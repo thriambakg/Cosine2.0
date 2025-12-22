@@ -399,32 +399,27 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
         
-        # Lobbyist name from general_text_search_fields - use parameter-filing mappings
+        # Lobbyist name from general_text_search_fields - use search index
         if general_text_search_fields.get('lobbyist'):
             lobbyist_terms = general_text_search_fields['lobbyist']
             if isinstance(lobbyist_terms, list) and lobbyist_terms:
                 query_configs.append({
                     'filter_key': 'lobbyist',
-                    'query_type': 'parameter_filing_mapping',
-                    'parameter_type': 'LOBBYIST',
-                    'parameter_values': lobbyist_terms,
+                    'query_type': 'search_index',
+                    'search_type': 'LOBBYIST',
+                    'search_values': lobbyist_terms,
                     'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
         
-        # PAC names from general_text_search_fields - use PACPostedDateIndex with pac=true
-        # Then filter by specific PAC names in Python
+        # PAC names from general_text_search_fields - use search index
         if general_text_search_fields.get('pac'):
             pac_terms = general_text_search_fields['pac']
             if isinstance(pac_terms, list) and pac_terms:
-                # Use PACPostedDateIndex with pac=1 to get all PAC filings, then filter by name
                 query_configs.append({
                     'filter_key': 'pac',
-                    'index_name': 'PACPostedDateIndex',
-                    'hash_key': 'pac',
-                    'hash_value': 1,  # All PAC filings
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None,
+                    'query_type': 'search_index',
+                    'search_type': 'PAC',
+                    'search_values': pac_terms,
                     'from_general_text_search': True  # Mark as coming from general_text_search_fields
                 })
     
@@ -465,33 +460,35 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'category': 'client_name'  # Group by category for OR logic
                 })
     
-    # Lobbyist name filter - use parameter-filing mappings (advanced search - AND across categories, OR within)
+    # Lobbyist name filter - use search index (advanced search - AND across categories, OR within)
     if filters.get('lobbyist_name'):
         lobbyist_names = filters['lobbyist_name'] if isinstance(filters['lobbyist_name'], list) else [filters['lobbyist_name']]
         if lobbyist_names:
-            # Parameter-filing mappings handle multiple values internally (OR within category)
-            query_configs.append({
-                'filter_key': 'lobbyist_name',
-                'query_type': 'parameter_filing_mapping',
-                'parameter_type': 'LOBBYIST',
-                'parameter_values': lobbyist_names,
-                'is_advanced_search': True,  # Mark as advanced search field
-                'category': 'lobbyist_name'  # Group by category for OR logic
-            })
+            # Create a query config for each lobbyist name (OR within category)
+            for lobbyist_name in lobbyist_names:
+                query_configs.append({
+                    'filter_key': 'lobbyist_name',
+                    'query_type': 'search_index',
+                    'search_type': 'LOBBYIST',
+                    'search_values': [lobbyist_name],
+                    'is_advanced_search': True,  # Mark as advanced search field
+                    'category': 'lobbyist_name'  # Group by category for OR logic
+                })
     
-    # Foreign entity name filter - use parameter-filing mappings (advanced search - AND across categories, OR within)
+    # Foreign entity name filter - use search index (advanced search - AND across categories, OR within)
     if filters.get('foreign_entity_name'):
         foreign_names = filters['foreign_entity_name'] if isinstance(filters['foreign_entity_name'], list) else [filters['foreign_entity_name']]
         if foreign_names:
-            # Parameter-filing mappings handle multiple values internally (OR within category)
-            query_configs.append({
-                'filter_key': 'foreign_entity_name',
-                'query_type': 'parameter_filing_mapping',
-                'parameter_type': 'FOREIGN_ENTITY',
-                'parameter_values': foreign_names,
-                'is_advanced_search': True,  # Mark as advanced search field
-                'category': 'foreign_entity_name'  # Group by category for OR logic
-            })
+            # Create a query config for each foreign entity name (OR within category)
+            for foreign_name in foreign_names:
+                query_configs.append({
+                    'filter_key': 'foreign_entity_name',
+                    'query_type': 'search_index',
+                    'search_type': 'FOREIGN_COUNTRY',
+                    'search_values': [foreign_name],
+                    'is_advanced_search': True,  # Mark as advanced search field
+                    'category': 'foreign_entity_name'  # Group by category for OR logic
+                })
     
     # State filter - use StatePostedDateIndex
     if filters.get('state'):
@@ -507,19 +504,23 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': 'gte' if date_from else None
             })
     
-    # General issue code filter - use parameter-filing mappings (now stores full names, not codes)
+    # General issue code filter - use search index (now stores full names, not codes)
     if filters.get('general_issue_code'):
         issue_names = filters['general_issue_code'] if isinstance(filters['general_issue_code'], list) else [filters['general_issue_code']]
         if issue_names:
             # Clean quotes from issue names before querying
             cleaned_issue_names = [clean_quotes(name) for name in issue_names if clean_quotes(name)]
             if cleaned_issue_names:
-                query_configs.append({
-                    'filter_key': 'general_issue_code',
-                    'query_type': 'parameter_filing_mapping',
-                    'parameter_type': 'GENERAL_ISSUE',
-                    'parameter_values': cleaned_issue_names
-                })
+                # Create a query config for each issue name (OR within category)
+                for issue_name in cleaned_issue_names:
+                    query_configs.append({
+                        'filter_key': 'general_issue_code',
+                        'query_type': 'search_index',
+                        'search_type': 'GENERAL_ISSUE',
+                        'search_values': [issue_name],
+                        'is_advanced_search': True,
+                        'category': 'general_issue_code'
+                    })
     
     # Foreign entity filter - use ForeignEntityPostedDateIndex
     if filters.get('is_foreign') is not None:
@@ -547,19 +548,23 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             'range_condition': 'gte' if date_from else None
         })
     
-    # Government entity filter - use parameter-filing mappings
+    # Government entity filter - use search index
     if filters.get('government_entity'):
         entity_names = filters['government_entity'] if isinstance(filters['government_entity'], list) else [filters['government_entity']]
         if entity_names:
             # Clean quotes from entity names before querying
             cleaned_entity_names = [clean_quotes(name) for name in entity_names if clean_quotes(name)]
             if cleaned_entity_names:
-                query_configs.append({
-                    'filter_key': 'government_entity',
-                    'query_type': 'parameter_filing_mapping',
-                    'parameter_type': 'GOVERNMENT_ENTITY',
-                    'parameter_values': cleaned_entity_names
-                })
+                # Create a query config for each entity name (OR within category)
+                for entity_name in cleaned_entity_names:
+                    query_configs.append({
+                        'filter_key': 'government_entity',
+                        'query_type': 'search_index',
+                        'search_type': 'GOVERNMENT_ENTITY',
+                        'search_values': [entity_name],
+                        'is_advanced_search': True,
+                        'category': 'government_entity'
+                    })
     
     return query_configs
 
@@ -569,6 +574,131 @@ def clean_quotes(value: str) -> str:
     if not value:
         return value
     return str(value).strip().strip('"').strip()
+
+
+def query_search_index(
+    search_type: str,
+    search_values: List[str],
+    limit: int = 1000,
+    exclusive_start_key: Optional[Dict] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None
+) -> tuple[List[str], Optional[Dict]]:
+    """
+    Query materialized search index items to get entity PKs (FILING#uuid or CONTRIBUTION#uuid)
+    Supports native DynamoDB pagination via LastEvaluatedKey
+    
+    Structure:
+    - PK = "SEARCH#<search_type>#<value>"
+    - SK = "DT_POSTED#<date>#<entityPK>"
+    
+    Args:
+        search_type: Type of search (e.g., "REGISTRANT", "CLIENT", "LOBBYIST", "PAC", "GENERAL_ISSUE", "GOVERNMENT_ENTITY", "FOREIGN_COUNTRY")
+        search_values: List of search values (e.g., ["APPLE INC.", "MICROSOFT"])
+        limit: Maximum number of entity PKs to return
+        exclusive_start_key: Pagination token from previous query
+        date_from: Optional date filter (YYYY-MM-DD)
+        date_to: Optional date filter (YYYY-MM-DD)
+    
+    Returns:
+        Tuple of (list of entity PKs like "FILING#uuid" or "CONTRIBUTION#uuid", last_evaluated_key for pagination)
+    """
+    if not filings_table:
+        raise Exception("DynamoDB filings table not initialized")
+    
+    all_entity_pks = []
+    last_eval_key = exclusive_start_key
+    
+    try:
+        # For now, query the first search value (can be extended for multiple values with union)
+        if not search_values:
+            return [], None
+        
+        search_value = search_values[0]
+        if not search_value or not str(search_value).strip():
+            return [], None
+        
+        # Clean and normalize search value
+        cleaned_value = clean_quotes(str(search_value).strip())
+        if not cleaned_value:
+            return [], None
+        
+        # Construct PK for search index: SEARCH#<search_type>#<value>
+        search_pk = f"SEARCH#{search_type}#{cleaned_value}"
+        
+        # Build query parameters
+        # SK format: DT_POSTED#YYYY-MM-DD#<entityPK>
+        # We can use SK range conditions for date filtering
+        key_condition = Key('PK').eq(search_pk)
+        
+        if date_from or date_to:
+            # Build SK range condition for date filtering
+            # SK format: DT_POSTED#YYYY-MM-DD#<entityPK>
+            # Extract date part (YYYY-MM-DD) from ISO format if needed
+            def extract_date(date_str):
+                """Extract YYYY-MM-DD from ISO format or return as-is"""
+                if not date_str:
+                    return None
+                # Handle ISO format: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD
+                if 'T' in date_str:
+                    return date_str.split('T')[0]
+                elif ' ' in date_str:
+                    return date_str.split(' ')[0]
+                return date_str[:10]  # Take first 10 chars (YYYY-MM-DD)
+            
+            date_from_part = extract_date(date_from) if date_from else None
+            date_to_part = extract_date(date_to) if date_to else None
+            
+            if date_from_part and date_to_part:
+                # Range: DT_POSTED#date_from# <= SK <= DT_POSTED#date_to#~
+                # Use ~ to ensure we get all SKs that start with DT_POSTED#date_to#
+                sk_start = f"DT_POSTED#{date_from_part}#"
+                sk_end = f"DT_POSTED#{date_to_part}#~"  # ~ is after all alphanumeric chars
+                key_condition = Key('PK').eq(search_pk) & Key('SK').between(sk_start, sk_end)
+            elif date_from_part:
+                # Greater than or equal: DT_POSTED#date_from# <= SK
+                sk_start = f"DT_POSTED#{date_from_part}#"
+                key_condition = Key('PK').eq(search_pk) & Key('SK').gte(sk_start)
+            elif date_to_part:
+                # Less than or equal: SK <= DT_POSTED#date_to#~
+                sk_end = f"DT_POSTED#{date_to_part}#~"
+                key_condition = Key('PK').eq(search_pk) & Key('SK').lte(sk_end)
+        
+        query_params = {
+            'KeyConditionExpression': key_condition,
+            'ProjectionExpression': 'entity_pk, SK',  # Get entity_pk and SK for pagination
+            'Limit': limit
+        }
+        
+        # Add pagination token if provided
+        if last_eval_key:
+            # Handle custom format with search_index_key
+            if isinstance(last_eval_key, dict):
+                if 'search_index_key' in last_eval_key:
+                    last_eval_key = last_eval_key['search_index_key']
+                query_params['ExclusiveStartKey'] = last_eval_key
+        
+        logger.info(f"Querying search index: PK={search_pk}, limit={limit}, has_pagination={last_eval_key is not None}")
+        response = filings_table.query(**query_params)
+        
+        # Extract entity PKs from results
+        for item in response.get('Items', []):
+            entity_pk = item.get('entity_pk')
+            if entity_pk:
+                all_entity_pks.append(str(entity_pk))
+        
+        last_eval_key = response.get('LastEvaluatedKey')
+        
+        # Date filtering is handled in the query via SK range conditions
+        # No need for Python filtering
+        
+        logger.info(f"Found {len(all_entity_pks)} entity PKs from search index (has_more: {last_eval_key is not None})")
+        
+        return all_entity_pks, last_eval_key
+        
+    except Exception as e:
+        logger.error(f"Error querying search index for {search_type}: {str(e)}", exc_info=True)
+        raise
 
 
 def query_parameter_filing_mappings(
@@ -836,15 +966,31 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
     if len(query_configs) > 1:
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} queries")
         
-        # Check if we have a pagination token for a parameter-filing mapping query
+        # Check if we have a pagination token for a search index or parameter-filing mapping query
+        search_index_pagination_key = None
+        search_index_config = None
         param_mapping_pagination_key = None
         param_mapping_config = None
         if last_evaluated_key and isinstance(last_evaluated_key, dict):
-            if last_evaluated_key.get('query_type') == 'parameter_filing_mapping':
+            query_type = last_evaluated_key.get('query_type')
+            if query_type == 'search_index':
+                # Extract the actual DynamoDB key from our custom format
+                search_index_key_obj = last_evaluated_key.get('search_index_key')
+                if search_index_key_obj:
+                    search_index_pagination_key = search_index_key_obj
+                    # Find the matching config
+                    for config in query_configs:
+                        if (config.get('query_type') == 'search_index' and 
+                            config.get('search_type') == last_evaluated_key.get('search_type') and
+                            config.get('filter_key') == last_evaluated_key.get('filter_key')):
+                            search_index_config = config
+                            break
+                    if search_index_pagination_key:
+                        logger.info(f"Continuing pagination for search index: {search_index_config['search_type'] if search_index_config else 'unknown'}")
+            elif query_type == 'parameter_filing_mapping':
                 # Extract the actual DynamoDB key from our custom format
                 param_mapping_key_obj = last_evaluated_key.get('parameter_mapping_key')
                 if param_mapping_key_obj:
-                    # The parameter_mapping_key should be the actual DynamoDB key (with PK and SK)
                     param_mapping_pagination_key = param_mapping_key_obj
                     # Find the matching config
                     for config in query_configs:
@@ -866,8 +1012,50 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             else:
                 unique_key = f"{config['filter_key']}_{config.get('hash_value', idx)}"
             
-            if config.get('query_type') == 'parameter_filing_mapping':
-                # Use parameter-filing mapping query
+            if config.get('query_type') == 'search_index':
+                # Use search index query
+                logger.info(f"Querying search index for {config['search_type']} with values: {config['search_values']}")
+                
+                # If this is the config we're paginating on, use the pagination key
+                exclusive_start_key = None
+                if search_index_config and config == search_index_config and search_index_pagination_key:
+                    exclusive_start_key = search_index_pagination_key
+                    logger.info(f"Using pagination key for search index query")
+                
+                # Extract date filters from filters dict
+                date_from = filters.get('date_from')
+                date_to = filters.get('date_to')
+                
+                # Query search index - returns entityPKs (FILING#uuid or CONTRIBUTION#uuid)
+                entity_pks, search_last_key = query_search_index(
+                    search_type=config['search_type'],
+                    search_values=config['search_values'],
+                    limit=1000,
+                    exclusive_start_key=exclusive_start_key,
+                    date_from=date_from,
+                    date_to=date_to
+                )
+                
+                # Convert entityPKs to filing_ids (remove FILING# or CONTRIBUTION# prefix)
+                filing_ids = []
+                for entity_pk in entity_pks:
+                    if entity_pk.startswith('FILING#'):
+                        filing_id = entity_pk.replace('FILING#', '')
+                        filing_ids.append(filing_id)
+                    elif entity_pk.startswith('CONTRIBUTION#'):
+                        filing_id = entity_pk.replace('CONTRIBUTION#', '')
+                        filing_ids.append(filing_id)
+                
+                gsi_results[unique_key] = {
+                    'filing_ids': set(filing_ids),
+                    'config': config,
+                    'total_count': len(filing_ids),
+                    'last_eval_key': search_last_key,
+                    'query_type': 'search_index'
+                }
+                logger.info(f"Found {len(filing_ids)} filing IDs from search index for {config['search_type']} (has_more: {search_last_key is not None})")
+            elif config.get('query_type') == 'parameter_filing_mapping':
+                # Use parameter-filing mapping query (legacy - kept for backward compatibility)
                 logger.info(f"Querying parameter-filing mappings for {config['parameter_type']} with values: {config['parameter_values']}")
                 
                 # If this is the config we're paginating on, use the pagination key
@@ -1119,30 +1307,49 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # Convert Decimal to float for JSON serialization
         results = [convert_decimal_to_float(item) for item in items]
         
-        # Check if we have a parameter-filing mapping query with pagination support
+        # Check if we have a search index or parameter-filing mapping query with pagination support
         # If so, use its pagination key for "load more" functionality
         serializable_last_key = None
         has_more = False
         
-        # Find parameter-filing mapping queries and check if they have more results
+        # Find search index queries first (preferred - new pattern)
         for key, result in gsi_results.items():
-            if result['query_type'] == 'parameter_filing_mapping' and result.get('last_eval_key'):
+            if result['query_type'] == 'search_index' and result.get('last_eval_key'):
                 config = result['config']
                 try:
-                    # Store the parameter mapping key for continuation
+                    # Store the search index key for continuation
                     serializable_last_key = {
-                        'parameter_mapping_key': convert_decimal_to_float(result['last_eval_key']),
-                        'parameter_type': config['parameter_type'],
+                        'search_index_key': convert_decimal_to_float(result['last_eval_key']),
+                        'search_type': config['search_type'],
                         'filter_key': config['filter_key'],
-                        'query_type': 'parameter_filing_mapping'
+                        'query_type': 'search_index'
                     }
                     has_more = True
-                    logger.info(f"Parameter-filing mapping has more results - pagination key available")
-                    break  # Use the first parameter-filing mapping query's pagination key
+                    logger.info(f"Search index has more results - pagination key available for {config['search_type']}")
+                    break  # Use the first search index query's pagination key
                 except Exception as e:
-                    logger.warning(f"Error converting parameter mapping key: {e}")
+                    logger.warning(f"Error converting search index key: {e}")
         
-        # If no parameter-filing mapping pagination key, check if we have more results based on fetched items
+        # If no search index pagination key, check parameter-filing mapping queries (legacy)
+        if not serializable_last_key:
+            for key, result in gsi_results.items():
+                if result['query_type'] == 'parameter_filing_mapping' and result.get('last_eval_key'):
+                    config = result['config']
+                    try:
+                        # Store the parameter mapping key for continuation
+                        serializable_last_key = {
+                            'parameter_mapping_key': convert_decimal_to_float(result['last_eval_key']),
+                            'parameter_type': config['parameter_type'],
+                            'filter_key': config['filter_key'],
+                            'query_type': 'parameter_filing_mapping'
+                        }
+                        has_more = True
+                        logger.info(f"Parameter-filing mapping has more results - pagination key available")
+                        break  # Use the first parameter-filing mapping query's pagination key
+                    except Exception as e:
+                        logger.warning(f"Error converting parameter mapping key: {e}")
+        
+        # If no pagination key, check if we have more results based on fetched items
         if not serializable_last_key:
             has_more = len(source_filing_ids) > len(items)
         
@@ -1156,12 +1363,149 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             'index_used': index_name
         }
     
-    # Fall back to single GSI query, parameter-filing mapping query, or scan
+    # Fall back to single GSI query, search index query, parameter-filing mapping query, or scan
     elif len(query_configs) == 1:
         config = query_configs[0]
         
-        # Check if this is a parameter-filing mapping query
-        if config.get('query_type') == 'parameter_filing_mapping':
+        # Check if this is a search index query
+        if config.get('query_type') == 'search_index':
+            logger.info(f"Using search index query: {config['search_type']} with values: {config['search_values']}")
+            
+            # Extract pagination token if present (for "load more" functionality)
+            search_index_last_key = None
+            if last_evaluated_key and isinstance(last_evaluated_key, dict):
+                # Check if this is a search index pagination token
+                if 'search_index_key' in last_evaluated_key:
+                    search_index_last_key = last_evaluated_key.get('search_index_key')
+            
+            # Extract date filters
+            date_from = filters.get('date_from')
+            date_to = filters.get('date_to')
+            
+            # Query search index to get entity PKs (with pagination support)
+            batch_size = min(limit * 3, 200)  # Fetch 3x limit or max 200, whichever is smaller
+            entity_pks, search_index_key = query_search_index(
+                search_type=config['search_type'],
+                search_values=config['search_values'],
+                limit=batch_size,
+                exclusive_start_key=search_index_last_key,
+                date_from=date_from,
+                date_to=date_to
+            )
+            
+            # Convert entityPKs to filing_ids (remove FILING# or CONTRIBUTION# prefix)
+            filing_ids = []
+            for entity_pk in entity_pks:
+                if entity_pk.startswith('FILING#'):
+                    filing_id = entity_pk.replace('FILING#', '')
+                    filing_ids.append(filing_id)
+                elif entity_pk.startswith('CONTRIBUTION#'):
+                    filing_id = entity_pk.replace('CONTRIBUTION#', '')
+                    filing_ids.append(filing_id)
+            
+            if not filing_ids:
+                logger.info("Search index query returned no filing IDs")
+                return {
+                    'success': True,
+                    'results': [],
+                    'count': 0,
+                    'has_more': False,
+                    'last_evaluated_key': None,
+                    'method': 'search_index',
+                    'search_type': config['search_type']
+                }
+            
+            logger.info(f"Found {len(filing_ids)} filing IDs from search index")
+            
+            # Fetch full items using efficient batch_get_item
+            # Note: No ProjectionExpression is used, so ALL attributes are returned (including PII)
+            items = []
+            dynamodb_client = boto3.client('dynamodb')
+            
+            # Process in batches of 50 (reduced since we try both FILING and CONTRIBUTION formats)
+            for i in range(0, len(filing_ids), 50):
+                batch_ids = filing_ids[i:i + 50]
+                # Try both FILING# and CONTRIBUTION# key formats for each ID
+                keys = []
+                for fid in batch_ids:
+                    keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+                    keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
+                request_items = {
+                    FILINGS_TABLE_NAME: {
+                        'Keys': keys
+                        # No ProjectionExpression - returns all attributes
+                    }
+                }
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    # Deserialize all fields - no filtering, returns complete row
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    items.append(converted_item)
+            
+            logger.info(f"Fetched {len(items)} full items from DynamoDB using batch_get_item")
+            
+            # Apply remaining filters
+            remaining_filters = filters.copy()
+            if config['filter_key'] in remaining_filters:
+                if isinstance(remaining_filters[config['filter_key']], list):
+                    remaining_filters[config['filter_key']] = remaining_filters[config['filter_key']][1:]
+                    if not remaining_filters[config['filter_key']]:
+                        del remaining_filters[config['filter_key']]
+                else:
+                    del remaining_filters[config['filter_key']]
+            
+            # Also remove from general_text_search_fields if present
+            if 'general_text_search_fields' in remaining_filters:
+                gtsf = remaining_filters['general_text_search_fields']
+                if config['filter_key'] in gtsf:
+                    if isinstance(gtsf[config['filter_key']], list):
+                        gtsf[config['filter_key']] = gtsf[config['filter_key']][1:]
+                        if not gtsf[config['filter_key']]:
+                            del gtsf[config['filter_key']]
+                    else:
+                        del gtsf[config['filter_key']]
+                if not gtsf:
+                    del remaining_filters['general_text_search_fields']
+            
+            filtered_items = []
+            for item in items:
+                if apply_python_filter(item, remaining_filters):
+                    filtered_items.append(item)
+                    if len(filtered_items) >= limit:
+                        break
+            
+            results = [convert_decimal_to_float(item) for item in filtered_items[:limit]]
+            
+            # Prepare pagination token for "load more" functionality
+            # Store the search index key so we can continue pagination
+            serializable_last_key = None
+            if search_index_key:
+                try:
+                    # Store both the search index key and filter info for continuation
+                    serializable_last_key = {
+                        'search_index_key': convert_decimal_to_float(search_index_key),
+                        'search_type': config['search_type'],
+                        'filter_key': config['filter_key'],
+                        'query_type': 'search_index'
+                    }
+                except Exception as e:
+                    logger.warning(f"Error converting search index key: {e}")
+                    serializable_last_key = None
+            
+            return {
+                'success': True,
+                'results': results,
+                'count': len(results),
+                'has_more': search_index_key is not None,  # More results available if we have a pagination key
+                'last_evaluated_key': serializable_last_key,
+                'method': 'search_index',
+                'search_type': config['search_type']
+            }
+        
+        # Check if this is a parameter-filing mapping query (legacy)
+        elif config.get('query_type') == 'parameter_filing_mapping':
             logger.info(f"Using parameter-filing mapping query: {config['parameter_type']} with values: {config['parameter_values']}")
             
             # Extract pagination token if present (for "load more" functionality)
