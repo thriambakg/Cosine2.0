@@ -541,55 +541,41 @@ def query_parameter_filing_mappings(
             if not param_value or not str(param_value).strip():
                 continue
             
-            # Clean double quotes from parameter value before querying
+            # Clean double quotes from parameter value before querying (values are not stored with quotes)
             cleaned_value = clean_quotes(param_value)
             if not cleaned_value:
                 continue
             
             # Construct PK for parameter-filing mapping: PARAMETER_TYPE#VALUE
-            # Try both with and without quotes to handle cases where values were stored with quotes
-            pk_with_quotes = f"{parameter_type}#\"{cleaned_value}\""
-            pk_without_quotes = f"{parameter_type}#{cleaned_value}"
+            pk = f"{parameter_type}#{cleaned_value}"
             
-            # Query both versions to handle cases where values may have been stored with quotes
-            found_results = False
-            for pk in [pk_without_quotes, pk_with_quotes]:
-                # Query for all mappings with this parameter value
-                query_params = {
-                    'KeyConditionExpression': Key('PK').eq(pk),
-                    'ProjectionExpression': 'SK',  # SK contains FILING#<uuid> or CONTRIBUTION#<uuid>
-                    'Limit': limit
-                }
-                
-                if last_eval_key:
-                    query_params['ExclusiveStartKey'] = last_eval_key
-                
-                logger.info(f"Querying parameter-filing mappings: PK={pk}")
-                try:
-                    response = filings_table.query(**query_params)
-                    
-                    for item in response.get('Items', []):
-                        sk = item.get('SK', '')
-                        if sk:
-                            sk_str = str(sk)
-                            # Extract UUID from SK (format: FILING#<uuid> or CONTRIBUTION#<uuid>)
-                            if sk_str.startswith('FILING#'):
-                                filing_uuid = sk_str.replace('FILING#', '')
-                                all_filing_uuids.add(filing_uuid)
-                            elif sk_str.startswith('CONTRIBUTION#'):
-                                # For contributions, we'd need to fetch the contribution to get filing_uuid
-                                # For now, skip contributions in parameter mappings (they're handled separately for PACs)
-                                pass
-                    
-                    last_eval_key = response.get('LastEvaluatedKey')
-                    
-                    # If we found results, break (don't need to check quoted version)
-                    if response.get('Items'):
-                        found_results = True
-                        break
-                except Exception as e:
-                    logger.debug(f"Query failed for PK={pk}: {e}")
-                    continue
+            # Query for all mappings with this parameter value
+            query_params = {
+                'KeyConditionExpression': Key('PK').eq(pk),
+                'ProjectionExpression': 'SK',  # SK contains FILING#<uuid> or CONTRIBUTION#<uuid>
+                'Limit': limit
+            }
+            
+            if last_eval_key:
+                query_params['ExclusiveStartKey'] = last_eval_key
+            
+            logger.info(f"Querying parameter-filing mappings: PK={pk}")
+            response = filings_table.query(**query_params)
+            
+            for item in response.get('Items', []):
+                sk = item.get('SK', '')
+                if sk:
+                    sk_str = str(sk)
+                    # Extract UUID from SK (format: FILING#<uuid> or CONTRIBUTION#<uuid>)
+                    if sk_str.startswith('FILING#'):
+                        filing_uuid = sk_str.replace('FILING#', '')
+                        all_filing_uuids.add(filing_uuid)
+                    elif sk_str.startswith('CONTRIBUTION#'):
+                        # For contributions, we'd need to fetch the contribution to get filing_uuid
+                        # For now, skip contributions in parameter mappings (they're handled separately for PACs)
+                        pass
+            
+            last_eval_key = response.get('LastEvaluatedKey')
             
             # If we've collected enough, break
             if len(all_filing_uuids) >= limit:
