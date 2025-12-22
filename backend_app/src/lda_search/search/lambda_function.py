@@ -218,15 +218,6 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                 return False
             # Additional name matching could be added here if foreign_entity_name field exists
     
-    # Report type filter (OR logic within field)
-    if filters.get('report_type'):
-        report_types = filters['report_type'] if isinstance(filters['report_type'], list) else [filters['report_type']]
-        report_types = [t for t in report_types if t and str(t).strip()]
-        if report_types:
-            item_type = str(item.get('report_type') or '').strip()
-            if item_type not in report_types:
-                return False
-    
     # Amount range filter
     if filters.get('amount_min') is not None:
         amount_min = float(filters['amount_min'])
@@ -413,21 +404,6 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'range_value': date_from if date_from else None,
                     'range_condition': 'gte' if date_from else None
                 })
-    
-    # Report type filter - use ReportTypePostedDateIndex
-    if filters.get('report_type'):
-        report_types = filters['report_type'] if isinstance(filters['report_type'], list) else [filters['report_type']]
-        if report_types:
-            # Use first report type for GSI query
-            query_configs.append({
-                'filter_key': 'report_type',
-                'index_name': 'ReportTypePostedDateIndex',
-                'hash_key': 'report_type',
-                'hash_value': report_types[0],
-                'range_key': 'dt_posted',
-                'range_value': date_from if date_from else None,
-                'range_condition': 'gte' if date_from else None
-            })
     
     # Registrant name filter - use RegistrantPostedDateIndex (legacy format)
     if filters.get('registrant_name'):

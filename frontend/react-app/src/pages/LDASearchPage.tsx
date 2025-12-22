@@ -114,7 +114,6 @@ const LDASearchPage: React.FC = () => {
       general_text_search: [],
       date_from: '',
       date_to: '',
-      report_type: [],
       amount_min: undefined,
       amount_max: undefined,
     }
@@ -1227,20 +1226,6 @@ const LDASearchPage: React.FC = () => {
                           allowCustomInput={false}
                         />
 
-                        {/* Filing Type - Multi-select */}
-                        <MultiSelectField<string>
-                          label="Filing Type"
-                          selectedItems={searchParams.report_type || []}
-                          onItemsChange={(types) => {
-                            setSearchParams(prev => ({ ...prev, report_type: types }));
-                          }}
-                          suggestions={['LD-1', 'LD-2', 'LD-203']}
-                          onSearch={() => ['LD-1', 'LD-2', 'LD-203']}
-                          renderItem={(type) => type}
-                          placeholder="Select filing types..."
-                          allowCustomInput={false}
-                        />
-
                         {/* State */}
                         <MultiSelectField<string>
                           label="State"
@@ -1288,7 +1273,6 @@ const LDASearchPage: React.FC = () => {
                           general_text_search: [],
                           date_from: '',
                           date_to: '',
-                          report_type: [],
                           item_type: [],
                           amount_min: undefined,
                           amount_max: undefined,
