@@ -834,7 +834,27 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
     
     # If we have multiple queryable filters, use intersection approach
     if len(query_configs) > 1:
-        logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
+        logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} queries")
+        
+        # Check if we have a pagination token for a parameter-filing mapping query
+        param_mapping_pagination_key = None
+        param_mapping_config = None
+        if last_evaluated_key and isinstance(last_evaluated_key, dict):
+            if last_evaluated_key.get('query_type') == 'parameter_filing_mapping':
+                # Extract the actual DynamoDB key from our custom format
+                param_mapping_key_obj = last_evaluated_key.get('parameter_mapping_key')
+                if param_mapping_key_obj:
+                    # The parameter_mapping_key should be the actual DynamoDB key (with PK and SK)
+                    param_mapping_pagination_key = param_mapping_key_obj
+                    # Find the matching config
+                    for config in query_configs:
+                        if (config.get('query_type') == 'parameter_filing_mapping' and 
+                            config.get('parameter_type') == last_evaluated_key.get('parameter_type') and
+                            config.get('filter_key') == last_evaluated_key.get('filter_key')):
+                            param_mapping_config = config
+                            break
+                    if param_mapping_pagination_key:
+                        logger.info(f"Continuing pagination for parameter-filing mapping: {param_mapping_config['parameter_type'] if param_mapping_config else 'unknown'}")
         
         # Query each filter to get initial batch of filing IDs (GSI or parameter-filing mapping)
         # Use a unique key for each query config to handle multiple values in the same category
@@ -849,21 +869,31 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             if config.get('query_type') == 'parameter_filing_mapping':
                 # Use parameter-filing mapping query
                 logger.info(f"Querying parameter-filing mappings for {config['parameter_type']} with values: {config['parameter_values']}")
-                filing_ids, _ = query_parameter_filing_mappings(
+                
+                # If this is the config we're paginating on, use the pagination key
+                exclusive_start_key = None
+                if param_mapping_config and config == param_mapping_config and param_mapping_pagination_key:
+                    exclusive_start_key = param_mapping_pagination_key
+                    logger.info(f"Using pagination key for parameter-filing mapping query")
+                
+                filing_ids, param_last_key = query_parameter_filing_mappings(
                     parameter_type=config['parameter_type'],
                     parameter_values=config['parameter_values'],
-                    limit=1000
+                    limit=1000,
+                    exclusive_start_key=exclusive_start_key,
+                    per_param_limit=1000
                 )
                 gsi_results[unique_key] = {
                     'filing_ids': set(filing_ids),
                     'config': config,
                     'total_count': len(filing_ids),
-                    'last_eval_key': None,
+                    'last_eval_key': param_last_key,
                     'query_type': 'parameter_filing_mapping'
                 }
-                logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings for {config['parameter_type']} (first batch)")
+                logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings for {config['parameter_type']} (has_more: {param_last_key is not None})")
             else:
                 # Use GSI query
+                # For GSI queries, we don't paginate in multi-query scenarios (we've already fetched all matching IDs)
                 logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
                 filing_ids, _ = query_gsi_for_filing_ids(
                     index_name=config['index_name'],
@@ -1089,17 +1119,39 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # Convert Decimal to float for JSON serialization
         results = [convert_decimal_to_float(item) for item in items]
         
-        # For multi-query intersection, we don't have a single pagination key
-        # Since we've already intersected all results, pagination would require re-querying
-        # For now, we'll indicate there are more results if we fetched the full limit
-        has_more = len(source_filing_ids) > len(items)
+        # Check if we have a parameter-filing mapping query with pagination support
+        # If so, use its pagination key for "load more" functionality
+        serializable_last_key = None
+        has_more = False
+        
+        # Find parameter-filing mapping queries and check if they have more results
+        for key, result in gsi_results.items():
+            if result['query_type'] == 'parameter_filing_mapping' and result.get('last_eval_key'):
+                config = result['config']
+                try:
+                    # Store the parameter mapping key for continuation
+                    serializable_last_key = {
+                        'parameter_mapping_key': convert_decimal_to_float(result['last_eval_key']),
+                        'parameter_type': config['parameter_type'],
+                        'filter_key': config['filter_key'],
+                        'query_type': 'parameter_filing_mapping'
+                    }
+                    has_more = True
+                    logger.info(f"Parameter-filing mapping has more results - pagination key available")
+                    break  # Use the first parameter-filing mapping query's pagination key
+                except Exception as e:
+                    logger.warning(f"Error converting parameter mapping key: {e}")
+        
+        # If no parameter-filing mapping pagination key, check if we have more results based on fetched items
+        if not serializable_last_key:
+            has_more = len(source_filing_ids) > len(items)
         
         return {
             'success': True,
             'results': results,
             'count': len(results),
             'has_more': has_more,
-            'last_evaluated_key': None,  # Multi-query intersection doesn't support pagination yet
+            'last_evaluated_key': serializable_last_key,  # Use parameter-filing mapping pagination key if available
             'method': method,
             'index_used': index_name
         }

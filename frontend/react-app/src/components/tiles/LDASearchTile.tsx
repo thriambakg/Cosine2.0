@@ -455,7 +455,10 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       if (response.success && response.results) {
         console.log('📋 LDASearchTile: Retrieved', response.results.length, 'filings');
         
-        const newLastEvaluatedKey = response.last_evaluated_key || null;
+        // Handle last_evaluated_key: convert false/undefined to null, keep objects/truthy values
+        const newLastEvaluatedKey = (response.last_evaluated_key && typeof response.last_evaluated_key === 'object') 
+          ? response.last_evaluated_key 
+          : null;
         setAllResults(response.results);
         setFilteredResults(response.results);
         setCurrentResults(response.results);
@@ -467,6 +470,12 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
         setLastEvaluatedKeys(newLastEvaluatedKeys);
         
+        console.log('📋 LDASearchTile: Pagination state set', {
+          hasMore: response.has_more,
+          lastEvaluatedKey: newLastEvaluatedKey,
+          lastEvaluatedKeys: newLastEvaluatedKeys,
+        });
+        
         // Persist pagination state
         onSettingsChange(id, {
           searchParams: currentSearchParams,
@@ -477,12 +486,11 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           },
         });
         
-        // Update parent component - include pagination state in session state
+        // Update parent component - only save pagination state, not results
         onUpdate(id, {
-          results: response.results,
           paginationState: {
             totalResultsLoaded: response.results.length,
-            lastEvaluatedKeys: response.last_evaluated_key ? [response.last_evaluated_key] : [],
+            lastEvaluatedKeys: newLastEvaluatedKeys,
             hasMore: response.has_more || false,
           },
           lastUpdated: Date.now(),
@@ -528,17 +536,25 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   // Load more results
   const handleLoadMore = useCallback(async () => {
     // Use lastEvaluatedKey if available, otherwise use the last key from lastEvaluatedKeys array
-    const keyToUse = lastEvaluatedKey || (lastEvaluatedKeys && lastEvaluatedKeys.length > 0 ? lastEvaluatedKeys[lastEvaluatedKeys.length - 1] : null);
+    // Handle case where lastEvaluatedKey might be false (boolean) - convert to null
+    const validLastEvaluatedKey = (lastEvaluatedKey && typeof lastEvaluatedKey === 'object') ? lastEvaluatedKey : null;
+    const keyToUse = validLastEvaluatedKey || (lastEvaluatedKeys && lastEvaluatedKeys.length > 0 ? lastEvaluatedKeys[lastEvaluatedKeys.length - 1] : null);
     
     if (!hasMore || !keyToUse || isLoadingMore || !currentSearchParams) {
-      console.log('📋 LDASearchTile: Load more blocked', {
+      console.warn('📋 LDASearchTile: Load more blocked', {
         hasMore,
-        keyToUse: !!keyToUse,
+        keyToUse: keyToUse ? 'present' : 'missing',
+        keyToUseType: typeof keyToUse,
         isLoadingMore,
         hasSearchParams: !!currentSearchParams,
-        lastEvaluatedKey: !!lastEvaluatedKey,
+        lastEvaluatedKey: lastEvaluatedKey ? (typeof lastEvaluatedKey === 'object' ? 'object' : typeof lastEvaluatedKey) : 'null/undefined',
         lastEvaluatedKeysLength: lastEvaluatedKeys?.length || 0,
       });
+      
+      // If hasMore is true but no key, this is a data inconsistency - log error
+      if (hasMore && !keyToUse) {
+        console.error('📋 LDASearchTile: Data inconsistency - hasMore is true but no pagination key available');
+      }
       return;
     }
     
@@ -611,7 +627,10 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       
       if (response.success && response.results) {
         const updatedResults = [...allResults, ...response.results];
-        const newLastEvaluatedKey = response.last_evaluated_key || null;
+        // Handle last_evaluated_key: convert false/undefined to null, keep objects/truthy values
+        const newLastEvaluatedKey = (response.last_evaluated_key && typeof response.last_evaluated_key === 'object') 
+          ? response.last_evaluated_key 
+          : null;
         setAllResults(updatedResults);
         setFilteredResults(updatedResults);
         setCurrentResults(updatedResults);
@@ -624,6 +643,12 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           : lastEvaluatedKeys;
         setLastEvaluatedKeys(updatedKeys);
         
+        console.log('📋 LDASearchTile: Load more pagination state updated', {
+          hasMore: response.has_more,
+          lastEvaluatedKey: newLastEvaluatedKey,
+          lastEvaluatedKeysLength: updatedKeys.length,
+        });
+        
         // Persist pagination state
         onSettingsChange(id, {
           paginationState: {
@@ -634,7 +659,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         });
         
         onUpdate(id, {
-          results: updatedResults,
           paginationState: {
             totalResultsLoaded: updatedResults.length,
             lastEvaluatedKeys: updatedKeys,
@@ -673,20 +697,20 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange, generalSearchItems]);
 
   // Restore pagination state on mount
+  // Results are NOT saved - fetch fresh using searchParams and pagination keys
   const restorePaginationState = useCallback(async () => {
-    if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
+    if (!paginationState || !currentSearchParams) {
       return;
     }
 
-    if (paginationState.totalResultsLoaded <= (results?.length || 0)) {
-      // Already have all results, no need to restore
+    // If we already have results loaded, don't restore
+    if (allResults.length > 0) {
       return;
     }
 
-    console.log('🔄 LDASearchTile: Restoring pagination state', {
+    console.log('🔄 LDASearchTile: Restoring pagination state - fetching fresh results', {
       totalResultsLoaded: paginationState.totalResultsLoaded,
-      currentResults: results?.length || 0,
-      keysToLoad: paginationState.lastEvaluatedKeys.length,
+      keysToLoad: paginationState.lastEvaluatedKeys?.length || 0,
     });
 
     setIsRestoringPagination(true);
@@ -694,77 +718,83 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     setError(null);
 
     try {
-      let currentResults = [...(results || [])];
-      let keysToLoad = [...paginationState.lastEvaluatedKeys];
+      let currentResults: LDAFiling[] = [];
+      let keysToLoad = paginationState.lastEvaluatedKeys ? [...paginationState.lastEvaluatedKeys] : [];
       
-      // Skip keys that were already used (if we have more results than initial page)
-      const initialPageSize = localDisplayOptions.maxResults || 50;
-      if (currentResults.length > initialPageSize) {
-        // Calculate how many pages we've already loaded
-        const pagesLoaded = Math.ceil(currentResults.length / initialPageSize);
-        keysToLoad = keysToLoad.slice(pagesLoaded - 1); // Skip already loaded keys
-      }
-
-      // Load each page sequentially until we reach totalResultsLoaded
-      while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0 && currentSearchParams) {
-        const nextKey = keysToLoad[0];
+      // First, fetch the initial page (no last_evaluated_key)
+      const filters: LDASearchFilters = { ...currentSearchParams };
+      
+      // Build general_text_search_fields from generalSearchItems
+      if (generalSearchItems.length > 0) {
+        const generalTextSearchFields: {
+          registrant?: string[] | false;
+          client?: string[] | false;
+          lobbyist?: string[] | false;
+          pac?: string[] | false;
+          foreign?: string[] | false;
+        } = {
+          registrant: false,
+          client: false,
+          lobbyist: false,
+          pac: false,
+          foreign: false,
+        };
         
-        const filters: LDASearchFilters = { ...currentSearchParams };
+        const itemsByType: Record<string, string[]> = {};
+        generalSearchItems.forEach(item => {
+          const type = item.type || 'unknown';
+          if (!itemsByType[type]) {
+            itemsByType[type] = [];
+          }
+          itemsByType[type].push(item.value);
+        });
         
-        // Build general_text_search_fields from generalSearchItems
-        if (generalSearchItems.length > 0) {
-          const generalTextSearchFields: {
-            registrant?: string[] | false;
-            client?: string[] | false;
-            lobbyist?: string[] | false;
-            pac?: string[] | false;
-            foreign?: string[] | false;
-          } = {
-            registrant: false,
-            client: false,
-            lobbyist: false,
-            pac: false,
-            foreign: false,
-          };
-          
-          const itemsByType: Record<string, string[]> = {};
-          generalSearchItems.forEach(item => {
-            const type = item.type || 'unknown';
-            if (!itemsByType[type]) {
-              itemsByType[type] = [];
-            }
-            itemsByType[type].push(item.value);
-          });
-          
-          if (itemsByType['registrant']) {
-            generalTextSearchFields.registrant = itemsByType['registrant'];
-          }
-          if (itemsByType['client']) {
-            generalTextSearchFields.client = itemsByType['client'];
-          }
-          if (itemsByType['lobbyist']) {
-            generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
-          }
-          if (itemsByType['pac']) {
-            generalTextSearchFields.pac = itemsByType['pac'];
-          }
-          if (itemsByType['foreign']) {
-            generalTextSearchFields.foreign = itemsByType['foreign'];
-          }
-          
-          filters.general_text_search_fields = generalTextSearchFields;
+        if (itemsByType['registrant']) {
+          generalTextSearchFields.registrant = itemsByType['registrant'];
+        }
+        if (itemsByType['client']) {
+          generalTextSearchFields.client = itemsByType['client'];
+        }
+        if (itemsByType['lobbyist']) {
+          generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
+        }
+        if (itemsByType['pac']) {
+          generalTextSearchFields.pac = itemsByType['pac'];
+        }
+        if (itemsByType['foreign']) {
+          generalTextSearchFields.foreign = itemsByType['foreign'];
         }
         
-        Object.keys(filters).forEach((key) => {
-          const value = filters[key];
-          if (Array.isArray(value) && value.length === 0) {
-            delete filters[key];
-          }
-        });
+        filters.general_text_search_fields = generalTextSearchFields;
+      }
+      
+      Object.keys(filters).forEach((key) => {
+        const value = filters[key];
+        if (Array.isArray(value) && value.length === 0) {
+          delete filters[key];
+        }
+      });
+      
+      // Fetch initial page
+      const initialSearchRequest = {
+        filters,
+        limit: localDisplayOptions.maxResults || 50,
+        last_evaluated_key: false,
+      };
+      
+      const initialResponse = await ldaSearchAPI.search(initialSearchRequest);
+      
+      if (initialResponse.success && initialResponse.results) {
+        currentResults = [...initialResponse.results];
+      }
+
+      // Load additional pages using pagination keys until we reach totalResultsLoaded
+      while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
+        const nextKey = keysToLoad[0];
         
         const searchRequest = {
           filters,
-          limit: localDisplayOptions.maxResults,
+          limit: localDisplayOptions.maxResults || 50,
           last_evaluated_key: nextKey,
         };
         
@@ -794,7 +824,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       
       // Update tile with restored results - include pagination state
       onUpdate(id, {
-        results: currentResults,
         paginationState: {
           totalResultsLoaded: currentResults.length,
           lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
@@ -814,11 +843,12 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       setIsRestoringPagination(false);
       setIsLoading(false);
     }
-  }, [paginationState, results, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, generalSearchItems]);
+  }, [paginationState, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, generalSearchItems, allResults.length]);
 
   // Restore pagination state on mount if needed
+  // Results are NOT saved - fetch fresh using searchParams and pagination keys
   useEffect(() => {
-    if (paginationState && paginationState.totalResultsLoaded > (results?.length || 0) && !isRestoringPagination && !isLoading) {
+    if (paginationState && paginationState.totalResultsLoaded > 0 && allResults.length === 0 && !isRestoringPagination && !isLoading && currentSearchParams) {
       restorePaginationState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -918,53 +948,38 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     }
   }, [searchParams]); // Sync when searchParams prop changes
 
-  // Restore results from props on mount (session persistence)
+  // Restore pagination state from props on mount (session persistence)
+  // Results are NOT saved - we'll fetch them fresh using searchParams
   useEffect(() => {
-    if (results && results.length > 0 && allResults.length === 0 && !isRestoringPagination) {
-      console.log('🔄 LDASearchTile: Restoring', results.length, 'results from session');
-      setAllResults(results);
-      setFilteredResults(results);
-      setCurrentResults(results);
-      setHasPerformedInitialSearch(true);
-      
-      // Also restore pagination state if available
-      if (paginationState) {
-        setLastEvaluatedKeys(paginationState.lastEvaluatedKeys || []);
-        const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
-          ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
-          : null;
-        setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
-        setHasMore(paginationState.hasMore || false);
-      }
+    if (paginationState && allResults.length === 0 && !isRestoringPagination) {
+      console.log('🔄 LDASearchTile: Restoring pagination state from session');
+      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys || []);
+      const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
+        ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
+        : null;
+      setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
+      setHasMore(paginationState.hasMore || false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // Sync results when props change (e.g., after restore from backend)
+  // Sync pagination state when props change (e.g., after restore from backend)
   useEffect(() => {
-    if (results && results.length > 0 && allResults.length === 0 && !isRestoringPagination) {
-      console.log('🔄 LDASearchTile: Restoring results from tile data:', results.length, 'results');
-      setAllResults(results);
-      setFilteredResults(results);
-      setCurrentResults(results);
-      setHasPerformedInitialSearch(true);
-      
-      // Also restore pagination state if available
-      if (paginationState) {
-        setLastEvaluatedKeys(paginationState.lastEvaluatedKeys || []);
-        const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
-          ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
-          : null;
-        setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
-        setHasMore(paginationState.hasMore || false);
-      }
+    if (paginationState && allResults.length === 0 && !isRestoringPagination) {
+      console.log('🔄 LDASearchTile: Restoring pagination state from tile data');
+      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys || []);
+      const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
+        ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
+        : null;
+      setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
+      setHasMore(paginationState.hasMore || false);
     }
-  }, [results, allResults.length, isRestoringPagination, paginationState]);
+  }, [paginationState, allResults.length, isRestoringPagination]);
 
   // Initial load: Fetch fresh results if none exist and we have search criteria
-  // Don't trigger if we already have results from props (session persistence)
+  // Results are NOT saved - always fetch fresh using searchParams
   useEffect(() => {
-    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination && (!results || results.length === 0)) {
+    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
       const hasSearchCriteria = 
         (currentSearchParams.general_text_search && currentSearchParams.general_text_search.length > 0) ||
         (currentSearchParams.general_text_search_fields && (
@@ -991,7 +1006,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         performSearch();
       }
     }
-  }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch, results, isRestoringPagination]);
+  }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch, isRestoringPagination]);
 
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
