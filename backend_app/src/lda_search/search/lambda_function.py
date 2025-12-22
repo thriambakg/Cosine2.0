@@ -94,18 +94,26 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                     if not matches:
                         return False
         
-        # Check lobbyist field
+        # Check lobbyist field - now uses parameter-filing mappings, so this is just a safety check
+        # The actual filtering happens via parameter-filing mapping queries
         if general_text_search_fields.get('lobbyist'):
             lobbyist_terms = general_text_search_fields['lobbyist']
             if isinstance(lobbyist_terms, list) and lobbyist_terms:
                 lobbyist_terms = [t for t in lobbyist_terms if t and str(t).strip()]
                 if lobbyist_terms:
-                    item_name = str(item.get('lobbyist_name') or '').lower()
+                    # Check all_lobbyist_names array if present
+                    all_lobbyist_names = item.get('all_lobbyist_names', [])
+                    if not isinstance(all_lobbyist_names, list):
+                        all_lobbyist_names = []
+                    
                     matches = False
                     for term in lobbyist_terms:
                         term_lower = str(term).strip().lower()
-                        if term_lower in item_name:
-                            matches = True
+                        for lobbyist_name in all_lobbyist_names:
+                            if isinstance(lobbyist_name, str) and term_lower in lobbyist_name.lower():
+                                matches = True
+                                break
+                        if matches:
                             break
                     if not matches:
                         return False
@@ -232,14 +240,21 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         if item_amount > amount_max:
             return False
     
-    # General issue code filter (OR logic within field)
+    # General issue code filter (OR logic within field) - now uses parameter-filing mappings
+    # This is just a safety check, actual filtering happens via parameter-filing mapping queries
     if filters.get('general_issue_code'):
-        issue_codes = filters['general_issue_code'] if isinstance(filters['general_issue_code'], list) else [filters['general_issue_code']]
-        issue_codes = [c for c in issue_codes if c and str(c).strip()]
-        if issue_codes:
-            item_code = str(item.get('general_issue_code') or '').strip()
-            if item_code not in issue_codes:
-                return False
+        issue_names = filters['general_issue_code'] if isinstance(filters['general_issue_code'], list) else [filters['general_issue_code']]
+        issue_names = [n for n in issue_names if n and str(n).strip()]
+        if issue_names:
+            # Check all_general_issue_codes array if present (though this shouldn't be in items anymore)
+            # Parameter-filing mappings should have already filtered these
+            all_issue_codes = item.get('all_general_issue_codes', [])
+            if not isinstance(all_issue_codes, list):
+                all_issue_codes = []
+            
+            # For now, if we have parameter-filing mappings, we trust them
+            # This is a fallback check only
+            pass  # Parameter-filing mappings handle the filtering
     
     # State filter (OR logic within field)
     if filters.get('state'):
@@ -338,18 +353,15 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'range_condition': 'gte' if date_from else None
                 })
         
-        # Lobbyist name from general_text_search_fields
+        # Lobbyist name from general_text_search_fields - use parameter-filing mappings
         if general_text_search_fields.get('lobbyist'):
             lobbyist_terms = general_text_search_fields['lobbyist']
             if isinstance(lobbyist_terms, list) and lobbyist_terms:
                 query_configs.append({
-                    'filter_key': 'lobbyist_name',
-                    'index_name': 'LobbyistPostedDateIndex',
-                    'hash_key': 'lobbyist_name',
-                    'hash_value': lobbyist_terms[0],
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None
+                    'filter_key': 'lobbyist',
+                    'query_type': 'parameter_filing_mapping',
+                    'parameter_type': 'LOBBYIST',
+                    'parameter_values': lobbyist_terms
                 })
         
         # PAC names from general_text_search_fields - use PACPostedDateIndex with pac=true
@@ -411,18 +423,15 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': 'gte' if date_from else None
             })
     
-    # Lobbyist name filter - use LobbyistPostedDateIndex (legacy format)
+    # Lobbyist name filter - use parameter-filing mappings (legacy format)
     if filters.get('lobbyist_name'):
         lobbyist_names = filters['lobbyist_name'] if isinstance(filters['lobbyist_name'], list) else [filters['lobbyist_name']]
         if lobbyist_names:
             query_configs.append({
                 'filter_key': 'lobbyist_name',
-                'index_name': 'LobbyistPostedDateIndex',
-                'hash_key': 'lobbyist_name',
-                'hash_value': lobbyist_names[0],
-                'range_key': 'dt_posted',
-                'range_value': date_from if date_from else None,
-                'range_condition': 'gte' if date_from else None
+                'query_type': 'parameter_filing_mapping',
+                'parameter_type': 'LOBBYIST',
+                'parameter_values': lobbyist_names
             })
     
     # State filter - use StatePostedDateIndex
@@ -439,18 +448,15 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': 'gte' if date_from else None
             })
     
-    # General issue code filter - use GeneralIssueCodePostedDateIndex
+    # General issue code filter - use parameter-filing mappings (now stores full names, not codes)
     if filters.get('general_issue_code'):
-        issue_codes = filters['general_issue_code'] if isinstance(filters['general_issue_code'], list) else [filters['general_issue_code']]
-        if issue_codes:
+        issue_names = filters['general_issue_code'] if isinstance(filters['general_issue_code'], list) else [filters['general_issue_code']]
+        if issue_names:
             query_configs.append({
                 'filter_key': 'general_issue_code',
-                'index_name': 'GeneralIssueCodePostedDateIndex',
-                'hash_key': 'general_issue_code',
-                'hash_value': issue_codes[0],
-                'range_key': 'dt_posted',
-                'range_value': date_from if date_from else None,
-                'range_condition': 'gte' if date_from else None
+                'query_type': 'parameter_filing_mapping',
+                'parameter_type': 'GENERAL_ISSUE',
+                'parameter_values': issue_names
             })
     
     # Foreign entity filter - use ForeignEntityPostedDateIndex
@@ -479,7 +485,90 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             'range_condition': 'gte' if date_from else None
         })
     
+    # Government entity filter - use parameter-filing mappings
+    if filters.get('government_entity'):
+        entity_names = filters['government_entity'] if isinstance(filters['government_entity'], list) else [filters['government_entity']]
+        if entity_names:
+            query_configs.append({
+                'filter_key': 'government_entity',
+                'query_type': 'parameter_filing_mapping',
+                'parameter_type': 'GOVERNMENT_ENTITY',
+                'parameter_values': entity_names
+            })
+    
     return query_configs
+
+
+def query_parameter_filing_mappings(
+    parameter_type: str,
+    parameter_values: List[str],
+    limit: int = 1000,
+    exclusive_start_key: Optional[Dict] = None
+) -> tuple[List[str], Optional[Dict]]:
+    """
+    Query parameter-filing mappings to get filing IDs for a list of parameter values
+    
+    Args:
+        parameter_type: Type of parameter (e.g., "GENERAL_ISSUE", "GOVERNMENT_ENTITY", "LOBBYIST", "PAC", "FOREIGN_COUNTRY")
+        parameter_values: List of parameter values (names, not codes)
+        limit: Maximum number of filing IDs to return
+        exclusive_start_key: Pagination token
+    
+    Returns:
+        Tuple of (list of filing UUIDs, last_evaluated_key)
+    """
+    if not filings_table:
+        raise Exception("DynamoDB filings table not initialized")
+    
+    all_filing_uuids = set()
+    last_eval_key = exclusive_start_key
+    
+    try:
+        for param_value in parameter_values:
+            if not param_value or not str(param_value).strip():
+                continue
+            
+            # Construct PK for parameter-filing mapping: PARAMETER_TYPE#VALUE
+            pk = f"{parameter_type}#{param_value}"
+            
+            # Query for all mappings with this parameter value
+            query_params = {
+                'KeyConditionExpression': Key('PK').eq(pk),
+                'ProjectionExpression': 'SK',  # SK contains FILING#<uuid> or CONTRIBUTION#<uuid>
+                'Limit': limit
+            }
+            
+            if last_eval_key:
+                query_params['ExclusiveStartKey'] = last_eval_key
+            
+            logger.info(f"Querying parameter-filing mappings: PK={pk}")
+            response = filings_table.query(**query_params)
+            
+            for item in response.get('Items', []):
+                sk = item.get('SK', '')
+                if sk:
+                    sk_str = str(sk)
+                    # Extract UUID from SK (format: FILING#<uuid> or CONTRIBUTION#<uuid>)
+                    if sk_str.startswith('FILING#'):
+                        filing_uuid = sk_str.replace('FILING#', '')
+                        all_filing_uuids.add(filing_uuid)
+                    elif sk_str.startswith('CONTRIBUTION#'):
+                        # For contributions, we'd need to fetch the contribution to get filing_uuid
+                        # For now, skip contributions in parameter mappings (they're handled separately for PACs)
+                        pass
+            
+            last_eval_key = response.get('LastEvaluatedKey')
+            
+            # If we've collected enough, break
+            if len(all_filing_uuids) >= limit:
+                break
+        
+        logger.info(f"Found {len(all_filing_uuids)} unique filing UUIDs from parameter-filing mappings for {parameter_type}")
+        return list(all_filing_uuids), last_eval_key
+        
+    except Exception as e:
+        logger.error(f"Error querying parameter-filing mappings for {parameter_type}: {str(e)}", exc_info=True)
+        raise
 
 
 def query_gsi_for_filing_ids(
@@ -623,27 +712,46 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
     if len(query_configs) > 1:
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
         
-        # Query each GSI to get initial batch of filing IDs
+        # Query each filter to get initial batch of filing IDs (GSI or parameter-filing mapping)
         gsi_results = {}
         for config in query_configs:
-            logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
-            filing_ids, _ = query_gsi_for_filing_ids(
-                index_name=config['index_name'],
-                hash_key_name=config['hash_key'],
-                hash_key_value=config['hash_value'],
-                range_key_name=config.get('range_key'),
-                range_key_value=config.get('range_value'),
-                range_key_condition=config.get('range_condition'),
-                limit=1000,
-                get_all=False
-            )
-            gsi_results[config['filter_key']] = {
-                'filing_ids': set(filing_ids),
-                'config': config,
-                'total_count': len(filing_ids),
-                'last_eval_key': None
-            }
-            logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch)")
+            if config.get('query_type') == 'parameter_filing_mapping':
+                # Use parameter-filing mapping query
+                logger.info(f"Querying parameter-filing mappings for {config['parameter_type']} with values: {config['parameter_values']}")
+                filing_ids, _ = query_parameter_filing_mappings(
+                    parameter_type=config['parameter_type'],
+                    parameter_values=config['parameter_values'],
+                    limit=1000
+                )
+                gsi_results[config['filter_key']] = {
+                    'filing_ids': set(filing_ids),
+                    'config': config,
+                    'total_count': len(filing_ids),
+                    'last_eval_key': None,
+                    'query_type': 'parameter_filing_mapping'
+                }
+                logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings for {config['parameter_type']} (first batch)")
+            else:
+                # Use GSI query
+                logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+                filing_ids, _ = query_gsi_for_filing_ids(
+                    index_name=config['index_name'],
+                    hash_key_name=config['hash_key'],
+                    hash_key_value=config['hash_value'],
+                    range_key_name=config.get('range_key'),
+                    range_key_value=config.get('range_value'),
+                    range_key_condition=config.get('range_condition'),
+                    limit=1000,
+                    get_all=False
+                )
+                gsi_results[config['filter_key']] = {
+                    'filing_ids': set(filing_ids),
+                    'config': config,
+                    'total_count': len(filing_ids),
+                    'last_eval_key': None,
+                    'query_type': 'gsi'
+                }
+                logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch)")
         
         # Find the shortest list (most restrictive filter) - this is our source of truth
         shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['filing_ids']))
@@ -755,10 +863,99 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             'index_used': index_name
         }
     
-    # Fall back to single GSI query or scan
+    # Fall back to single GSI query, parameter-filing mapping query, or scan
     elif len(query_configs) == 1:
-        logger.info(f"Using single GSI query: {query_configs[0]['index_name']}")
         config = query_configs[0]
+        
+        # Check if this is a parameter-filing mapping query
+        if config.get('query_type') == 'parameter_filing_mapping':
+            logger.info(f"Using parameter-filing mapping query: {config['parameter_type']} with values: {config['parameter_values']}")
+            
+            # Query parameter-filing mappings to get filing IDs
+            filing_ids, _ = query_parameter_filing_mappings(
+                parameter_type=config['parameter_type'],
+                parameter_values=config['parameter_values'],
+                limit=limit * 10  # Get more IDs to account for filtering
+            )
+            
+            if not filing_ids:
+                logger.info("Parameter-filing mapping query returned no filing IDs")
+                return {
+                    'success': True,
+                    'results': [],
+                    'count': 0,
+                    'has_more': False,
+                    'last_evaluated_key': None,
+                    'method': 'parameter_filing_mapping',
+                    'parameter_type': config['parameter_type']
+                }
+            
+            logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings")
+            
+            # Fetch full items
+            items = []
+            dynamodb_client = boto3.client('dynamodb')
+            for i in range(0, len(filing_ids), 100):
+                batch_ids = filing_ids[i:i + 100]
+                request_items = {
+                    FILINGS_TABLE_NAME: {
+                        'Keys': [
+                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
+                            for fid in batch_ids
+                        ]
+                    }
+                }
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    items.append(converted_item)
+            
+            # Apply remaining filters
+            remaining_filters = filters.copy()
+            if config['filter_key'] in remaining_filters:
+                if isinstance(remaining_filters[config['filter_key']], list):
+                    remaining_filters[config['filter_key']] = remaining_filters[config['filter_key']][1:]
+                    if not remaining_filters[config['filter_key']]:
+                        del remaining_filters[config['filter_key']]
+                else:
+                    del remaining_filters[config['filter_key']]
+            
+            # Also remove from general_text_search_fields if present
+            if 'general_text_search_fields' in remaining_filters:
+                gtsf = remaining_filters['general_text_search_fields']
+                if config['filter_key'] in gtsf:
+                    if isinstance(gtsf[config['filter_key']], list):
+                        gtsf[config['filter_key']] = gtsf[config['filter_key']][1:]
+                        if not gtsf[config['filter_key']]:
+                            del gtsf[config['filter_key']]
+                    else:
+                        del gtsf[config['filter_key']]
+                if not gtsf:
+                    del remaining_filters['general_text_search_fields']
+            
+            filtered_items = []
+            for item in items:
+                if apply_python_filter(item, remaining_filters):
+                    filtered_items.append(item)
+                    if len(filtered_items) >= limit:
+                        break
+            
+            results = [convert_decimal_to_float(item) for item in filtered_items[:limit]]
+            
+            return {
+                'success': True,
+                'results': results,
+                'count': len(results),
+                'has_more': len(filing_ids) > len(filtered_items),
+                'last_evaluated_key': None,
+                'method': 'parameter_filing_mapping',
+                'parameter_type': config['parameter_type']
+            }
+        
+        # Normal GSI query
+        logger.info(f"Using single GSI query: {config['index_name']}")
         logger.info(f"GSI query config: hash_key={config['hash_key']}, hash_value={config['hash_value']}, range_key={config.get('range_key')}, range_value={config.get('range_value')}")
         
         # For PAC searches, we need to paginate through all results efficiently

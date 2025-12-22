@@ -1340,7 +1340,8 @@ export interface LDASearchFilters {
   foreign_entity_name?: string[];
   general_issue_code?: string[];
   state?: string[];
-  government_entity_id?: number[];
+  government_entity?: string[];  // Government entity names (not IDs)
+  government_entity_id?: number[];  // Legacy - kept for backwards compatibility
   filing_period?: string[];
   contribution_item_type?: string[];
   is_foreign?: boolean;

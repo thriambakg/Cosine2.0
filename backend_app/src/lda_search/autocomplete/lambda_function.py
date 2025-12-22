@@ -29,8 +29,10 @@ FIELD_TYPE_TO_S3_KEY = {
     'client': f'{S3_PREFIX}client_names.csv',
     'lobbyist': f'{S3_PREFIX}lobbyist_names.csv',
     'pac': f'{S3_PREFIX}pacs.csv',
-    'foreign': f'{S3_PREFIX}lda_countries.csv',  # Foreign entities use countries CSV
-    'country': f'{S3_PREFIX}lda_countries.csv',
+    'foreign': f'{S3_PREFIX}countries.csv',  # Foreign entities use countries CSV
+    'country': f'{S3_PREFIX}countries.csv',
+    'government_entity': f'{S3_PREFIX}government_entities.csv',  # Government entities from constants CSV
+    'general_issue': f'{S3_PREFIX}general_issues.csv',  # General issue codes from constants CSV
 }
 
 # Cache for CSV data (in-memory, per Lambda instance)
@@ -49,13 +51,13 @@ def get_cors_headers():
 
 def load_csv_from_s3(field_type: str) -> List[str]:
     """
-    Load CSV file from S3 and return list of values
+    Load CSV file or JSON file from S3 and return list of values
     
     Args:
-        field_type: Type of field (e.g., 'registrant', 'client', 'lobbyist')
+        field_type: Type of field (e.g., 'registrant', 'client', 'lobbyist', 'government_entity')
     
     Returns:
-        List of values from CSV file
+        List of values from CSV or JSON file
     """
     # Check cache first
     if field_type in _csv_cache:
@@ -68,16 +70,16 @@ def load_csv_from_s3(field_type: str) -> List[str]:
     
     try:
         response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
-        csv_content = response['Body'].read().decode('utf-8')
+        content = response['Body'].read().decode('utf-8')
         
-        # Parse CSV
-        reader = csv.reader(StringIO(csv_content))
+        # Handle CSV files (all constants are now single-column CSV format with just values)
+        reader = csv.reader(StringIO(content))
         values = []
         
         # Skip header row
         next(reader, None)
         
-        # Read all values
+        # Read all values (single column)
         for row in reader:
             if row and row[0]:
                 value = row[0].strip()
@@ -91,10 +93,10 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         return values
         
     except s3_client.exceptions.NoSuchKey:
-        logger.warning(f"CSV file not found: s3://{S3_BUCKET_NAME}/{s3_key}")
+        logger.warning(f"File not found: s3://{S3_BUCKET_NAME}/{s3_key}")
         return []
     except Exception as e:
-        logger.error(f"Error loading CSV from S3 ({s3_key}): {str(e)}", exc_info=True)
+        logger.error(f"Error loading file from S3 ({s3_key}): {str(e)}", exc_info=True)
         return []
 
 
