@@ -109,6 +109,32 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                             break
                     if not matches:
                         return False
+        
+        # Check PAC field - PAC names are typically in client_name when pac=true
+        if general_text_search_fields.get('pac'):
+            pac_terms = general_text_search_fields['pac']
+            if isinstance(pac_terms, list) and pac_terms:
+                pac_terms = [t for t in pac_terms if t and str(t).strip()]
+                if pac_terms:
+                    # PAC names are stored in client_name when it's a PAC
+                    item_name = str(item.get('client_name') or '').lower()
+                    item_pac = bool(item.get('pac', 0))
+                    logger.info(f"PAC filter check - item client_name: '{item.get('client_name')}', item pac flag: {item_pac}, searching for: {pac_terms}")
+                    matches = False
+                    for term in pac_terms:
+                        term_lower = str(term).strip().lower()
+                        if term_lower in item_name:
+                            matches = True
+                            logger.info(f"PAC name match found: '{term_lower}' in '{item_name}'")
+                            break
+                    if not matches:
+                        logger.info(f"PAC name not matched: '{pac_terms}' not found in '{item.get('client_name')}'")
+                        return False
+                    # Also ensure this is actually a PAC filing
+                    if not item_pac:
+                        logger.info(f"Item has matching PAC name but pac flag is False: {item.get('client_name')}")
+                        return False
+                    logger.info(f"PAC filter passed for item: {item.get('client_name')}")
     
     # General text search (legacy format - searches across multiple fields)
     if filters.get('general_text_search'):
@@ -325,6 +351,22 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'range_value': date_from if date_from else None,
                     'range_condition': 'gte' if date_from else None
                 })
+        
+        # PAC names from general_text_search_fields - use PACPostedDateIndex with pac=true
+        # Then filter by specific PAC names in Python
+        if general_text_search_fields.get('pac'):
+            pac_terms = general_text_search_fields['pac']
+            if isinstance(pac_terms, list) and pac_terms:
+                # Use PACPostedDateIndex with pac=1 to get all PAC filings, then filter by name
+                query_configs.append({
+                    'filter_key': 'pac',
+                    'index_name': 'PACPostedDateIndex',
+                    'hash_key': 'pac',
+                    'hash_value': 1,  # All PAC filings
+                    'range_key': 'dt_posted',
+                    'range_value': date_from if date_from else None,
+                    'range_condition': 'gte' if date_from else None
+                })
     
     # Report type filter - use ReportTypePostedDateIndex
     if filters.get('report_type'):
@@ -488,14 +530,41 @@ def query_gsi_for_filing_ids(
         if last_eval_key:
             query_params['ExclusiveStartKey'] = last_eval_key
         
+        logger.info(f"Querying GSI {index_name} with hash_key={hash_key_name}, hash_value={hash_key_value} (type: {type(hash_key_value)}), range_key={range_key_name}, range_value={range_key_value}, range_condition={range_key_condition}")
+        logger.info(f"KeyConditionExpression: {key_condition}")
+        
         response = filings_table.query(**query_params)
         
-        # Extract filing IDs from PK (format: FILING#{filing_uuid})
+        logger.info(f"GSI query response: {len(response.get('Items', []))} items returned, LastEvaluatedKey present: {bool(response.get('LastEvaluatedKey'))}")
+        
+        # Extract IDs from PK (format: FILING#{filing_uuid} or CONTRIBUTION#{contribution_uuid})
+        if response.get('Items'):
+            sample_item = response.get('Items')[0]
+            logger.info(f"Sample item from GSI query: {sample_item}")
+            logger.info(f"Sample item keys: {list(sample_item.keys())}")
+            logger.info(f"Sample item PK value: {sample_item.get('PK')}, type: {type(sample_item.get('PK'))}")
+        
         for item in response.get('Items', []):
             pk = item.get('PK', '')
-            if pk.startswith('FILING#'):
-                filing_id = pk.replace('FILING#', '')
-                filing_ids.append(filing_id)
+            logger.debug(f"Processing item with PK: {pk}, type: {type(pk)}")
+            if pk:
+                pk_str = str(pk)
+                if pk_str.startswith('FILING#'):
+                    filing_id = pk_str.replace('FILING#', '')
+                    filing_ids.append(filing_id)
+                    logger.debug(f"Extracted filing ID: {filing_id}")
+                elif pk_str.startswith('CONTRIBUTION#'):
+                    # For contribution items, we'll extract the contribution ID
+                    # The caller will need to handle fetching contribution items and mapping to filings
+                    contribution_id = pk_str.replace('CONTRIBUTION#', '')
+                    filing_ids.append(contribution_id)  # Store as contribution ID for now
+                    logger.debug(f"Extracted contribution ID: {contribution_id}")
+                else:
+                    logger.warning(f"Item PK does not match expected format: {pk}")
+            else:
+                logger.warning(f"Item has no PK: {item}")
+        
+        logger.info(f"Extracted {len(filing_ids)} IDs from {len(response.get('Items', []))} items")
         
         last_eval_key = response.get('LastEvaluatedKey')
         
@@ -690,45 +759,17 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
     elif len(query_configs) == 1:
         logger.info(f"Using single GSI query: {query_configs[0]['index_name']}")
         config = query_configs[0]
+        logger.info(f"GSI query config: hash_key={config['hash_key']}, hash_value={config['hash_value']}, range_key={config.get('range_key')}, range_value={config.get('range_value')}")
         
-        # Query GSI to get filing IDs
-        filing_ids, last_eval_key = query_gsi_for_filing_ids(
-            index_name=config['index_name'],
-            hash_key_name=config['hash_key'],
-            hash_key_value=config['hash_value'],
-            range_key_name=config.get('range_key'),
-            range_key_value=config.get('range_value'),
-            range_key_condition=config.get('range_condition'),
-            limit=limit * 2,  # Get more IDs to account for filtering
-            exclusive_start_key=last_evaluated_key,
-            get_all=False
-        )
-        
-        # Fetch full items
-        items = []
-        if filing_ids:
-            batch_size = 100
-            dynamodb_client = boto3.client('dynamodb')
-            for i in range(0, len(filing_ids), batch_size):
-                batch_ids = filing_ids[i:i + batch_size]
-                request_items = {
-                    FILINGS_TABLE_NAME: {
-                        'Keys': [
-                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
-                            for fid in batch_ids
-                        ]
-                    }
-                }
-                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
-                deserializer = TypeDeserializer()
-                for item in batch_items:
-                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    items.append(converted_item)
-        
-        # Apply remaining filters
+        # For PAC searches, we need to paginate through all results efficiently
+        # Process in batches to avoid memory issues
         remaining_filters = filters.copy()
-        if config['filter_key'] in remaining_filters:
+        # For PAC searches, we only filtered by pac=1, but still need to filter by PAC name
+        # So we keep general_text_search_fields.pac in the filters
+        if config['filter_key'] == 'pac' and 'general_text_search_fields' in remaining_filters:
+            # Keep general_text_search_fields.pac for name matching
+            logger.info("PAC GSI query used - keeping general_text_search_fields.pac for name filtering")
+        elif config['filter_key'] in remaining_filters:
             if isinstance(remaining_filters[config['filter_key']], list):
                 remaining_filters[config['filter_key']] = remaining_filters[config['filter_key']][1:]
                 if not remaining_filters[config['filter_key']]:
@@ -736,15 +777,192 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             else:
                 del remaining_filters[config['filter_key']]
         
-        filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
+        logger.info(f"Applying remaining filters: {list(remaining_filters.keys())}")
+        logger.info(f"Remaining filters details: {json.dumps(remaining_filters, default=str)}")
+        
+        # Memory-efficient pagination: process in batches
+        filtered_items = []
+        gsi_last_eval_key = last_evaluated_key
+        max_pagination_rounds = 1000  # Safety limit
+        pagination_round = 0
+        batch_size = 100  # Process 100 items at a time
+        
+        # Special handling for PAC searches - GSI returns CONTRIBUTION items, not FILING items
+        is_pac_search = config['filter_key'] == 'pac' and 'general_text_search_fields' in remaining_filters and remaining_filters.get('general_text_search_fields', {}).get('pac')
+        
+        while len(filtered_items) < limit and pagination_round < max_pagination_rounds:
+            pagination_round += 1
+            
+            # Query GSI to get a batch of IDs (could be filing IDs or contribution IDs)
+            ids_batch, new_last_eval_key = query_gsi_for_filing_ids(
+                index_name=config['index_name'],
+                hash_key_name=config['hash_key'],
+                hash_key_value=config['hash_value'],
+                range_key_name=config.get('range_key'),
+                range_key_value=config.get('range_value'),
+                range_key_condition=config.get('range_condition'),
+                limit=batch_size,
+                exclusive_start_key=gsi_last_eval_key,
+                get_all=False
+            )
+            
+            gsi_last_eval_key = new_last_eval_key
+            
+            if not ids_batch:
+                logger.info(f"GSI query returned no more IDs (pagination round {pagination_round})")
+                break
+            
+            logger.info(f"Pagination round {pagination_round}: Got {len(ids_batch)} IDs from GSI")
+            
+            # Fetch full items for this batch
+            items_batch = []
+            if ids_batch:
+                dynamodb_client = boto3.client('dynamodb')
+                
+                if is_pac_search:
+                    # For PAC searches, GSI returns contribution items
+                    # Fetch contribution items to get filing_uuid and check pacs array
+                    contribution_items = []
+                    for i in range(0, len(ids_batch), 100):  # DynamoDB batch_get_item limit is 100
+                        batch_ids = ids_batch[i:i + 100]
+                        request_items = {
+                            FILINGS_TABLE_NAME: {
+                                'Keys': [
+                                    {'PK': {'S': f'CONTRIBUTION#{cid}'}, 'SK': {'S': f'CONTRIBUTION#{cid}'}}
+                                    for cid in batch_ids
+                                ]
+                            }
+                        }
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            contribution_items.append(converted_item)
+                    
+                    logger.info(f"Pagination round {pagination_round}: Fetched {len(contribution_items)} contribution items")
+                    
+                    # Filter contributions by PAC name and extract filing UUIDs
+                    pac_terms = remaining_filters.get('general_text_search_fields', {}).get('pac', [])
+                    if isinstance(pac_terms, list):
+                        pac_terms = [str(t).strip().lower() for t in pac_terms if t]
+                    
+                    filing_uuids = set()
+                    for contribution in contribution_items:
+                        # Check if contribution matches PAC name
+                        pacs = contribution.get('pacs', [])
+                        if isinstance(pacs, str):
+                            # Handle JSON string format
+                            try:
+                                pacs = json.loads(pacs)
+                            except:
+                                pacs = []
+                        
+                        if not isinstance(pacs, list):
+                            pacs = []
+                        
+                        # Check if any PAC name matches
+                        matches = False
+                        for pac_name in pacs:
+                            if isinstance(pac_name, dict):
+                                # Handle DynamoDB format
+                                pac_name = pac_name.get('S', '') if 'S' in pac_name else str(pac_name)
+                            pac_name_lower = str(pac_name).strip().lower()
+                            for term in pac_terms:
+                                if term in pac_name_lower:
+                                    matches = True
+                                    break
+                            if matches:
+                                break
+                        
+                        if matches:
+                            filing_uuid = contribution.get('filing_uuid')
+                            if filing_uuid:
+                                filing_uuids.add(filing_uuid)
+                    
+                    logger.info(f"Pagination round {pagination_round}: Found {len(filing_uuids)} unique filing UUIDs matching PAC names")
+                    
+                    # Fetch the actual filing items
+                    if filing_uuids:
+                        filing_uuids_list = list(filing_uuids)
+                        for i in range(0, len(filing_uuids_list), 100):
+                            batch_uuids = filing_uuids_list[i:i + 100]
+                            request_items = {
+                                FILINGS_TABLE_NAME: {
+                                    'Keys': [
+                                        {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
+                                        for fid in batch_uuids
+                                    ]
+                                }
+                            }
+                            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                            batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                            deserializer = TypeDeserializer()
+                            for item in batch_items:
+                                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                                items_batch.append(converted_item)
+                else:
+                    # Normal case: GSI returns filing IDs
+                    for i in range(0, len(ids_batch), 100):  # DynamoDB batch_get_item limit is 100
+                        batch_ids = ids_batch[i:i + 100]
+                        request_items = {
+                            FILINGS_TABLE_NAME: {
+                                'Keys': [
+                                    {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
+                                    for fid in batch_ids
+                                ]
+                            }
+                        }
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            items_batch.append(converted_item)
+            
+            logger.info(f"Pagination round {pagination_round}: Fetched {len(items_batch)} full items from DynamoDB")
+            
+            # Apply remaining filters to this batch (for PAC search, PAC name filtering already done)
+            if is_pac_search:
+                # For PAC searches, we already filtered by PAC name, so just add all items
+                # But still apply other filters if any
+                temp_filters = remaining_filters.copy()
+                if 'general_text_search_fields' in temp_filters:
+                    temp_filters_gtsf = temp_filters['general_text_search_fields'].copy()
+                    temp_filters_gtsf.pop('pac', None)  # Remove PAC filter as it's already applied
+                    if temp_filters_gtsf:
+                        temp_filters['general_text_search_fields'] = temp_filters_gtsf
+                    else:
+                        temp_filters.pop('general_text_search_fields', None)
+                
+                for item in items_batch:
+                    if apply_python_filter(item, temp_filters):
+                        filtered_items.append(item)
+                        if len(filtered_items) >= limit:
+                            break
+            else:
+                # Normal filtering
+                for item in items_batch:
+                    if apply_python_filter(item, remaining_filters):
+                        filtered_items.append(item)
+                        if len(filtered_items) >= limit:
+                            break
+            
+            logger.info(f"Pagination round {pagination_round}: {len(filtered_items)} items match all filters so far (need {limit})")
+            
+            # Stop if we have enough results or GSI ran out
+            if len(filtered_items) >= limit or not gsi_last_eval_key:
+                break
+        
+        logger.info(f"Pagination complete: {len(filtered_items)} items match all filters after {pagination_round} rounds")
         filtered_items = filtered_items[:limit]
         
         results = [convert_decimal_to_float(item) for item in filtered_items]
         
         serializable_last_key = None
-        if last_eval_key:
+        if gsi_last_eval_key:
             try:
-                serializable_last_key = convert_decimal_to_float(last_eval_key)
+                serializable_last_key = convert_decimal_to_float(gsi_last_eval_key)
             except Exception as e:
                 logger.warning(f"Error converting last_evaluated_key: {e}")
         
@@ -752,7 +970,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             'success': True,
             'results': results,
             'count': len(results),
-            'has_more': last_eval_key is not None,
+            'has_more': gsi_last_eval_key is not None,
             'last_evaluated_key': serializable_last_key,
             'method': 'single_gsi_query',
             'index_used': config['index_name']

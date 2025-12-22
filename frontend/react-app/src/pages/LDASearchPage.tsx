@@ -42,8 +42,6 @@ import {
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
   Download as DownloadIcon,
-  PictureAsPdf as PdfIcon,
-  Description as DocumentIcon,
 } from '@mui/icons-material';
 import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutocompleteItem } from '../services/api';
 import MultiSelectField from '../components/MultiSelectField';
@@ -147,7 +145,7 @@ const LDASearchPage: React.FC = () => {
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Filter state (client-side filtering)
-  const [availableFilters] = useState<{
+  const [availableFilters, setAvailableFilters] = useState<{
     registrant_filters?: Array<{ registrant: string; count: number }>;
     client_filters?: Array<{ client: string; count: number }>;
     lobbyist_filters?: Array<{ lobbyist: string; count: number }>;
@@ -166,6 +164,9 @@ const LDASearchPage: React.FC = () => {
       states: false,
     }
   );
+
+  // General issues loaded from CSV
+  const [generalIssues, setGeneralIssues] = useState<string[]>([]);
   
   const [selectedFilters, setSelectedFilters] = useState<{
     registrants: string[];
@@ -186,6 +187,21 @@ const LDASearchPage: React.FC = () => {
   const [isFiltered, setIsFiltered] = useState<boolean>(savedState?.isFiltered || false);
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== undefined ? savedState.advancedSearchExpanded : false);
+
+  // Load general issues from CSV file
+  useEffect(() => {
+    const loadGeneralIssues = async () => {
+      try {
+        const response = await fetch('/data/lda_general_issues.csv');
+        const text = await response.text();
+        const lines = text.split('\n').filter(line => line.trim() && !line.startsWith('general_issue_name'));
+        setGeneralIssues(lines.map(line => line.trim()).filter(line => line.length > 0));
+      } catch (error) {
+        console.error('❌ Error loading general issues CSV:', error);
+      }
+    };
+    loadGeneralIssues();
+  }, []);
 
   // Log state restoration
   useEffect(() => {
@@ -244,9 +260,84 @@ const LDASearchPage: React.FC = () => {
     advancedSearchExpanded,
   ]);
 
-  // Compute filters from search results (will be used when API is integrated)
-  // TODO: Implement filter computation from results when needed
-  // const computeFiltersFromResults = (results: LDAFiling[]) => { ... }
+  // Compute filters from search results
+  const computeFiltersFromResults = useCallback((results: LDAFiling[]) => {
+    if (!results || results.length === 0) {
+      setAvailableFilters({});
+      return;
+    }
+
+    // Count occurrences of each filter value
+    const registrantCounts = new Map<string, number>();
+    const clientCounts = new Map<string, number>();
+    const lobbyistCounts = new Map<string, number>();
+    const filingTypeCounts = new Map<string, number>();
+    const issueCodeCounts = new Map<string, number>();
+    const stateCounts = new Map<string, number>();
+
+    results.forEach(filing => {
+      // Registrants
+      if (filing.registrant_name) {
+        registrantCounts.set(filing.registrant_name, (registrantCounts.get(filing.registrant_name) || 0) + 1);
+      }
+      
+      // Clients
+      if (filing.client_name) {
+        clientCounts.set(filing.client_name, (clientCounts.get(filing.client_name) || 0) + 1);
+      }
+      
+      // Lobbyists
+      if (filing.lobbyist_name) {
+        lobbyistCounts.set(filing.lobbyist_name, (lobbyistCounts.get(filing.lobbyist_name) || 0) + 1);
+      }
+      
+      // Filing types
+      if (filing.report_type) {
+        filingTypeCounts.set(filing.report_type, (filingTypeCounts.get(filing.report_type) || 0) + 1);
+      }
+      
+      // Issue codes
+      if (filing.general_issue_code) {
+        issueCodeCounts.set(filing.general_issue_code, (issueCodeCounts.get(filing.general_issue_code) || 0) + 1);
+      }
+      
+      // States
+      if (filing.state) {
+        stateCounts.set(filing.state, (stateCounts.get(filing.state) || 0) + 1);
+      }
+    });
+
+    // Convert maps to sorted arrays (by count descending, then alphabetically)
+    const sortByCountThenName = <T extends { count: number }>(a: T, b: T, getName: (item: T) => string) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return getName(a).localeCompare(getName(b));
+    };
+
+    setAvailableFilters({
+      registrant_filters: Array.from(registrantCounts.entries())
+        .map(([registrant, count]) => ({ registrant, count }))
+        .sort((a, b) => sortByCountThenName(a, b, (item) => item.registrant))
+        .slice(0, 50), // Limit to top 50
+      client_filters: Array.from(clientCounts.entries())
+        .map(([client, count]) => ({ client, count }))
+        .sort((a, b) => sortByCountThenName(a, b, (item) => item.client))
+        .slice(0, 50),
+      lobbyist_filters: Array.from(lobbyistCounts.entries())
+        .map(([lobbyist, count]) => ({ lobbyist, count }))
+        .sort((a, b) => sortByCountThenName(a, b, (item) => item.lobbyist))
+        .slice(0, 50),
+      filing_type_filters: Array.from(filingTypeCounts.entries())
+        .map(([filingType, count]) => ({ filingType, count }))
+        .sort((a, b) => sortByCountThenName(a, b, (item) => item.filingType)),
+      issue_code_filters: Array.from(issueCodeCounts.entries())
+        .map(([issueCode, count]) => ({ issueCode, count }))
+        .sort((a, b) => sortByCountThenName(a, b, (item) => item.issueCode))
+        .slice(0, 50),
+      state_filters: Array.from(stateCounts.entries())
+        .map(([state, count]) => ({ state, count }))
+        .sort((a, b) => sortByCountThenName(a, b, (item) => item.state)),
+    });
+  }, []);
 
   // Client-side filtering function
   const applyFilters = useCallback(() => {
@@ -304,6 +395,15 @@ const LDASearchPage: React.FC = () => {
       selectedFilters.states.length > 0
     );
   }, [allSearchResults, selectedFilters]);
+
+  // Compute available filters when search results change
+  useEffect(() => {
+    if (allSearchResults.length > 0) {
+      computeFiltersFromResults(allSearchResults);
+    } else {
+      setAvailableFilters({});
+    }
+  }, [allSearchResults, computeFiltersFromResults]);
 
   // Apply filters when selectedFilters or allSearchResults change
   useEffect(() => {
@@ -1021,8 +1121,22 @@ const LDASearchPage: React.FC = () => {
                           onItemsChange={(codes) => {
                             setSearchParams(prev => ({ ...prev, general_issue_code: codes }));
                           }}
-                          suggestions={[]}
-                          onSearch={() => []}
+                          suggestions={generalIssues}
+                          onSearch={(query: string) => {
+                            if (!query || query.trim() === '') {
+                              return generalIssues;
+                            }
+                            const queryLower = query.toLowerCase().trim();
+                            // Filter: starts with query, then contains query
+                            const startsWith = generalIssues.filter(issue => 
+                              issue.toLowerCase().startsWith(queryLower)
+                            );
+                            const contains = generalIssues.filter(issue => 
+                              !issue.toLowerCase().startsWith(queryLower) && 
+                              issue.toLowerCase().includes(queryLower)
+                            );
+                            return [...startsWith, ...contains];
+                          }}
                           renderItem={(code) => code}
                           placeholder="Search issue codes..."
                           allowCustomInput={false}
@@ -1244,6 +1358,20 @@ const LDASearchPage: React.FC = () => {
                         border: 'none',
                         overflow: 'auto',
                         width: '100%',
+                        '&::-webkit-scrollbar': {
+                          width: '8px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                          borderRadius: '4px',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        },
                       }}>
                         <Table size="small">
                           <TableHead>
@@ -1581,7 +1709,24 @@ const LDASearchPage: React.FC = () => {
                     {expandedFilters.registrants ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                   </Box>
                   <Collapse in={expandedFilters.registrants}>
-                    <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto' }}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
                       {availableFilters.registrant_filters.map((filter, idx) => {
                         const isSelected = selectedFilters.registrants.includes(filter.registrant);
                         return (
@@ -1651,7 +1796,560 @@ const LDASearchPage: React.FC = () => {
                 </Box>
               )}
 
-              {/* Similar filter sections for clients, lobbyists, filing types, issue codes, states */}
+              {/* Clients Filter */}
+              {availableFilters.client_filters && availableFilters.client_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, clients: !prev.clients }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Clients
+                    </Typography>
+                    {expandedFilters.clients ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.clients}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.client_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.clients.includes(filter.client);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.clients.includes(filter.client);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    clients: prev.clients.filter(c => c !== filter.client),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    clients: [...prev.clients, filter.client],
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.client}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Lobbyists Filter */}
+              {availableFilters.lobbyist_filters && availableFilters.lobbyist_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, lobbyists: !prev.lobbyists }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Lobbyists
+                    </Typography>
+                    {expandedFilters.lobbyists ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.lobbyists}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.lobbyist_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.lobbyists.includes(filter.lobbyist);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.lobbyists.includes(filter.lobbyist);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    lobbyists: prev.lobbyists.filter(l => l !== filter.lobbyist),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    lobbyists: [...prev.lobbyists, filter.lobbyist],
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.lobbyist}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Filing Types Filter */}
+              {availableFilters.filing_type_filters && availableFilters.filing_type_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, filingTypes: !prev.filingTypes }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Filing Types
+                    </Typography>
+                    {expandedFilters.filingTypes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.filingTypes}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.filing_type_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.filingTypes.includes(filter.filingType);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.filingTypes.includes(filter.filingType);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    filingTypes: prev.filingTypes.filter(f => f !== filter.filingType),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    filingTypes: [...prev.filingTypes, filter.filingType],
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.filingType}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Issue Codes Filter */}
+              {availableFilters.issue_code_filters && availableFilters.issue_code_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, issueCodes: !prev.issueCodes }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      Issue Codes
+                    </Typography>
+                    {expandedFilters.issueCodes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.issueCodes}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.issue_code_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.issueCodes.includes(filter.issueCode);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.issueCodes.includes(filter.issueCode);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    issueCodes: prev.issueCodes.filter(i => i !== filter.issueCode),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    issueCodes: [...prev.issueCodes, filter.issueCode],
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.issueCode}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* States Filter */}
+              {availableFilters.state_filters && availableFilters.state_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, states: !prev.states }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                      States
+                    </Typography>
+                    {expandedFilters.states ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.states}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.state_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.states.includes(filter.state);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.states.includes(filter.state);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    states: prev.states.filter(s => s !== filter.state),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    states: [...prev.states, filter.state],
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                            }}>
+                              {filter.state}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
             </GlassCard>
           )}
         </Box>
@@ -1687,7 +2385,7 @@ const LDASearchPage: React.FC = () => {
       <Dialog
         open={detailsDialogOpen}
         onClose={() => setDetailsDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
         PaperProps={{
           sx: {
@@ -1700,98 +2398,563 @@ const LDASearchPage: React.FC = () => {
       >
         {selectedFilingForDetails && (
           <>
-            <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2, color: '#ffffff', fontWeight: 600 }}>
-              Filing Details
+            <DialogTitle sx={{ 
+              borderBottom: '1px solid #374151', 
+              pb: 2, 
+              color: '#ffffff', 
+              fontWeight: 600,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}>
+              <Typography variant="h6" component="span" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                Filing Details
+              </Typography>
+              {selectedFilingForDetails.s3_key && (
+                <IconButton
+                  size="small"
+                  onClick={async () => {
+                    try {
+                      console.log('📥 Downloading LDA filing:', selectedFilingForDetails.s3_key);
+                      
+                      if (!user?.id) {
+                        console.error('Missing user ID for file download');
+                        alert('Please log in to download files');
+                        return;
+                      }
+                      
+                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                      const response = await fetch(`${apiUrl}/file-download`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          user_id: user.id,
+                          session_id: activeSessionId || '', // Optional for LDA filings
+                          s3_key: selectedFilingForDetails.s3_key,
+                          filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
+                          bucket: 'LDA_DISCLOSURES',
+                        }),
+                      });
+                      
+                      if (!response.ok) {
+                        throw new Error(`Download request failed: ${response.status}`);
+                      }
+                      
+                      const { download_url } = await response.json();
+                      
+                      // Create download link and trigger download
+                      const link = document.createElement('a');
+                      link.href = download_url;
+                      link.download = selectedFilingForDetails.s3_key.split('/').pop() || 'filing';
+                      link.target = '_blank';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      
+                      console.log('✅ File download started');
+                    } catch (error) {
+                      console.error('❌ Download failed:', error);
+                    }
+                  }}
+                  sx={{
+                    color: '#3b82f6',
+                    '&:hover': { 
+                      color: '#60a5fa', 
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)' 
+                    }
+                  }}
+                >
+                  <DownloadIcon />
+                </IconButton>
+              )}
             </DialogTitle>
-            <DialogContent sx={{ pt: 3 }}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Filing UUID:</strong> {selectedFilingForDetails.filing_uuid}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Filing Type:</strong> {selectedFilingForDetails.report_type || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Registrant:</strong> {selectedFilingForDetails.registrant_name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Client:</strong> {selectedFilingForDetails.client_name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Lobbyist:</strong> {selectedFilingForDetails.lobbyist_name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Amount:</strong> {formatCurrency(selectedFilingForDetails.amount_reported)}
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                  <strong>Date Posted:</strong> {formatDate(selectedFilingForDetails.dt_posted)}
-                </Typography>
-                
-                {/* File download section */}
-                {selectedFilingForDetails.s3_key && (
-                  <Box sx={{ mt: 2, p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.5)' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {selectedFilingForDetails.s3_key.endsWith('.pdf') ? (
-                        <PdfIcon sx={{ fontSize: 20, color: '#ef4444' }} />
-                      ) : (
-                        <DocumentIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
-                      )}
-                      <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1 }}>
-                        {selectedFilingForDetails.s3_key.split('/').pop() || 'Document'}
+            <DialogContent sx={{ 
+              pt: 3, 
+              maxHeight: '80vh', 
+              overflowY: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+              },
+            }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {/* Basic Filing Information */}
+                <Box>
+                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Filing Information
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      <strong>Filing UUID:</strong> <span style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{selectedFilingForDetails.filing_uuid}</span>
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      <strong>Filing Type:</strong> {selectedFilingForDetails.report_type || selectedFilingForDetails.filing_type || 'N/A'}
+                      {selectedFilingForDetails.report_type_display || selectedFilingForDetails.filing_type_display ? ` (${selectedFilingForDetails.report_type_display || selectedFilingForDetails.filing_type_display})` : ''}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      <strong>Filing Period:</strong> {selectedFilingForDetails.filing_period_display || selectedFilingForDetails.filing_period || 'N/A'}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      <strong>Filing Year:</strong> {selectedFilingForDetails.filing_year || 'N/A'}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      <strong>Date Posted:</strong> {formatDate(selectedFilingForDetails.dt_posted)}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      <strong>Amount:</strong> {formatCurrency(selectedFilingForDetails.amount_reported)}
+                    </Typography>
+                    {selectedFilingForDetails.general_issue_code && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>General Issue Code:</strong> {selectedFilingForDetails.general_issue_code}
+                        {selectedFilingForDetails.general_issue_code_display ? ` (${selectedFilingForDetails.general_issue_code_display})` : ''}
                       </Typography>
-                      <IconButton
-                        size="small"
-                        onClick={async () => {
-                          try {
-                            console.log('📥 Downloading LDA filing:', selectedFilingForDetails.s3_key);
-                            
-                            if (!user?.id) {
-                              console.error('Missing user ID for file download');
-                              alert('Please log in to download files');
-                              return;
-                            }
-                            
-                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                            const response = await fetch(`${apiUrl}/file-download`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                user_id: user.id,
-                                session_id: activeSessionId || '', // Optional for LDA filings
-                                s3_key: selectedFilingForDetails.s3_key,
-                                filename: selectedFilingForDetails.s3_key.split('/').pop() || 'filing',
-                                bucket: 'LDA_DISCLOSURES',
-                              }),
-                            });
-                            
-                            if (!response.ok) {
-                              throw new Error(`Download request failed: ${response.status}`);
-                            }
-                            
-                            const { download_url } = await response.json();
-                            
-                            // Create download link and trigger download
-                            const link = document.createElement('a');
-                            link.href = download_url;
-                            link.download = selectedFilingForDetails.s3_key.split('/').pop() || 'filing';
-                            link.target = '_blank';
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                            
-                            console.log('✅ File download started');
-                          } catch (error) {
-                            console.error('❌ Download failed:', error);
-                          }
-                        }}
-                        sx={{
-                          color: '#3b82f6',
-                          ml: 'auto',
-                          '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
-                        }}
-                      >
-                        <DownloadIcon fontSize="small" />
-                      </IconButton>
+                    )}
+                    {selectedFilingForDetails.state && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>State:</strong> {selectedFilingForDetails.state}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.income && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Income:</strong> {formatCurrency(selectedFilingForDetails.income)}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.expenses !== null && selectedFilingForDetails.expenses !== undefined && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Expenses:</strong> {formatCurrency(selectedFilingForDetails.expenses)}
+                        {selectedFilingForDetails.expenses_method_display ? ` (${selectedFilingForDetails.expenses_method_display})` : selectedFilingForDetails.expenses_method ? ` (Method: ${selectedFilingForDetails.expenses_method})` : ''}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.amount_bucket && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Amount Bucket:</strong> {formatCurrency(selectedFilingForDetails.amount_bucket)}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.posted_by_name && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Posted By:</strong> {selectedFilingForDetails.posted_by_name}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.termination_date && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Termination Date:</strong> {formatDate(selectedFilingForDetails.termination_date)}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.no_contributions !== null && selectedFilingForDetails.no_contributions !== undefined && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>No Contributions:</strong> {selectedFilingForDetails.no_contributions ? 'Yes' : 'No'}
+                      </Typography>
+                    )}
+                    {selectedFilingForDetails.government_entity_id && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Government Entity ID:</strong> <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.government_entity_id}</span>
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+
+                {/* Registrant Information */}
+                {(selectedFilingForDetails.registrant || selectedFilingForDetails.registrant_name) && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Registrant
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.95rem' }}>
+                        {selectedFilingForDetails.registrant?.name || selectedFilingForDetails.registrant_name || 'N/A'}
+                      </Typography>
+                      
+                      {/* PII - Contact Information */}
+                      {selectedFilingForDetails.registrant?.contact_name && (
+                        <Typography variant="body2" sx={{ color: '#fbbf24', fontWeight: 500 }}>
+                          <strong>Contact Name:</strong> {selectedFilingForDetails.registrant.contact_name}
+                        </Typography>
+                      )}
+                      {selectedFilingForDetails.registrant?.contact_telephone && (
+                        <Typography variant="body2" sx={{ color: '#fbbf24', fontWeight: 500 }}>
+                          <strong>Contact Phone:</strong> {selectedFilingForDetails.registrant.contact_telephone}
+                        </Typography>
+                      )}
+                      
+                      {/* PII - Address */}
+                      {(selectedFilingForDetails.registrant?.address_1 || selectedFilingForDetails.address?.address_1) && (
+                        <Box sx={{ mt: 0.5 }}>
+                          <Typography variant="body2" sx={{ color: '#fbbf24', fontWeight: 500, mb: 0.5 }}>
+                            <strong>Address:</strong>
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: '#fbbf24', pl: 2, fontStyle: 'italic' }}>
+                            {selectedFilingForDetails.registrant?.address_1 || selectedFilingForDetails.address?.address_1}
+                            {selectedFilingForDetails.registrant?.address_2 || selectedFilingForDetails.address?.address_2 ? `, ${selectedFilingForDetails.registrant?.address_2 || selectedFilingForDetails.address?.address_2}` : ''}
+                            <br />
+                            {selectedFilingForDetails.registrant?.city || selectedFilingForDetails.address?.city}, {selectedFilingForDetails.registrant?.state || selectedFilingForDetails.address?.state || selectedFilingForDetails.state} {selectedFilingForDetails.registrant?.zip || selectedFilingForDetails.address?.zip}
+                            <br />
+                            {selectedFilingForDetails.registrant?.country_display || selectedFilingForDetails.registrant?.country || selectedFilingForDetails.address?.country_display || selectedFilingForDetails.address?.country || 'N/A'}
+                          </Typography>
+                        </Box>
+                      )}
+                      
+                      {/* IDs (less emphasized) */}
+                      <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #475569' }}>
+                        {selectedFilingForDetails.registrant?.id && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            Registrant ID: <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.registrant.id}</span>
+                          </Typography>
+                        )}
+                        {selectedFilingForDetails.registrant?.house_registrant_id && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            House Registrant ID: <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.registrant.house_registrant_id}</span>
+                          </Typography>
+                        )}
+                        {selectedFilingForDetails.registrant_id && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            Registrant ID (alt): <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.registrant_id}</span>
+                          </Typography>
+                        )}
+                      </Box>
+                      
+                      {/* Other registrant info */}
+                      {selectedFilingForDetails.registrant?.description && (
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 1, fontStyle: 'italic' }}>
+                          {selectedFilingForDetails.registrant.description}
+                        </Typography>
+                      )}
+                      {selectedFilingForDetails.registrant?.dt_updated && (
+                        <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                          Last Updated: {formatDate(selectedFilingForDetails.registrant.dt_updated)}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Client Information */}
+                {(selectedFilingForDetails.client || selectedFilingForDetails.client_name) && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Client
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.95rem' }}>
+                        {selectedFilingForDetails.client?.name || selectedFilingForDetails.client_name || 'N/A'}
+                      </Typography>
+                      
+                      {/* Client description */}
+                      {selectedFilingForDetails.client?.general_description && (
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', fontStyle: 'italic' }}>
+                          {selectedFilingForDetails.client.general_description}
+                        </Typography>
+                      )}
+                      
+                      {/* Client location */}
+                      {(selectedFilingForDetails.client?.state_display || selectedFilingForDetails.client?.country_display) && (
+                        <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                          <strong>Location:</strong> {selectedFilingForDetails.client.state_display || ''}
+                          {selectedFilingForDetails.client.state_display && selectedFilingForDetails.client.country_display ? ', ' : ''}
+                          {selectedFilingForDetails.client.country_display || selectedFilingForDetails.client.country || ''}
+                        </Typography>
+                      )}
+                      
+                      {/* IDs (less emphasized) */}
+                      <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #475569' }}>
+                        {selectedFilingForDetails.client_id && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            Client ID: <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.client_id}</span>
+                          </Typography>
+                        )}
+                        {selectedFilingForDetails.client_client_id && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            Client Client ID: <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.client_client_id}</span>
+                          </Typography>
+                        )}
+                        {selectedFilingForDetails.client?.id && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            Client ID (alt): <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.client.id}</span>
+                          </Typography>
+                        )}
+                      </Box>
+                      
+                      {/* Government entity flag */}
+                      {selectedFilingForDetails.client?.client_government_entity !== undefined && (
+                        <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                          <strong>Government Entity:</strong> {selectedFilingForDetails.client.client_government_entity ? 'Yes' : 'No'}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Lobbyist Information */}
+                {selectedFilingForDetails.lobbyist_name && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Lobbyist
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.95rem' }}>
+                        {selectedFilingForDetails.lobbyist_name}
+                      </Typography>
+                      
+                      {/* ID (less emphasized) */}
+                      {selectedFilingForDetails.lobbyist_id && (
+                        <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 1 }}>
+                          Lobbyist ID: <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.lobbyist_id}</span>
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* All General Issue Codes */}
+                {selectedFilingForDetails.all_general_issue_codes && Array.isArray(selectedFilingForDetails.all_general_issue_codes) && selectedFilingForDetails.all_general_issue_codes.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      All General Issue Codes
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {selectedFilingForDetails.all_general_issue_codes.map((code: string, idx: number) => (
+                        <Chip
+                          key={idx}
+                          label={code}
+                          size="small"
+                          sx={{
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            color: '#93c5fd',
+                            border: '1px solid #3b82f6',
+                            fontSize: '0.75rem',
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* All Government Entity IDs */}
+                {selectedFilingForDetails.all_government_entity_ids && Array.isArray(selectedFilingForDetails.all_government_entity_ids) && selectedFilingForDetails.all_government_entity_ids.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Government Entity IDs
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {selectedFilingForDetails.all_government_entity_ids.map((id: number, idx: number) => (
+                        <Chip
+                          key={idx}
+                          label={id}
+                          size="small"
+                          sx={{
+                            backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                            color: '#9ca3af',
+                            border: '1px solid #6b7280',
+                            fontSize: '0.75rem',
+                            fontFamily: 'monospace',
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Lobbying Activities */}
+                {selectedFilingForDetails.lobbying_activities && Array.isArray(selectedFilingForDetails.lobbying_activities) && selectedFilingForDetails.lobbying_activities.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Lobbying Activities ({selectedFilingForDetails.lobbying_activities.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {selectedFilingForDetails.lobbying_activities.map((activity: any, idx: number) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            p: 1.5,
+                            border: '1px solid #475569',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                          }}
+                        >
+                          {activity.general_issue_code && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                              <strong>Issue Code:</strong> {activity.general_issue_code}
+                              {activity.general_issue_code_display ? ` (${activity.general_issue_code_display})` : ''}
+                            </Typography>
+                          )}
+                          {activity.specific_issue && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                              <strong>Specific Issue:</strong> {activity.specific_issue}
+                            </Typography>
+                          )}
+                          {activity.house_id && (
+                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                              House ID: <span style={{ fontFamily: 'monospace' }}>{activity.house_id}</span>
+                            </Typography>
+                          )}
+                          {activity.senate_id && (
+                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                              Senate ID: <span style={{ fontFamily: 'monospace' }}>{activity.senate_id}</span>
+                            </Typography>
+                          )}
+                          {activity.amount && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
+                              <strong>Amount:</strong> {formatCurrency(activity.amount)}
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Affiliated Organizations */}
+                {selectedFilingForDetails.affiliated_organizations && Array.isArray(selectedFilingForDetails.affiliated_organizations) && selectedFilingForDetails.affiliated_organizations.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Affiliated Organizations ({selectedFilingForDetails.affiliated_organizations.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {selectedFilingForDetails.affiliated_organizations.map((org: any, idx: number) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            p: 1,
+                            border: '1px solid #475569',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                          }}
+                        >
+                          {org.name && (
+                            <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                              {org.name}
+                            </Typography>
+                          )}
+                          {org.id && (
+                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                              ID: <span style={{ fontFamily: 'monospace' }}>{org.id}</span>
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Foreign Entities */}
+                {selectedFilingForDetails.foreign_entities && Array.isArray(selectedFilingForDetails.foreign_entities) && selectedFilingForDetails.foreign_entities.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Foreign Entities ({selectedFilingForDetails.foreign_entities.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {selectedFilingForDetails.foreign_entities.map((entity: any, idx: number) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            p: 1,
+                            border: '1px solid #475569',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                          }}
+                        >
+                          {entity.name && (
+                            <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                              {entity.name}
+                            </Typography>
+                          )}
+                          {entity.country && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
+                              <strong>Country:</strong> {entity.country}
+                            </Typography>
+                          )}
+                          {entity.id && (
+                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                              ID: <span style={{ fontFamily: 'monospace' }}>{entity.id}</span>
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Contribution Items */}
+                {selectedFilingForDetails.contribution_items && Array.isArray(selectedFilingForDetails.contribution_items) && selectedFilingForDetails.contribution_items.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Contribution Items ({selectedFilingForDetails.contribution_items.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {selectedFilingForDetails.contribution_items.map((item: any, idx: number) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            p: 1.5,
+                            border: '1px solid #475569',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                          }}
+                        >
+                          {item.recipient_name && (
+                            <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                              {item.recipient_name}
+                            </Typography>
+                          )}
+                          {item.amount && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
+                              <strong>Amount:</strong> {formatCurrency(item.amount)}
+                            </Typography>
+                          )}
+                          {item.date && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
+                              <strong>Date:</strong> {formatDate(item.date)}
+                            </Typography>
+                          )}
+                          {item.description && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
+                              <strong>Description:</strong> {item.description}
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* Conviction Disclosures */}
+                {selectedFilingForDetails.conviction_disclosures && Array.isArray(selectedFilingForDetails.conviction_disclosures) && selectedFilingForDetails.conviction_disclosures.length > 0 && (
+                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Conviction Disclosures ({selectedFilingForDetails.conviction_disclosures.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {selectedFilingForDetails.conviction_disclosures.map((disclosure: any, idx: number) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            p: 1.5,
+                            border: '1px solid #475569',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                          }}
+                        >
+                          {disclosure.description && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                              {disclosure.description}
+                            </Typography>
+                          )}
+                          {disclosure.date && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
+                              <strong>Date:</strong> {formatDate(disclosure.date)}
+                            </Typography>
+                          )}
+                        </Box>
+                      ))}
                     </Box>
                   </Box>
                 )}
