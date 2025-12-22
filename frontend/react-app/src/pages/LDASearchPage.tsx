@@ -1212,19 +1212,59 @@ const LDASearchPage: React.FC = () => {
                           allowCustomInput={false}
                         />
 
-                        {/* Item Type - Multi-select (FILING or CONTRIBUTION) */}
-                        <MultiSelectField<string>
-                          label="Item Type"
-                          selectedItems={searchParams.item_type || []}
-                          onItemsChange={(types) => {
-                            setSearchParams(prev => ({ ...prev, item_type: types }));
-                          }}
-                          suggestions={['FILING', 'CONTRIBUTION']}
-                          onSearch={() => ['FILING', 'CONTRIBUTION']}
-                          renderItem={(type) => type}
-                          placeholder="Select item types (leave empty for all)..."
-                          allowCustomInput={false}
-                        />
+                        {/* Item Type - Checkbox Multiselect (FILING or CONTRIBUTION) */}
+                        <Box>
+                          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
+                            Item Type
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            {['FILING', 'CONTRIBUTION'].map((type) => {
+                              const isSelected = Array.isArray(searchParams.item_type) 
+                                ? searchParams.item_type.includes(type)
+                                : searchParams.item_type === type;
+                              return (
+                                <Box
+                                  key={type}
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    p: 1,
+                                    borderRadius: '4px',
+                                    backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                                    border: isSelected ? '1px solid #3b82f6' : '1px solid #374151',
+                                    cursor: 'pointer',
+                                    '&:hover': {
+                                      backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(55, 65, 81, 0.3)',
+                                    },
+                                  }}
+                                  onClick={() => {
+                                    setSearchParams(prev => {
+                                      const currentTypes = Array.isArray(prev.item_type) ? prev.item_type : (prev.item_type ? [prev.item_type] : []);
+                                      if (isSelected) {
+                                        const newTypes = currentTypes.filter(t => t !== type);
+                                        return { ...prev, item_type: newTypes.length > 0 ? newTypes : [] };
+                                      } else {
+                                        return { ...prev, item_type: [...currentTypes, type] };
+                                      }
+                                    });
+                                  }}
+                                >
+                                  <Checkbox
+                                    checked={isSelected}
+                                    sx={{
+                                      color: '#9ca3af',
+                                      '&.Mui-checked': { color: '#3b82f6' },
+                                      p: 0.5,
+                                    }}
+                                  />
+                                  <Typography sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
+                                    {type}
+                                  </Typography>
+                                </Box>
+                              );
+                            })}
+                          </Box>
+                        </Box>
 
                         {/* State */}
                         <MultiSelectField<string>

@@ -1304,15 +1304,24 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # This avoids scan operations by querying YearPostedDateIndex for recent years
         logger.info("No GSI-queryable filters found, using default YearPostedDateIndex query for recent years")
         
-        # Use current year and previous year as default to get recent filings
+        # Check if item_type filter is specified
+        item_type_filter = filters.get('item_type', [])
+        if isinstance(item_type_filter, str):
+            item_type_filter = [item_type_filter]
+        item_type_filter = [t.upper() for t in item_type_filter if t]
+        
+        # Use current year and previous years as default to get recent filings
+        # Query more years to ensure we get results (data might not be available for current year)
         from datetime import datetime
         current_year = datetime.now().year
-        years_to_query = [current_year, current_year - 1]
+        years_to_query = [current_year, current_year - 1, current_year - 2, current_year - 3]
         
         all_filing_ids = []
         all_last_eval_keys = {}
         
         # Query each year's GSI to get filing IDs
+        # Note: YearPostedDateIndex should index both FILING and CONTRIBUTION items if they have filing_year
+        # The query_gsi_for_filing_ids function extracts both FILING# and CONTRIBUTION# IDs from results
         for year in years_to_query:
             filing_ids, last_eval_key = query_gsi_for_filing_ids(
                 index_name='YearPostedDateIndex',
@@ -1326,21 +1335,38 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             if last_eval_key:
                 all_last_eval_keys[year] = last_eval_key
         
-        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years")
+        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years (includes both FILING and CONTRIBUTION items)")
+        
+        # If we got no IDs and item_type is specified, log a warning
+        if len(all_filing_ids) == 0 and item_type_filter:
+            logger.warning(f"No items found in YearPostedDateIndex for years {years_to_query} with item_type filter: {item_type_filter}. This might indicate no data exists for these years, or the items might not be indexed in this GSI.")
         
         # Fetch full items using batch get
         items = []
         if all_filing_ids:
-            batch_size = 100
+            batch_size = 50  # Reduced since we may try both formats
             dynamodb_client = boto3.client('dynamodb')
             for i in range(0, len(all_filing_ids), batch_size):
                 batch_ids = all_filing_ids[i:i + batch_size]
+                # If item_type is specified, only try the relevant key format
+                # Otherwise, try both FILING and CONTRIBUTION formats
+                keys = []
+                if item_type_filter:
+                    # Only try the specified type(s)
+                    for fid in batch_ids:
+                        if 'FILING' in item_type_filter:
+                            keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+                        if 'CONTRIBUTION' in item_type_filter:
+                            keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
+                else:
+                    # No item_type filter - try both formats
+                    for fid in batch_ids:
+                        keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+                        keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
+                
                 request_items = {
                     FILINGS_TABLE_NAME: {
-                        'Keys': [
-                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
-                            for fid in batch_ids
-                        ]
+                        'Keys': keys
                         # No ProjectionExpression - returns ALL attributes (complete row including PII)
                     }
                 }
