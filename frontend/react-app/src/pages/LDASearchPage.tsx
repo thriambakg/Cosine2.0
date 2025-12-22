@@ -2753,27 +2753,6 @@ const LDASearchPage: React.FC = () => {
                   </Box>
                 )}
 
-                {/* Lobbyist Information */}
-                {selectedFilingForDetails.lobbyist_name && (
-                  <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
-                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Lobbyist
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.95rem' }}>
-                        {selectedFilingForDetails.lobbyist_name}
-                      </Typography>
-                      
-                      {/* ID (less emphasized) */}
-                      {selectedFilingForDetails.lobbyist_id && (
-                        <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 1 }}>
-                          Lobbyist ID: <span style={{ fontFamily: 'monospace' }}>{selectedFilingForDetails.lobbyist_id}</span>
-                        </Typography>
-                      )}
-                    </Box>
-                  </Box>
-                )}
-
                 {/* All General Issue Codes */}
                 {selectedFilingForDetails.all_general_issue_codes && Array.isArray(selectedFilingForDetails.all_general_issue_codes) && selectedFilingForDetails.all_general_issue_codes.length > 0 && (
                   <Box sx={{ p: 2, border: '1px solid #374151', borderRadius: '4px', backgroundColor: 'rgba(31, 41, 55, 0.3)' }}>
@@ -2840,27 +2819,130 @@ const LDASearchPage: React.FC = () => {
                             backgroundColor: 'rgba(15, 23, 42, 0.5)',
                           }}
                         >
+                          {activity.description && (
+                            <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, mb: 1, fontSize: '0.95rem' }}>
+                              {activity.description}
+                            </Typography>
+                          )}
+                          
                           {activity.general_issue_code && (
                             <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
                               <strong>Issue Code:</strong> {activity.general_issue_code}
                               {activity.general_issue_code_display ? ` (${activity.general_issue_code_display})` : ''}
                             </Typography>
                           )}
+                          
                           {activity.specific_issue && (
                             <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
                               <strong>Specific Issue:</strong> {activity.specific_issue}
                             </Typography>
                           )}
+                          
+                          {activity.foreign_entity_issues && (
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                              <strong>Foreign Entity Issues:</strong> {activity.foreign_entity_issues}
+                            </Typography>
+                          )}
+                          
+                          {/* Government Entities for this activity */}
+                          {activity.government_entities && Array.isArray(activity.government_entities) && activity.government_entities.length > 0 && (
+                            <Box sx={{ mt: 1, mb: 0.5 }}>
+                              <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5, fontWeight: 500 }}>
+                                <strong>Government Entities:</strong>
+                              </Typography>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, pl: 1 }}>
+                                {activity.government_entities.map((entity: any, entityIdx: number) => (
+                                  <Chip
+                                    key={entityIdx}
+                                    label={entity.name || entity.id || `Entity ${entityIdx + 1}`}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                                      color: '#9ca3af',
+                                      border: '1px solid #6b7280',
+                                      fontSize: '0.7rem',
+                                    }}
+                                  />
+                                ))}
+                              </Box>
+                            </Box>
+                          )}
+                          
+                          {/* Lobbyists for this activity - recursively extract from nested structure */}
+                          {activity.lobbyists && Array.isArray(activity.lobbyists) && activity.lobbyists.length > 0 && (
+                            <Box sx={{ mt: 1, mb: 0.5 }}>
+                              <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5, fontWeight: 500 }}>
+                                <strong>Lobbyists ({activity.lobbyists.length}):</strong>
+                              </Typography>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pl: 1 }}>
+                                {activity.lobbyists.map((lobbyistItem: any, lobbyistIdx: number) => {
+                                  // Handle nested structure: activity.lobbyists[].lobbyist
+                                  const lobbyist = lobbyistItem.lobbyist || lobbyistItem;
+                                  
+                                  // Build full name from first_name, last_name, etc.
+                                  let fullName = '';
+                                  if (typeof lobbyist === 'string') {
+                                    fullName = lobbyist;
+                                  } else if (lobbyist.first_name || lobbyist.last_name) {
+                                    const parts = [
+                                      lobbyist.prefix_display || lobbyist.prefix,
+                                      lobbyist.first_name,
+                                      lobbyist.middle_name,
+                                      lobbyist.last_name,
+                                      lobbyist.suffix_display || lobbyist.suffix
+                                    ].filter(Boolean);
+                                    fullName = parts.join(' ').trim();
+                                  } else {
+                                    fullName = lobbyist.name || lobbyist.lobbyist_name || `Lobbyist ${lobbyistIdx + 1}`;
+                                  }
+                                  
+                                  return (
+                                    <Box
+                                      key={lobbyistIdx}
+                                      sx={{
+                                        p: 1,
+                                        border: '1px solid #475569',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'rgba(15, 23, 42, 0.3)',
+                                      }}
+                                    >
+                                      <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem' }}>
+                                        {fullName}
+                                      </Typography>
+                                      {lobbyist.id && (
+                                        <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
+                                          ID: <span style={{ fontFamily: 'monospace' }}>{lobbyist.id}</span>
+                                        </Typography>
+                                      )}
+                                      {lobbyistItem.covered_position && lobbyistItem.covered_position !== 'N/A' && (
+                                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mt: 0.5 }}>
+                                          Position: {lobbyistItem.covered_position}
+                                        </Typography>
+                                      )}
+                                      {lobbyistItem.new !== null && lobbyistItem.new !== undefined && (
+                                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mt: 0.5 }}>
+                                          New: {lobbyistItem.new ? 'Yes' : 'No'}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+                            </Box>
+                          )}
+                          
                           {activity.house_id && (
-                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
                               House ID: <span style={{ fontFamily: 'monospace' }}>{activity.house_id}</span>
                             </Typography>
                           )}
+                          
                           {activity.senate_id && (
-                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block' }}>
+                            <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
                               Senate ID: <span style={{ fontFamily: 'monospace' }}>{activity.senate_id}</span>
                             </Typography>
                           )}
+                          
                           {activity.amount && (
                             <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 0.5 }}>
                               <strong>Amount:</strong> {formatCurrency(activity.amount)}

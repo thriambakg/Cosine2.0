@@ -516,51 +516,96 @@ def query_parameter_filing_mappings(
     parameter_type: str,
     parameter_values: List[str],
     limit: int = 1000,
-    exclusive_start_key: Optional[Dict] = None
+    exclusive_start_key: Optional[Dict] = None,
+    per_param_limit: Optional[int] = None
 ) -> tuple[List[str], Optional[Dict]]:
     """
     Query parameter-filing mappings to get filing IDs for a list of parameter values
+    Supports pagination on SK (since PK is the same for all items with same parameter value)
     
     Args:
         parameter_type: Type of parameter (e.g., "GENERAL_ISSUE", "GOVERNMENT_ENTITY", "LOBBYIST", "PAC", "FOREIGN_COUNTRY")
         parameter_values: List of parameter values (names, not codes)
-        limit: Maximum number of filing IDs to return
-        exclusive_start_key: Pagination token
+        limit: Maximum number of filing IDs to return total
+        exclusive_start_key: Pagination token (contains PK and SK for continuing query)
+        per_param_limit: Limit per parameter value (for pagination within a single parameter)
     
     Returns:
-        Tuple of (list of filing UUIDs, last_evaluated_key)
+        Tuple of (list of filing UUIDs, last_evaluated_key for pagination)
     """
     if not filings_table:
         raise Exception("DynamoDB filings table not initialized")
     
-    all_filing_uuids = set()
+    all_filing_uuids = []
     last_eval_key = exclusive_start_key
-    
+    per_param_limit = per_param_limit or limit
     
     try:
-        for param_value in parameter_values:
+        # If we have a last_eval_key, it contains the PK and SK from the previous query
+        # This means we're continuing pagination for a specific parameter value
+        if last_eval_key:
+            # Handle both DynamoDB format and our custom format
+            if isinstance(last_eval_key, dict):
+                # Check if it's in DynamoDB format (from direct query)
+                if 'PK' in last_eval_key:
+                    pk_from_key = last_eval_key.get('PK', {}).get('S', '') if isinstance(last_eval_key.get('PK'), dict) else str(last_eval_key.get('PK', ''))
+                else:
+                    # It's our custom format, extract the actual DynamoDB key
+                    pk_from_key = None
+                    # Try to extract from nested structure
+                    if 'parameter_mapping_key' in last_eval_key:
+                        param_key = last_eval_key['parameter_mapping_key']
+                        pk_from_key = param_key.get('PK', {}).get('S', '') if isinstance(param_key.get('PK'), dict) else str(param_key.get('PK', ''))
+                        last_eval_key = param_key  # Use the actual DynamoDB key
+                
+                if pk_from_key and pk_from_key.startswith(f"{parameter_type}#"):
+                    # Query with pagination token
+                    query_params = {
+                        'KeyConditionExpression': Key('PK').eq(pk_from_key),
+                        'ProjectionExpression': 'SK',
+                        'Limit': per_param_limit,
+                        'ExclusiveStartKey': last_eval_key
+                    }
+                    
+                    logger.info(f"Continuing pagination for parameter-filing mappings: PK={pk_from_key}")
+                    response = filings_table.query(**query_params)
+                    
+                    for item in response.get('Items', []):
+                        sk = item.get('SK', '')
+                        if sk:
+                            sk_str = str(sk)
+                            if sk_str.startswith('FILING#'):
+                                filing_uuid = sk_str.replace('FILING#', '')
+                                all_filing_uuids.append(filing_uuid)
+                    
+                    last_eval_key = response.get('LastEvaluatedKey')
+                    logger.info(f"Found {len(all_filing_uuids)} filing UUIDs from paginated query")
+                    return all_filing_uuids, last_eval_key
+        
+        # No pagination token - start fresh query
+        # For now, only query the first parameter value (can be extended for multiple values)
+        if parameter_values:
+            param_value = parameter_values[0]
             if not param_value or not str(param_value).strip():
-                continue
+                return [], None
             
             # Clean double quotes from parameter value before querying (values are not stored with quotes)
             cleaned_value = clean_quotes(param_value)
             if not cleaned_value:
-                continue
+                return [], None
             
             # Construct PK for parameter-filing mapping: PARAMETER_TYPE#VALUE
             pk = f"{parameter_type}#{cleaned_value}"
             
-            # Query for all mappings with this parameter value
+            # Query for all mappings with this parameter value (paginated on SK)
+            # Use a reasonable batch size for pagination
             query_params = {
                 'KeyConditionExpression': Key('PK').eq(pk),
                 'ProjectionExpression': 'SK',  # SK contains FILING#<uuid> or CONTRIBUTION#<uuid>
-                'Limit': limit
+                'Limit': min(per_param_limit, limit)
             }
             
-            if last_eval_key:
-                query_params['ExclusiveStartKey'] = last_eval_key
-            
-            logger.info(f"Querying parameter-filing mappings: PK={pk}")
+            logger.info(f"Querying parameter-filing mappings: PK={pk}, limit={per_param_limit}")
             response = filings_table.query(**query_params)
             
             for item in response.get('Items', []):
@@ -570,20 +615,16 @@ def query_parameter_filing_mappings(
                     # Extract UUID from SK (format: FILING#<uuid> or CONTRIBUTION#<uuid>)
                     if sk_str.startswith('FILING#'):
                         filing_uuid = sk_str.replace('FILING#', '')
-                        all_filing_uuids.add(filing_uuid)
+                        all_filing_uuids.append(filing_uuid)
                     elif sk_str.startswith('CONTRIBUTION#'):
                         # For contributions, we'd need to fetch the contribution to get filing_uuid
                         # For now, skip contributions in parameter mappings (they're handled separately for PACs)
                         pass
             
             last_eval_key = response.get('LastEvaluatedKey')
-            
-            # If we've collected enough, break
-            if len(all_filing_uuids) >= limit:
-                break
+            logger.info(f"Found {len(all_filing_uuids)} filing UUIDs from parameter-filing mappings (has_more: {last_eval_key is not None})")
         
-        logger.info(f"Found {len(all_filing_uuids)} unique filing UUIDs from parameter-filing mappings for {parameter_type}")
-        return list(all_filing_uuids), last_eval_key
+        return all_filing_uuids, last_eval_key
         
     except Exception as e:
         logger.error(f"Error querying parameter-filing mappings for {parameter_type}: {str(e)}", exc_info=True)
@@ -833,12 +874,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                                 {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
                                 for fid in batch_ids
                             ]
+                            # No ProjectionExpression - returns ALL attributes (complete row including PII)
                         }
                     }
                     batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                     batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                     deserializer = TypeDeserializer()
                     for item in batch_items:
+                        # Deserialize all fields - no filtering, returns complete row
                         converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                         items_batch.append(converted_item)
             
@@ -890,11 +933,23 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         if config.get('query_type') == 'parameter_filing_mapping':
             logger.info(f"Using parameter-filing mapping query: {config['parameter_type']} with values: {config['parameter_values']}")
             
-            # Query parameter-filing mappings to get filing IDs
-            filing_ids, _ = query_parameter_filing_mappings(
+            # Extract pagination token if present (for "load more" functionality)
+            param_mapping_last_key = None
+            if last_evaluated_key and isinstance(last_evaluated_key, dict):
+                # Check if this is a parameter-filing mapping pagination token
+                if 'parameter_mapping_key' in last_evaluated_key:
+                    param_mapping_last_key = last_evaluated_key.get('parameter_mapping_key')
+            
+            # Query parameter-filing mappings to get filing IDs (with pagination support)
+            # Use a reasonable batch size for pagination - fetch enough to account for filtering
+            # but not too many to avoid long wait times
+            batch_size = min(limit * 3, 200)  # Fetch 3x limit or max 200, whichever is smaller
+            filing_ids, param_mapping_key = query_parameter_filing_mappings(
                 parameter_type=config['parameter_type'],
                 parameter_values=config['parameter_values'],
-                limit=limit * 10  # Get more IDs to account for filtering
+                limit=batch_size,
+                exclusive_start_key=param_mapping_last_key,
+                per_param_limit=batch_size
             )
             
             if not filing_ids:
@@ -911,9 +966,12 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             
             logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings")
             
-            # Fetch full items
+            # Fetch full items using efficient batch_get_item
+            # Note: No ProjectionExpression is used, so ALL attributes are returned (including PII like addresses, phone numbers, etc.)
             items = []
             dynamodb_client = boto3.client('dynamodb')
+            
+            # Process in batches of 100 (DynamoDB batch_get_item limit)
             for i in range(0, len(filing_ids), 100):
                 batch_ids = filing_ids[i:i + 100]
                 request_items = {
@@ -922,14 +980,18 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                             {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
                             for fid in batch_ids
                         ]
+                        # No ProjectionExpression - returns all attributes
                     }
                 }
                 batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                 batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                 deserializer = TypeDeserializer()
                 for item in batch_items:
+                    # Deserialize all fields - no filtering, returns complete row
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                     items.append(converted_item)
+            
+            logger.info(f"Fetched {len(items)} full items from DynamoDB using batch_get_item")
             
             # Apply remaining filters
             remaining_filters = filters.copy()
@@ -963,12 +1025,28 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             
             results = [convert_decimal_to_float(item) for item in filtered_items[:limit]]
             
+            # Prepare pagination token for "load more" functionality
+            # Store the parameter-filing mapping key so we can continue pagination
+            serializable_last_key = None
+            if param_mapping_key:
+                try:
+                    # Store both the parameter mapping key and filter info for continuation
+                    serializable_last_key = {
+                        'parameter_mapping_key': convert_decimal_to_float(param_mapping_key),
+                        'parameter_type': config['parameter_type'],
+                        'filter_key': config['filter_key'],
+                        'query_type': 'parameter_filing_mapping'
+                    }
+                except Exception as e:
+                    logger.warning(f"Error converting parameter mapping key: {e}")
+                    serializable_last_key = None
+            
             return {
                 'success': True,
                 'results': results,
                 'count': len(results),
-                'has_more': len(filing_ids) > len(filtered_items),
-                'last_evaluated_key': None,
+                'has_more': param_mapping_key is not None,  # More results available if we have a pagination key
+                'last_evaluated_key': serializable_last_key,
                 'method': 'parameter_filing_mapping',
                 'parameter_type': config['parameter_type']
             }
@@ -1047,12 +1125,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                                     {'PK': {'S': f'CONTRIBUTION#{cid}'}, 'SK': {'S': f'CONTRIBUTION#{cid}'}}
                                     for cid in batch_ids
                                 ]
+                                # No ProjectionExpression - returns ALL attributes (complete row including PII)
                             }
                         }
                         batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                         batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                         deserializer = TypeDeserializer()
                         for item in batch_items:
+                            # Deserialize all fields - no filtering, returns complete row
                             converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                             contribution_items.append(converted_item)
                     
@@ -1109,12 +1189,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                                         {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
                                         for fid in batch_uuids
                                     ]
+                                    # No ProjectionExpression - returns ALL attributes (complete row including PII)
                                 }
                             }
                             batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                             batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                             deserializer = TypeDeserializer()
                             for item in batch_items:
+                                # Deserialize all fields - no filtering, returns complete row
                                 converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                                 items_batch.append(converted_item)
                 else:
@@ -1127,12 +1209,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                                     {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
                                     for fid in batch_ids
                                 ]
+                                # No ProjectionExpression - returns ALL attributes (complete row including PII)
                             }
                         }
                         batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                         batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                         deserializer = TypeDeserializer()
                         for item in batch_items:
+                            # Deserialize all fields - no filtering, returns complete row
                             converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                             items_batch.append(converted_item)
             
@@ -1234,12 +1318,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                             {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
                             for fid in batch_ids
                         ]
+                        # No ProjectionExpression - returns ALL attributes (complete row including PII)
                     }
                 }
                 batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                 batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                 deserializer = TypeDeserializer()
                 for item in batch_items:
+                    # Deserialize all fields - no filtering, returns complete row
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                     items.append(converted_item)
         
