@@ -220,6 +220,8 @@ resource "aws_iam_role_policy_attachment" "sqs_read_policy" {
 
 # Event Source Mapping: SQS Queue -> Lambda Function
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
+  count = var.sqs_enable_event_source_mapping ? 1 : 0
+
   event_source_arn                   = aws_sqs_queue.main.arn
   function_name                      = aws_lambda_function.function.function_name
   batch_size                         = var.sqs_batch_size != null ? var.sqs_batch_size : 1

@@ -12,6 +12,7 @@ import {
   Divider,
   Chip,
   Link as MuiLink,
+  Button,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -67,6 +68,9 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
   const isCongressBill =
     item.type === 'congress_bill' ||
     Boolean(data?.bill_id || data?.bill_type || data?.bill_number);
+  const isLDAFiling =
+    item.type === 'lda_filing' ||
+    Boolean(data?.filing_uuid || data?.registrant_name || data?.client_name || data?.PK?.startsWith('FILING#') || data?.PK?.startsWith('CONTRIBUTION#'));
 
   const secDocuments = useMemo(() => {
     const urls: string[] = data.documentUrls || [];
@@ -419,6 +423,91 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
     );
   };
 
+  const formatLDACurrency = (amount?: string | number): string => {
+    if (amount === undefined || amount === null) return 'N/A';
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount)) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(numAmount);
+  };
+
+  const renderLDADetails = () => {
+    const infoFields = [
+      { label: 'Registrant', value: data.registrant_name || data.registrant?.name },
+      { label: 'Client', value: data.client_name || data.client?.name },
+      { label: 'Filing Type', value: data.report_type_display || data.filing_type_display || data.report_type || data.filing_type },
+      { label: 'Filing Period', value: data.filing_period_display || data.filing_period },
+      { label: 'Filing Year', value: data.filing_year },
+      { label: 'Date Posted', value: formatDate(data.dt_posted) },
+      { label: 'Amount', value: formatLDACurrency(data.amount_reported || data.income) },
+      { label: 'State', value: data.state },
+    ];
+
+    // Get lobbyist names (concise list)
+    const lobbyistNames = data.all_lobbyist_names || [];
+    const lobbyistDisplay = lobbyistNames.length > 0 
+      ? (lobbyistNames.length <= 5 
+          ? lobbyistNames.join(', ') 
+          : `${lobbyistNames.slice(0, 5).join(', ')} +${lobbyistNames.length - 5} more`)
+      : null;
+
+    return (
+      <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1 }}>
+          {infoFields
+            .filter((field) => field.value && field.value !== 'N/A')
+            .map((field) => (
+              <Box key={field.label} sx={{ backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: 1, p: 1 }}>
+                <Typography variant="caption" sx={{ color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {field.label}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+                  {field.value}
+                </Typography>
+              </Box>
+            ))}
+        </Box>
+        {lobbyistDisplay && (
+          <Box sx={{ backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: 1, p: 1 }}>
+            <Typography variant="caption" sx={{ color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Lobbyists
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
+              {lobbyistDisplay}
+            </Typography>
+          </Box>
+        )}
+        {data.filing_document_url && (
+          <Box sx={{ mt: 1 }}>
+            <Button
+              component="a"
+              href={data.filing_document_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="outlined"
+              size="small"
+              startIcon={<OpenInNewIcon />}
+              sx={{
+                color: '#3b82f6',
+                borderColor: '#3b82f6',
+                '&:hover': {
+                  borderColor: '#60a5fa',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              View Filing Document
+            </Button>
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
   const formatPublishedDate = (dateStr?: string): string => {
     if (!dateStr) return 'N/A';
     try {
@@ -728,6 +817,7 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
           : isArticle ? renderArticleDetails()
           : isGovtContract ? renderGovtContractDetails()
           : isCongressBill ? renderCongressBillDetails()
+          : isLDAFiling ? renderLDADetails()
           : renderGenericDetails(item.data || {})}
       </Collapse>
     </Box>

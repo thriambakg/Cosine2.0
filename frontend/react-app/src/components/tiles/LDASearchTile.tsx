@@ -2968,11 +2968,36 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
             }}>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {/* Basic Filing Information */}
-                {/* Basic Filing Information */}
                 <Box>
-                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Filing Information
-                  </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Filing Information
+                    </Typography>
+                    {selectedFilingForDetails.filing_document_url && (
+                      <Button
+                        component="a"
+                        href={selectedFilingForDetails.filing_document_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="outlined"
+                        size="small"
+                        sx={{
+                          color: '#3b82f6',
+                          borderColor: '#3b82f6',
+                          fontSize: '0.75rem',
+                          py: 0.5,
+                          px: 1.5,
+                          textTransform: 'none',
+                          '&:hover': {
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                        }}
+                      >
+                        View Filing Document
+                      </Button>
+                    )}
+                  </Box>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
                       <strong>Filing UUID:</strong> <span style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{selectedFilingForDetails.filing_uuid}</span>

@@ -1622,15 +1622,16 @@ module "websocket_connection_lambda" {
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda          = true
-  wrapper_timeout                = 30
-  sns_topic_name                 = "${var.project_name}-websocket-connection-completion-${var.environment}"
-  response_table_name            = null
-  completion_sns_env_var_name    = "WEBSOCKET_CONNECTION_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-  sqs_enable_dlq                 = true
-  sqs_batch_size                 = 1
-  reserved_concurrent_executions = 20
+  enable_wrapper_lambda           = true
+  wrapper_timeout                 = 30
+  sns_topic_name                  = "${var.project_name}-websocket-connection-completion-${var.environment}"
+  response_table_name             = null
+  completion_sns_env_var_name     = "WEBSOCKET_CONNECTION_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                  = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                  = true
+  sqs_batch_size                  = 1
+  sqs_enable_event_source_mapping = false # Disable SQS event source mapping - WebSocket connections should only be triggered by API Gateway
+  reserved_concurrent_executions  = 20
 
   tags = var.common_tags
 }

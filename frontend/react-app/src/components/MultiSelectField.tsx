@@ -7,11 +7,20 @@ import {
   Paper,
   TextField,
   IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
 } from '@mui/material';
 import {
   Add as AddIcon,
   KeyboardArrowDown as ArrowDropDownIcon,
   KeyboardArrowUp as ArrowDropUpIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 
 interface MultiSelectFieldProps<T> {
@@ -51,6 +60,7 @@ function MultiSelectField<T = string>({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [currentQuery, setCurrentQuery] = useState<string>('');
+  const [showAllItemsDialog, setShowAllItemsDialog] = useState(false);
 
   // Track last search query to prevent duplicate calls
   const lastSearchQueryRef = useRef<string>('');
@@ -469,10 +479,15 @@ function MultiSelectField<T = string>({
             <Chip
               label={`+${selectedItems.length - maxChipsShown} more`}
               size="small"
+              onClick={() => setShowAllItemsDialog(true)}
               sx={{
                 backgroundColor: 'rgba(107, 114, 128, 0.2)',
                 color: '#9ca3af',
                 border: '1px solid #6b7280',
+                cursor: 'pointer',
+                '&:hover': {
+                  backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                },
               }}
             />
           )}
@@ -484,6 +499,95 @@ function MultiSelectField<T = string>({
           {helperText}
         </Typography>
       )}
+
+      {/* Dialog to show all selected items */}
+      <Dialog
+        open={showAllItemsDialog}
+        onClose={() => setShowAllItemsDialog(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#1f2937',
+            border: '1px solid #374151',
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
+          All Selected {label}
+          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontWeight: 'normal' }}>
+            {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          <List sx={{ 
+            maxHeight: '400px', 
+            overflow: 'auto',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: '#2563eb',
+            },
+          }}>
+            {selectedItems.map((item, index) => (
+              <ListItem
+                key={getItemKey(item)}
+                sx={{
+                  borderBottom: '1px solid #374151',
+                  '&:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+                secondaryAction={
+                  <IconButton
+                    edge="end"
+                    onClick={() => {
+                      handleRemoveItem(item);
+                      // If this was the last item, close the dialog
+                      if (selectedItems.length === 1) {
+                        setShowAllItemsDialog(false);
+                      }
+                    }}
+                    sx={{ color: '#ef4444' }}
+                    size="small"
+                  >
+                    <CloseIcon />
+                  </IconButton>
+                }
+              >
+                <ListItemText
+                  primary={renderItem(item)}
+                  primaryTypographyProps={{
+                    sx: { color: '#ffffff' },
+                  }}
+                />
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button
+            onClick={() => setShowAllItemsDialog(false)}
+            sx={{
+              color: '#9ca3af',
+              '&:hover': {
+                backgroundColor: 'rgba(107, 114, 128, 0.1)',
+              },
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

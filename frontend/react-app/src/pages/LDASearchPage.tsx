@@ -42,11 +42,13 @@ import {
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
   Download as DownloadIcon,
+  ViewColumn as ViewColumnIcon,
 } from '@mui/icons-material';
 import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutocompleteItem } from '../services/api';
 import MultiSelectField from '../components/MultiSelectField';
 import { useAuth } from '../contexts/AuthContext';
 import { useGlobalChat } from '../contexts/GlobalChatContext';
+import { addLDAFilingToContext, addMultipleLDAFilingsToContext } from '../components/tiles/common/contextManager';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -143,6 +145,32 @@ const LDASearchPage: React.FC = () => {
   // Selection state
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  
+  // Column visibility state
+  const AVAILABLE_COLUMNS = [
+    'filing_type',
+    'filing_period',
+    'filing_year',
+    'registrant',
+    'client',
+    'amount',
+    'date_posted',
+    'state',
+  ];
+  const DEFAULT_VISIBLE_COLUMNS = ['filing_type', 'filing_period', 'filing_year', 'registrant', 'client', 'amount', 'date_posted', 'state'];
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
+  const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
+  
+  // Handle column toggle
+  const handleColumnToggle = useCallback((column: string) => {
+    setVisibleColumns((prev) => {
+      if (prev.includes(column)) {
+        return prev.filter((c) => c !== column);
+      } else {
+        return [...prev, column];
+      }
+    });
+  }, []);
   
   // Filter state (client-side filtering)
   const [availableFilters, setAvailableFilters] = useState<{
@@ -635,8 +663,12 @@ const LDASearchPage: React.FC = () => {
 
     if (selectedFilingObjects.length === 0) return;
 
-    // TODO: Implement add to context when API integration is ready
-    console.log(`Adding ${selectedFilingObjects.length} filing(s) to context (target: ${target})`);
+    // Add to context using the context manager functions
+    if (selectedFilingObjects.length === 1) {
+      addLDAFilingToContext(selectedFilingObjects[0], target);
+    } else {
+      addMultipleLDAFilingsToContext(selectedFilingObjects, target);
+    }
 
     setSelectedFilings(new Set());
     handleContextMenuClose();
@@ -1362,7 +1394,15 @@ const LDASearchPage: React.FC = () => {
                 <Box sx={{ p: 3 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                     <Box sx={{ display: 'flex', gap: 1 }}>
-                      {/* Left side can be used for other controls if needed */}
+                      <Tooltip title="Select columns to display">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
+                          sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                        >
+                          <ViewColumnIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </Box>
                     <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                       {/* Add to Context Button */}
@@ -1458,6 +1498,59 @@ const LDASearchPage: React.FC = () => {
                     </Box>
                   </Box>
 
+                  {/* Column Selection Menu */}
+                  <Menu
+                    anchorEl={columnMenuAnchor}
+                    open={Boolean(columnMenuAnchor)}
+                    onClose={() => setColumnMenuAnchor(null)}
+                    PaperProps={{
+                      sx: {
+                        bgcolor: '#1f2937',
+                        border: '1px solid #374151',
+                        mt: 1,
+                        minWidth: 200,
+                      },
+                    }}
+                  >
+                    {AVAILABLE_COLUMNS.map((column) => {
+                      const columnLabels: Record<string, string> = {
+                        filing_type: 'Filing Type',
+                        filing_period: 'Filing Period',
+                        filing_year: 'Filing Year',
+                        registrant: 'Registrant',
+                        client: 'Client',
+                        amount: 'Amount',
+                        date_posted: 'Date Posted',
+                        state: 'State',
+                      };
+                      const isVisible = visibleColumns.includes(column);
+                      return (
+                        <MenuItem
+                          key={column}
+                          onClick={() => {
+                            handleColumnToggle(column);
+                          }}
+                          sx={{
+                            color: '#ffffff',
+                            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                            '&.Mui-selected': { backgroundColor: 'rgba(59, 130, 246, 0.2)' },
+                          }}
+                        >
+                          <Checkbox
+                            checked={isVisible}
+                            size="small"
+                            sx={{
+                              color: '#9ca3af',
+                              '&.Mui-checked': { color: '#3b82f6' },
+                              mr: 1,
+                            }}
+                          />
+                          {columnLabels[column] || column}
+                        </MenuItem>
+                      );
+                    })}
+                  </Menu>
+
                   {/* Results Table */}
                   {currentResults.length > 0 ? (
                     <>
@@ -1509,14 +1602,31 @@ const LDASearchPage: React.FC = () => {
                                   }}
                                 />
                               </TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Type</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Period</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Year</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Registrant</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Client</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Amount</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Date Posted</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>State</TableCell>
+                              {visibleColumns.includes('filing_type') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Type</TableCell>
+                              )}
+                              {visibleColumns.includes('filing_period') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Period</TableCell>
+                              )}
+                              {visibleColumns.includes('filing_year') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Year</TableCell>
+                              )}
+                              {visibleColumns.includes('registrant') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Registrant</TableCell>
+                              )}
+                              {visibleColumns.includes('client') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Client</TableCell>
+                              )}
+                              {visibleColumns.includes('amount') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Amount</TableCell>
+                              )}
+                              {visibleColumns.includes('date_posted') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Date Posted</TableCell>
+                              )}
+                              {visibleColumns.includes('state') && (
+                                <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>State</TableCell>
+                              )}
+                              {/* Actions column is always visible */}
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>More Info</TableCell>
                             </TableRow>
                           </TableHead>
@@ -1546,30 +1656,47 @@ const LDASearchPage: React.FC = () => {
                                     sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
                                   />
                                 </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.report_type_display || filing.filing_type_display || filing.report_type || filing.filing_type || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.filing_period_display || filing.filing_period || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.filing_year || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.registrant_name || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.client_name || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {formatCurrency(filing.amount_reported)}
-                                </TableCell>
-                                <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
-                                  {formatDate(filing.dt_posted)}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.state || 'N/A'}
-                                </TableCell>
+                                {visibleColumns.includes('filing_type') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {filing.report_type_display || filing.filing_type_display || filing.report_type || filing.filing_type || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('filing_period') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {filing.filing_period_display || filing.filing_period || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('filing_year') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {filing.filing_year || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('registrant') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {filing.registrant_name || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('client') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {filing.client_name || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('amount') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {formatCurrency(filing.amount_reported)}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('date_posted') && (
+                                  <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
+                                    {formatDate(filing.dt_posted)}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('state') && (
+                                  <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                    {filing.state || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {/* Actions column is always visible */}
                                 <TableCell>
                                   <Button
                                     variant="outlined"
@@ -2603,9 +2730,35 @@ const LDASearchPage: React.FC = () => {
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {/* Basic Filing Information */}
                 <Box>
-                  <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Filing Information
-                  </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                    <Typography variant="subtitle2" sx={{ color: '#93c5fd', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Filing Information
+                    </Typography>
+                    {selectedFilingForDetails.filing_document_url && (
+                      <Button
+                        component="a"
+                        href={selectedFilingForDetails.filing_document_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        variant="outlined"
+                        size="small"
+                        sx={{
+                          color: '#3b82f6',
+                          borderColor: '#3b82f6',
+                          fontSize: '0.75rem',
+                          py: 0.5,
+                          px: 1.5,
+                          textTransform: 'none',
+                          '&:hover': {
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                        }}
+                      >
+                        View Filing Document
+                      </Button>
+                    )}
+                  </Box>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
                       <strong>Filing UUID:</strong> <span style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{selectedFilingForDetails.filing_uuid}</span>

@@ -746,6 +746,7 @@ const SECSearchPage: React.FC = () => {
   const [currentResults, setCurrentResults] = useState<SECSearchResult[]>([]);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [formTypesModalOpen, setFormTypesModalOpen] = useState(false);
+  const [showAllFormTypesDialog, setShowAllFormTypesDialog] = useState(false);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>(
     savedState?.selectedCategoryFilter || 'all'
   );
@@ -1913,10 +1914,15 @@ const SECSearchPage: React.FC = () => {
                       <Chip
                         label={`+${searchParams.formTypes.length - 3} more`}
                         size="small"
+                        onClick={() => setShowAllFormTypesDialog(true)}
                         sx={{
                           backgroundColor: 'rgba(59, 130, 246, 0.1)',
                           color: '#93c5fd',
                           border: '1px solid #3b82f6',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          },
                         }}
                       />
                     )}
@@ -3821,6 +3827,97 @@ const SECSearchPage: React.FC = () => {
           Add to Current Sidebar Chat
         </MenuItem>
       </Menu>
+
+      {/* Dialog to show all selected form types */}
+      <Dialog
+        open={showAllFormTypesDialog}
+        onClose={() => setShowAllFormTypesDialog(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: '#1f2937',
+            border: '1px solid #374151',
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
+          All Selected Form Types
+          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontWeight: 'normal' }}>
+            {searchParams.formTypes.length} form type{searchParams.formTypes.length !== 1 ? 's' : ''} selected
+          </Typography>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          <Box sx={{ 
+            maxHeight: '400px', 
+            overflow: 'auto', 
+            p: 2,
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: '#2563eb',
+            },
+          }}>
+            {searchParams.formTypes.map((formType, index) => (
+              <Box
+                key={formType}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  p: 1.5,
+                  mb: 1,
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px solid #3b82f6',
+                  borderRadius: 1,
+                  '&:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                  },
+                }}
+              >
+                <Typography sx={{ color: '#ffffff' }}>{formType}</Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => {
+                    setSearchParams(prev => ({
+                      ...prev,
+                      formTypes: prev.formTypes.filter(ft => ft !== formType),
+                    }));
+                    if (searchParams.formTypes.length === 1) {
+                      setShowAllFormTypesDialog(false);
+                    }
+                  }}
+                  sx={{ color: '#ef4444' }}
+                >
+                  <CloseIcon />
+                </IconButton>
+              </Box>
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button
+            onClick={() => setShowAllFormTypesDialog(false)}
+            sx={{
+              color: '#9ca3af',
+              '&:hover': {
+                backgroundColor: 'rgba(107, 114, 128, 0.1)',
+              },
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

@@ -91,13 +91,13 @@ output "sqs_read_policy_arn" {
 }
 
 output "sqs_event_source_mapping_id" {
-  description = "ID of the event source mapping connecting SQS to Lambda"
-  value       = aws_lambda_event_source_mapping.sqs_trigger.id
+  description = "ID of the event source mapping connecting SQS to Lambda (null if event source mapping not enabled)"
+  value       = var.sqs_enable_event_source_mapping ? aws_lambda_event_source_mapping.sqs_trigger[0].id : null
 }
 
 output "sqs_event_source_mapping_uuid" {
-  description = "UUID of the event source mapping connecting SQS to Lambda"
-  value       = aws_lambda_event_source_mapping.sqs_trigger.uuid
+  description = "UUID of the event source mapping connecting SQS to Lambda (null if event source mapping not enabled)"
+  value       = var.sqs_enable_event_source_mapping ? aws_lambda_event_source_mapping.sqs_trigger[0].uuid : null
 }
 
 # Queue attributes for reference

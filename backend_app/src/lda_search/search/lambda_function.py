@@ -977,14 +977,21 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
     if len(query_configs) > 1:
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} queries")
         
-        # Check if we have a pagination token for a search index or parameter-filing mapping query
+        # Check if we have a pagination token for a search index, parameter-filing mapping, GSI query, or union offset
         search_index_pagination_key = None
         search_index_config = None
         param_mapping_pagination_key = None
         param_mapping_config = None
+        gsi_pagination_key = None
+        gsi_config = None
+        union_offset = None
         if last_evaluated_key and isinstance(last_evaluated_key, dict):
             query_type = last_evaluated_key.get('query_type')
-            if query_type == 'search_index':
+            if query_type == 'union_offset':
+                # Offset-based pagination for union of IDs
+                union_offset = last_evaluated_key.get('offset', 0)
+                logger.info(f"Continuing pagination from union offset: {union_offset}")
+            elif query_type == 'search_index':
                 # Extract the actual DynamoDB key from our custom format
                 search_index_key_obj = last_evaluated_key.get('search_index_key')
                 if search_index_key_obj:
@@ -1012,6 +1019,21 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                             break
                     if param_mapping_pagination_key:
                         logger.info(f"Continuing pagination for parameter-filing mapping: {param_mapping_config['parameter_type'] if param_mapping_config else 'unknown'}")
+            elif query_type == 'gsi':
+                # Extract the actual DynamoDB key from our custom format
+                gsi_key_obj = last_evaluated_key.get('gsi_key')
+                if gsi_key_obj:
+                    gsi_pagination_key = gsi_key_obj
+                    # Find the matching config
+                    for config in query_configs:
+                        if (config.get('query_type') == 'gsi' and 
+                            config.get('index_name') == last_evaluated_key.get('index_name') and
+                            config.get('hash_key') == last_evaluated_key.get('hash_key') and
+                            config.get('hash_value') == last_evaluated_key.get('hash_value')):
+                            gsi_config = config
+                            break
+                    if gsi_pagination_key:
+                        logger.info(f"Continuing pagination for GSI: {gsi_config['index_name'] if gsi_config else 'unknown'}")
         
         # Query each filter to get initial batch of filing IDs (GSI or parameter-filing mapping)
         # Use a unique key for each query config to handle multiple values in the same category
@@ -1092,9 +1114,16 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings for {config['parameter_type']} (has_more: {param_last_key is not None})")
             else:
                 # Use GSI query
-                # For GSI queries, we don't paginate in multi-query scenarios (we've already fetched all matching IDs)
+                # For GSI queries, capture LastEvaluatedKey for pagination support
                 logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
-                filing_ids, _ = query_gsi_for_filing_ids(
+                
+                # Check if we have a pagination key for this specific GSI query
+                exclusive_start_key = None
+                if gsi_config and config == gsi_config and gsi_pagination_key:
+                    exclusive_start_key = gsi_pagination_key
+                    logger.info(f"Using pagination key for GSI query: {config['index_name']}")
+                
+                filing_ids, last_eval_key = query_gsi_for_filing_ids(
                     index_name=config['index_name'],
                     hash_key_name=config['hash_key'],
                     hash_key_value=config['hash_value'],
@@ -1102,16 +1131,17 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     range_key_value=config.get('range_value'),
                     range_key_condition=config.get('range_condition'),
                     limit=1000,
+                    exclusive_start_key=exclusive_start_key,
                     get_all=False
                 )
                 gsi_results[unique_key] = {
                     'filing_ids': set(filing_ids),
                     'config': config,
                     'total_count': len(filing_ids),
-                    'last_eval_key': None,
+                    'last_eval_key': last_eval_key,  # Store the actual LastEvaluatedKey from GSI query
                     'query_type': 'gsi'
                 }
-                logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch)")
+                logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch, has_more: {last_eval_key is not None})")
         
         # Separate filters into three groups:
         # 1. general_text_search_fields (OR logic - union all)
@@ -1196,12 +1226,15 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         logger.info(f"Final result: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields, OR within/AND across for advanced search, and AND for other filters")
         
         # Remove all queryable filters from filters
-        # For general_text_search_fields and advanced search fields, we keep them in remaining_filters 
-        # so Python can do exact name matching (GSI queries might have used only the first term, but we need to match all terms)
+        # For general_text_search_fields, we've already queried all terms via separate query configs
+        # and unioned the results, so we can remove them from remaining_filters
         remaining_filters = filters.copy()
         
         # Track which advanced search categories we've processed
         processed_advanced_categories = set()
+        
+        # Track which general_text_search_fields we've processed (to remove them all at once)
+        processed_gtsf_fields = set()
         
         for config in query_configs:
             filter_key = config['filter_key']
@@ -1209,31 +1242,21 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             is_advanced_search = config.get('is_advanced_search', False)
             category = config.get('category')
             
-            # For general_text_search_fields filters, keep them for Python filtering
+            # For general_text_search_fields filters, mark them as processed
+            # We now create separate query configs for EACH term in general_text_search_fields
+            # and union all results, so all terms are already handled by the queries
             if is_from_general_text_search:
-                # Keep general_text_search_fields in remaining_filters for Python filtering
-                # (GSI queries used the first term, but we need to check all terms in Python)
-                if 'general_text_search_fields' in remaining_filters:
-                    gtsf = remaining_filters['general_text_search_fields']
-                    # Map filter_key to general_text_search_fields key
-                    gtsf_key = None
-                    if filter_key == 'registrant_name':
-                        gtsf_key = 'registrant'
-                    elif filter_key == 'client_name':
-                        gtsf_key = 'client'
-                    elif filter_key in ['lobbyist', 'pac']:
-                        gtsf_key = filter_key
-                    
-                    # For parameter-filing mappings (lobbyist), we can remove since mapping already has exact matches
-                    # For GSI queries (registrant, client, pac), keep for Python filtering to match all terms
-                    if gtsf_key and config.get('query_type') == 'parameter_filing_mapping':
-                        # Parameter-filing mapping already has exact matches, can remove
-                        if gtsf_key in gtsf:
-                            del gtsf[gtsf_key]
-                        if not gtsf:
-                            del remaining_filters['general_text_search_fields']
-                    # For GSI queries, keep the filter so Python can match all terms
-                    # (The GSI query used the first term, but we need to check all terms in Python)
+                # Map filter_key to general_text_search_fields key
+                gtsf_key = None
+                if filter_key == 'registrant_name':
+                    gtsf_key = 'registrant'
+                elif filter_key == 'client_name':
+                    gtsf_key = 'client'
+                elif filter_key in ['lobbyist', 'pac']:
+                    gtsf_key = filter_key
+                
+                if gtsf_key:
+                    processed_gtsf_fields.add(gtsf_key)
             
             # For advanced search fields, handle based on query type
             elif is_advanced_search and category:
@@ -1258,19 +1281,40 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     else:
                         del remaining_filters[filter_key]
         
+        # Remove all processed general_text_search_fields at once
+        if processed_gtsf_fields and 'general_text_search_fields' in remaining_filters:
+            gtsf = remaining_filters['general_text_search_fields']
+            for gtsf_key in processed_gtsf_fields:
+                if gtsf_key in gtsf:
+                    del gtsf[gtsf_key]
+            # If general_text_search_fields is now empty or only has false/empty values, remove it entirely
+            if not gtsf or not any(v for v in gtsf.values() if v):
+                del remaining_filters['general_text_search_fields']
+        
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
         # Fetch items directly from the intersected filing IDs (no need to paginate through source query)
         # Since we've already intersected all query results, we can fetch items directly
         all_matching_items = []
+        next_offset = None  # Initialize next_offset
         
         if source_filing_ids:
             # Fetch full items in batches
             # Since IDs could be from either FILING or CONTRIBUTION items, try both key formats
             batch_size = 50  # Reduced to 50 since we're trying both formats (effectively 100 keys)
             dynamodb_client = boto3.client('dynamodb')
-            for i in range(0, len(source_filing_ids), batch_size):
+            
+            # Start from union_offset if provided (for pagination)
+            start_index = union_offset if union_offset is not None else 0
+            last_processed_index = start_index
+            
+            # Fetch and filter items in batches until we have enough filtered items or run out of IDs
+            filtered_items = []
+            i = start_index
+            while i < len(source_filing_ids) and len(filtered_items) < limit:
                 batch_ids = source_filing_ids[i:i + batch_size]
+                last_processed_index = i + len(batch_ids)  # Track the last index we processed
+                
                 # Try both FILING# and CONTRIBUTION# key formats for each ID
                 keys = []
                 for fid in batch_ids:
@@ -1286,27 +1330,31 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                 batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
                 deserializer = TypeDeserializer()
+                
+                # Filter items as we fetch them
                 for item in batch_items:
                     # Deserialize all fields - no filtering, returns complete row
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    all_matching_items.append(converted_item)
+                    if apply_python_filter(converted_item, remaining_filters):
+                        filtered_items.append(converted_item)
+                        if len(filtered_items) >= limit:
+                            break
                 
-                # Stop if we have enough results
-                if len(all_matching_items) >= limit:
+                i += batch_size
+                if len(filtered_items) >= limit:
                     break
             
-            logger.info(f"Fetched {len(all_matching_items)} items from intersected filing IDs")
-            
-            # Apply remaining filters in Python
-            filtered_items = []
-            for item in all_matching_items:
-                if apply_python_filter(item, remaining_filters):
-                    filtered_items.append(item)
-                    if len(filtered_items) >= limit:
-                        break
-            
             all_matching_items = filtered_items
-            logger.info(f"After applying remaining filters: {len(all_matching_items)} items match all filters")
+            logger.info(f"Fetched and filtered {len(all_matching_items)} items (processed up to index {last_processed_index} of {len(source_filing_ids)})")
+            
+            # Calculate next offset for union pagination
+            # Use the last processed index as the next offset
+            if last_processed_index < len(source_filing_ids):
+                next_offset = last_processed_index
+            else:
+                next_offset = None  # No more items to fetch
+        else:
+            next_offset = None
         
         # Use the collected items directly
         items = all_matching_items[:limit]
@@ -1360,9 +1408,47 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     except Exception as e:
                         logger.warning(f"Error converting parameter mapping key: {e}")
         
-        # If no pagination key, check if we have more results based on fetched items
+        # If no search index or parameter mapping pagination key, check GSI queries
         if not serializable_last_key:
-            has_more = len(source_filing_ids) > len(items)
+            for key, result in gsi_results.items():
+                if result['query_type'] == 'gsi' and result.get('last_eval_key'):
+                    config = result['config']
+                    try:
+                        # Store the GSI query key for continuation
+                        serializable_last_key = {
+                            'gsi_key': convert_decimal_to_float(result['last_eval_key']),
+                            'index_name': config['index_name'],
+                            'hash_key': config['hash_key'],
+                            'hash_value': config['hash_value'],
+                            'range_key': config.get('range_key'),
+                            'range_value': config.get('range_value'),
+                            'range_condition': config.get('range_condition'),
+                            'filter_key': config['filter_key'],
+                            'query_type': 'gsi',
+                            'from_general_text_search': config.get('from_general_text_search', False),
+                            'category': config.get('category')
+                        }
+                        has_more = True
+                        logger.info(f"GSI query has more results - pagination key available for {config['index_name']}")
+                        break  # Use the first GSI query's pagination key
+                    except Exception as e:
+                        logger.warning(f"Error converting GSI key: {e}")
+        
+        # If no pagination key from individual queries, use union offset pagination
+        if not serializable_last_key:
+            # Check if we have more items to fetch from the union
+            current_offset = union_offset if union_offset is not None else 0
+            has_more = next_offset is not None and next_offset < len(source_filing_ids)
+            if has_more:
+                # Return union offset pagination key
+                serializable_last_key = {
+                    'offset': next_offset,
+                    'query_type': 'union_offset',
+                    'total_ids': len(source_filing_ids)
+                }
+                logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs: {len(source_filing_ids)}")
+            else:
+                has_more = len(source_filing_ids) > (current_offset + len(items))
         
         return {
             'success': True,
