@@ -200,32 +200,38 @@ const LDASearchPage: React.FC = () => {
         if (cachedGeneralIssues) {
           setGeneralIssues(JSON.parse(cachedGeneralIssues));
         } else {
-          // Fetch from API
+          // Fetch from API - request full list with high limit
           const generalIssuesResponse = await ldaAutocompleteAPI.search({
             query: '',
             field_types: ['general_issue'],
-            limit: 1000
+            limit: 5000  // Request high limit to get all general issues
           });
           if (generalIssuesResponse?.results && Array.isArray(generalIssuesResponse.results)) {
             const issues = generalIssuesResponse.results.map(item => typeof item === 'string' ? item : item.value || '');
+            console.log(`✅ Loaded ${issues.length} general issues from API`);
             setGeneralIssues(issues);
             sessionStorage.setItem('lda_general_issues', JSON.stringify(issues));
+          } else {
+            console.warn('⚠️ No general issues returned from API');
           }
         }
         
         if (cachedGovernmentEntities) {
           setGovernmentEntities(JSON.parse(cachedGovernmentEntities));
         } else {
-          // Fetch from API
+          // Fetch from API - request full list with high limit
           const governmentEntitiesResponse = await ldaAutocompleteAPI.search({
             query: '',
             field_types: ['government_entity'],
-            limit: 1000
+            limit: 5000  // Request high limit to get all government entities
           });
           if (governmentEntitiesResponse?.results && Array.isArray(governmentEntitiesResponse.results)) {
             const entities = governmentEntitiesResponse.results.map(item => typeof item === 'string' ? item : item.value || '');
+            console.log(`✅ Loaded ${entities.length} government entities from API`);
             setGovernmentEntities(entities);
             sessionStorage.setItem('lda_government_entities', JSON.stringify(entities));
+          } else {
+            console.warn('⚠️ No government entities returned from API');
           }
         }
       } catch (error) {

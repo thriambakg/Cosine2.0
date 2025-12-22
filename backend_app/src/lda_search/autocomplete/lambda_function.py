@@ -172,8 +172,13 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
     all_results = []
     
     # Get more matches than needed to allow for pagination
-    # We'll search for limit * 10 to ensure we have enough results across all field types
-    search_limit = max(limit * 10, 100)  # At least 100 per field type
+    # For constants files with empty query, we want all results, so use a very high limit
+    if not query or not query.strip():
+        # Empty query means "get all" - use a very high limit to get everything
+        search_limit = max(limit, 10000)  # Use the requested limit or 10000, whichever is higher
+    else:
+        # For search queries, get more than needed for pagination
+        search_limit = max(limit * 10, 100)  # At least 100 per field type
     
     for field_type in field_types:
         # Load CSV for this field type
@@ -254,7 +259,17 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
         # Extract parameters
         query = request_body.get('query', '').strip()
         field_types = request_body.get('field_types', ['registrant', 'client', 'lobbyist', 'pac'])
-        limit = min(request_body.get('limit', 20), 50)  # Cap at 50
+        
+        # For constants files (general_issue, government_entity, countries), allow higher limits
+        # These are used for full list loading in the frontend
+        is_constants_request = any(ft in ['general_issue', 'government_entity', 'country', 'foreign'] for ft in field_types)
+        if is_constants_request:
+            # Allow up to 5000 for constants (to get full lists)
+            limit = min(request_body.get('limit', 1000), 5000)
+        else:
+            # Cap at 50 for other field types (autocomplete suggestions)
+            limit = min(request_body.get('limit', 20), 50)
+        
         offset = max(request_body.get('offset', 0), 0)  # Offset for pagination
         
         # Validate field types
