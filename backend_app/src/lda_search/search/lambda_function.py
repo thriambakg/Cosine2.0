@@ -452,12 +452,15 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     if filters.get('general_issue_code'):
         issue_names = filters['general_issue_code'] if isinstance(filters['general_issue_code'], list) else [filters['general_issue_code']]
         if issue_names:
-            query_configs.append({
-                'filter_key': 'general_issue_code',
-                'query_type': 'parameter_filing_mapping',
-                'parameter_type': 'GENERAL_ISSUE',
-                'parameter_values': issue_names
-            })
+            # Clean quotes from issue names before querying
+            cleaned_issue_names = [clean_quotes(name) for name in issue_names if clean_quotes(name)]
+            if cleaned_issue_names:
+                query_configs.append({
+                    'filter_key': 'general_issue_code',
+                    'query_type': 'parameter_filing_mapping',
+                    'parameter_type': 'GENERAL_ISSUE',
+                    'parameter_values': cleaned_issue_names
+                })
     
     # Foreign entity filter - use ForeignEntityPostedDateIndex
     if filters.get('is_foreign') is not None:
@@ -489,14 +492,24 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     if filters.get('government_entity'):
         entity_names = filters['government_entity'] if isinstance(filters['government_entity'], list) else [filters['government_entity']]
         if entity_names:
-            query_configs.append({
-                'filter_key': 'government_entity',
-                'query_type': 'parameter_filing_mapping',
-                'parameter_type': 'GOVERNMENT_ENTITY',
-                'parameter_values': entity_names
-            })
+            # Clean quotes from entity names before querying
+            cleaned_entity_names = [clean_quotes(name) for name in entity_names if clean_quotes(name)]
+            if cleaned_entity_names:
+                query_configs.append({
+                    'filter_key': 'government_entity',
+                    'query_type': 'parameter_filing_mapping',
+                    'parameter_type': 'GOVERNMENT_ENTITY',
+                    'parameter_values': cleaned_entity_names
+                })
     
     return query_configs
+
+
+def clean_quotes(value: str) -> str:
+    """Remove surrounding double quotes from a string value"""
+    if not value:
+        return value
+    return str(value).strip().strip('"').strip()
 
 
 def query_parameter_filing_mappings(
@@ -528,36 +541,55 @@ def query_parameter_filing_mappings(
             if not param_value or not str(param_value).strip():
                 continue
             
+            # Clean double quotes from parameter value before querying
+            cleaned_value = clean_quotes(param_value)
+            if not cleaned_value:
+                continue
+            
             # Construct PK for parameter-filing mapping: PARAMETER_TYPE#VALUE
-            pk = f"{parameter_type}#{param_value}"
+            # Try both with and without quotes to handle cases where values were stored with quotes
+            pk_with_quotes = f"{parameter_type}#\"{cleaned_value}\""
+            pk_without_quotes = f"{parameter_type}#{cleaned_value}"
             
-            # Query for all mappings with this parameter value
-            query_params = {
-                'KeyConditionExpression': Key('PK').eq(pk),
-                'ProjectionExpression': 'SK',  # SK contains FILING#<uuid> or CONTRIBUTION#<uuid>
-                'Limit': limit
-            }
-            
-            if last_eval_key:
-                query_params['ExclusiveStartKey'] = last_eval_key
-            
-            logger.info(f"Querying parameter-filing mappings: PK={pk}")
-            response = filings_table.query(**query_params)
-            
-            for item in response.get('Items', []):
-                sk = item.get('SK', '')
-                if sk:
-                    sk_str = str(sk)
-                    # Extract UUID from SK (format: FILING#<uuid> or CONTRIBUTION#<uuid>)
-                    if sk_str.startswith('FILING#'):
-                        filing_uuid = sk_str.replace('FILING#', '')
-                        all_filing_uuids.add(filing_uuid)
-                    elif sk_str.startswith('CONTRIBUTION#'):
-                        # For contributions, we'd need to fetch the contribution to get filing_uuid
-                        # For now, skip contributions in parameter mappings (they're handled separately for PACs)
-                        pass
-            
-            last_eval_key = response.get('LastEvaluatedKey')
+            # Query both versions to handle cases where values may have been stored with quotes
+            found_results = False
+            for pk in [pk_without_quotes, pk_with_quotes]:
+                # Query for all mappings with this parameter value
+                query_params = {
+                    'KeyConditionExpression': Key('PK').eq(pk),
+                    'ProjectionExpression': 'SK',  # SK contains FILING#<uuid> or CONTRIBUTION#<uuid>
+                    'Limit': limit
+                }
+                
+                if last_eval_key:
+                    query_params['ExclusiveStartKey'] = last_eval_key
+                
+                logger.info(f"Querying parameter-filing mappings: PK={pk}")
+                try:
+                    response = filings_table.query(**query_params)
+                    
+                    for item in response.get('Items', []):
+                        sk = item.get('SK', '')
+                        if sk:
+                            sk_str = str(sk)
+                            # Extract UUID from SK (format: FILING#<uuid> or CONTRIBUTION#<uuid>)
+                            if sk_str.startswith('FILING#'):
+                                filing_uuid = sk_str.replace('FILING#', '')
+                                all_filing_uuids.add(filing_uuid)
+                            elif sk_str.startswith('CONTRIBUTION#'):
+                                # For contributions, we'd need to fetch the contribution to get filing_uuid
+                                # For now, skip contributions in parameter mappings (they're handled separately for PACs)
+                                pass
+                    
+                    last_eval_key = response.get('LastEvaluatedKey')
+                    
+                    # If we found results, break (don't need to check quoted version)
+                    if response.get('Items'):
+                        found_results = True
+                        break
+                except Exception as e:
+                    logger.debug(f"Query failed for PK={pk}: {e}")
+                    continue
             
             # If we've collected enough, break
             if len(all_filing_uuids) >= limit:

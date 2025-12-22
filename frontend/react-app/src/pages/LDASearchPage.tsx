@@ -189,6 +189,12 @@ const LDASearchPage: React.FC = () => {
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== undefined ? savedState.advancedSearchExpanded : false);
 
+  // Helper function to clean double quotes from CSV values
+  const cleanCSVValue = (value: string): string => {
+    // Remove surrounding double quotes if present
+    return value.trim().replace(/^"+|"+$/g, '');
+  };
+
   // Load general issues and government entities from local CSV files
   useEffect(() => {
     const loadCSVData = async () => {
@@ -199,7 +205,7 @@ const LDASearchPage: React.FC = () => {
           const text = await generalIssuesResponse.text();
           const lines = text.split('\n')
             .filter(line => line.trim() && !line.startsWith('value'))
-            .map(line => line.trim())
+            .map(line => cleanCSVValue(line))
             .filter(line => line.length > 0);
           setGeneralIssues(lines);
           console.log(`✅ Loaded ${lines.length} general issues from CSV`);
@@ -213,7 +219,7 @@ const LDASearchPage: React.FC = () => {
           const text = await governmentEntitiesResponse.text();
           const lines = text.split('\n')
             .filter(line => line.trim() && !line.startsWith('value'))
-            .map(line => line.trim())
+            .map(line => cleanCSVValue(line))
             .filter(line => line.length > 0);
           setGovernmentEntities(lines);
           console.log(`✅ Loaded ${lines.length} government entities from CSV`);
