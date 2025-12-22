@@ -450,6 +450,16 @@ const LDASearchPage: React.FC = () => {
     setCurrentResults([]);
     setLastEvaluatedKey(null);
     setHasMore(false);
+    // Clear client-side filters when performing a new search
+    setSelectedFilters({
+      registrants: [],
+      clients: [],
+      lobbyists: [],
+      filingTypes: [],
+      issueCodes: [],
+      states: [],
+    });
+    setIsFiltered(false);
     
     try {
       // Transform searchParams to new format with general_text_search_fields
@@ -1203,6 +1213,20 @@ const LDASearchPage: React.FC = () => {
                           allowCustomInput={false}
                         />
 
+                        {/* Item Type - Multi-select (FILING or CONTRIBUTION) */}
+                        <MultiSelectField<string>
+                          label="Item Type"
+                          selectedItems={searchParams.item_type || []}
+                          onItemsChange={(types) => {
+                            setSearchParams(prev => ({ ...prev, item_type: types }));
+                          }}
+                          suggestions={['FILING', 'CONTRIBUTION']}
+                          onSearch={() => ['FILING', 'CONTRIBUTION']}
+                          renderItem={(type) => type}
+                          placeholder="Select item types (leave empty for all)..."
+                          allowCustomInput={false}
+                        />
+
                         {/* Filing Type - Multi-select */}
                         <MultiSelectField<string>
                           label="Filing Type"
@@ -1265,6 +1289,7 @@ const LDASearchPage: React.FC = () => {
                           date_from: '',
                           date_to: '',
                           report_type: [],
+                          item_type: [],
                           amount_min: undefined,
                           amount_max: undefined,
                         });
@@ -1461,13 +1486,13 @@ const LDASearchPage: React.FC = () => {
                                 />
                               </TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Type</TableCell>
+                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Period</TableCell>
+                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Filing Year</TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Registrant</TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Client</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Lobbyist</TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Amount</TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Date Posted</TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>State</TableCell>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Issue Code</TableCell>
                               <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>More Info</TableCell>
                             </TableRow>
                           </TableHead>
@@ -1498,16 +1523,19 @@ const LDASearchPage: React.FC = () => {
                                   />
                                 </TableCell>
                                 <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.report_type || 'N/A'}
+                                  {filing.report_type_display || filing.filing_type_display || filing.report_type || filing.filing_type || 'N/A'}
+                                </TableCell>
+                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                  {filing.filing_period_display || filing.filing_period || 'N/A'}
+                                </TableCell>
+                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                                  {filing.filing_year || 'N/A'}
                                 </TableCell>
                                 <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                                   {filing.registrant_name || 'N/A'}
                                 </TableCell>
                                 <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                                   {filing.client_name || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.lobbyist_name || 'N/A'}
                                 </TableCell>
                                 <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                                   {formatCurrency(filing.amount_reported)}
@@ -1517,9 +1545,6 @@ const LDASearchPage: React.FC = () => {
                                 </TableCell>
                                 <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                                   {filing.state || 'N/A'}
-                                </TableCell>
-                                <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                                  {filing.general_issue_code || 'N/A'}
                                 </TableCell>
                                 <TableCell>
                                   <Button

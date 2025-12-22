@@ -288,6 +288,40 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             if item_type not in filer_types:
                 return False
     
+    # Item type filter (FILING or CONTRIBUTION) - filters by PK prefix
+    if filters.get('item_type'):
+        item_types = filters['item_type'] if isinstance(filters['item_type'], list) else [filters['item_type']]
+        item_types = [t.upper() for t in item_types if t and str(t).strip()]
+        if item_types:
+            # Get PK from item to check prefix
+            item_pk = str(item.get('PK') or '').strip()
+            if not item_pk:
+                # If no PK, try to determine from other fields
+                # FILING items typically have filing_uuid, CONTRIBUTION items have contribution_uuid
+                if item.get('filing_uuid') and not item.get('contribution_uuid'):
+                    item_pk = f'FILING#{item.get("filing_uuid")}'
+                elif item.get('contribution_uuid'):
+                    item_pk = f'CONTRIBUTION#{item.get("contribution_uuid")}'
+                else:
+                    # Fallback: check if it looks like a filing or contribution based on structure
+                    # FILING items have report_type, CONTRIBUTION items have contribution-specific fields
+                    if item.get('report_type') or item.get('filing_type'):
+                        item_pk = 'FILING#'
+                    elif item.get('pacs') or item.get('contribution_items'):
+                        item_pk = 'CONTRIBUTION#'
+                    else:
+                        # Default to FILING if we can't determine
+                        item_pk = 'FILING#'
+            
+            # Check if PK starts with any of the requested prefixes
+            matches = False
+            for item_type in item_types:
+                if item_pk.startswith(f'{item_type}#'):
+                    matches = True
+                    break
+            if not matches:
+                return False
+    
     return True
 
 
@@ -643,10 +677,11 @@ def query_gsi_for_filing_ids(
     get_all: bool = False
 ) -> tuple[List[str], Optional[Dict]]:
     """
-    Query a GSI to get filing IDs (PK values)
+    Query a GSI to get filing/contribution IDs (PK values)
     
     Returns:
-        Tuple of (list of filing IDs, last_evaluated_key)
+        Tuple of (list of IDs as strings, last_evaluated_key)
+        Note: IDs can be from either FILING# or CONTRIBUTION# items
     """
     if not filings_table:
         raise Exception("DynamoDB filings table not initialized")
@@ -706,7 +741,7 @@ def query_gsi_for_filing_ids(
                     # For contribution items, we'll extract the contribution ID
                     # The caller will need to handle fetching contribution items and mapping to filings
                     contribution_id = pk_str.replace('CONTRIBUTION#', '')
-                    filing_ids.append(contribution_id)  # Store as contribution ID for now
+                    filing_ids.append(contribution_id)
                     logger.debug(f"Extracted contribution ID: {contribution_id}")
                 else:
                     logger.warning(f"Item PK does not match expected format: {pk}")
@@ -729,6 +764,10 @@ def query_gsi_for_filing_ids(
                         filing_id = pk.replace('FILING#', '')
                         if filing_id not in filing_ids:  # Avoid duplicates
                             filing_ids.append(filing_id)
+                    elif pk.startswith('CONTRIBUTION#'):
+                        contribution_id = pk.replace('CONTRIBUTION#', '')
+                        if contribution_id not in filing_ids:  # Avoid duplicates
+                            filing_ids.append(contribution_id)
                 
                 last_eval_key = response.get('LastEvaluatedKey')
                 if not last_eval_key:
@@ -860,16 +899,20 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         
         if source_filing_ids:
             # Fetch full items in batches
-            batch_size = 100
+            # Since IDs could be from either FILING or CONTRIBUTION items, try both key formats
+            batch_size = 50  # Reduced to 50 since we're trying both formats (effectively 100 keys)
             dynamodb_client = boto3.client('dynamodb')
             for i in range(0, len(source_filing_ids), batch_size):
                 batch_ids = source_filing_ids[i:i + batch_size]
+                # Try both FILING# and CONTRIBUTION# key formats for each ID
+                keys = []
+                for fid in batch_ids:
+                    keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+                    keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
+                
                 request_items = {
                     FILINGS_TABLE_NAME: {
-                        'Keys': [
-                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
-                            for fid in batch_ids
-                        ]
+                        'Keys': keys
                         # No ProjectionExpression - returns ALL attributes (complete row including PII)
                     }
                 }
@@ -969,15 +1012,18 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             items = []
             dynamodb_client = boto3.client('dynamodb')
             
-            # Process in batches of 100 (DynamoDB batch_get_item limit)
-            for i in range(0, len(filing_ids), 100):
-                batch_ids = filing_ids[i:i + 100]
+            # Process in batches of 50 (reduced since we try both FILING and CONTRIBUTION formats)
+            # Parameter-filing mappings typically return FILING items, but try both to be safe
+            for i in range(0, len(filing_ids), 50):
+                batch_ids = filing_ids[i:i + 50]
+                # Try both FILING# and CONTRIBUTION# key formats for each ID
+                keys = []
+                for fid in batch_ids:
+                    keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+                    keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
                 request_items = {
                     FILINGS_TABLE_NAME: {
-                        'Keys': [
-                            {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
-                            for fid in batch_ids
-                        ]
+                        'Keys': keys
                         # No ProjectionExpression - returns all attributes
                     }
                 }
@@ -1198,15 +1244,18 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                                 converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                                 items_batch.append(converted_item)
                 else:
-                    # Normal case: GSI returns filing IDs
-                    for i in range(0, len(ids_batch), 100):  # DynamoDB batch_get_item limit is 100
-                        batch_ids = ids_batch[i:i + 100]
+                    # Normal case: GSI returns filing/contribution IDs
+                    # Try both FILING# and CONTRIBUTION# formats since we don't know the type
+                    for i in range(0, len(ids_batch), 50):  # Reduced to 50 since we try both formats (effectively 100 keys)
+                        batch_ids = ids_batch[i:i + 50]
+                        # Try both FILING# and CONTRIBUTION# key formats for each ID
+                        keys = []
+                        for fid in batch_ids:
+                            keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+                            keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
                         request_items = {
                             FILINGS_TABLE_NAME: {
-                                'Keys': [
-                                    {'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}}
-                                    for fid in batch_ids
-                                ]
+                                'Keys': keys
                                 # No ProjectionExpression - returns ALL attributes (complete row including PII)
                             }
                         }

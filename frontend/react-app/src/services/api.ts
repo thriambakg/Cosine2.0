@@ -1347,6 +1347,7 @@ export interface LDASearchFilters {
   is_foreign?: boolean;
   pac?: boolean;
   filer_type?: string[];
+  item_type?: string[];  // FILING or CONTRIBUTION - filters by PK prefix
   [key: string]: any;
 }
 
