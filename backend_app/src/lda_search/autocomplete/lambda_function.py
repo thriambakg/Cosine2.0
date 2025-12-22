@@ -24,15 +24,16 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-lda-disclosures-produc
 S3_PREFIX = os.environ.get('S3_PREFIX', 'lists/')
 
 # Field type to S3 key mapping
+# Note: Constants files (general_issues, government_entities, countries) contain names only (not codes/IDs)
 FIELD_TYPE_TO_S3_KEY = {
     'registrant': f'{S3_PREFIX}registrant_names.csv',
     'client': f'{S3_PREFIX}client_names.csv',
     'lobbyist': f'{S3_PREFIX}lobbyist_names.csv',
     'pac': f'{S3_PREFIX}pacs.csv',
     'foreign': f'{S3_PREFIX}countries.csv',  # Foreign entities use countries CSV
-    'country': f'{S3_PREFIX}countries.csv',
-    'government_entity': f'{S3_PREFIX}government_entities.csv',  # Government entities from constants CSV
-    'general_issue': f'{S3_PREFIX}general_issues.csv',  # General issue codes from constants CSV
+    'country': f'{S3_PREFIX}countries.csv',  # Countries CSV contains country names (not codes)
+    'government_entity': f'{S3_PREFIX}government_entities.csv',  # Government entities CSV contains entity names (not IDs)
+    'general_issue': f'{S3_PREFIX}general_issues.csv',  # General issues CSV contains issue names (not codes)
 }
 
 # Cache for CSV data (in-memory, per Lambda instance)
@@ -74,15 +75,20 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         content = response['Body'].read().decode('utf-8')
         
         # Handle CSV files (all constants are now single-column CSV format with names for autocomplete)
+        # Format: header row with 'value', then one name per row
         reader = csv.reader(StringIO(content))
         values = []
         
-        # Skip header row
-        next(reader, None)
+        # Skip header row (should be 'value')
+        header = next(reader, None)
+        if header:
+            logger.debug(f"CSV header: {header}")
         
         # Read all values (single column) - these should be names, not codes/IDs
+        row_count = 0
         for row in reader:
-            if row and row[0]:
+            row_count += 1
+            if row and len(row) > 0 and row[0]:
                 value = row[0].strip()
                 if value:
                     values.append(value)
@@ -90,9 +96,12 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         # Cache the results
         _csv_cache[field_type] = values
         
-        logger.info(f"Loaded {len(values)} values from s3://{S3_BUCKET_NAME}/{s3_key}")
+        logger.info(f"Loaded {len(values)} values from s3://{S3_BUCKET_NAME}/{s3_key} (processed {row_count} rows)")
         if values:
             logger.info(f"Sample values (first 5): {values[:5]}")
+            logger.info(f"Sample values (last 5): {values[-5:]}")
+        else:
+            logger.warning(f"No values loaded from s3://{S3_BUCKET_NAME}/{s3_key} - file may be empty or malformed")
         return values
         
     except s3_client.exceptions.NoSuchKey:
