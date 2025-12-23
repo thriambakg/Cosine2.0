@@ -51,6 +51,37 @@ def convert_decimal_to_float(obj: Any) -> Any:
         return obj
 
 
+def is_search_index_item(item: Dict[str, Any]) -> bool:
+    """
+    Check if an item is a search index item (should be filtered out from results).
+    
+    Search index items have:
+    - bill_id starting with "SEARCH#"
+    - is_search_index: True flag
+    - search_type field
+    
+    Args:
+        item: DynamoDB item to check
+    
+    Returns:
+        True if item is a search index item, False otherwise
+    """
+    if not item:
+        return False
+    
+    bill_id = str(item.get('bill_id', ''))
+    if bill_id.startswith('SEARCH#'):
+        return True
+    
+    if item.get('is_search_index') is True:
+        return True
+    
+    if item.get('search_type'):
+        return True
+    
+    return False
+
+
 def fetch_oversized_bill_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
     """
     Fetch oversized bill details from S3 (when oversize_s3_key exists)
@@ -1323,7 +1354,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     deserializer = TypeDeserializer()
                     for item in batch_items:
                         converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                        items_batch.append(converted_item)
+                        # Filter out search index items
+                        if not is_search_index_item(converted_item):
+                            items_batch.append(converted_item)
             
             # Apply remaining filters in Python
             for item in items_batch:
@@ -1351,6 +1384,10 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         s3_fetch_success_count = 0
         s3_fetch_fail_count = 0
         for bill in results:
+            # Filter out search index items
+            if is_search_index_item(bill):
+                continue
+            
             # Check if this is an oversized item (full details in S3)
             oversize_s3_key = bill.get('oversize_s3_key')
             if oversize_s3_key:
@@ -1428,6 +1465,10 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         results = [convert_decimal_to_float(item) for item in filtered_items]
         enriched_results = []
         for bill in results:
+            # Filter out search index items
+            if is_search_index_item(bill):
+                continue
+            
             oversize_s3_key = bill.get('oversize_s3_key')
             if oversize_s3_key:
                 full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
@@ -1706,6 +1747,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 # Filter items as we fetch them
                 for item in batch_items:
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    # Filter out search index items
+                    if is_search_index_item(converted_item):
+                        continue
                     if apply_python_filter(converted_item, remaining_filters_for_fetch):
                         items.append(converted_item)
                         filtered_count += 1
@@ -1759,6 +1803,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 # Filter items as we fetch them
                 for item in batch_items:
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    # Filter out search index items
+                    if is_search_index_item(converted_item):
+                        continue
                     if apply_python_filter(converted_item, remaining_filters_for_fetch):
                         items.append(converted_item)
                         filtered_count += 1
@@ -1800,7 +1847,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 deserializer = TypeDeserializer()
                 for item in batch_items:
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    items.append(converted_item)
+                    # Filter out search index items
+                    if not is_search_index_item(converted_item):
+                        items.append(converted_item)
     
     # Apply remaining filters
     remaining_filters = filters.copy()
@@ -1898,6 +1947,10 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     results = [convert_decimal_to_float(item) for item in filtered_items]
     enriched_results = []
     for bill in results:
+        # Filter out search index items
+        if is_search_index_item(bill):
+            continue
+        
         oversize_s3_key = bill.get('oversize_s3_key')
         if oversize_s3_key:
             full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)

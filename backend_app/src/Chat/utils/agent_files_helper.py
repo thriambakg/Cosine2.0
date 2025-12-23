@@ -324,3 +324,4 @@ class AgentFilesHelper:
             logger.error(f"Error sending session update to WebSocket: {str(e)}", exc_info=True)
             # Don't raise - this is not critical for file processing
 
+
