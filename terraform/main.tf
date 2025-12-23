@@ -412,7 +412,7 @@ module "api_gateway" {
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
-      lambda_arn              = module.file_return_lambda.wrapper_function_arn != null ? module.file_return_lambda.wrapper_function_arn : module.file_return_lambda.function_arn
+      lambda_arn              = module.file_return_lambda.function_arn
       request_parameters      = {}
     }
     # POST method for SEC search (uses wrapper Lambda for SQS integration)
@@ -653,7 +653,7 @@ module "api_gateway" {
       resource_path = "files"
     }
     file_download_post = {
-      function_arn  = module.file_return_lambda.wrapper_function_arn != null ? module.file_return_lambda.wrapper_function_arn : module.file_return_lambda.function_arn
+      function_arn  = module.file_return_lambda.function_arn
       http_method   = "POST"
       resource_path = "file-download"
     }
@@ -2091,9 +2091,9 @@ module "session_management_lambda" {
   tags = var.common_tags
 }
 
-# File Return Lambda Function (with SQS and wrapper support)
+# File Return Lambda Function
 module "file_return_lambda" {
-  source = "./modules/lambda-sqs"
+  source = "./modules/lambda"
 
   function_name = "${var.project_name}-file-return-${var.environment}"
   description   = "Lambda function for secure file returns with user validation"
@@ -2116,6 +2116,10 @@ module "file_return_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
@@ -2126,21 +2130,9 @@ module "file_return_lambda" {
     aws_iam_policy.lda_disclosures_s3_policy.arn    # Add LDA disclosures bucket access
   ]
 
-  # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda          = true
-  wrapper_timeout                = 30
-  sns_topic_name                 = "${var.project_name}-file-return-completion-${var.environment}"
-  response_table_name            = null
-  completion_sns_env_var_name    = "FILE_RETURN_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-  sqs_enable_dlq                 = true
-  sqs_batch_size                 = 1
   reserved_concurrent_executions = 20
 
   tags = var.common_tags
-
-  # Removed depends_on to break circular dependency
-  # depends_on = [module.websocket_api]
 }
 
 # News Search Lambda Function (with SQS and wrapper support)

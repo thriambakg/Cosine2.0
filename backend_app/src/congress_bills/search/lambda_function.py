@@ -432,7 +432,122 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             'range_condition': None
         })
     
+    # Cosponsor search index (many-to-many relationship)
+    # Uses search index pattern: PK = SEARCH#COSPONSOR#<name>, SK = INTRODUCED_DATE#<date>#<bill_id>
+    if filters.get('cosponsor_name'):
+        cosponsor_names = filters['cosponsor_name'] if isinstance(filters['cosponsor_name'], list) else [filters['cosponsor_name']]
+        cosponsor_names = [n for n in cosponsor_names if n and str(n).strip()]
+        if cosponsor_names:
+            # Use first cosponsor name for search index query
+            cosponsor_name = cosponsor_names[0].strip()
+            query_configs.append({
+                'filter_key': 'cosponsor_name',
+                'index_name': None,  # No GSI, uses search index pattern
+                'query_type': 'search_index',  # Mark as search index query
+                'search_type': 'COSPONSOR',
+                'search_value': cosponsor_name,
+                'hash_key': None,
+                'hash_value': None,
+                'range_key': None,
+                'range_value': None,
+                'range_condition': None
+            })
+    
     return query_configs
+
+
+def query_cosponsor_search_index(
+    cosponsor_name: str,
+    limit: int = 1000,
+    exclusive_start_key: Optional[Dict] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None
+) -> tuple[List[str], Optional[Dict]]:
+    """
+    Query cosponsor search index to get bill IDs.
+    
+    Structure:
+    - PK = SEARCH#COSPONSOR#<cosponsor_name>
+    - SK = INTRODUCED_DATE#<date>#<bill_id>
+    
+    Args:
+        cosponsor_name: Name of the cosponsor
+        limit: Maximum number of bill IDs to return
+        exclusive_start_key: Pagination token from previous query
+        date_from: Optional date filter (YYYY-MM-DD)
+        date_to: Optional date filter (YYYY-MM-DD)
+    
+    Returns:
+        Tuple of (list of bill_ids, last_evaluated_key for pagination)
+    """
+    if not bills_table or not cosponsor_name:
+        return [], None
+    
+    try:
+        # Normalize cosponsor name
+        normalized_name = str(cosponsor_name).strip()
+        if not normalized_name:
+            return [], None
+        
+        # Construct PK for search index: SEARCH#COSPONSOR#<name>
+        search_pk = f"SEARCH#COSPONSOR#{normalized_name}"
+        
+        # Build query parameters
+        # SK format: INTRODUCED_DATE#YYYY-MM-DD#<bill_id>
+        # We can use SK range conditions for date filtering
+        key_condition = Key('PK').eq(search_pk)
+        
+        if date_from or date_to:
+            def extract_date(date_str):
+                if not date_str:
+                    return None
+                if 'T' in date_str:
+                    return date_str.split('T')[0]
+                elif ' ' in date_str:
+                    return date_str.split(' ')[0]
+                return date_str[:10] if len(date_str) >= 10 else date_str
+            
+            date_from_part = extract_date(date_from) if date_from else None
+            date_to_part = extract_date(date_to) if date_to else None
+            
+            if date_from_part and date_to_part:
+                sk_start = f"INTRODUCED_DATE#{date_from_part}#"
+                sk_end = f"INTRODUCED_DATE#{date_to_part}#~"  # ~ ensures we get all items on that date
+                key_condition = Key('PK').eq(search_pk) & Key('SK').between(sk_start, sk_end)
+            elif date_from_part:
+                sk_start = f"INTRODUCED_DATE#{date_from_part}#"
+                key_condition = Key('PK').eq(search_pk) & Key('SK').gte(sk_start)
+            elif date_to_part:
+                sk_end = f"INTRODUCED_DATE#{date_to_part}#~"
+                key_condition = Key('PK').eq(search_pk) & Key('SK').lte(sk_end)
+        
+        query_params = {
+            'KeyConditionExpression': key_condition,
+            'ProjectionExpression': 'entity_pk, SK',
+            'Limit': limit
+        }
+        
+        if exclusive_start_key:
+            query_params['ExclusiveStartKey'] = exclusive_start_key
+        
+        response = bills_table.query(**query_params)
+        
+        # Extract bill_ids from entity_pk field
+        bill_ids = []
+        for item in response.get('Items', []):
+            entity_pk = item.get('entity_pk')
+            if entity_pk:
+                bill_ids.append(entity_pk)
+        
+        last_eval_key = response.get('LastEvaluatedKey')
+        
+        logger.info(f"Query cosponsor search index '{normalized_name}': found {len(bill_ids)} bill IDs, has_more: {last_eval_key is not None}")
+        
+        return bill_ids, last_eval_key
+        
+    except Exception as e:
+        logger.error(f"Error querying cosponsor search index '{cosponsor_name}': {str(e)}", exc_info=True)
+        raise
 
 
 def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: Any,
@@ -541,28 +656,41 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     if len(query_configs) > 1:
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
         
-        # Query each GSI to get initial batch of bill_ids (to determine shortest list)
+        # Query each GSI/search index to get initial batch of bill_ids (to determine shortest list)
         gsi_results = {}
         for config in query_configs:
-            logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
-            # Get first batch to determine which is shortest
-            bill_ids, _ = query_gsi_for_bill_ids(
-                index_name=config['index_name'],
-                hash_key_name=config['hash_key'],
-                hash_key_value=config['hash_value'],
-                range_key_name=config.get('range_key'),
-                range_key_value=config.get('range_value'),
-                range_key_condition=config.get('range_condition'),
-                limit=1000,  # Get first batch
-                get_all=False
-            )
+            if config.get('query_type') == 'search_index':
+                # Use search index query for cosponsors
+                logger.info(f"Querying cosponsor search index for {config['filter_key']}={config['search_value']}")
+                bill_ids, _ = query_cosponsor_search_index(
+                    cosponsor_name=config['search_value'],
+                    limit=1000,  # Get first batch
+                    date_from=filters.get('introduced_date_from'),
+                    date_to=filters.get('introduced_date_to')
+                )
+                index_name = f"SearchIndex({config['search_type']})"
+            else:
+                # Use GSI query
+                logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+                bill_ids, _ = query_gsi_for_bill_ids(
+                    index_name=config['index_name'],
+                    hash_key_name=config['hash_key'],
+                    hash_key_value=config['hash_value'],
+                    range_key_name=config.get('range_key'),
+                    range_key_value=config.get('range_value'),
+                    range_key_condition=config.get('range_condition'),
+                    limit=1000,  # Get first batch
+                    get_all=False
+                )
+                index_name = config['index_name']
+            
             gsi_results[config['filter_key']] = {
                 'bill_ids': set(bill_ids),
                 'config': config,
                 'total_count': len(bill_ids),
                 'last_eval_key': None
             }
-            logger.info(f"Found {len(bill_ids)} bill_ids from {config['index_name']} (first batch)")
+            logger.info(f"Found {len(bill_ids)} bill_ids from {index_name} (first batch)")
         
         # Find the shortest list (most restrictive filter) - this is our source of truth
         shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['bill_ids']))
@@ -594,18 +722,29 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
             pagination_round += 1
             
-            # Query source GSI with pagination
-            source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
-                index_name=source_config['index_name'],
-                hash_key_name=source_config['hash_key'],
-                hash_key_value=source_config['hash_value'],
-                range_key_name=source_config.get('range_key'),
-                range_key_value=source_config.get('range_value'),
-                range_key_condition=source_config.get('range_condition'),
-                limit=1000,
-                exclusive_start_key=source_last_eval_key,
-                get_all=False
-            )
+            # Query source GSI/search index with pagination
+            if source_config.get('query_type') == 'search_index':
+                # Use search index query for cosponsors
+                source_bill_ids_batch, new_last_eval_key = query_cosponsor_search_index(
+                    cosponsor_name=source_config['search_value'],
+                    limit=1000,
+                    exclusive_start_key=source_last_eval_key,
+                    date_from=filters.get('introduced_date_from'),
+                    date_to=filters.get('introduced_date_to')
+                )
+            else:
+                # Use GSI query
+                source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
+                    index_name=source_config['index_name'],
+                    hash_key_name=source_config['hash_key'],
+                    hash_key_value=source_config['hash_value'],
+                    range_key_name=source_config.get('range_key'),
+                    range_key_value=source_config.get('range_value'),
+                    range_key_condition=source_config.get('range_condition'),
+                    limit=1000,
+                    exclusive_start_key=source_last_eval_key,
+                    get_all=False
+                )
             source_last_eval_key = new_last_eval_key
             
             if not source_bill_ids_batch:
@@ -754,22 +893,35 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             'index_used': None
         }
     
-    # Use first query config for single GSI query
+    # Use first query config for single GSI/search index query
     config = query_configs[0]
-    logger.info(f"Using single GSI query: {config['index_name']}")
     
-    # Query GSI with pagination support
-    bill_ids, last_eval_key = query_gsi_for_bill_ids(
-        index_name=config['index_name'],
-        hash_key_name=config['hash_key'],
-        hash_key_value=config['hash_value'],
-        range_key_name=config.get('range_key'),
-        range_key_value=config.get('range_value'),
-        range_key_condition=config.get('range_condition'),
-        limit=limit * 5,  # Fetch more to account for filtering
-        exclusive_start_key=last_evaluated_key,  # Support pagination
-        get_all=False
-    )
+    if config.get('query_type') == 'search_index':
+        # Use search index query for cosponsors
+        logger.info(f"Using single cosponsor search index query: {config['search_value']}")
+        bill_ids, last_eval_key = query_cosponsor_search_index(
+            cosponsor_name=config['search_value'],
+            limit=limit * 5,  # Fetch more to account for filtering
+            exclusive_start_key=last_evaluated_key,
+            date_from=filters.get('introduced_date_from'),
+            date_to=filters.get('introduced_date_to')
+        )
+        index_name = f"SearchIndex({config['search_type']})"
+    else:
+        # Use GSI query
+        logger.info(f"Using single GSI query: {config['index_name']}")
+        bill_ids, last_eval_key = query_gsi_for_bill_ids(
+            index_name=config['index_name'],
+            hash_key_name=config['hash_key'],
+            hash_key_value=config['hash_value'],
+            range_key_name=config.get('range_key'),
+            range_key_value=config.get('range_value'),
+            range_key_condition=config.get('range_condition'),
+            limit=limit * 5,  # Fetch more to account for filtering
+            exclusive_start_key=last_evaluated_key,  # Support pagination
+            get_all=False
+        )
+        index_name = config['index_name']
     
     # Fetch full items
     items = []
@@ -830,7 +982,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         'has_more': last_eval_key is not None,
         'last_evaluated_key': serializable_last_key,
         'method': 'query',
-        'index_used': config['index_name']
+        'index_used': index_name
     }
 
 
