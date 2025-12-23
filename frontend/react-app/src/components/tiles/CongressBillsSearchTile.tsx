@@ -137,16 +137,16 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   isSelected = false,
   onSelectionChange,
   searchParams = {
-    bill_title: [],
-    bill_type: [],
-    politician_name: [],
-    politician_role: [],
+    bill_title: [] as string[],
+    bill_type: [] as string[],
+    politician_name: [] as string[],
+    politician_role: [] as ('sponsor' | 'cosponsor')[],
     introduced_date_from: '',
     introduced_date_to: '',
-    congress: [],
-    policy_area: [],
-    sponsor_party: [],
-    sponsor_state: [],
+    congress: [] as number[],
+    policy_area: [] as string[],
+    sponsor_party: [] as string[],
+    sponsor_state: [] as string[],
     latest_action_date_from: '',
     latest_action_date_to: '',
     bipartisan: undefined,
@@ -190,8 +190,31 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   
-  // Search state
-  const [currentSearchParams, setCurrentSearchParams] = useState<CongressBillsSearchFilters>(searchParams);
+  // Search state - initialize with default values if searchParams is not provided
+  const [currentSearchParams, setCurrentSearchParams] = useState<CongressBillsSearchFilters>(() => {
+    if (searchParams) {
+      return {
+        ...searchParams,
+        politician_role: searchParams.politician_role || []
+      };
+    }
+    return {
+      bill_title: [] as string[],
+      bill_type: [] as string[],
+      politician_name: [] as string[],
+      politician_role: [] as ('sponsor' | 'cosponsor')[],
+      introduced_date_from: '',
+      introduced_date_to: '',
+      congress: [] as number[],
+      policy_area: [] as string[],
+      sponsor_party: [] as string[],
+      sponsor_state: [] as string[],
+      latest_action_date_from: '',
+      latest_action_date_to: '',
+      bipartisan: undefined,
+      bill_number: undefined,
+    };
+  });
   
   // Store all results for client-side filtering - restore from props if available (session persistence)
   const [allResults, setAllResults] = useState<CongressBill[]>(results || []);

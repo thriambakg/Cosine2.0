@@ -1247,7 +1247,7 @@ export interface CongressBillsSearchFilters {
   bill_type?: string[];
   sponsor_name?: string[]; // Deprecated: use politician_name instead
   politician_name?: string[]; // New: searches both sponsor and cosponsor
-  politician_role?: 'sponsor' | 'cosponsor' | 'both'; // Filter by role: sponsor only, cosponsor only, or both
+  politician_role?: ('sponsor' | 'cosponsor')[]; // Filter by role: [] = both, ['sponsor'] = sponsor only, ['cosponsor'] = cosponsor only, ['sponsor', 'cosponsor'] = both
   introduced_date_from?: string;
   introduced_date_to?: string;
   congress?: number[];

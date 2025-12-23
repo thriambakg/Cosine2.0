@@ -133,7 +133,7 @@ const CongressBillsSearchPage: React.FC = () => {
       bill_title: Array.isArray(saved?.bill_title) ? saved.bill_title : [],
       bill_type: Array.isArray(saved?.bill_type) ? saved.bill_type : [],
       politician_name: Array.isArray(politicianNames) ? politicianNames : [],
-      politician_role: saved?.politician_role ? (Array.isArray(saved.politician_role) ? saved.politician_role.filter(r => r !== 'both') : (saved.politician_role !== 'both' ? [saved.politician_role] : [])) : [],
+      politician_role: saved?.politician_role ? (Array.isArray(saved.politician_role) ? saved.politician_role.filter((r: string) => r !== 'both' && (r === 'sponsor' || r === 'cosponsor')) : (saved.politician_role !== 'both' && (saved.politician_role === 'sponsor' || saved.politician_role === 'cosponsor') ? [saved.politician_role] : [])) : [],
       introduced_date_from: saved?.introduced_date_from || '',
       introduced_date_to: saved?.introduced_date_to || '',
       congress: Array.isArray(saved?.congress) ? saved.congress : [],
@@ -1194,15 +1194,15 @@ const CongressBillsSearchPage: React.FC = () => {
                       variant="outlined"
                       onClick={() => {
                         setSearchParams({
-                          bill_title: [],
-                          bill_type: [],
-                          politician_name: [],
-                          politician_role: [],
+                          bill_title: [] as string[],
+                          bill_type: [] as string[],
+                          politician_name: [] as string[],
+                          politician_role: [] as ('sponsor' | 'cosponsor')[],
                           introduced_date_from: '',
                           introduced_date_to: '',
-                          policy_area: [],
-                          sponsor_party: [],
-                          sponsor_state: [],
+                          policy_area: [] as string[],
+                          sponsor_party: [] as string[],
+                          sponsor_state: [] as string[],
                           latest_action_date_from: '',
                           latest_action_date_to: '',
                         });
