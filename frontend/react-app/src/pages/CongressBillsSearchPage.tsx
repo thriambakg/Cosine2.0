@@ -960,8 +960,8 @@ const CongressBillsSearchPage: React.FC = () => {
                             {['Sponsor', 'Cosponsor'].map((role) => {
                               const roleKey = role.toLowerCase() as 'sponsor' | 'cosponsor';
                               const currentRoles = Array.isArray(searchParams.politician_role) 
-                                ? searchParams.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
-                                : (searchParams.politician_role && searchParams.politician_role !== 'both' && (searchParams.politician_role === 'sponsor' || searchParams.politician_role === 'cosponsor') ? [searchParams.politician_role] : []);
+                                ? searchParams.politician_role.filter(r => r === 'sponsor' || r === 'cosponsor')
+                                : [];
                               const isSelected = currentRoles.includes(roleKey);
                               return (
                                 <Box
@@ -988,8 +988,8 @@ const CongressBillsSearchPage: React.FC = () => {
                                     });
                                     setSearchParams(prev => {
                                       const currentRoles = Array.isArray(prev.politician_role) 
-                                        ? prev.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
-                                        : (prev.politician_role && prev.politician_role !== 'both' && (prev.politician_role === 'sponsor' || prev.politician_role === 'cosponsor') ? [prev.politician_role] : []);
+                                        ? prev.politician_role.filter(r => r === 'sponsor' || r === 'cosponsor')
+                                        : [];
                                       console.log('🔵 Before update - currentRoles:', currentRoles);
                                       if (isSelected) {
                                         const newRoles = currentRoles.filter(r => r !== roleKey);

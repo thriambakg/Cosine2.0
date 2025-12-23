@@ -1774,8 +1774,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                       {['Sponsor', 'Cosponsor'].map((role) => {
                         const roleKey = role.toLowerCase() as 'sponsor' | 'cosponsor';
                         const currentRoles = Array.isArray(currentSearchParams?.politician_role) 
-                          ? currentSearchParams.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
-                          : (currentSearchParams?.politician_role && currentSearchParams.politician_role !== 'both' && (currentSearchParams.politician_role === 'sponsor' || currentSearchParams.politician_role === 'cosponsor') ? [currentSearchParams.politician_role] : []);
+                          ? currentSearchParams.politician_role.filter(r => r === 'sponsor' || r === 'cosponsor')
+                          : [];
                         const isSelected = currentRoles.includes(roleKey);
                         return (
                           <Box
@@ -1803,8 +1803,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                               setCurrentSearchParams(prev => {
                                 if (!prev) return prev;
                                 const currentRoles = Array.isArray(prev.politician_role) 
-                                  ? prev.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
-                                  : (prev.politician_role && prev.politician_role !== 'both' && (prev.politician_role === 'sponsor' || prev.politician_role === 'cosponsor') ? [prev.politician_role] : []);
+                                  ? prev.politician_role.filter(r => r === 'sponsor' || r === 'cosponsor')
+                                  : [];
                                 console.log('🔵 [Tile] Before update - currentRoles:', currentRoles);
                                 if (isSelected) {
                                   const newRoles = currentRoles.filter(r => r !== roleKey);
