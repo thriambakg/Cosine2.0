@@ -676,8 +676,12 @@ export default function ChatPage() {
       // Clear any session-specific state
       setSessionLoadingStates({});
       setPendingMessages({});
+      setVisibleCount(50); // Reset visible count when session is cleared
+    } else {
+      // Reset visible count when switching to a new session
+      setVisibleCount(50);
     }
-  }, [currentSession]);
+  }, [currentSession?.session_id]); // Use session_id to detect actual session changes
 
   // Clear stuck loading states and timeout messages on page load (in case of errors or page refresh)
   useEffect(() => {
@@ -1988,11 +1992,19 @@ export default function ChatPage() {
               </Box>
             )}
             {(() => {
-              const visibleMessages = messages.slice(Math.max(0, messages.length - visibleCount));
-              if (messages.length > 0 && visibleMessages.length === 0) {
-                console.warn(`⚠️ ChatPage: Messages exist (${messages.length}) but visibleMessages is empty. visibleCount: ${visibleCount}`);
-              }
-              return visibleMessages.map((message, messageIndex) => (
+              // Ensure we always show at least the last message if there are any messages
+              // If visibleCount is 0 or invalid, show all messages
+              // Otherwise, show the last visibleCount messages, but at least 1 if messages exist
+              const effectiveVisibleCount = visibleCount > 0 ? visibleCount : messages.length || 50;
+              const startIndex = Math.max(0, messages.length - effectiveVisibleCount);
+              const visibleMessages = messages.slice(startIndex);
+              
+              // Safety check: if we still have no visible messages but messages exist, show all messages
+              const finalVisibleMessages = (messages.length > 0 && visibleMessages.length === 0) 
+                ? messages 
+                : visibleMessages;
+              
+              return finalVisibleMessages.map((message, messageIndex) => (
               <Box key={message.id} display="flex" gap={2}>
                 <Avatar sx={{ bgcolor: message.sender === 'user' ? '#3b82f6' : '#374151', width: 32, height: 32 }}>
                   {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}

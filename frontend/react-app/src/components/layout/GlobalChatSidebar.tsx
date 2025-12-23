@@ -1862,9 +1862,6 @@ const GlobalChatSidebar: React.FC = () => {
       >
         {(() => {
           const messagesToRender = messages.slice(Math.max(0, messages.length - visibleCount));
-          if (messagesToRender.length > 0 && activeSessionId) {
-            console.log(`🎨 Sidebar: Rendering ${messagesToRender.length} messages for session ${activeSessionId}`, messagesToRender.map(m => ({ id: m.id, sender: m.sender, text: m.text.substring(0, 30) })));
-          }
           return messagesToRender;
         })().map((message, messageIndex) => (
           <Box

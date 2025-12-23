@@ -74,33 +74,45 @@ class ExcelGenerator:
         """
         Parse data from JSON string, dict, or S3 key.
         Handles cases where:
-        1. data is a JSON string
-        2. data is a dict with 's3_key' field
-        3. data is just an S3 key string
+        1. data is an S3 key string (preferred for large datasets)
+        2. data is a JSON string with 's3_key' field
+        3. data is a dict with 's3_key' field
         4. data is a dict with stocks that have individual 's3_key' fields
+        5. data is a JSON string with actual data (for small datasets)
         """
         if isinstance(data, str):
             # Check if it's an S3 key (starts with users/ or data-files/)
             if data.startswith('users/') or data.startswith('data-files/'):
+                agent_logger.info(f"📦 Detected S3 key, reading from: {data}")
                 logger.info(f"📦 Detected S3 key, reading from: {data}")
                 return self._read_from_s3(data)
             
             # Try to parse as JSON
             try:
                 parsed = json.loads(data)
-                # Check if the parsed JSON contains an s3_key
+                # Check if the parsed JSON contains an s3_key (preferred path for large datasets)
                 if isinstance(parsed, dict) and 's3_key' in parsed:
                     s3_key = parsed['s3_key']
+                    agent_logger.info(f"📦 Data contains s3_key, reading from: {s3_key}")
                     logger.info(f"📦 Data contains s3_key, reading from: {s3_key}")
                     return self._read_from_s3(s3_key)
+                
+                # If it's a dict with compressed data, check size
+                if isinstance(parsed, dict) and parsed.get('_compressed'):
+                    data_size = len(data)
+                    if data_size > 50000:  # If compressed data is still large, warn
+                        agent_logger.warning(f"⚠️ Large compressed dataset ({data_size} chars). Consider using S3 key for better performance.")
+                        logger.warning(f"⚠️ Large compressed dataset ({data_size} chars). Consider using S3 key for better performance.")
+                
                 return parsed
             except json.JSONDecodeError:
                 raise ValueError(f"Invalid JSON data or S3 key: {data[:100]}")
         
         elif isinstance(data, dict):
-            # Check if dict contains an s3_key field
+            # Check if dict contains an s3_key field (preferred path for large datasets)
             if 's3_key' in data:
                 s3_key = data['s3_key']
+                agent_logger.info(f"📦 Data dict contains s3_key, reading from: {s3_key}")
                 logger.info(f"📦 Data dict contains s3_key, reading from: {s3_key}")
                 s3_data = self._read_from_s3(s3_key)
                 
@@ -117,6 +129,7 @@ class ExcelGenerator:
                 for i, stock in enumerate(stocks):
                     if isinstance(stock, dict) and 's3_key' in stock and 'historical_data' not in stock:
                         s3_key = stock['s3_key']
+                        agent_logger.info(f"📦 Stock {stock.get('symbol', 'UNKNOWN')} data in S3, reading from: {s3_key}")
                         logger.info(f"📦 Stock {stock.get('symbol', 'UNKNOWN')} data in S3, reading from: {s3_key}")
                         try:
                             stock_data = self._read_from_s3(s3_key)
@@ -125,14 +138,26 @@ class ExcelGenerator:
                             stocks[i] = stock_data
                         except Exception as e:
                             logger.error(f"❌ Failed to read stock data from S3: {str(e)}")
+                            agent_logger.error(f"❌ Failed to read stock data from S3: {str(e)}")
                             # Keep the stock entry as-is if S3 read fails
+            
+            # Check if it's compressed data and warn if large
+            if data.get('_compressed'):
+                data_str = json.dumps(data)
+                if len(data_str) > 50000:
+                    agent_logger.warning(f"⚠️ Large compressed dataset ({len(data_str)} chars). Consider using S3 key for better performance.")
+                    logger.warning(f"⚠️ Large compressed dataset ({len(data_str)} chars). Consider using S3 key for better performance.")
         
         return data
     
-    def _read_from_s3(self, s3_key: str) -> Dict[str, Any]:
+    def _read_from_s3(self, s3_key: str, max_rows: int = 10000) -> Dict[str, Any]:
         """
         Read data from S3. Handles large files efficiently.
-        For very large datasets, may need to sample or limit rows.
+        For very large datasets, limits historical data rows to avoid memory/timeout issues.
+        
+        Args:
+            s3_key: S3 key to read from
+            max_rows: Maximum number of historical data rows to include (default: 10000)
         """
         try:
             bucket_name = self._get_bucket_name()
@@ -169,6 +194,31 @@ class ExcelGenerator:
                     # Try to use original_data if available
                     if isinstance(data, dict) and 'original_data' in data:
                         data = data['original_data']
+            
+            # Limit historical data rows if dataset is very large
+            if isinstance(data, dict):
+                # Single stock data
+                if 'historical_data' in data and isinstance(data['historical_data'], list):
+                    historical_data = data['historical_data']
+                    if len(historical_data) > max_rows:
+                        logger.info(f"📊 Limiting historical data from {len(historical_data)} to {max_rows} rows for Excel generation")
+                        # Sample evenly across the dataset
+                        step = len(historical_data) // max_rows
+                        data['historical_data'] = historical_data[::step][:max_rows]
+                        data['_rows_limited'] = True
+                        data['_original_rows'] = len(historical_data)
+                
+                # Multiple stocks data
+                if 'stocks' in data and isinstance(data['stocks'], list):
+                    for stock in data['stocks']:
+                        if isinstance(stock, dict) and 'historical_data' in stock:
+                            historical_data = stock['historical_data']
+                            if isinstance(historical_data, list) and len(historical_data) > max_rows:
+                                logger.info(f"📊 Limiting {stock.get('symbol', 'UNKNOWN')} historical data from {len(historical_data)} to {max_rows} rows")
+                                step = len(historical_data) // max_rows
+                                stock['historical_data'] = historical_data[::step][:max_rows]
+                                stock['_rows_limited'] = True
+                                stock['_original_rows'] = len(historical_data)
             
             logger.info(f"✅ Successfully read {len(content)} chars from S3")
             return data
@@ -623,40 +673,42 @@ def generate_excel_with_charts_tool(
     Supports data from get_financial_data, get_multiple_financial_data, and custom data structures.
     
     IMPORTANT: This tool automatically handles large datasets stored in S3. When data tools return
-    an s3_key (for large datasets), you can pass either:
-    1. The full JSON response containing the s3_key field
-    2. Just the s3_key string itself (e.g., "users/.../data-files/...")
+    an s3_key (for large datasets), you should pass the s3_key directly:
+    1. The s3_key string itself (e.g., "users/.../data-files/...")
+    2. Or a JSON string with 's3_key' field: '{"s3_key": "users/.../data-files/..."}'
     
-    The tool will automatically read the entire S3 object and process it efficiently.
+    The tool will automatically read from S3 and limit rows to 10,000 per dataset to avoid timeouts.
+    The Excel file will be saved to agent-files and the S3 key will be returned.
     
     Args:
         data: JSON string or S3 key containing the data to convert to Excel. Can be:
-            - Result from get_financial_data() (single stock)
+            - S3 key string (preferred for large datasets): "users/.../data-files/..."
+            - JSON string with 's3_key' field: '{"s3_key": "users/.../data-files/..."}'
+            - Result from get_financial_data() (single stock) - will be processed directly
             - Result from get_multiple_financial_data() (multiple stocks) - may contain s3_key
             - Custom JSON data structure (list of objects or dict)
-            - S3 key string if data is stored in S3 (e.g., "users/.../data-files/...")
-            - JSON string with 's3_key' field pointing to large dataset
         filename: Name of the Excel file (without .xlsx extension)
         chart_type: Type of chart to create ("line", "bar", "scatter", "pie", or "none")
         sheet_name: Custom name for the data sheet (optional, defaults to "Stock Data" or "Data")
     
     Returns:
-        JSON string with status, filename, S3 key, and download URL
+        JSON string with status, filename, s3_key (for the Excel file in agent-files), and message
         
     Example:
-        # Single stock
-        stock_data = get_financial_data("AAPL", "1y")
-        generate_excel_with_charts_tool(stock_data, "AAPL_Analysis", "line")
+        # Using S3 key from stock data tool (recommended for large datasets)
+        stock_data = get_financial_data("AAPL", "1mo")
+        # If stock_data contains {"s3_key": "users/.../data-files/..."}, use it:
+        generate_excel_with_charts_tool('{"s3_key": "users/.../data-files/stock_data_AAPL_1mo_20231223.json"}', "AAPL_Analysis", "line")
         
-        # Multiple stocks (may return s3_key for large datasets)
+        # Or pass S3 key directly as string
+        generate_excel_with_charts_tool("users/user_id/sessions/session_id/data-files/stock_data_AAPL_1mo_20231223.json", "AAPL_Analysis", "line")
+        
+        # Multiple stocks with S3 key
         stocks_data = get_multiple_financial_data("AAPL,MSFT,GOOGL", "1y")
-        # If stocks_data contains {"s3_key": "users/.../data-files/..."}, tool handles it automatically
+        # Extract s3_key and use it
         generate_excel_with_charts_tool(stocks_data, "Stock_Comparison", "line")
         
-        # Direct S3 key (if you have the key from a previous tool call)
-        generate_excel_with_charts_tool("users/user_id/sessions/session_id/data-files/large_data.json", "Report", "line")
-        
-        # Custom data
+        # Custom data (small datasets only)
         custom_data = '[{"name": "Item1", "value": 100}, {"name": "Item2", "value": 200}]'
         generate_excel_with_charts_tool(custom_data, "Custom_Report", "bar")
     """
@@ -665,7 +717,7 @@ def generate_excel_with_charts_tool(
         
         generator = ExcelGenerator()
         
-        # Parse data
+        # Parse data (handles S3 keys automatically)
         parsed_data = generator._parse_data(data)
         
         # Detect data type
@@ -683,13 +735,13 @@ def generate_excel_with_charts_tool(
             # Custom data
             excel_bytes = generator.generate_excel_from_custom_data(parsed_data, filename, sheet_name or "Data")
         
-        # Upload to S3
+        # Upload to S3 (saves to agent-files)
         result = generator.upload_to_s3(excel_bytes, filename)
         return result
     
     except Exception as e:
         error_msg = f"Error generating Excel file: {str(e)}"
-        logger.error(error_msg)
+        logger.error(error_msg, exc_info=True)
         agent_logger.error(error_msg)
         return json.dumps({
             'status': 'error',

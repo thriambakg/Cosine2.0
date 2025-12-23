@@ -248,10 +248,11 @@ class StockDataFetcher:
                 return result
             
             # Determine if data is large enough to store in S3
+            # Lower thresholds to store more data in S3 to avoid timeouts in Excel tool
             data_points = len(result.get('historical_data', []))
             data_size = len(json.dumps(result))
-            LARGE_DATA_THRESHOLD = 50000  # 50KB
-            LARGE_POINTS_THRESHOLD = 500  # 500 data points
+            LARGE_DATA_THRESHOLD = 30000  # 30KB (lowered from 50KB)
+            LARGE_POINTS_THRESHOLD = 200  # 200 data points (lowered from 500)
             
             should_store_in_s3 = data_size > LARGE_DATA_THRESHOLD or data_points > LARGE_POINTS_THRESHOLD
             

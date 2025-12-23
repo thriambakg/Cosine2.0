@@ -166,6 +166,8 @@ from tools.stock_data_fetcher import (
 from tools.congress_bills_search import search_congress_bills
 from tools.govt_contracts_search import search_govt_contracts
 from tools.politician_trades_search import search_politician_trades
+from tools.lda_autocomplete_tool import lda_autocomplete
+from tools.lda_search_tool import lda_search
 from tools.datetime_tool import get_current_datetime, calculate_date_range
 
 # Financial Analysis Tools
@@ -2052,6 +2054,8 @@ enhanced_tools = [
     search_congress_bills,  # Search congressional bills in DynamoDB
     search_govt_contracts,  # Search government contracts/awards in DynamoDB
     search_politician_trades,  # Search politician stock trades in DynamoDB
+    lda_autocomplete,  # LDA autocomplete tool for finding registrants, clients, lobbyists, PACs
+    lda_search,  # LDA search tool for searching lobbying disclosures
     get_current_datetime,  # Get current date/time for exact timeframe calculations
     calculate_date_range,  # Calculate date ranges relative to current date
 ]

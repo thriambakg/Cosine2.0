@@ -558,11 +558,18 @@ class UnifiedMessageHandlerService {
       const ws = new WebSocket(wsUrl);
       
       return new Promise((resolve, reject) => {
+        let connectionResolved = false;
         const timeout = setTimeout(() => {
-          reject(new Error('WebSocket connection timeout'));
+          if (!connectionResolved) {
+            connectionResolved = true;
+            ws.close();
+            reject(new Error('WebSocket connection timeout after 10 seconds'));
+          }
         }, 10000);
         
         ws.onopen = () => {
+          if (connectionResolved) return;
+          connectionResolved = true;
           console.log('✅ UnifiedMessageHandler: WebSocket connected for session:', sessionId);
           clearTimeout(timeout);
           
@@ -575,9 +582,10 @@ class UnifiedMessageHandlerService {
         };
         
         ws.onerror = (error) => {
-          console.error('❌ UnifiedMessageHandler: WebSocket error:', error);
-          clearTimeout(timeout);
-          reject(error);
+          console.error('❌ UnifiedMessageHandler: WebSocket error event:', error);
+          console.error('❌ UnifiedMessageHandler: WebSocket readyState:', ws.readyState);
+          console.error('❌ UnifiedMessageHandler: WebSocket URL:', wsUrl);
+          // Don't reject here - let onclose handle it with more details
         };
         
         ws.onmessage = (event) => {
@@ -597,8 +605,41 @@ class UnifiedMessageHandlerService {
         };
         
         ws.onclose = (event) => {
-          console.log('❌ UnifiedMessageHandler: WebSocket disconnected for session:', sessionId, event.code);
+          if (connectionResolved) return;
+          connectionResolved = true;
+          clearTimeout(timeout);
+          
+          // Log detailed close information
+          const closeReasons: Record<number, string> = {
+            1000: 'Normal Closure',
+            1001: 'Going Away',
+            1002: 'Protocol Error',
+            1003: 'Unsupported Data',
+            1004: 'Reserved',
+            1005: 'No Status Received',
+            1006: 'Abnormal Closure (connection lost without close frame)',
+            1007: 'Invalid Frame Payload Data',
+            1008: 'Policy Violation',
+            1009: 'Message Too Big',
+            1010: 'Mandatory Extension',
+            1011: 'Internal Server Error',
+            1012: 'Service Restart',
+            1013: 'Try Again Later',
+            1014: 'Bad Gateway',
+            1015: 'TLS Handshake'
+          };
+          
+          const reason = closeReasons[event.code] || `Unknown (${event.code})`;
+          console.error('❌ UnifiedMessageHandler: WebSocket closed for session:', sessionId);
+          console.error('❌ UnifiedMessageHandler: Close code:', event.code, '-', reason);
+          console.error('❌ UnifiedMessageHandler: Close reason:', event.reason || 'No reason provided');
+          console.error('❌ UnifiedMessageHandler: Was clean:', event.wasClean);
+          console.error('❌ UnifiedMessageHandler: WebSocket URL:', wsUrl);
+          
           this.removeWebSocketConnection(sessionId);
+          
+          // Reject the promise with detailed error
+          reject(new Error(`WebSocket connection failed: ${reason} (code ${event.code})${event.reason ? ` - ${event.reason}` : ''}`));
         };
       });
     } catch (error) {
