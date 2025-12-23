@@ -1080,38 +1080,99 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Use first query config for single GSI/search index query
     config = query_configs[0]
     
+    # Check for union_offset pagination (for union queries)
+    union_offset = None
+    if last_evaluated_key and isinstance(last_evaluated_key, dict):
+        query_type = last_evaluated_key.get('query_type')
+        if query_type == 'union_offset':
+            union_offset = last_evaluated_key.get('offset', 0)
+            logger.info(f"Continuing pagination from union offset: {union_offset}")
+    
     if config.get('query_type') == 'union_politician':
         # Union sponsor and cosponsor queries
         union_configs = config['union_configs']
         all_bill_ids = set()
         
+        # For union queries, we need to fetch all IDs (or paginate through them)
+        # Check if we're continuing from a union_offset
+        if union_offset is not None:
+            # We already have the full list from previous request, but we need to reconstruct it
+            # For now, fetch all IDs again (in production, you might cache this)
+            logger.info(f"Union offset pagination: fetching all IDs again from offset {union_offset}")
+        
+        # Fetch bill IDs from both queries
+        # For union queries, we need to fetch enough IDs to cover offset + limit
+        # Calculate how many we need: offset + (limit * multiplier for filtering)
+        fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
+        cosponsor_has_more = False
+        sponsor_has_more = False
+        
         for union_config in union_configs:
             if union_config.get('query_type') == 'search_index':
-                # Cosponsor search index
-                bill_ids_batch, _ = query_cosponsor_search_index(
-                    cosponsor_name=union_config['search_value'],
-                    limit=limit * 5,
-                    date_from=filters.get('introduced_date_from'),
-                    date_to=filters.get('introduced_date_to')
-                )
-                all_bill_ids.update(bill_ids_batch)
+                # Cosponsor search index - fetch with pagination
+                cosponsor_bill_ids = []
+                cosponsor_last_key = None
+                total_fetched = 0
+                
+                while total_fetched < fetch_limit:
+                    batch_limit = min(1000, fetch_limit - total_fetched)
+                    batch_ids, cosponsor_last_key = query_cosponsor_search_index(
+                        cosponsor_name=union_config['search_value'],
+                        limit=batch_limit,
+                        exclusive_start_key=cosponsor_last_key,
+                        date_from=filters.get('introduced_date_from'),
+                        date_to=filters.get('introduced_date_to')
+                    )
+                    if not batch_ids:
+                        break
+                    cosponsor_bill_ids.extend(batch_ids)
+                    all_bill_ids.update(batch_ids)
+                    total_fetched += len(batch_ids)
+                    if not cosponsor_last_key:
+                        break
+                cosponsor_has_more = cosponsor_last_key is not None
+                logger.info(f"Fetched {len(cosponsor_bill_ids)} bill IDs from cosponsor search index (has_more: {cosponsor_has_more})")
             else:
-                # Sponsor GSI
-                bill_ids_batch, _ = query_gsi_for_bill_ids(
-                    index_name=union_config['index_name'],
-                    hash_key_name=union_config['hash_key'],
-                    hash_key_value=union_config['hash_value'],
-                    range_key_name=union_config.get('range_key'),
-                    range_key_value=union_config.get('range_value'),
-                    range_key_condition=union_config.get('range_condition'),
-                    limit=limit * 5,
-                    get_all=False
-                )
-                all_bill_ids.update(bill_ids_batch)
+                # Sponsor GSI - fetch with pagination
+                sponsor_bill_ids = []
+                sponsor_last_key = None
+                total_fetched = 0
+                
+                while total_fetched < fetch_limit:
+                    batch_limit = min(1000, fetch_limit - total_fetched)
+                    batch_ids, sponsor_last_key = query_gsi_for_bill_ids(
+                        index_name=union_config['index_name'],
+                        hash_key_name=union_config['hash_key'],
+                        hash_key_value=union_config['hash_value'],
+                        range_key_name=union_config.get('range_key'),
+                        range_key_value=union_config.get('range_value'),
+                        range_key_condition=union_config.get('range_condition'),
+                        limit=batch_limit,
+                        exclusive_start_key=sponsor_last_key,
+                        get_all=False
+                    )
+                    if not batch_ids:
+                        break
+                    sponsor_bill_ids.extend(batch_ids)
+                    all_bill_ids.update(batch_ids)
+                    total_fetched += len(batch_ids)
+                    if not sponsor_last_key:
+                        break
+                sponsor_has_more = sponsor_last_key is not None
+                logger.info(f"Fetched {len(sponsor_bill_ids)} bill IDs from sponsor GSI (has_more: {sponsor_has_more})")
         
-        bill_ids = list(all_bill_ids)
-        last_eval_key = None  # Union queries don't support pagination easily
+        # Convert to sorted list for consistent pagination
+        bill_ids = sorted(list(all_bill_ids))
+        original_bill_ids_count = len(bill_ids)  # Store original count before slicing
+        logger.info(f"Total unique bill IDs from union: {original_bill_ids_count}")
+        
+        # Use union_offset to slice the list
+        start_index = union_offset if union_offset is not None else 0
+        bill_ids = bill_ids[start_index:]
+        logger.info(f"Sliced bill IDs from index {start_index}: {len(bill_ids)} IDs remaining")
+        
         index_name = f"PoliticianNameUnion({config['politician_name']})"
+        last_eval_key = None  # Will be set after fetching items if more are available
     elif config.get('query_type') == 'search_index':
         # Use search index query for cosponsors
         logger.info(f"Using single cosponsor search index query: {config['search_value']}")
@@ -1141,30 +1202,91 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     
     # Fetch full items
     items = []
+    last_processed_index = 0
+    if config.get('query_type') == 'union_politician':
+        last_processed_index = start_index
+    
     if bill_ids:
         batch_size = 100
-        for i in range(0, len(bill_ids), batch_size):
-            batch_ids = bill_ids[i:i + batch_size]
-            dynamodb_client = boto3.client('dynamodb')
-            # Include both bill_id (hash key) and search_index_sk (range key)
-            # For regular bill items, search_index_sk = bill_id
-            request_items = {
-                BILLS_TABLE_NAME: {
-                    'Keys': [
-                        {
-                            'bill_id': {'S': str(bid)},
-                            'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
-                        }
-                        for bid in batch_ids
-                    ]
+        # For union queries, fetch in batches until we have enough filtered items
+        if config.get('query_type') == 'union_politician':
+            # Prepare remaining filters for filtering during fetch
+            remaining_filters_for_fetch = filters.copy()
+            if 'politician_role' in remaining_filters_for_fetch:
+                del remaining_filters_for_fetch['politician_role']
+            if config.get('filter_key') == 'politician_name' and config.get('politician_name'):
+                politician_name = config['politician_name']
+                if 'politician_name' in remaining_filters_for_fetch:
+                    politician_names = remaining_filters_for_fetch['politician_name'] if isinstance(remaining_filters_for_fetch['politician_name'], list) else [remaining_filters_for_fetch['politician_name']]
+                    politician_names = [n for n in politician_names if str(n).strip() != politician_name]
+                    if politician_names:
+                        remaining_filters_for_fetch['politician_name'] = politician_names
+                    else:
+                        del remaining_filters_for_fetch['politician_name']
+            
+            # Fetch and filter items in batches until we have enough filtered items or run out
+            i = 0
+            filtered_count = 0
+            while i < len(bill_ids) and filtered_count < limit:
+                batch_ids = bill_ids[i:i + batch_size]
+                last_processed_index = start_index + i + len(batch_ids)
+                
+                dynamodb_client = boto3.client('dynamodb')
+                # Include both bill_id (hash key) and search_index_sk (range key)
+                # For regular bill items, search_index_sk = bill_id
+                request_items = {
+                    BILLS_TABLE_NAME: {
+                        'Keys': [
+                            {
+                                'bill_id': {'S': str(bid)},
+                                'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                            }
+                            for bid in batch_ids
+                        ]
+                    }
                 }
-            }
-            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-            batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
-            deserializer = TypeDeserializer()
-            for item in batch_items:
-                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                items.append(converted_item)
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                
+                # Filter items as we fetch them
+                for item in batch_items:
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    if apply_python_filter(converted_item, remaining_filters_for_fetch):
+                        items.append(converted_item)
+                        filtered_count += 1
+                        if filtered_count >= limit:
+                            break
+                
+                i += batch_size
+                if filtered_count >= limit:
+                    break
+                
+                logger.info(f"Union pagination: processed {i} IDs, {filtered_count} filtered items (need {limit})")
+        else:
+            # For single queries, fetch all items
+            for i in range(0, len(bill_ids), batch_size):
+                batch_ids = bill_ids[i:i + batch_size]
+                dynamodb_client = boto3.client('dynamodb')
+                # Include both bill_id (hash key) and search_index_sk (range key)
+                # For regular bill items, search_index_sk = bill_id
+                request_items = {
+                    BILLS_TABLE_NAME: {
+                        'Keys': [
+                            {
+                                'bill_id': {'S': str(bid)},
+                                'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                            }
+                            for bid in batch_ids
+                        ]
+                    }
+                }
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    items.append(converted_item)
     
     # Apply remaining filters
     remaining_filters = filters.copy()
@@ -1191,8 +1313,37 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         else:
             del remaining_filters[config['filter_key']]
     
-    filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
-    filtered_items = filtered_items[:limit]
+    # For union queries, items are already filtered during fetch
+    # For other queries, apply filters now
+    if config.get('query_type') == 'union_politician':
+        filtered_items = items[:limit]  # Already filtered, just limit to requested count
+    else:
+        filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
+        filtered_items = filtered_items[:limit]
+    
+    # For union queries, calculate next offset for pagination
+    if config.get('query_type') == 'union_politician':
+        # Check if we have more items to fetch
+        # last_processed_index is the index we've processed up to (in the original full list)
+        # original_bill_ids_count is the total number of IDs we fetched
+        # We have more if: (1) we haven't processed all fetched IDs, OR (2) either query has more
+        has_more_union = (last_processed_index < original_bill_ids_count) or cosponsor_has_more or sponsor_has_more
+        
+        if has_more_union:
+            # Return union offset pagination key
+            next_offset = last_processed_index
+            last_eval_key = {
+                'offset': next_offset,
+                'query_type': 'union_offset',
+                'total_ids': original_bill_ids_count,
+                'cosponsor_has_more': cosponsor_has_more,
+                'sponsor_has_more': sponsor_has_more
+            }
+            logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs fetched: {original_bill_ids_count}, processed: {last_processed_index}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}")
+        else:
+            last_eval_key = None
+            logger.info(f"Union pagination complete - processed all {last_processed_index} of {original_bill_ids_count} fetched IDs")
+    # For non-union queries, last_eval_key is already set from the query above
     
     # Convert and enrich
     results = [convert_decimal_to_float(item) for item in filtered_items]
@@ -1208,17 +1359,23 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Convert last_evaluated_key to JSON-serializable format
     serializable_last_key = None
     if last_eval_key:
-        try:
-            serializable_last_key = convert_decimal_to_float(last_eval_key)
-        except Exception as e:
-            logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
-            serializable_last_key = None
+        if isinstance(last_eval_key, dict) and last_eval_key.get('query_type') == 'union_offset':
+            # Union offset pagination key is already serializable
+            serializable_last_key = last_eval_key
+        else:
+            try:
+                serializable_last_key = convert_decimal_to_float(last_eval_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+                serializable_last_key = None
+    
+    has_more = serializable_last_key is not None
     
     return {
         'success': True,
         'results': enriched_results,
         'count': len(enriched_results),
-        'has_more': last_eval_key is not None,
+        'has_more': has_more,
         'last_evaluated_key': serializable_last_key,
         'method': 'query',
         'index_used': index_name
