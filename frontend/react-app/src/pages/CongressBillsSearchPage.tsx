@@ -1906,6 +1906,7 @@ const CongressBillsSearchPage: React.FC = () => {
                         policy_areas: new Set(),
                         congresses: new Set(),
                         bipartisan: new Set(),
+                        politician_roles: new Set(),
                       });
                       setIsFiltered(false);
                     }}
