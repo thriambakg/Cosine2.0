@@ -85,6 +85,56 @@ def fetch_oversized_bill_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def normalize_politician_role(politician_role: Any) -> str:
+    """
+    Normalize politician_role from various formats to a single string.
+    
+    Handles:
+    - Array: [] (empty) -> 'both' (search both sponsor and cosponsor)
+    - Array: ['sponsor'] -> 'sponsor' (sponsor only)
+    - Array: ['cosponsor'] -> 'cosponsor' (cosponsor only)
+    - Array: ['sponsor', 'cosponsor'] -> 'both' (both selected, search both)
+    - String: 'sponsor', 'cosponsor', 'both' -> as-is (for backward compatibility)
+    - None/undefined -> 'both'
+    
+    Returns:
+        'sponsor', 'cosponsor', or 'both'
+    """
+    if politician_role is None:
+        return 'both'
+    
+    if isinstance(politician_role, list):
+        if len(politician_role) == 0:
+            # Empty array means search both sponsor and cosponsor
+            return 'both'
+        elif len(politician_role) == 1:
+            # Single option selected
+            role = politician_role[0]
+            if role in ['sponsor', 'cosponsor']:
+                return role
+            elif role == 'both':
+                # If array contains 'both', treat as 'both'
+                return 'both'
+            else:
+                # Unknown value, default to 'both'
+                return 'both'
+        elif len(politician_role) == 2:
+            # Both options selected means 'both'
+            return 'both'
+        else:
+            # More than 2 options shouldn't happen, but default to 'both'
+            return 'both'
+    
+    if isinstance(politician_role, str):
+        if politician_role in ['sponsor', 'cosponsor', 'both']:
+            return politician_role
+        else:
+            return 'both'
+    
+    # Fallback to 'both' for any other type
+    return 'both'
+
+
 def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     """
     Apply filters to an item in Python (for post-BatchGetItem filtering with KEYS_ONLY GSIs)
@@ -98,7 +148,7 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     """
     # Politician name filter (OR logic within field) - checks both sponsor and cosponsor
     politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
-    politician_role = filters.get('politician_role', 'both')
+    politician_role = normalize_politician_role(filters.get('politician_role'))
     
     if politician_name_filter:
         politician_names = politician_name_filter if isinstance(politician_name_filter, list) else [politician_name_filter]
@@ -269,7 +319,7 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Politician name: searches both sponsor and cosponsor
     # Support both politician_name (new) and sponsor_name (legacy) for backward compatibility
     politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
-    politician_role = filters.get('politician_role', 'both')  # 'sponsor', 'cosponsor', or 'both'
+    politician_role = normalize_politician_role(filters.get('politician_role'))  # Normalize to 'sponsor', 'cosponsor', or 'both'
     
     if politician_name_filter:
         politician_names = politician_name_filter if isinstance(politician_name_filter, list) else [politician_name_filter]
@@ -738,14 +788,138 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     if not bills_table:
         raise Exception("DynamoDB bills table not initialized")
     
+    # Check for union_offset pagination BEFORE identifying queryable filters
+    # This allows us to continue union queries even if filters are empty
+    union_offset = None
+    union_offset_metadata = None
+    if last_evaluated_key and isinstance(last_evaluated_key, dict):
+        query_type = last_evaluated_key.get('query_type')
+        if query_type == 'union_offset':
+            union_offset = last_evaluated_key.get('offset', 0)
+            union_offset_metadata = last_evaluated_key  # Store full metadata for reconstruction
+            logger.info(f"Detected union_offset pagination: offset={union_offset}")
+            # If we have union_offset, we need to ensure we have query configs
+            # The filters should contain the politician_name to reconstruct the query
+    
     # Identify which filters can use GSIs
     query_configs = identify_queryable_filters(filters)
     
-    # Special handling for politician_name: if we have both sponsor and cosponsor queries for the same name, union them first
-    politician_role = filters.get('politician_role', 'both')
+    # If we have union_offset but no query configs, try to reconstruct from metadata or filters
+    # This handles the case where "load more" is called with union_offset but filters might be minimal
+    if union_offset is not None and not query_configs:
+        # Check if this is a union_all_politicians query (multiple names)
+        politician_names = None
+        politician_role = 'both'
+        
+        if union_offset_metadata:
+            politician_names = union_offset_metadata.get('politician_names')
+            politician_name = union_offset_metadata.get('politician_name')  # Single name for union_politician
+            politician_role = normalize_politician_role(union_offset_metadata.get('politician_role'))
+            
+            if politician_names:
+                logger.info(f"Reconstructing union_all_politicians from union_offset metadata: {len(politician_names)} names, role={politician_role}")
+            elif politician_name:
+                logger.info(f"Reconstructing union_politician from union_offset metadata: politician_name={politician_name}, role={politician_role}")
+        
+        # Fallback to filters if not in metadata
+        if not politician_names and not politician_name:
+            politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
+            if politician_name_filter:
+                politician_names = politician_name_filter if isinstance(politician_name_filter, list) else [politician_name_filter]
+                politician_role = normalize_politician_role(filters.get('politician_role'))
+                logger.info(f"Reconstructing from filters: {len(politician_names)} names, role={politician_role}")
+        
+        # Reconstruct the union query config(s)
+        if politician_names and len(politician_names) > 1:
+            # Multiple politician names - create union_all_politicians config
+            politician_configs = []
+            for pol_name in politician_names:
+                union_configs = []
+                
+                # Add sponsor GSI config
+                if politician_role == 'both' or politician_role == 'sponsor':
+                    union_configs.append({
+                        'filter_key': 'politician_name',
+                        'index_name': 'SponsorNameDateIndex',
+                        'hash_key': 'sponsor_full_name',
+                        'hash_value': pol_name,
+                        'range_key': 'introduced_date',
+                        'range_value': filters.get('introduced_date_from'),
+                        'range_condition': 'gte' if filters.get('introduced_date_from') else None
+                    })
+                
+                # Add cosponsor search index config
+                if politician_role == 'both' or politician_role == 'cosponsor':
+                    union_configs.append({
+                        'filter_key': 'politician_name',
+                        'query_type': 'search_index',
+                        'search_type': 'COSPONSOR',
+                        'search_value': pol_name
+                    })
+                
+                if len(union_configs) > 1:
+                    politician_configs.append({
+                        'filter_key': 'politician_name',
+                        'politician_name': pol_name,
+                        'role': politician_role,
+                        'union_configs': union_configs,
+                        'query_type': 'union_politician'
+                    })
+                elif len(union_configs) == 1:
+                    politician_configs.append(union_configs[0])
+            
+            if politician_configs:
+                query_configs.append({
+                    'filter_key': 'politician_name',
+                    'query_type': 'union_all_politicians',
+                    'politician_configs': politician_configs,
+                    'politician_names': politician_names
+                })
+                logger.info(f"Reconstructed union_all_politicians query config for {len(politician_names)} names")
+        elif (politician_name or (politician_names and len(politician_names) == 1)):
+            # Single politician name - create union_politician config
+            single_name = politician_name or (politician_names[0] if politician_names else None)
+            if single_name:
+                union_configs = []
+                
+                # Add sponsor GSI config
+                if politician_role == 'both' or politician_role == 'sponsor':
+                    union_configs.append({
+                        'filter_key': 'politician_name',
+                        'index_name': 'SponsorNameDateIndex',
+                        'hash_key': 'sponsor_full_name',
+                        'hash_value': single_name,
+                        'range_key': 'introduced_date',
+                        'range_value': filters.get('introduced_date_from'),
+                        'range_condition': 'gte' if filters.get('introduced_date_from') else None
+                    })
+                
+                # Add cosponsor search index config
+                if politician_role == 'both' or politician_role == 'cosponsor':
+                    union_configs.append({
+                        'filter_key': 'politician_name',
+                        'query_type': 'search_index',
+                        'search_type': 'COSPONSOR',
+                        'search_value': single_name
+                    })
+                
+                if union_configs:
+                    query_configs.append({
+                        'filter_key': 'politician_name',
+                        'politician_name': single_name,
+                        'role': politician_role,
+                        'union_configs': union_configs,
+                        'query_type': 'union_politician'
+                    })
+                    logger.info(f"Reconstructed union query config for politician_name: {single_name}, role: {politician_role}")
+    
+    # Special handling for politician_name: 
+    # 1. For each politician name, union sponsor and cosponsor queries (if role is 'both')
+    # 2. For multiple politician names, union all politician name results together (OR logic)
+    politician_role = normalize_politician_role(filters.get('politician_role'))
     politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
     
-    if politician_name_filter and politician_role == 'both':
+    if politician_name_filter:
         # Group queries by politician_name
         politician_queries = {}
         other_queries = []
@@ -759,21 +933,40 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             else:
                 other_queries.append(config)
         
-        # For each politician_name, union sponsor and cosponsor queries
+        # For each politician_name, union sponsor and cosponsor queries (if role is 'both')
         if politician_queries:
             unioned_politician_configs = []
             for politician_name, configs in politician_queries.items():
-                # Union the results from sponsor and cosponsor queries
-                unioned_politician_configs.append({
-                    'filter_key': 'politician_name',
-                    'politician_name': politician_name,
-                    'role': 'both',
-                    'union_configs': configs,  # Store both sponsor and cosponsor configs
-                    'query_type': 'union_politician'
-                })
+                # If role is 'both', we need to union sponsor and cosponsor queries for this name
+                if politician_role == 'both' and len(configs) > 1:
+                    # Union the results from sponsor and cosponsor queries
+                    unioned_politician_configs.append({
+                        'filter_key': 'politician_name',
+                        'politician_name': politician_name,
+                        'role': 'both',
+                        'union_configs': configs,  # Store both sponsor and cosponsor configs
+                        'query_type': 'union_politician'
+                    })
+                elif len(configs) == 1:
+                    # Single query (either sponsor or cosponsor only)
+                    unioned_politician_configs.append(configs[0])
+                else:
+                    # Multiple configs but role is not 'both' - shouldn't happen, but handle it
+                    unioned_politician_configs.append(configs[0])
             
-            # Replace politician_name queries with unioned configs
-            query_configs = unioned_politician_configs + other_queries
+            # If we have multiple politician names, we need to union them together
+            # Create a special "union_all_politicians" config that will union all politician results
+            if len(unioned_politician_configs) > 1:
+                # Replace individual politician configs with a single union config
+                query_configs = [{
+                    'filter_key': 'politician_name',
+                    'query_type': 'union_all_politicians',
+                    'politician_configs': unioned_politician_configs,  # All individual politician configs
+                    'politician_names': list(politician_queries.keys())
+                }] + other_queries
+            else:
+                # Single politician name, use the unioned config directly
+                query_configs = unioned_politician_configs + other_queries
     
     # If we have multiple queryable filters, use intersection approach
     if len(query_configs) > 1:
@@ -782,7 +975,99 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # Query each GSI/search index to get initial batch of bill_ids (to determine shortest list)
         gsi_results = {}
         for config in query_configs:
-            if config.get('query_type') == 'search_index':
+            if config.get('query_type') == 'union_all_politicians':
+                # Handle union of multiple politician names (OR logic)
+                politician_configs = config.get('politician_configs', [])
+                politician_names = config.get('politician_names', [])
+                logger.info(f"Querying union of {len(politician_names)} politician names: {politician_names}")
+                all_bill_ids = set()
+                
+                # Query each politician config and union the results
+                for politician_config in politician_configs:
+                    if politician_config.get('query_type') == 'union_politician':
+                        # Union sponsor and cosponsor for this politician
+                        union_configs = politician_config.get('union_configs', [])
+                        for union_config in union_configs:
+                            if union_config.get('query_type') == 'search_index':
+                                bill_ids, _ = query_cosponsor_search_index(
+                                    cosponsor_name=union_config['search_value'],
+                                    limit=1000,
+                                    date_from=filters.get('introduced_date_from'),
+                                    date_to=filters.get('introduced_date_to')
+                                )
+                                all_bill_ids.update(bill_ids)
+                            elif union_config.get('index_name'):
+                                bill_ids, _ = query_gsi_for_bill_ids(
+                                    index_name=union_config['index_name'],
+                                    hash_key_name=union_config['hash_key'],
+                                    hash_key_value=union_config['hash_value'],
+                                    range_key_name=union_config.get('range_key'),
+                                    range_key_value=union_config.get('range_value'),
+                                    range_key_condition=union_config.get('range_condition'),
+                                    limit=1000,
+                                    get_all=False
+                                )
+                                all_bill_ids.update(bill_ids)
+                    elif politician_config.get('query_type') == 'search_index':
+                        # Single cosponsor query
+                        bill_ids, _ = query_cosponsor_search_index(
+                            cosponsor_name=politician_config['search_value'],
+                            limit=1000,
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        all_bill_ids.update(bill_ids)
+                    elif politician_config.get('index_name'):
+                        # Single sponsor GSI query
+                        bill_ids, _ = query_gsi_for_bill_ids(
+                            index_name=politician_config['index_name'],
+                            hash_key_name=politician_config['hash_key'],
+                            hash_key_value=politician_config['hash_value'],
+                            range_key_name=politician_config.get('range_key'),
+                            range_key_value=politician_config.get('range_value'),
+                            range_key_condition=politician_config.get('range_condition'),
+                            limit=1000,
+                            get_all=False
+                        )
+                        all_bill_ids.update(bill_ids)
+                
+                bill_ids = list(all_bill_ids)
+                index_name = f"UnionAllPoliticians({len(politician_names)} names)"
+            elif config.get('query_type') == 'union_politician':
+                # Handle union politician query (sponsor + cosponsor for single name)
+                politician_name = config.get('politician_name', 'unknown')
+                logger.info(f"Querying union politician query for {config['filter_key']}={politician_name}")
+                all_bill_ids = set()
+                
+                # Query both sponsor GSI and cosponsor search index
+                union_configs = config.get('union_configs', [])
+                for union_config in union_configs:
+                    if union_config.get('query_type') == 'search_index':
+                        # Query cosponsor search index
+                        bill_ids, _ = query_cosponsor_search_index(
+                            cosponsor_name=union_config['search_value'],
+                            limit=1000,  # Get first batch
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        all_bill_ids.update(bill_ids)
+                    elif union_config.get('index_name'):
+                        # Query sponsor GSI
+                        bill_ids, _ = query_gsi_for_bill_ids(
+                            index_name=union_config['index_name'],
+                            hash_key_name=union_config['hash_key'],
+                            hash_key_value=union_config['hash_value'],
+                            range_key_name=union_config.get('range_key'),
+                            range_key_value=union_config.get('range_value'),
+                            range_key_condition=union_config.get('range_condition'),
+                            limit=1000,  # Get first batch
+                            get_all=False
+                        )
+                        all_bill_ids.update(bill_ids)
+                
+                bill_ids = list(all_bill_ids)
+                index_name = f"UnionPolitician({politician_name})"
+            elif config.get('query_type') == 'search_index':
                 # Use search index query for cosponsors
                 logger.info(f"Querying cosponsor search index for {config['filter_key']}={config['search_value']}")
                 bill_ids, _ = query_cosponsor_search_index(
@@ -794,9 +1079,10 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 index_name = f"SearchIndex({config['search_type']})"
             else:
                 # Use GSI query
-                logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+                index_name = config.get('index_name', 'Unknown')
+                logger.info(f"Querying {index_name} for {config['filter_key']}={config.get('hash_value', 'N/A')}")
                 bill_ids, _ = query_gsi_for_bill_ids(
-                    index_name=config['index_name'],
+                    index_name=index_name,
                     hash_key_name=config['hash_key'],
                     hash_key_value=config['hash_value'],
                     range_key_name=config.get('range_key'),
@@ -805,9 +1091,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     limit=1000,  # Get first batch
                     get_all=False
                 )
-                index_name = config['index_name']
             
-            gsi_results[config['filter_key']] = {
+            # Use a unique key for each config (handle multiple politician names)
+            result_key = config['filter_key']
+            if config.get('politician_name'):
+                result_key = f"{config['filter_key']}_{config['politician_name']}"
+            
+            gsi_results[result_key] = {
                 'bill_ids': set(bill_ids),
                 'config': config,
                 'total_count': len(bill_ids),
@@ -828,8 +1118,14 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         if 'politician_role' in remaining_filters:
             del remaining_filters['politician_role']
         
-        # Handle politician_name filter removal (may have format like "politician_name_John Doe")
-        if shortest_key.startswith('politician_name_'):
+        # Handle politician_name filter removal
+        if source_config.get('query_type') == 'union_all_politicians':
+            # All politician names have been applied, remove them all
+            if 'politician_name' in remaining_filters:
+                del remaining_filters['politician_name']
+            if 'sponsor_name' in remaining_filters:
+                del remaining_filters['sponsor_name']
+        elif shortest_key.startswith('politician_name_'):
             # Extract the politician name from the key
             politician_name = shortest_key.replace('politician_name_', '', 1)
             if 'politician_name' in remaining_filters:
@@ -862,8 +1158,73 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             pagination_round += 1
             
             # Query source GSI/search index with pagination
-            if source_config.get('query_type') == 'union_politician':
-                # Union sponsor and cosponsor queries for pagination
+            if source_config.get('query_type') == 'union_all_politicians':
+                # Union all politician queries for pagination
+                politician_configs = source_config.get('politician_configs', [])
+                all_bill_ids_batch = set()
+                new_last_eval_key = None
+                
+                for politician_config in politician_configs:
+                    if politician_config.get('query_type') == 'union_politician':
+                        # Union sponsor and cosponsor for this politician
+                        union_configs = politician_config.get('union_configs', [])
+                        for union_config in union_configs:
+                            if union_config.get('query_type') == 'search_index':
+                                bill_ids_batch, cosponsor_last_key = query_cosponsor_search_index(
+                                    cosponsor_name=union_config['search_value'],
+                                    limit=1000,
+                                    exclusive_start_key=source_last_eval_key,
+                                    date_from=filters.get('introduced_date_from'),
+                                    date_to=filters.get('introduced_date_to')
+                                )
+                                all_bill_ids_batch.update(bill_ids_batch)
+                                if cosponsor_last_key:
+                                    new_last_eval_key = cosponsor_last_key
+                            elif union_config.get('index_name'):
+                                bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                                    index_name=union_config['index_name'],
+                                    hash_key_name=union_config['hash_key'],
+                                    hash_key_value=union_config['hash_value'],
+                                    range_key_name=union_config.get('range_key'),
+                                    range_key_value=union_config.get('range_value'),
+                                    range_key_condition=union_config.get('range_condition'),
+                                    limit=1000,
+                                    exclusive_start_key=source_last_eval_key,
+                                    get_all=False
+                                )
+                                all_bill_ids_batch.update(bill_ids_batch)
+                                if sponsor_last_key:
+                                    new_last_eval_key = sponsor_last_key
+                    elif politician_config.get('query_type') == 'search_index':
+                        bill_ids_batch, cosponsor_last_key = query_cosponsor_search_index(
+                            cosponsor_name=politician_config['search_value'],
+                            limit=1000,
+                            exclusive_start_key=source_last_eval_key,
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        all_bill_ids_batch.update(bill_ids_batch)
+                        if cosponsor_last_key:
+                            new_last_eval_key = cosponsor_last_key
+                    elif politician_config.get('index_name'):
+                        bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                            index_name=politician_config['index_name'],
+                            hash_key_name=politician_config['hash_key'],
+                            hash_key_value=politician_config['hash_value'],
+                            range_key_name=politician_config.get('range_key'),
+                            range_key_value=politician_config.get('range_value'),
+                            range_key_condition=politician_config.get('range_condition'),
+                            limit=1000,
+                            exclusive_start_key=source_last_eval_key,
+                            get_all=False
+                        )
+                        all_bill_ids_batch.update(bill_ids_batch)
+                        if sponsor_last_key:
+                            new_last_eval_key = sponsor_last_key
+                
+                source_bill_ids_batch = list(all_bill_ids_batch)
+            elif source_config.get('query_type') == 'union_politician':
+                # Union sponsor and cosponsor queries for pagination (single politician name)
                 union_configs = source_config['union_configs']
                 all_bill_ids_batch = set()
                 new_last_eval_key = None
@@ -924,7 +1285,15 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             source_last_eval_key = new_last_eval_key
             
             if not source_bill_ids_batch:
-                logger.info(f"Source GSI {source_config['index_name']} ran out of items")
+                # Handle different query types for logging
+                if source_config.get('query_type') == 'union_politician':
+                    politician_name = source_config.get('politician_name', 'unknown')
+                    logger.info(f"Source union politician query ({politician_name}) ran out of items")
+                elif source_config.get('query_type') == 'search_index':
+                    logger.info(f"Source search index query ran out of items")
+                else:
+                    index_name = source_config.get('index_name', 'Unknown')
+                    logger.info(f"Source GSI {index_name} ran out of items")
                 break
             
             logger.info(f"Pagination round {pagination_round}: Got {len(source_bill_ids_batch)} bill_ids from source GSI")
@@ -1030,8 +1399,16 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             'Limit': scan_limit
         }
         
+        # Only use last_evaluated_key if it's a valid DynamoDB key format (not a custom format like union_offset)
+        # Custom formats have 'query_type' field, DynamoDB keys are dicts with table key attributes
         if last_evaluated_key:
-            params['ExclusiveStartKey'] = last_evaluated_key
+            # Check if it's a custom format (has 'query_type' field)
+            if isinstance(last_evaluated_key, dict) and 'query_type' in last_evaluated_key:
+                logger.warning(f"Ignoring custom last_evaluated_key format ({last_evaluated_key.get('query_type')}) for scan operation - starting fresh scan")
+                # Don't use custom format keys for scan operations
+            else:
+                # It's a valid DynamoDB key format, use it
+                params['ExclusiveStartKey'] = last_evaluated_key
         
         logger.info(f"Scanning bills table with Limit={scan_limit} (result limit={limit})")
         response = bills_table.scan(**params)
@@ -1080,15 +1457,78 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Use first query config for single GSI/search index query
     config = query_configs[0]
     
-    # Check for union_offset pagination (for union queries)
-    union_offset = None
-    if last_evaluated_key and isinstance(last_evaluated_key, dict):
-        query_type = last_evaluated_key.get('query_type')
-        if query_type == 'union_offset':
-            union_offset = last_evaluated_key.get('offset', 0)
-            logger.info(f"Continuing pagination from union offset: {union_offset}")
-    
-    if config.get('query_type') == 'union_politician':
+    # union_offset is already extracted at the top of the function
+    # Use it here for union queries
+    if config.get('query_type') == 'union_all_politicians':
+        # Union all politician names (multiple names OR'd together)
+        politician_configs = config.get('politician_configs', [])
+        politician_names = config.get('politician_names', [])
+        logger.info(f"Using single union all politicians query: {len(politician_names)} names")
+        all_bill_ids = set()
+        
+        # Fetch bill IDs from all politician configs and union them
+        fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
+        
+        for politician_config in politician_configs:
+            if politician_config.get('query_type') == 'union_politician':
+                # Union sponsor and cosponsor for this politician
+                union_configs = politician_config.get('union_configs', [])
+                for union_config in union_configs:
+                    if union_config.get('query_type') == 'search_index':
+                        batch_ids, _ = query_cosponsor_search_index(
+                            cosponsor_name=union_config['search_value'],
+                            limit=fetch_limit,
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        all_bill_ids.update(batch_ids)
+                    elif union_config.get('index_name'):
+                        batch_ids, _ = query_gsi_for_bill_ids(
+                            index_name=union_config['index_name'],
+                            hash_key_name=union_config['hash_key'],
+                            hash_key_value=union_config['hash_value'],
+                            range_key_name=union_config.get('range_key'),
+                            range_key_value=union_config.get('range_value'),
+                            range_key_condition=union_config.get('range_condition'),
+                            limit=fetch_limit,
+                            get_all=False
+                        )
+                        all_bill_ids.update(batch_ids)
+            elif politician_config.get('query_type') == 'search_index':
+                batch_ids, _ = query_cosponsor_search_index(
+                    cosponsor_name=politician_config['search_value'],
+                    limit=fetch_limit,
+                    date_from=filters.get('introduced_date_from'),
+                    date_to=filters.get('introduced_date_to')
+                )
+                all_bill_ids.update(batch_ids)
+            elif politician_config.get('index_name'):
+                batch_ids, _ = query_gsi_for_bill_ids(
+                    index_name=politician_config['index_name'],
+                    hash_key_name=politician_config['hash_key'],
+                    hash_key_value=politician_config['hash_value'],
+                    range_key_name=politician_config.get('range_key'),
+                    range_key_value=politician_config.get('range_value'),
+                    range_key_condition=politician_config.get('range_condition'),
+                    limit=fetch_limit,
+                    get_all=False
+                )
+                all_bill_ids.update(batch_ids)
+        
+        # Convert to sorted list for consistent pagination
+        bill_ids = sorted(list(all_bill_ids))
+        original_bill_ids_count = len(bill_ids)
+        logger.info(f"Total unique bill IDs from union of all politicians: {original_bill_ids_count}")
+        
+        # Use union_offset to slice the list
+        start_index = union_offset if union_offset is not None else 0
+        bill_ids = bill_ids[start_index:]
+        logger.info(f"Sliced bill IDs from index {start_index}: {len(bill_ids)} IDs remaining")
+        
+        index_name = f"UnionAllPoliticians({len(politician_names)} names)"
+        last_eval_key = None
+        last_processed_index = start_index
+    elif config.get('query_type') == 'union_politician':
         # Union sponsor and cosponsor queries
         union_configs = config['union_configs']
         all_bill_ids = set()
@@ -1104,8 +1544,15 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # For union queries, we need to fetch enough IDs to cover offset + limit
         # Calculate how many we need: offset + (limit * multiplier for filtering)
         fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
-        cosponsor_has_more = False
-        sponsor_has_more = False
+        
+        # If continuing from union_offset, preserve has_more flags from previous request
+        if union_offset_metadata:
+            cosponsor_has_more = union_offset_metadata.get('cosponsor_has_more', False)
+            sponsor_has_more = union_offset_metadata.get('sponsor_has_more', False)
+            logger.info(f"Preserving has_more flags from previous request: cosponsor={cosponsor_has_more}, sponsor={sponsor_has_more}")
+        else:
+            cosponsor_has_more = False
+            sponsor_has_more = False
         
         for union_config in union_configs:
             if union_config.get('query_type') == 'search_index':
@@ -1130,7 +1577,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     total_fetched += len(batch_ids)
                     if not cosponsor_last_key:
                         break
-                cosponsor_has_more = cosponsor_last_key is not None
+                # Update has_more flag based on actual query result (OR with preserved value if continuing)
+                current_cosponsor_has_more = cosponsor_last_key is not None
+                if union_offset_metadata:
+                    # If we had more before and still have more, keep it true
+                    cosponsor_has_more = cosponsor_has_more or current_cosponsor_has_more
+                else:
+                    cosponsor_has_more = current_cosponsor_has_more
                 logger.info(f"Fetched {len(cosponsor_bill_ids)} bill IDs from cosponsor search index (has_more: {cosponsor_has_more})")
             else:
                 # Sponsor GSI - fetch with pagination
@@ -1158,7 +1611,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     total_fetched += len(batch_ids)
                     if not sponsor_last_key:
                         break
-                sponsor_has_more = sponsor_last_key is not None
+                # Update has_more flag based on actual query result (OR with preserved value if continuing)
+                current_sponsor_has_more = sponsor_last_key is not None
+                if union_offset_metadata:
+                    # If we had more before and still have more, keep it true
+                    sponsor_has_more = sponsor_has_more or current_sponsor_has_more
+                else:
+                    sponsor_has_more = current_sponsor_has_more
                 logger.info(f"Fetched {len(sponsor_bill_ids)} bill IDs from sponsor GSI (has_more: {sponsor_has_more})")
         
         # Convert to sorted list for consistent pagination
@@ -1203,13 +1662,62 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Fetch full items
     items = []
     last_processed_index = 0
-    if config.get('query_type') == 'union_politician':
+    if config.get('query_type') == 'union_all_politicians':
+        last_processed_index = start_index
+    elif config.get('query_type') == 'union_politician':
         last_processed_index = start_index
     
     if bill_ids:
         batch_size = limit  # Use limit (page size) for batch size
         # For union queries, fetch in batches until we have enough filtered items
-        if config.get('query_type') == 'union_politician':
+        if config.get('query_type') == 'union_all_politicians':
+            # Prepare remaining filters for filtering during fetch
+            remaining_filters_for_fetch = filters.copy()
+            if 'politician_role' in remaining_filters_for_fetch:
+                del remaining_filters_for_fetch['politician_role']
+            # All politician names have been applied, remove them
+            if 'politician_name' in remaining_filters_for_fetch:
+                del remaining_filters_for_fetch['politician_name']
+            if 'sponsor_name' in remaining_filters_for_fetch:
+                del remaining_filters_for_fetch['sponsor_name']
+            
+            # Fetch and filter items in batches until we have enough filtered items or run out
+            i = 0
+            filtered_count = 0
+            while i < len(bill_ids) and filtered_count < limit:
+                batch_ids = bill_ids[i:i + batch_size]
+                
+                dynamodb_client = boto3.client('dynamodb')
+                request_items = {
+                    BILLS_TABLE_NAME: {
+                        'Keys': [
+                            {
+                                'bill_id': {'S': str(bid)},
+                                'search_index_sk': {'S': str(bid)}
+                            }
+                            for bid in batch_ids
+                        ]
+                    }
+                }
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                deserializer = TypeDeserializer()
+                
+                # Filter items as we fetch them
+                for item in batch_items:
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    if apply_python_filter(converted_item, remaining_filters_for_fetch):
+                        items.append(converted_item)
+                        filtered_count += 1
+                        if filtered_count >= limit:
+                            break
+                
+                last_processed_index = start_index + i + len(batch_ids)
+                if filtered_count >= limit:
+                    break
+                i += batch_size
+                logger.info(f"Union all politicians pagination: processed {i} IDs, {filtered_count} filtered items (need {limit})")
+        elif config.get('query_type') == 'union_politician':
             # Prepare remaining filters for filtering during fetch
             remaining_filters_for_fetch = filters.copy()
             if 'politician_role' in remaining_filters_for_fetch:
@@ -1301,7 +1809,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         del remaining_filters['politician_role']
     
     # Handle filter removal based on config
-    if config.get('filter_key') == 'politician_name' and config.get('politician_name'):
+    if config.get('query_type') == 'union_all_politicians':
+        # All politician names have been applied, remove them all
+        if 'politician_name' in remaining_filters:
+            del remaining_filters['politician_name']
+        if 'sponsor_name' in remaining_filters:
+            del remaining_filters['sponsor_name']
+    elif config.get('filter_key') == 'politician_name' and config.get('politician_name'):
         # Remove the specific politician name that was queried
         politician_name = config['politician_name']
         if 'politician_name' in remaining_filters:
@@ -1321,14 +1835,36 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     
     # For union queries, items are already filtered during fetch
     # For other queries, apply filters now
-    if config.get('query_type') == 'union_politician':
+    if config.get('query_type') in ['union_politician', 'union_all_politicians']:
         filtered_items = items[:limit]  # Already filtered, just limit to requested count
     else:
         filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
         filtered_items = filtered_items[:limit]
     
     # For union queries, calculate next offset for pagination
-    if config.get('query_type') == 'union_politician':
+    if config.get('query_type') == 'union_all_politicians':
+        # For union_all_politicians, we don't track individual has_more flags
+        # We just check if we've processed all fetched IDs
+        items_returned = len(filtered_items)
+        has_more_union = last_processed_index < original_bill_ids_count
+        
+        logger.info(f"Union all politicians pagination check - last_processed_index: {last_processed_index}, original_bill_ids_count: {original_bill_ids_count}, items_returned: {items_returned}, limit: {limit}, has_more_union: {has_more_union}")
+        
+        if has_more_union:
+            next_offset = last_processed_index
+            politician_names = config.get('politician_names', [])
+            last_eval_key = {
+                'offset': next_offset,
+                'query_type': 'union_offset',
+                'total_ids': original_bill_ids_count,
+                'politician_names': politician_names,  # Store all politician names for reconstruction
+                'politician_role': filters.get('politician_role', 'both')
+            }
+            logger.info(f"Union all politicians offset pagination - next offset: {next_offset}, total IDs fetched: {original_bill_ids_count}, processed: {last_processed_index}, politician_names: {politician_names}")
+        else:
+            last_eval_key = None
+            logger.info(f"Union all politicians pagination complete - processed all {last_processed_index} of {original_bill_ids_count} fetched IDs")
+    elif config.get('query_type') == 'union_politician':
         # Check if we have more items to fetch
         # last_processed_index is the index we've processed up to (in the original full list)
         # original_bill_ids_count is the total number of IDs we fetched
@@ -1348,9 +1884,11 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 'query_type': 'union_offset',
                 'total_ids': original_bill_ids_count,
                 'cosponsor_has_more': cosponsor_has_more,
-                'sponsor_has_more': sponsor_has_more
+                'sponsor_has_more': sponsor_has_more,
+                'politician_name': config.get('politician_name'),  # Store politician name for reconstruction
+                'politician_role': config.get('role', 'both')  # Store role for reconstruction
             }
-            logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs fetched: {original_bill_ids_count}, processed: {last_processed_index}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}")
+            logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs fetched: {original_bill_ids_count}, processed: {last_processed_index}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}, politician_name: {config.get('politician_name')}")
         else:
             last_eval_key = None
             logger.info(f"Union pagination complete - processed all {last_processed_index} of {original_bill_ids_count} fetched IDs")

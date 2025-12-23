@@ -430,16 +430,27 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         }
       });
       
-      // Handle politician_role: if undefined or empty array, set to 'both'
-      if (!filters.politician_role || (Array.isArray(filters.politician_role) && filters.politician_role.length === 0)) {
-        filters.politician_role = 'both';
-      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 2) {
-        // If both roles selected, set to 'both'
-        filters.politician_role = 'both';
-      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 1) {
-        // If only one role selected, use that role
-        filters.politician_role = filters.politician_role[0];
+      // Handle politician_role: normalize to array format
+      // - undefined or null -> [] (empty array means 'both' - lambda will handle)
+      // - string 'both' -> [] (empty array means 'both')
+      // - string 'sponsor' -> ['sponsor']
+      // - string 'cosponsor' -> ['cosponsor']
+      // - array -> keep as-is ([] = both, ['sponsor'] = sponsor only, ['cosponsor'] = cosponsor only, ['sponsor', 'cosponsor'] = both)
+      if (filters.politician_role === undefined || filters.politician_role === null) {
+        filters.politician_role = [];
+      } else if (typeof filters.politician_role === 'string') {
+        if (filters.politician_role === 'both') {
+          filters.politician_role = [];
+        } else if (filters.politician_role === 'sponsor' || filters.politician_role === 'cosponsor') {
+          filters.politician_role = [filters.politician_role];
+        } else {
+          // Unknown string value, default to empty array (both)
+          filters.politician_role = [];
+        }
       }
+      // If it's already an array, keep it as-is - lambda will handle empty array as 'both'
+      
+      console.log('🟢 [Tile] Final politician_role (array format):', filters.politician_role);
       
       const searchRequest = {
         filters,
@@ -1642,26 +1653,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
             />
 
-            {/* Bill Title - Multi-select with autocomplete */}
-            <MultiSelectField<string>
-              label="Bill Title"
-              selectedItems={currentSearchParams?.bill_title || []}
-              onItemsChange={(titles) => {
-                setCurrentSearchParams((prev) => ({ ...prev, bill_title: titles }));
-              }}
-              suggestions={[]}
-              onSearch={(_query: string) => {
-                // Note: MultiSelectField expects synchronous function, but autocomplete API is async
-                // For now, return empty array - autocomplete functionality can be added later
-                // TODO: Implement state-based autocomplete suggestions or update MultiSelectField to support async
-                return [];
-              }}
-              renderItem={(title) => title}
-              placeholder="Search bill titles..."
-              allowCustomInput={true}
-              isLoading={false}
-            />
-
             {/* Bill Type - Multi-select */}
             <MultiSelectField<string>
               label="Bill Type"
@@ -1779,17 +1770,32 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                               },
                             }}
                             onClick={() => {
+                              console.log('🔵 [Tile] Politician Role Checkbox Clicked:', {
+                                role: roleKey,
+                                isSelected,
+                                currentPoliticianRole: currentSearchParams?.politician_role,
+                                currentPoliticianRoleType: typeof currentSearchParams?.politician_role,
+                                currentPoliticianRoleIsArray: Array.isArray(currentSearchParams?.politician_role)
+                              });
                               setCurrentSearchParams(prev => {
                                 if (!prev) return prev;
                                 const currentRoles = Array.isArray(prev.politician_role) 
                                   ? prev.politician_role 
                                   : (prev.politician_role && prev.politician_role !== 'both' ? [prev.politician_role] : []);
+                                console.log('🔵 [Tile] Before update - currentRoles:', currentRoles);
                                 if (isSelected) {
                                   const newRoles = currentRoles.filter(r => r !== roleKey);
+                                  console.log('🔵 [Tile] Unselecting - newRoles:', newRoles);
                                   // If no roles selected, it means 'both' (empty array or undefined)
-                                  return { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                  const result = { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                  console.log('🔵 [Tile] After unselect - result.politician_role:', result.politician_role);
+                                  return result;
                                 } else {
-                                  return { ...prev, politician_role: [...currentRoles, roleKey] };
+                                  const newRoles = [...currentRoles, roleKey];
+                                  console.log('🔵 [Tile] Selecting - newRoles:', newRoles);
+                                  const result = { ...prev, politician_role: newRoles };
+                                  console.log('🔵 [Tile] After select - result.politician_role:', result.politician_role);
+                                  return result;
                                 }
                               });
                             }}
@@ -1810,6 +1816,26 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                       })}
                     </Box>
                   </Box>
+
+                  {/* Exact Bill Title - Multi-select with autocomplete */}
+                  <MultiSelectField<string>
+                    label="Exact Bill Title"
+                    selectedItems={currentSearchParams?.bill_title || []}
+                    onItemsChange={(titles) => {
+                      setCurrentSearchParams((prev) => ({ ...prev, bill_title: titles }));
+                    }}
+                    suggestions={[]}
+                    onSearch={(_query: string) => {
+                      // Note: MultiSelectField expects synchronous function, but autocomplete API is async
+                      // For now, return empty array - autocomplete functionality can be added later
+                      // TODO: Implement state-based autocomplete suggestions or update MultiSelectField to support async
+                      return [];
+                    }}
+                    renderItem={(title) => title}
+                    placeholder="Search bill titles..."
+                    allowCustomInput={true}
+                    isLoading={false}
+                  />
 
                   {/* Sponsor Party */}
                   <MultiSelectField<string>

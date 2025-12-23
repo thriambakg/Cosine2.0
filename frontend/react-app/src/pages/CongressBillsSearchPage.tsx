@@ -509,16 +509,27 @@ const CongressBillsSearchPage: React.FC = () => {
         }
       });
       
-      // Handle politician_role: if undefined or empty array, set to 'both'
-      if (!filters.politician_role || (Array.isArray(filters.politician_role) && filters.politician_role.length === 0)) {
-        filters.politician_role = 'both';
-      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 2) {
-        // If both roles selected, set to 'both'
-        filters.politician_role = 'both';
-      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 1) {
-        // If only one role selected, use that role
-        filters.politician_role = filters.politician_role[0];
+      // Handle politician_role: normalize to array format
+      // - undefined or null -> [] (empty array means 'both' - lambda will handle)
+      // - string 'both' -> [] (empty array means 'both')
+      // - string 'sponsor' -> ['sponsor']
+      // - string 'cosponsor' -> ['cosponsor']
+      // - array -> keep as-is ([] = both, ['sponsor'] = sponsor only, ['cosponsor'] = cosponsor only, ['sponsor', 'cosponsor'] = both)
+      if (filters.politician_role === undefined || filters.politician_role === null) {
+        filters.politician_role = [];
+      } else if (typeof filters.politician_role === 'string') {
+        if (filters.politician_role === 'both') {
+          filters.politician_role = [];
+        } else if (filters.politician_role === 'sponsor' || filters.politician_role === 'cosponsor') {
+          filters.politician_role = [filters.politician_role];
+        } else {
+          // Unknown string value, default to empty array (both)
+          filters.politician_role = [];
+        }
       }
+      // If it's already an array, keep it as-is - lambda will handle empty array as 'both'
+      
+      console.log('🟢 [Search] Final politician_role (array format):', filters.politician_role);
 
       // Use default batch size for initial fetch
       const fetchPageSize = 10;
@@ -840,21 +851,6 @@ const CongressBillsSearchPage: React.FC = () => {
                     isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
                   />
 
-                  {/* Bill Title - Free text multi-select with autocomplete */}
-                  <MultiSelectField<string>
-                    label="Bill Title"
-                    selectedItems={searchParams.bill_title || []}
-                    onItemsChange={(titles) => {
-                      setSearchParams((prev) => ({ ...prev, bill_title: titles }));
-                    }}
-                    suggestions={billTitleSuggestions}
-                    onSearch={billTitleSearch}
-                    renderItem={(title) => title}
-                    placeholder="Search bill titles..."
-                    allowCustomInput={true}
-                    isLoading={billTitleLoading}
-                  />
-
                   {/* Bill Type - Dropdown multi-select */}
                   <MultiSelectField<string>
                     label="Bill Type"
@@ -983,16 +979,31 @@ const CongressBillsSearchPage: React.FC = () => {
                                     },
                                   }}
                                   onClick={() => {
+                                    console.log('🔵 Politician Role Checkbox Clicked:', {
+                                      role: roleKey,
+                                      isSelected,
+                                      currentPoliticianRole: searchParams.politician_role,
+                                      currentPoliticianRoleType: typeof searchParams.politician_role,
+                                      currentPoliticianRoleIsArray: Array.isArray(searchParams.politician_role)
+                                    });
                                     setSearchParams(prev => {
                                       const currentRoles = Array.isArray(prev.politician_role) 
                                         ? prev.politician_role 
                                         : (prev.politician_role && prev.politician_role !== 'both' ? [prev.politician_role] : []);
+                                      console.log('🔵 Before update - currentRoles:', currentRoles);
                                       if (isSelected) {
                                         const newRoles = currentRoles.filter(r => r !== roleKey);
+                                        console.log('🔵 Unselecting - newRoles:', newRoles);
                                         // If no roles selected, it means 'both' (empty array or undefined)
-                                        return { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                        const result = { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                        console.log('🔵 After unselect - result.politician_role:', result.politician_role);
+                                        return result;
                                       } else {
-                                        return { ...prev, politician_role: [...currentRoles, roleKey] };
+                                        const newRoles = [...currentRoles, roleKey];
+                                        console.log('🔵 Selecting - newRoles:', newRoles);
+                                        const result = { ...prev, politician_role: newRoles };
+                                        console.log('🔵 After select - result.politician_role:', result.politician_role);
+                                        return result;
                                       }
                                     });
                                   }}
@@ -1013,6 +1024,21 @@ const CongressBillsSearchPage: React.FC = () => {
                             })}
                           </Box>
                         </Box>
+
+                        {/* Exact Bill Title - Free text multi-select with autocomplete */}
+                        <MultiSelectField<string>
+                          label="Exact Bill Title"
+                          selectedItems={searchParams.bill_title || []}
+                          onItemsChange={(titles) => {
+                            setSearchParams((prev) => ({ ...prev, bill_title: titles }));
+                          }}
+                          suggestions={billTitleSuggestions}
+                          onSearch={billTitleSearch}
+                          renderItem={(title) => title}
+                          placeholder="Search bill titles..."
+                          allowCustomInput={true}
+                          isLoading={billTitleLoading}
+                        />
 
                         {/* Sponsor Party - Dropdown multi-select */}
                         <MultiSelectField<string>
