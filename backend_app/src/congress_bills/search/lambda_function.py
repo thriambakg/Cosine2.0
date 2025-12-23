@@ -936,9 +936,17 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 for i in range(0, len(source_bill_ids_batch), batch_size):
                     batch_ids = source_bill_ids_batch[i:i + batch_size]
                     dynamodb_client = boto3.client('dynamodb')
+                    # Include both bill_id (hash key) and search_index_sk (range key)
+                    # For regular bill items, search_index_sk = bill_id
                     request_items = {
                         BILLS_TABLE_NAME: {
-                            'Keys': [{'bill_id': {'S': str(bid)}} for bid in batch_ids]
+                            'Keys': [
+                                {
+                                    'bill_id': {'S': str(bid)},
+                                    'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                                }
+                                for bid in batch_ids
+                            ]
                         }
                     }
                     batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
@@ -1138,9 +1146,17 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         for i in range(0, len(bill_ids), batch_size):
             batch_ids = bill_ids[i:i + batch_size]
             dynamodb_client = boto3.client('dynamodb')
+            # Include both bill_id (hash key) and search_index_sk (range key)
+            # For regular bill items, search_index_sk = bill_id
             request_items = {
                 BILLS_TABLE_NAME: {
-                    'Keys': [{'bill_id': {'S': str(bid)}} for bid in batch_ids]
+                    'Keys': [
+                        {
+                            'bill_id': {'S': str(bid)},
+                            'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                        }
+                        for bid in batch_ids
+                    ]
                 }
             }
             batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
