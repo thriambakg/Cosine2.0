@@ -3844,7 +3844,7 @@ const SECSearchPage: React.FC = () => {
         <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
           All Selected Form Types
           <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontWeight: 'normal' }}>
-            {searchParams.formTypes.length} form type{searchParams.formTypes.length !== 1 ? 's' : ''} selected
+            {(searchParams.formTypes || []).length} form type{(searchParams.formTypes || []).length !== 1 ? 's' : ''} selected
           </Typography>
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
@@ -3867,7 +3867,7 @@ const SECSearchPage: React.FC = () => {
               backgroundColor: '#2563eb',
             },
           }}>
-            {searchParams.formTypes.map((formType, index) => (
+            {(searchParams.formTypes || []).map((formType) => (
               <Box
                 key={formType}
                 sx={{
@@ -3890,9 +3890,9 @@ const SECSearchPage: React.FC = () => {
                   onClick={() => {
                     setSearchParams(prev => ({
                       ...prev,
-                      formTypes: prev.formTypes.filter(ft => ft !== formType),
+                      formTypes: (prev.formTypes || []).filter(ft => ft !== formType),
                     }));
-                    if (searchParams.formTypes.length === 1) {
+                    if ((searchParams.formTypes || []).length === 1) {
                       setShowAllFormTypesDialog(false);
                     }
                   }}

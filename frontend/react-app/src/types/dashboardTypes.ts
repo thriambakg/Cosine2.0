@@ -57,7 +57,7 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'lda_disclosures';
   title: string;
   customTitle?: string; // Custom tile name set by user
   customColor?: string; // Custom tile color (for header/icon)
@@ -71,10 +71,18 @@ export interface UnifiedTile {
   results?: StockResult[]; // For stock_screener tiles
   filters?: NewsFilters; // For news tiles
   articles?: NewsArticle[]; // For news tiles
-  filterSettings?: { // For news tiles - client-side filtering settings
+  filterSettings?: { // For news tiles and LDA tiles - client-side filtering settings
+    // News tile filter settings
     sources?: string[];
     categories?: string[];
     countries?: string[];
+    // LDA tile filter settings
+    registrants?: string[];
+    clients?: string[];
+    lobbyists?: string[];
+    filingTypes?: string[];
+    issueCodes?: string[];
+    states?: string[];
   };
   searchParams?: any; // For politician_trades tiles - keeping flexible for now
   trades?: any[]; // For politician_trades tiles - keeping flexible for now

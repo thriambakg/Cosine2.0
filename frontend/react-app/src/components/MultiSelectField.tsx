@@ -538,7 +538,7 @@ function MultiSelectField<T = string>({
               backgroundColor: '#2563eb',
             },
           }}>
-            {selectedItems.map((item, index) => (
+            {selectedItems.map((item) => (
               <ListItem
                 key={getItemKey(item)}
                 sx={{

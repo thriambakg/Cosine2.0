@@ -3220,7 +3220,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
           All Selected Form Types
           <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontWeight: 'normal' }}>
-            {currentSearchParams.formTypes.length} form type{currentSearchParams.formTypes.length !== 1 ? 's' : ''} selected
+            {(currentSearchParams.formTypes || []).length} form type{(currentSearchParams.formTypes || []).length !== 1 ? 's' : ''} selected
           </Typography>
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
@@ -3243,7 +3243,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               backgroundColor: '#2563eb',
             },
           }}>
-            {currentSearchParams.formTypes.map((formType) => (
+            {(currentSearchParams.formTypes || []).map((formType) => (
               <Box
                 key={formType}
                 sx={{
@@ -3266,9 +3266,9 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                   onClick={() => {
                     setCurrentSearchParams(prev => ({
                       ...prev,
-                      formTypes: prev.formTypes.filter(ft => ft !== formType),
+                      formTypes: (prev.formTypes || []).filter(ft => ft !== formType),
                     }));
-                    if (currentSearchParams.formTypes.length === 1) {
+                    if ((currentSearchParams.formTypes || []).length === 1) {
                       setShowAllFormTypesDialog(false);
                     }
                   }}
