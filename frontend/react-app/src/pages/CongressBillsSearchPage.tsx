@@ -127,10 +127,13 @@ const CongressBillsSearchPage: React.FC = () => {
   // Search state
   const [searchParams, setSearchParams] = useState<CongressBillsSearchFilters>(() => {
     const saved = savedState?.searchParams;
+    // Support both old sponsor_name and new politician_name for backward compatibility
+    const politicianNames = saved?.politician_name || saved?.sponsor_name || [];
     return {
       bill_title: Array.isArray(saved?.bill_title) ? saved.bill_title : [],
       bill_type: Array.isArray(saved?.bill_type) ? saved.bill_type : [],
-      sponsor_name: Array.isArray(saved?.sponsor_name) ? saved.sponsor_name : [],
+      politician_name: Array.isArray(politicianNames) ? politicianNames : [],
+      politician_role: saved?.politician_role ? (Array.isArray(saved.politician_role) ? saved.politician_role : [saved.politician_role]) : undefined, // undefined means 'both'
       introduced_date_from: saved?.introduced_date_from || '',
       introduced_date_to: saved?.introduced_date_to || '',
       congress: Array.isArray(saved?.congress) ? saved.congress : [],
@@ -165,6 +168,7 @@ const CongressBillsSearchPage: React.FC = () => {
     policy_areas: Set<string>;
     congresses: Set<number>;
     bipartisan: Set<number>;
+    politician_roles: Set<string>; // 'sponsor', 'cosponsor', 'both'
   }>(() => {
     const saved = savedState?.selectedFilters;
     if (saved) {
@@ -175,6 +179,7 @@ const CongressBillsSearchPage: React.FC = () => {
         policy_areas: new Set(saved.policy_areas || []),
         congresses: new Set(saved.congresses || []),
         bipartisan: new Set(saved.bipartisan || []),
+        politician_roles: new Set(saved.politician_roles || []),
       };
     }
     return {
@@ -184,6 +189,7 @@ const CongressBillsSearchPage: React.FC = () => {
       policy_areas: new Set(),
       congresses: new Set(),
       bipartisan: new Set(),
+      politician_roles: new Set(),
     };
   });
 
@@ -327,6 +333,9 @@ const CongressBillsSearchPage: React.FC = () => {
       );
     }
 
+    // Note: politician_roles filter is handled server-side via politician_role parameter
+    // This client-side filter is for display purposes only if needed in the future
+
     setCurrentResults(filtered);
     setIsFiltered(
       selectedFilters.bill_types.size > 0 ||
@@ -334,7 +343,8 @@ const CongressBillsSearchPage: React.FC = () => {
       selectedFilters.sponsor_states.size > 0 ||
       selectedFilters.policy_areas.size > 0 ||
       selectedFilters.congresses.size > 0 ||
-      selectedFilters.bipartisan.size > 0
+      selectedFilters.bipartisan.size > 0 ||
+      selectedFilters.politician_roles.size > 0
     );
     setCurrentPage(1);
   }, [allSearchResults, selectedFilters]);
@@ -498,6 +508,17 @@ const CongressBillsSearchPage: React.FC = () => {
           delete filters[key];
         }
       });
+      
+      // Handle politician_role: if undefined or empty array, set to 'both'
+      if (!filters.politician_role || (Array.isArray(filters.politician_role) && filters.politician_role.length === 0)) {
+        filters.politician_role = 'both';
+      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 2) {
+        // If both roles selected, set to 'both'
+        filters.politician_role = 'both';
+      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 1) {
+        // If only one role selected, use that role
+        filters.politician_role = filters.politician_role[0];
+      }
 
       // Use default batch size for initial fetch
       const fetchPageSize = 10;
@@ -524,6 +545,7 @@ const CongressBillsSearchPage: React.FC = () => {
             policy_areas: new Set(),
             congresses: new Set(),
             bipartisan: new Set(),
+            politician_roles: new Set(),
           });
           setIsFiltered(false);
         }
@@ -767,11 +789,11 @@ const CongressBillsSearchPage: React.FC = () => {
               </Box>
               <Collapse in={searchFormExpanded}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {/* Sponsor Name - Free text multi-select with autocomplete */}
+                  {/* Politician Name - Free text multi-select with autocomplete */}
                   <MultiSelectField<string>
-                    label="Sponsor Name"
+                    label="Politician Name"
                     selectedItems={(() => {
-                      const names = Array.isArray(searchParams.sponsor_name) ? searchParams.sponsor_name : (searchParams.sponsor_name ? [searchParams.sponsor_name] : []);
+                      const names = Array.isArray(searchParams.politician_name) ? searchParams.politician_name : (searchParams.politician_name ? [searchParams.politician_name] : []);
                       if (!isPoliticianDataLoaded) return names;
                       
                       // Convert actual names to display format
@@ -780,25 +802,25 @@ const CongressBillsSearchPage: React.FC = () => {
                         return politician ? politician.displayText : name;
                       });
                     })()}
-                    onItemsChange={(sponsors) => {
+                    onItemsChange={(politicians) => {
                       // Extract actual names from display text
-                      const actualNames = sponsors.map(sponsorDisplay => {
-                        const nameMatch = sponsorDisplay.match(/^([^(]+)/);
-                        return nameMatch ? nameMatch[1].trim() : sponsorDisplay;
+                      const actualNames = politicians.map(politicianDisplay => {
+                        const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                        return nameMatch ? nameMatch[1].trim() : politicianDisplay;
                       });
-                      setSearchParams((prev) => ({ ...prev, sponsor_name: actualNames }));
+                      setSearchParams((prev) => ({ ...prev, politician_name: actualNames }));
                     }}
                     suggestions={isPoliticianDataLoaded ? 
                       politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : 
                       []
                     }
                     onSearch={sponsorNameSearch}
-                    renderItem={(sponsorDisplay) => sponsorDisplay}
-                    renderOptionCustom={(sponsorDisplay) => {
+                    renderItem={(politicianDisplay) => politicianDisplay}
+                    renderOptionCustom={(politicianDisplay) => {
                       // Extract the name part for display while keeping full display text
-                      const nameMatch = sponsorDisplay.match(/^([^(]+)/);
-                      const name = nameMatch ? nameMatch[1].trim() : sponsorDisplay;
-                      const details = sponsorDisplay.replace(name, '').trim();
+                      const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                      const name = nameMatch ? nameMatch[1].trim() : politicianDisplay;
+                      const details = politicianDisplay.replace(name, '').trim();
                       return (
                         <Box sx={{ width: '100%' }}>
                           <Typography variant="body2" sx={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem' }}>
@@ -812,8 +834,8 @@ const CongressBillsSearchPage: React.FC = () => {
                         </Box>
                       );
                     }}
-                    getItemKey={(sponsor) => sponsor}
-                    placeholder="Search sponsor names..."
+                    getItemKey={(politician) => politician}
+                    placeholder="Search politician names (sponsor or cosponsor)..."
                     allowCustomInput={false}
                     isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
                   />
@@ -933,6 +955,65 @@ const CongressBillsSearchPage: React.FC = () => {
                     </Box>
                     <Collapse in={advancedSearchExpanded}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {/* Politician Role - Checkbox Multiselect */}
+                        <Box>
+                          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
+                            Politician Role
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            {['Sponsor', 'Cosponsor'].map((role) => {
+                              const roleKey = role.toLowerCase() as 'sponsor' | 'cosponsor';
+                              const currentRoles = Array.isArray(searchParams.politician_role) 
+                                ? searchParams.politician_role 
+                                : (searchParams.politician_role && searchParams.politician_role !== 'both' ? [searchParams.politician_role] : []);
+                              const isSelected = currentRoles.includes(roleKey);
+                              return (
+                                <Box
+                                  key={role}
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    p: 1,
+                                    borderRadius: '4px',
+                                    backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                                    border: isSelected ? '1px solid #3b82f6' : '1px solid #374151',
+                                    cursor: 'pointer',
+                                    '&:hover': {
+                                      backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(55, 65, 81, 0.3)',
+                                    },
+                                  }}
+                                  onClick={() => {
+                                    setSearchParams(prev => {
+                                      const currentRoles = Array.isArray(prev.politician_role) 
+                                        ? prev.politician_role 
+                                        : (prev.politician_role && prev.politician_role !== 'both' ? [prev.politician_role] : []);
+                                      if (isSelected) {
+                                        const newRoles = currentRoles.filter(r => r !== roleKey);
+                                        // If no roles selected, it means 'both' (empty array or undefined)
+                                        return { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                      } else {
+                                        return { ...prev, politician_role: [...currentRoles, roleKey] };
+                                      }
+                                    });
+                                  }}
+                                >
+                                  <Checkbox
+                                    checked={isSelected}
+                                    sx={{
+                                      color: '#9ca3af',
+                                      '&.Mui-checked': { color: '#3b82f6' },
+                                      p: 0.5,
+                                    }}
+                                  />
+                                  <Typography sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
+                                    {role}
+                                  </Typography>
+                                </Box>
+                              );
+                            })}
+                          </Box>
+                        </Box>
+
                         {/* Sponsor Party - Dropdown multi-select */}
                         <MultiSelectField<string>
                           label="Sponsor Party"
@@ -1090,7 +1171,8 @@ const CongressBillsSearchPage: React.FC = () => {
                         setSearchParams({
                           bill_title: [],
                           bill_type: [],
-                          sponsor_name: [],
+                          politician_name: [],
+                          politician_role: undefined, // undefined means 'both'
                           introduced_date_from: '',
                           introduced_date_to: '',
                           policy_area: [],

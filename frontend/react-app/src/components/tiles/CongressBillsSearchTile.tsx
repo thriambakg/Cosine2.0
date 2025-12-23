@@ -139,7 +139,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   searchParams = {
     bill_title: [],
     bill_type: [],
-    sponsor_name: [],
+    politician_name: [],
+    politician_role: undefined, // undefined means 'both'
     introduced_date_from: '',
     introduced_date_to: '',
     congress: [],
@@ -428,6 +429,17 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           delete filters[key];
         }
       });
+      
+      // Handle politician_role: if undefined or empty array, set to 'both'
+      if (!filters.politician_role || (Array.isArray(filters.politician_role) && filters.politician_role.length === 0)) {
+        filters.politician_role = 'both';
+      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 2) {
+        // If both roles selected, set to 'both'
+        filters.politician_role = 'both';
+      } else if (Array.isArray(filters.politician_role) && filters.politician_role.length === 1) {
+        // If only one role selected, use that role
+        filters.politician_role = filters.politician_role[0];
+      }
       
       const searchRequest = {
         filters,
@@ -1583,23 +1595,23 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         </DialogTitle>
         <DialogContent sx={{ p: 3 }}>
           <Box display="flex" flexDirection="column" gap={3} mt={2}>
-            {/* Sponsor Name - Multi-select with autocomplete */}
+            {/* Politician Name - Multi-select with autocomplete */}
             <MultiSelectField<string>
-              label="Sponsor Name"
+              label="Politician Name"
               selectedItems={(() => {
-                const names = Array.isArray(currentSearchParams?.sponsor_name) ? currentSearchParams.sponsor_name : (currentSearchParams?.sponsor_name ? [currentSearchParams.sponsor_name] : []);
+                const names = Array.isArray(currentSearchParams?.politician_name) ? currentSearchParams.politician_name : (currentSearchParams?.politician_name ? [currentSearchParams.politician_name] : []);
                 if (!isPoliticianDataLoaded) return names;
                 return names.map(name => {
                   const politician = politicianSuggestionsService.getAllPoliticians().find(p => p.fullName === name);
                   return politician ? politician.displayText : name;
                 });
               })()}
-              onItemsChange={(sponsors) => {
-                const actualNames = sponsors.map(sponsorDisplay => {
-                  const nameMatch = sponsorDisplay.match(/^([^(]+)/);
-                  return nameMatch ? nameMatch[1].trim() : sponsorDisplay;
+              onItemsChange={(politicians) => {
+                const actualNames = politicians.map(politicianDisplay => {
+                  const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                  return nameMatch ? nameMatch[1].trim() : politicianDisplay;
                 });
-                setCurrentSearchParams((prev) => ({ ...prev, sponsor_name: actualNames }));
+                setCurrentSearchParams((prev) => ({ ...prev, politician_name: actualNames }));
               }}
               suggestions={isPoliticianDataLoaded ? 
                 politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : 
@@ -1739,6 +1751,66 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               </AccordionSummary>
               <AccordionDetails>
                 <Box display="flex" flexDirection="column" gap={2}>
+                  {/* Politician Role - Checkbox Multiselect */}
+                  <Box>
+                    <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
+                      Politician Role
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {['Sponsor', 'Cosponsor'].map((role) => {
+                        const roleKey = role.toLowerCase() as 'sponsor' | 'cosponsor';
+                        const currentRoles = Array.isArray(currentSearchParams?.politician_role) 
+                          ? currentSearchParams.politician_role 
+                          : (currentSearchParams?.politician_role && currentSearchParams.politician_role !== 'both' ? [currentSearchParams.politician_role] : []);
+                        const isSelected = currentRoles.includes(roleKey);
+                        return (
+                          <Box
+                            key={role}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              p: 1,
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid #374151',
+                              cursor: 'pointer',
+                              '&:hover': {
+                                backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(55, 65, 81, 0.3)',
+                              },
+                            }}
+                            onClick={() => {
+                              setCurrentSearchParams(prev => {
+                                if (!prev) return prev;
+                                const currentRoles = Array.isArray(prev.politician_role) 
+                                  ? prev.politician_role 
+                                  : (prev.politician_role && prev.politician_role !== 'both' ? [prev.politician_role] : []);
+                                if (isSelected) {
+                                  const newRoles = currentRoles.filter(r => r !== roleKey);
+                                  // If no roles selected, it means 'both' (empty array or undefined)
+                                  return { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                } else {
+                                  return { ...prev, politician_role: [...currentRoles, roleKey] };
+                                }
+                              });
+                            }}
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              sx={{
+                                color: '#9ca3af',
+                                '&.Mui-checked': { color: '#3b82f6' },
+                                p: 0.5,
+                              }}
+                            />
+                            <Typography sx={{ color: '#ffffff', fontSize: '0.875rem', flex: 1 }}>
+                              {role}
+                            </Typography>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Box>
+
                   {/* Sponsor Party */}
                   <MultiSelectField<string>
                     label="Sponsor Party"

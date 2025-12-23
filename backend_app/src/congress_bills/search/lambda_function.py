@@ -96,8 +96,50 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     Returns:
         True if item matches all filters, False otherwise
     """
-    # Sponsor name filter (OR logic within field)
-    if filters.get('sponsor_name'):
+    # Politician name filter (OR logic within field) - checks both sponsor and cosponsor
+    politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
+    politician_role = filters.get('politician_role', 'both')
+    
+    if politician_name_filter:
+        politician_names = politician_name_filter if isinstance(politician_name_filter, list) else [politician_name_filter]
+        politician_names = [n for n in politician_names if n and str(n).strip()]
+        if politician_names:
+            matches = False
+            for name in politician_names:
+                name_str = str(name).strip()
+                
+                # Check sponsor name
+                if politician_role in ['sponsor', 'both']:
+                    item_sponsor_name = str(item.get('sponsor_full_name') or '').strip()
+                    if item_sponsor_name:
+                        if name_str.lower() in item_sponsor_name.lower() or item_sponsor_name.lower() in name_str.lower():
+                            matches = True
+                            break
+                
+                # Check cosponsor names
+                if politician_role in ['cosponsor', 'both']:
+                    cosponsors_json = item.get('cosponsors')
+                    if cosponsors_json:
+                        try:
+                            import json
+                            cosponsors = json.loads(cosponsors_json) if isinstance(cosponsors_json, str) else cosponsors_json
+                            if isinstance(cosponsors, list):
+                                for cosponsor in cosponsors:
+                                    cosponsor_name = str(cosponsor.get('name') or '').strip()
+                                    if cosponsor_name:
+                                        if name_str.lower() in cosponsor_name.lower() or cosponsor_name.lower() in name_str.lower():
+                                            matches = True
+                                            break
+                                if matches:
+                                    break
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+            
+            if not matches:
+                return False
+    
+    # Legacy sponsor_name filter (for backward compatibility)
+    if not politician_name_filter and filters.get('sponsor_name'):
         sponsor_names = filters['sponsor_name'] if isinstance(filters['sponsor_name'], list) else [filters['sponsor_name']]
         sponsor_names = [n for n in sponsor_names if n and str(n).strip()]
         if sponsor_names:
@@ -224,8 +266,55 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     query_configs = []
     
-    # SponsorNameDateIndex: hash_key=sponsor_full_name, range_key=introduced_date
-    if filters.get('sponsor_name'):
+    # Politician name: searches both sponsor and cosponsor
+    # Support both politician_name (new) and sponsor_name (legacy) for backward compatibility
+    politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
+    politician_role = filters.get('politician_role', 'both')  # 'sponsor', 'cosponsor', or 'both'
+    
+    if politician_name_filter:
+        politician_names = politician_name_filter if isinstance(politician_name_filter, list) else [politician_name_filter]
+        politician_names = [n for n in politician_names if n and str(n).strip()]
+        if politician_names:
+            # For each politician name, create queries for sponsor and/or cosponsor based on politician_role
+            for politician_name in politician_names:
+                politician_name = politician_name.strip()
+                introduced_date = None
+                if filters.get('introduced_date_from'):
+                    introduced_date = filters['introduced_date_from']
+                
+                # Query sponsor GSI if role is 'sponsor' or 'both'
+                if politician_role in ['sponsor', 'both']:
+                    query_configs.append({
+                        'filter_key': 'politician_name',
+                        'politician_name': politician_name,
+                        'role': 'sponsor',
+                        'index_name': 'SponsorNameDateIndex',
+                        'hash_key': 'sponsor_full_name',
+                        'hash_value': politician_name,
+                        'range_key': 'introduced_date' if introduced_date else None,
+                        'range_value': introduced_date,
+                        'range_condition': 'gte' if introduced_date else None
+                    })
+                
+                # Query cosponsor search index if role is 'cosponsor' or 'both'
+                if politician_role in ['cosponsor', 'both']:
+                    query_configs.append({
+                        'filter_key': 'politician_name',
+                        'politician_name': politician_name,
+                        'role': 'cosponsor',
+                        'index_name': None,  # No GSI, uses search index pattern
+                        'query_type': 'search_index',  # Mark as search index query
+                        'search_type': 'COSPONSOR',
+                        'search_value': politician_name,
+                        'hash_key': None,
+                        'hash_value': None,
+                        'range_key': None,
+                        'range_value': None,
+                        'range_condition': None
+                    })
+    
+    # Legacy sponsor_name support (if politician_name not provided)
+    if not politician_name_filter and filters.get('sponsor_name'):
         sponsor_names = filters['sponsor_name'] if isinstance(filters['sponsor_name'], list) else [filters['sponsor_name']]
         sponsor_names = [n for n in sponsor_names if n and str(n).strip()]
         if sponsor_names:
@@ -467,8 +556,8 @@ def query_cosponsor_search_index(
     Query cosponsor search index to get bill IDs.
     
     Structure:
-    - PK = SEARCH#COSPONSOR#<cosponsor_name>
-    - SK = INTRODUCED_DATE#<date>#<bill_id>
+    - bill_id = SEARCH#COSPONSOR#<cosponsor_name> (hash key)
+    - search_index_sk = INTRODUCED_DATE#<date>#<original_bill_id> (range key)
     
     Args:
         cosponsor_name: Name of the cosponsor
@@ -489,13 +578,13 @@ def query_cosponsor_search_index(
         if not normalized_name:
             return [], None
         
-        # Construct PK for search index: SEARCH#COSPONSOR#<name>
-        search_pk = f"SEARCH#COSPONSOR#{normalized_name}"
+        # Construct hash key for search index: SEARCH#COSPONSOR#<name>
+        search_bill_id = f"SEARCH#COSPONSOR#{normalized_name}"
         
         # Build query parameters
-        # SK format: INTRODUCED_DATE#YYYY-MM-DD#<bill_id>
-        # We can use SK range conditions for date filtering
-        key_condition = Key('PK').eq(search_pk)
+        # search_index_sk format: INTRODUCED_DATE#YYYY-MM-DD#<bill_id>
+        # We can use range key conditions for date filtering
+        key_condition = Key('bill_id').eq(search_bill_id)
         
         if date_from or date_to:
             def extract_date(date_str):
@@ -513,17 +602,17 @@ def query_cosponsor_search_index(
             if date_from_part and date_to_part:
                 sk_start = f"INTRODUCED_DATE#{date_from_part}#"
                 sk_end = f"INTRODUCED_DATE#{date_to_part}#~"  # ~ ensures we get all items on that date
-                key_condition = Key('PK').eq(search_pk) & Key('SK').between(sk_start, sk_end)
+                key_condition = Key('bill_id').eq(search_bill_id) & Key('search_index_sk').between(sk_start, sk_end)
             elif date_from_part:
                 sk_start = f"INTRODUCED_DATE#{date_from_part}#"
-                key_condition = Key('PK').eq(search_pk) & Key('SK').gte(sk_start)
+                key_condition = Key('bill_id').eq(search_bill_id) & Key('search_index_sk').gte(sk_start)
             elif date_to_part:
                 sk_end = f"INTRODUCED_DATE#{date_to_part}#~"
-                key_condition = Key('PK').eq(search_pk) & Key('SK').lte(sk_end)
+                key_condition = Key('bill_id').eq(search_bill_id) & Key('search_index_sk').lte(sk_end)
         
         query_params = {
             'KeyConditionExpression': key_condition,
-            'ProjectionExpression': 'entity_pk, SK',
+            'ProjectionExpression': 'entity_bill_id, search_index_sk',
             'Limit': limit
         }
         
@@ -532,12 +621,12 @@ def query_cosponsor_search_index(
         
         response = bills_table.query(**query_params)
         
-        # Extract bill_ids from entity_pk field
+        # Extract bill_ids from entity_bill_id field
         bill_ids = []
         for item in response.get('Items', []):
-            entity_pk = item.get('entity_pk')
-            if entity_pk:
-                bill_ids.append(entity_pk)
+            entity_bill_id = item.get('entity_bill_id')
+            if entity_bill_id:
+                bill_ids.append(entity_bill_id)
         
         last_eval_key = response.get('LastEvaluatedKey')
         
@@ -652,6 +741,40 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Identify which filters can use GSIs
     query_configs = identify_queryable_filters(filters)
     
+    # Special handling for politician_name: if we have both sponsor and cosponsor queries for the same name, union them first
+    politician_role = filters.get('politician_role', 'both')
+    politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
+    
+    if politician_name_filter and politician_role == 'both':
+        # Group queries by politician_name
+        politician_queries = {}
+        other_queries = []
+        
+        for config in query_configs:
+            if config.get('filter_key') == 'politician_name':
+                politician_name = config.get('politician_name')
+                if politician_name not in politician_queries:
+                    politician_queries[politician_name] = []
+                politician_queries[politician_name].append(config)
+            else:
+                other_queries.append(config)
+        
+        # For each politician_name, union sponsor and cosponsor queries
+        if politician_queries:
+            unioned_politician_configs = []
+            for politician_name, configs in politician_queries.items():
+                # Union the results from sponsor and cosponsor queries
+                unioned_politician_configs.append({
+                    'filter_key': 'politician_name',
+                    'politician_name': politician_name,
+                    'role': 'both',
+                    'union_configs': configs,  # Store both sponsor and cosponsor configs
+                    'query_type': 'union_politician'
+                })
+            
+            # Replace politician_name queries with unioned configs
+            query_configs = unioned_politician_configs + other_queries
+    
     # If we have multiple queryable filters, use intersection approach
     if len(query_configs) > 1:
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
@@ -701,7 +824,23 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         
         # Remove the source filter from filters (we've already applied it via GSI)
         remaining_filters = filters.copy()
-        if shortest_key in remaining_filters:
+        # Remove politician_role since it's handled at query level
+        if 'politician_role' in remaining_filters:
+            del remaining_filters['politician_role']
+        
+        # Handle politician_name filter removal (may have format like "politician_name_John Doe")
+        if shortest_key.startswith('politician_name_'):
+            # Extract the politician name from the key
+            politician_name = shortest_key.replace('politician_name_', '', 1)
+            if 'politician_name' in remaining_filters:
+                politician_names = remaining_filters['politician_name'] if isinstance(remaining_filters['politician_name'], list) else [remaining_filters['politician_name']]
+                # Remove the politician name that was used in the query
+                politician_names = [n for n in politician_names if str(n).strip() != politician_name]
+                if politician_names:
+                    remaining_filters['politician_name'] = politician_names
+                else:
+                    del remaining_filters['politician_name']
+        elif shortest_key in remaining_filters:
             # For list filters, we need to handle the first value being used in GSI
             if isinstance(remaining_filters[shortest_key], list):
                 # Remove the first value that was used in GSI, keep others for Python filtering
@@ -723,7 +862,44 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             pagination_round += 1
             
             # Query source GSI/search index with pagination
-            if source_config.get('query_type') == 'search_index':
+            if source_config.get('query_type') == 'union_politician':
+                # Union sponsor and cosponsor queries for pagination
+                union_configs = source_config['union_configs']
+                all_bill_ids_batch = set()
+                new_last_eval_key = None
+                
+                for union_config in union_configs:
+                    if union_config.get('query_type') == 'search_index':
+                        # Cosponsor search index
+                        bill_ids_batch, cosponsor_last_key = query_cosponsor_search_index(
+                            cosponsor_name=union_config['search_value'],
+                            limit=1000,
+                            exclusive_start_key=source_last_eval_key,  # Note: this may need refinement for union pagination
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        all_bill_ids_batch.update(bill_ids_batch)
+                        if cosponsor_last_key:
+                            new_last_eval_key = cosponsor_last_key  # Use last key from any query
+                    else:
+                        # Sponsor GSI
+                        bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                            index_name=union_config['index_name'],
+                            hash_key_name=union_config['hash_key'],
+                            hash_key_value=union_config['hash_value'],
+                            range_key_name=union_config.get('range_key'),
+                            range_key_value=union_config.get('range_value'),
+                            range_key_condition=union_config.get('range_condition'),
+                            limit=1000,
+                            exclusive_start_key=source_last_eval_key,  # Note: this may need refinement for union pagination
+                            get_all=False
+                        )
+                        all_bill_ids_batch.update(bill_ids_batch)
+                        if sponsor_last_key:
+                            new_last_eval_key = sponsor_last_key  # Use last key from any query
+                
+                source_bill_ids_batch = list(all_bill_ids_batch)
+            elif source_config.get('query_type') == 'search_index':
                 # Use search index query for cosponsors
                 source_bill_ids_batch, new_last_eval_key = query_cosponsor_search_index(
                     cosponsor_name=source_config['search_value'],
@@ -896,7 +1072,39 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Use first query config for single GSI/search index query
     config = query_configs[0]
     
-    if config.get('query_type') == 'search_index':
+    if config.get('query_type') == 'union_politician':
+        # Union sponsor and cosponsor queries
+        union_configs = config['union_configs']
+        all_bill_ids = set()
+        
+        for union_config in union_configs:
+            if union_config.get('query_type') == 'search_index':
+                # Cosponsor search index
+                bill_ids_batch, _ = query_cosponsor_search_index(
+                    cosponsor_name=union_config['search_value'],
+                    limit=limit * 5,
+                    date_from=filters.get('introduced_date_from'),
+                    date_to=filters.get('introduced_date_to')
+                )
+                all_bill_ids.update(bill_ids_batch)
+            else:
+                # Sponsor GSI
+                bill_ids_batch, _ = query_gsi_for_bill_ids(
+                    index_name=union_config['index_name'],
+                    hash_key_name=union_config['hash_key'],
+                    hash_key_value=union_config['hash_value'],
+                    range_key_name=union_config.get('range_key'),
+                    range_key_value=union_config.get('range_value'),
+                    range_key_condition=union_config.get('range_condition'),
+                    limit=limit * 5,
+                    get_all=False
+                )
+                all_bill_ids.update(bill_ids_batch)
+        
+        bill_ids = list(all_bill_ids)
+        last_eval_key = None  # Union queries don't support pagination easily
+        index_name = f"PoliticianNameUnion({config['politician_name']})"
+    elif config.get('query_type') == 'search_index':
         # Use search index query for cosponsors
         logger.info(f"Using single cosponsor search index query: {config['search_value']}")
         bill_ids, last_eval_key = query_cosponsor_search_index(
@@ -944,7 +1152,22 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     
     # Apply remaining filters
     remaining_filters = filters.copy()
-    if config['filter_key'] in remaining_filters:
+    # Remove politician_role since it's handled at query level
+    if 'politician_role' in remaining_filters:
+        del remaining_filters['politician_role']
+    
+    # Handle filter removal based on config
+    if config.get('filter_key') == 'politician_name' and config.get('politician_name'):
+        # Remove the specific politician name that was queried
+        politician_name = config['politician_name']
+        if 'politician_name' in remaining_filters:
+            politician_names = remaining_filters['politician_name'] if isinstance(remaining_filters['politician_name'], list) else [remaining_filters['politician_name']]
+            politician_names = [n for n in politician_names if str(n).strip() != politician_name]
+            if politician_names:
+                remaining_filters['politician_name'] = politician_names
+            else:
+                del remaining_filters['politician_name']
+    elif config.get('filter_key') in remaining_filters:
         if isinstance(remaining_filters[config['filter_key']], list):
             remaining_filters[config['filter_key']] = remaining_filters[config['filter_key']][1:]
             if not remaining_filters[config['filter_key']]:
