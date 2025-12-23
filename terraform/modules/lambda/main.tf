@@ -71,5 +71,8 @@ resource "aws_lambda_function" "function" {
 
   layers = var.layers
 
+  # Reserved concurrency (if specified)
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
   tags = var.tags
 }

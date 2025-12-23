@@ -61,3 +61,9 @@ variable "layers" {
   type        = list(string)
   default     = []
 }
+
+variable "reserved_concurrent_executions" {
+  description = "Reserved concurrent executions for the Lambda function (optional)"
+  type        = number
+  default     = null
+}

@@ -1587,9 +1587,10 @@ resource "aws_lambda_function" "chat_agent" {
 # Note: Provisioned concurrency removed for now due to complexity with $LATEST
 # Can be added later using AWS CLI or console after Lambda is deployed
 
-# WebSocket Connection Manager Lambda Function (with SQS and wrapper support)
+# WebSocket Connection Manager Lambda Function
+# Using standard lambda module - WebSocket connections are fast and don't need SQS/wrapper complexity
 module "websocket_connection_lambda" {
-  source = "./modules/lambda-sqs"
+  source = "./modules/lambda"
 
   function_name = "${var.project_name}-websocket-connection-${var.environment}"
   description   = "Lambda function for WebSocket connection management"
@@ -1621,17 +1622,8 @@ module "websocket_connection_lambda" {
     aws_iam_policy.lambda_websocket_policy.arn
   ]
 
-  # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda           = true
-  wrapper_timeout                 = 30
-  sns_topic_name                  = "${var.project_name}-websocket-connection-completion-${var.environment}"
-  response_table_name             = null
-  completion_sns_env_var_name     = "WEBSOCKET_CONNECTION_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers                  = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-  sqs_enable_dlq                  = true
-  sqs_batch_size                  = 1
-  sqs_enable_event_source_mapping = false # Disable SQS event source mapping - WebSocket connections should only be triggered by API Gateway
-  reserved_concurrent_executions  = 20
+  # Reserved concurrency to prevent overwhelming the connection manager
+  reserved_concurrent_executions = 20
 
   tags = var.common_tags
 }
@@ -1650,7 +1642,7 @@ module "websocket_api" {
   api_description = "WebSocket API for real-time chat functionality"
   stage_name      = var.environment
 
-  connection_lambda_arn  = module.websocket_connection_lambda.wrapper_function_arn != null ? module.websocket_connection_lambda.wrapper_function_arn : module.websocket_connection_lambda.function_arn
+  connection_lambda_arn  = module.websocket_connection_lambda.function_arn
   connection_lambda_name = module.websocket_connection_lambda.function_name
   message_lambda_arn     = aws_lambda_function.chat_agent.arn
   message_lambda_name    = aws_lambda_function.chat_agent.function_name
