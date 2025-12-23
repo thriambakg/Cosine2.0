@@ -140,7 +140,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     bill_title: [],
     bill_type: [],
     politician_name: [],
-    politician_role: undefined, // undefined means 'both'
+    politician_role: [],
     introduced_date_from: '',
     introduced_date_to: '',
     congress: [],
@@ -1751,8 +1751,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                       {['Sponsor', 'Cosponsor'].map((role) => {
                         const roleKey = role.toLowerCase() as 'sponsor' | 'cosponsor';
                         const currentRoles = Array.isArray(currentSearchParams?.politician_role) 
-                          ? currentSearchParams.politician_role 
-                          : (currentSearchParams?.politician_role && currentSearchParams.politician_role !== 'both' ? [currentSearchParams.politician_role] : []);
+                          ? currentSearchParams.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
+                          : (currentSearchParams?.politician_role && currentSearchParams.politician_role !== 'both' && (currentSearchParams.politician_role === 'sponsor' || currentSearchParams.politician_role === 'cosponsor') ? [currentSearchParams.politician_role] : []);
                         const isSelected = currentRoles.includes(roleKey);
                         return (
                           <Box
@@ -1780,14 +1780,13 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                               setCurrentSearchParams(prev => {
                                 if (!prev) return prev;
                                 const currentRoles = Array.isArray(prev.politician_role) 
-                                  ? prev.politician_role 
-                                  : (prev.politician_role && prev.politician_role !== 'both' ? [prev.politician_role] : []);
+                                  ? prev.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
+                                  : (prev.politician_role && prev.politician_role !== 'both' && (prev.politician_role === 'sponsor' || prev.politician_role === 'cosponsor') ? [prev.politician_role] : []);
                                 console.log('🔵 [Tile] Before update - currentRoles:', currentRoles);
                                 if (isSelected) {
                                   const newRoles = currentRoles.filter(r => r !== roleKey);
                                   console.log('🔵 [Tile] Unselecting - newRoles:', newRoles);
-                                  // If no roles selected, it means 'both' (empty array or undefined)
-                                  const result = { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                  const result = { ...prev, politician_role: newRoles };
                                   console.log('🔵 [Tile] After unselect - result.politician_role:', result.politician_role);
                                   return result;
                                 } else {

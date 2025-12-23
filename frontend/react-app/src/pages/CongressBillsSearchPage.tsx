@@ -133,7 +133,7 @@ const CongressBillsSearchPage: React.FC = () => {
       bill_title: Array.isArray(saved?.bill_title) ? saved.bill_title : [],
       bill_type: Array.isArray(saved?.bill_type) ? saved.bill_type : [],
       politician_name: Array.isArray(politicianNames) ? politicianNames : [],
-      politician_role: saved?.politician_role ? (Array.isArray(saved.politician_role) ? saved.politician_role : [saved.politician_role]) : undefined, // undefined means 'both'
+      politician_role: saved?.politician_role ? (Array.isArray(saved.politician_role) ? saved.politician_role.filter(r => r !== 'both') : (saved.politician_role !== 'both' ? [saved.politician_role] : [])) : [],
       introduced_date_from: saved?.introduced_date_from || '',
       introduced_date_to: saved?.introduced_date_to || '',
       congress: Array.isArray(saved?.congress) ? saved.congress : [],
@@ -960,8 +960,8 @@ const CongressBillsSearchPage: React.FC = () => {
                             {['Sponsor', 'Cosponsor'].map((role) => {
                               const roleKey = role.toLowerCase() as 'sponsor' | 'cosponsor';
                               const currentRoles = Array.isArray(searchParams.politician_role) 
-                                ? searchParams.politician_role 
-                                : (searchParams.politician_role && searchParams.politician_role !== 'both' ? [searchParams.politician_role] : []);
+                                ? searchParams.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
+                                : (searchParams.politician_role && searchParams.politician_role !== 'both' && (searchParams.politician_role === 'sponsor' || searchParams.politician_role === 'cosponsor') ? [searchParams.politician_role] : []);
                               const isSelected = currentRoles.includes(roleKey);
                               return (
                                 <Box
@@ -988,14 +988,13 @@ const CongressBillsSearchPage: React.FC = () => {
                                     });
                                     setSearchParams(prev => {
                                       const currentRoles = Array.isArray(prev.politician_role) 
-                                        ? prev.politician_role 
-                                        : (prev.politician_role && prev.politician_role !== 'both' ? [prev.politician_role] : []);
+                                        ? prev.politician_role.filter(r => r !== 'both' && (r === 'sponsor' || r === 'cosponsor'))
+                                        : (prev.politician_role && prev.politician_role !== 'both' && (prev.politician_role === 'sponsor' || prev.politician_role === 'cosponsor') ? [prev.politician_role] : []);
                                       console.log('🔵 Before update - currentRoles:', currentRoles);
                                       if (isSelected) {
                                         const newRoles = currentRoles.filter(r => r !== roleKey);
                                         console.log('🔵 Unselecting - newRoles:', newRoles);
-                                        // If no roles selected, it means 'both' (empty array or undefined)
-                                        const result = { ...prev, politician_role: newRoles.length > 0 ? newRoles : undefined };
+                                        const result = { ...prev, politician_role: newRoles };
                                         console.log('🔵 After unselect - result.politician_role:', result.politician_role);
                                         return result;
                                       } else {
@@ -1198,7 +1197,7 @@ const CongressBillsSearchPage: React.FC = () => {
                           bill_title: [],
                           bill_type: [],
                           politician_name: [],
-                          politician_role: undefined, // undefined means 'both'
+                          politician_role: [],
                           introduced_date_from: '',
                           introduced_date_to: '',
                           policy_area: [],
