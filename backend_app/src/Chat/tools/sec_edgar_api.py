@@ -416,27 +416,53 @@ def download_filing_pdf(cik: str, accession_number: str, document_name: str,
                 if not bucket_name or not user_id or not session_id:
                     return "Error: Missing environment variables for S3 upload"
                 
-                # Generate S3 key for agent-files folder
+                # Generate filename for agent-files folder
                 timestamp = int(time.time())
-                s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{timestamp}_{document_name}"
+                filename = f"{timestamp}_{document_name}"
                 
-                # Upload to S3
-                s3_client = boto3.client('s3')
-                s3_client.put_object(
-                    Bucket=bucket_name,
-                    Key=s3_key,
-                    Body=content,
-                    ContentType='application/pdf',
-                    Metadata={
-                        'source': 'sec_edgar',
-                        'cik': cik_padded,
-                        'accession_number': accession_number,
-                        'document_name': document_name,
-                        'download_timestamp': str(timestamp)
-                    }
-                )
-                
-                s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+                # Use AgentFilesHelper if available (preferred method)
+                try:
+                    from utils.agent_files_helper import AgentFilesHelper
+                    if AgentFilesHelper:
+                        result_helper = AgentFilesHelper.upload_file_and_update_session(
+                            user_id=user_id,
+                            session_id=session_id,
+                            file_bytes=content,
+                            filename=filename,
+                            content_type='application/pdf',
+                            file_metadata={
+                                'source': 'sec_edgar',
+                                'cik': cik_padded,
+                                'accession_number': accession_number,
+                                'document_name': document_name,
+                                'download_timestamp': str(timestamp)
+                            }
+                        )
+                        s3_key = result_helper['s3_key']
+                        s3_url = result_helper['file_metadata']['s3_url']
+                        logger.info(f"Successfully uploaded SEC filing and updated session: {s3_key}")
+                    else:
+                        raise ImportError("AgentFilesHelper not available")
+                except (ImportError, Exception) as helper_error:
+                    # Fallback: Direct S3 upload
+                    logger.warning(f"AgentFilesHelper failed, using direct S3 upload: {str(helper_error)}")
+                    s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
+                    s3_client = boto3.client('s3')
+                    s3_client.put_object(
+                        Bucket=bucket_name,
+                        Key=s3_key,
+                        Body=content,
+                        ContentType='application/pdf',
+                        Metadata={
+                            'source': 'sec_edgar',
+                            'cik': cik_padded,
+                            'accession_number': accession_number,
+                            'document_name': document_name,
+                            'download_timestamp': str(timestamp)
+                        }
+                    )
+                    s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+                    logger.warning("Session variables not updated - AgentFilesHelper not available")
                 
                 result = f"✅ Successfully downloaded and saved SEC filing to S3:\n\n"
                 result += f"Document: {document_name}\n"

@@ -16,6 +16,13 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+# Import agent files helper
+try:
+    from utils.agent_files_helper import AgentFilesHelper
+except ImportError:
+    # Fallback for local development
+    AgentFilesHelper = None
+
 # Import required libraries
 try:
     import pandas as pd
@@ -614,9 +621,8 @@ class ExcelGenerator:
         return output.read()
     
     def upload_to_s3(self, excel_bytes: bytes, filename: str) -> str:
-        """Upload Excel file to S3"""
+        """Upload Excel file to S3 and update session_variables"""
         try:
-            bucket_name = self._get_bucket_name()
             user_id = self._get_user_id()
             session_id = self._get_session_id()
             
@@ -624,6 +630,39 @@ class ExcelGenerator:
             if not filename.endswith('.xlsx'):
                 filename = f"{filename}.xlsx"
             
+            # Use AgentFilesHelper if available (preferred method)
+            if AgentFilesHelper:
+                try:
+                    result = AgentFilesHelper.upload_file_and_update_session(
+                        user_id=user_id,
+                        session_id=session_id,
+                        file_bytes=excel_bytes,
+                        filename=filename,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        file_metadata={
+                            'file_type': 'xlsx',
+                            'generated_by': 'excel_generator_tool'
+                        }
+                    )
+                    
+                    logger.info(f"Successfully uploaded Excel file and updated session: {result['s3_key']}")
+                    agent_logger.info(f"Excel file generated and session updated: {result['s3_key']}")
+                    
+                    return json.dumps({
+                        'status': 'success',
+                        'message': f'Excel file generated successfully: {filename}',
+                        'filename': filename,
+                        's3_key': result['s3_key'],
+                        's3_url': result['file_metadata']['s3_url'],
+                        'file_size': len(excel_bytes),
+                        'file_metadata': result['file_metadata']
+                    })
+                except Exception as helper_error:
+                    logger.warning(f"AgentFilesHelper failed, falling back to direct S3 upload: {str(helper_error)}")
+                    # Fall through to direct S3 upload
+            
+            # Fallback: Direct S3 upload (if AgentFilesHelper not available)
+            bucket_name = self._get_bucket_name()
             s3_key = f"users/{user_id}/sessions/{session_id}/agent-files/{filename}"
             
             # Upload to S3
@@ -642,7 +681,8 @@ class ExcelGenerator:
                 }
             )
             
-            logger.info(f"Successfully uploaded Excel file: {s3_key}")
+            logger.info(f"Successfully uploaded Excel file (direct upload): {s3_key}")
+            logger.warning("Session variables not updated - AgentFilesHelper not available")
             
             return json.dumps({
                 'status': 'success',

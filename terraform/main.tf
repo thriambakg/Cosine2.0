@@ -1570,7 +1570,7 @@ resource "aws_lambda_function" "chat_agent" {
       FILE_RETURN_LAMBDA_NAME = module.file_return_lambda.function_name
 
       # Agent Files Processor Lambda Function Name for direct invocation
-      AGENT_FILES_PROCESSOR_FUNCTION_NAME = module.agent_files_processor_lambda.function_name
+      # AGENT_FILES_PROCESSOR_FUNCTION_NAME removed - functionality moved to chat_agent utils
 
       # WebSocket API Gateway endpoint for direct message delivery
       # Note: These are set via data source lookup at runtime to avoid circular dependency
@@ -2194,58 +2194,10 @@ module "news_search_lambda" {
 # File Upload Lambda Function - REMOVED
 # Functionality consolidated into chat_agent container
 
-# Agent Files Processor Lambda Function (with SQS and wrapper support)
-module "agent_files_processor_lambda" {
-  source = "./modules/lambda-sqs"
-
-  function_name = "${var.project_name}-agent-files-processor-${var.environment}"
-  description   = "Lambda function for processing agent files and updating session_variables"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 30
-  memory_size   = 512
-
-  # Source directory
-  source_dir = "../backend_app/src/agent_files_processor/app"
-
-  # Environment variables
-  environment_variables = {
-    ENVIRONMENT              = var.environment
-    LOG_LEVEL                = var.environment == "development" ? "DEBUG" : "INFO"
-    CHAT_FILES_BUCKET_NAME   = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
-    CHAT_SESSIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
-    # WEBSOCKET_PROCESSOR_FUNCTION_NAME removed to avoid circular dependency with chat_agent
-    # The agent_files_processor can construct the function name at runtime using the standard pattern:
-    # "${project_name}-chat-agent-${environment}"
-    PROJECT_NAME = var.project_name
-  }
-
-  # Attach core layer only
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn
-  ]
-
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
-  ]
-
-  # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda          = true
-  wrapper_timeout                = 30
-  sns_topic_name                 = "${var.project_name}-agent-files-processor-completion-${var.environment}"
-  response_table_name            = null
-  completion_sns_env_var_name    = "AGENT_FILES_PROCESSOR_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
-  sqs_enable_dlq                 = true
-  sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
-
-  tags = var.common_tags
-}
+# Agent Files Processor Lambda Function - DEPRECATED
+# Functionality has been moved to Chat/utils/agent_files_helper.py
+# The Lambda code remains in backend_app/src/agent_files_processor/app for reference
+# but is no longer deployed via Terraform
 
 # ============================================================================
 # SNS Topic for SEC Search Progress Updates

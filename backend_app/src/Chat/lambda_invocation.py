@@ -14,6 +14,13 @@ from io import BytesIO
 # Configure logging
 logger = logging.getLogger()
 
+# Import agent files helper
+try:
+    from utils.agent_files_helper import AgentFilesHelper
+except ImportError:
+    # Fallback for local development
+    AgentFilesHelper = None
+
 def upload_file_and_notify(
     content: Union[str, bytes],
     filename: str,
@@ -149,17 +156,40 @@ def upload_file_and_notify(
             'generated_by': 'agent'
         }
         
-        # Notify agent files processor if this is an agent file
+        # Update session_variables if this is an agent file
         if folder == "agent-files":
-            success = invoke_agent_files_processor(
-                s3_bucket_name=bucket_name,
-                s3_key=s3_key,
-                file_size=len(file_content),
-                file_metadata=file_metadata
-            )
-            
-            if not success:
-                logger.warning(f"File uploaded but failed to notify processor: {s3_key}")
+            if AgentFilesHelper:
+                try:
+                    # Use AgentFilesHelper to update session (file already uploaded)
+                    AgentFilesHelper.update_session_for_existing_file(
+                        user_id=user_id,
+                        session_id=session_id,
+                        s3_key=s3_key,
+                        filename=filename,
+                        file_metadata=file_metadata
+                    )
+                    logger.info(f"Successfully updated session_variables for file: {s3_key}")
+                except Exception as helper_error:
+                    logger.warning(f"File uploaded but failed to update session: {str(helper_error)}")
+                    # Fallback to old Lambda invocation method
+                    success = invoke_agent_files_processor(
+                        s3_bucket_name=bucket_name,
+                        s3_key=s3_key,
+                        file_size=len(file_content),
+                        file_metadata=file_metadata
+                    )
+                    if not success:
+                        logger.warning(f"File uploaded but failed to notify processor: {s3_key}")
+            else:
+                # Fallback to old Lambda invocation method if helper not available
+                success = invoke_agent_files_processor(
+                    s3_bucket_name=bucket_name,
+                    s3_key=s3_key,
+                    file_size=len(file_content),
+                    file_metadata=file_metadata
+                )
+                if not success:
+                    logger.warning(f"File uploaded but failed to notify processor: {s3_key}")
         
         return f"✅ Successfully uploaded file '{filename}' to {folder} folder. The file will appear in the file menu."
         
