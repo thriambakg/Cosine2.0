@@ -749,6 +749,8 @@ def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: 
         'KeyConditionExpression': Key(hash_key_name).eq(hash_key_value),
         'Limit': limit,
         'ProjectionExpression': 'bill_id'  # Only need bill_id from KEYS_ONLY GSI
+        # Note: Cannot use FilterExpression on is_search_index here because GSIs don't project it
+        # Search index items will be filtered out after BatchGetItem using is_search_index_item()
     }
     
     # Add range key condition if provided
@@ -1433,7 +1435,8 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # Build scan parameters
         scan_limit = max(limit * 10, 1000)  # Scan more items to account for potential filtering
         params = {
-            'Limit': scan_limit
+            'Limit': scan_limit,
+            'FilterExpression': Attr('is_search_index').not_exists()  # Exclude search index items
         }
         
         # Only use last_evaluated_key if it's a valid DynamoDB key format (not a custom format like union_offset)

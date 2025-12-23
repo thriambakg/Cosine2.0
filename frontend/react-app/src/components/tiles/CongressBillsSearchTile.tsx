@@ -66,6 +66,9 @@ const US_STATES = [
 // Parties
 const PARTIES = ['R', 'D', 'I'];
 
+// Minimum date for introduced date (January 3, 2025)
+const MIN_INTRODUCED_DATE = '2025-01-03';
+
 // Bipartisan options
 const BIPARTISAN_OPTIONS = [
   { value: 1, label: 'Bipartisan' },
@@ -1694,12 +1697,20 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               type="date"
               value={currentSearchParams?.introduced_date_from || ''}
               onChange={(e) => {
+                let dateValue = e.target.value || undefined;
+                // Validate: if date is before minimum, default to minimum
+                if (dateValue && dateValue < MIN_INTRODUCED_DATE) {
+                  dateValue = MIN_INTRODUCED_DATE;
+                }
                 setCurrentSearchParams((prev) => ({
                   ...prev,
-                  introduced_date_from: e.target.value || undefined,
+                  introduced_date_from: dateValue,
                 }));
               }}
               InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: MIN_INTRODUCED_DATE,
+              }}
               fullWidth
               sx={{
                 '& .MuiOutlinedInput-root': {

@@ -57,6 +57,9 @@ import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { securitySuggestionsServiceV2 } from '../../services/securitySuggestionsV2';
 
+// Minimum date for date filters (January 1, 2025)
+const MIN_DATE = '2025-01-01';
+
 interface PoliticianTradesSearchTileProps {
   id: string;
   size?: { width: number; height: number };
@@ -118,7 +121,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   isSelected = false,
   onSelectionChange,
   searchParams = {
-    dateFrom: '2020-01-01',
+    dateFrom: MIN_DATE,
     dateTo: new Date().toISOString().split('T')[0],
     politicianName: [],
     party: [],
@@ -1185,8 +1188,27 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               label="From Date"
               type="date"
               value={currentSearchParams.dateFrom || ''}
-              onChange={(e) => setCurrentSearchParams(prev => ({ ...prev, dateFrom: e.target.value }))}
+              onChange={(e) => {
+                let dateValue = e.target.value || undefined;
+                // Validate: if date is before minimum, default to minimum
+                if (dateValue && dateValue < MIN_DATE) {
+                  dateValue = MIN_DATE;
+                }
+                setCurrentSearchParams(prev => ({ ...prev, dateFrom: dateValue }));
+              }}
+              onBlur={(e) => {
+                // Additional validation on blur to ensure date is not before minimum
+                const dateValue = e.target.value;
+                if (dateValue && dateValue < MIN_DATE) {
+                  setCurrentSearchParams(prev => ({ ...prev, dateFrom: MIN_DATE }));
+                }
+              }}
               InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: MIN_DATE,
+                max: new Date().toISOString().split('T')[0],
+                step: 1, // Ensure day-by-day selection
+              }}
               size="small"
               sx={{
                 '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
@@ -1197,8 +1219,27 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               label="To Date"
               type="date"
               value={currentSearchParams.dateTo || ''}
-              onChange={(e) => setCurrentSearchParams(prev => ({ ...prev, dateTo: e.target.value }))}
+              onChange={(e) => {
+                let dateValue = e.target.value || undefined;
+                // Validate: if date is before minimum, default to minimum
+                if (dateValue && dateValue < MIN_DATE) {
+                  dateValue = MIN_DATE;
+                }
+                setCurrentSearchParams(prev => ({ ...prev, dateTo: dateValue }));
+              }}
+              onBlur={(e) => {
+                // Additional validation on blur to ensure date is not before minimum
+                const dateValue = e.target.value;
+                if (dateValue && dateValue < MIN_DATE) {
+                  setCurrentSearchParams(prev => ({ ...prev, dateTo: MIN_DATE }));
+                }
+              }}
               InputLabelProps={{ shrink: true }}
+              inputProps={{
+                min: MIN_DATE,
+                max: new Date().toISOString().split('T')[0],
+                step: 1, // Ensure day-by-day selection
+              }}
               size="small"
               sx={{
                 '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },

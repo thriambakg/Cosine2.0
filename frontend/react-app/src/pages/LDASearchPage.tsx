@@ -48,6 +48,9 @@ import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutoc
 import MultiSelectField from '../components/MultiSelectField';
 import { useAuth } from '../contexts/AuthContext';
 import { useGlobalChat } from '../contexts/GlobalChatContext';
+
+// Minimum date for date filters (January 1, 2000)
+const MIN_DATE = '2000-01-01';
 import { addLDAFilingToContext, addMultipleLDAFilingsToContext } from '../components/tiles/common/contextManager';
 
 // Custom styled components
@@ -859,8 +862,18 @@ const LDASearchPage: React.FC = () => {
                       label="Date From"
                       type="date"
                       value={searchParams.date_from || ''}
-                      onChange={(e) => setSearchParams(prev => ({ ...prev, date_from: e.target.value || undefined }))}
+                      onChange={(e) => {
+                        let dateValue = e.target.value || undefined;
+                        // Validate: if date is before minimum, default to minimum
+                        if (dateValue && dateValue < MIN_DATE) {
+                          dateValue = MIN_DATE;
+                        }
+                        setSearchParams(prev => ({ ...prev, date_from: dateValue }));
+                      }}
                       InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: MIN_DATE,
+                      }}
                       fullWidth
                       sx={{
                         '& .MuiOutlinedInput-root': {
@@ -877,8 +890,18 @@ const LDASearchPage: React.FC = () => {
                       label="Date To"
                       type="date"
                       value={searchParams.date_to || ''}
-                      onChange={(e) => setSearchParams(prev => ({ ...prev, date_to: e.target.value || undefined }))}
+                      onChange={(e) => {
+                        let dateValue = e.target.value || undefined;
+                        // Validate: if date is before minimum, default to minimum
+                        if (dateValue && dateValue < MIN_DATE) {
+                          dateValue = MIN_DATE;
+                        }
+                        setSearchParams(prev => ({ ...prev, date_to: dateValue }));
+                      }}
                       InputLabelProps={{ shrink: true }}
+                      inputProps={{
+                        min: MIN_DATE,
+                      }}
                       fullWidth
                       sx={{
                         '& .MuiOutlinedInput-root': {

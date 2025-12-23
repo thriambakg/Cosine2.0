@@ -48,6 +48,9 @@ import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 
+// Minimum date for date filters (January 1, 2025)
+const MIN_DATE = '2025-01-01';
+
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
   const safeSx = sx && typeof sx === 'object' ? sx : {};
@@ -144,7 +147,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
   // Search state
   const [searchParams, setSearchParams] = useState<PoliticianTradesSearchParams>(
     savedState?.searchParams || {
-      dateFrom: '2020-01-01',
+      dateFrom: MIN_DATE,
       dateTo: new Date().toISOString().split('T')[0],
       // Initialize all search parameter arrays as empty
       politicianName: [],
@@ -1097,11 +1100,26 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 label="Transaction Date From"
                 type="date"
                 value={searchParams.dateFrom || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
+                onChange={(e) => {
+                  let dateValue = e.target.value || undefined;
+                  // Validate: if date is before minimum, default to minimum
+                  if (dateValue && dateValue < MIN_DATE) {
+                    dateValue = MIN_DATE;
+                  }
+                  setSearchParams(prev => ({ ...prev, dateFrom: dateValue }));
+                }}
+                onBlur={(e) => {
+                  // Additional validation on blur to ensure date is not before minimum
+                  const dateValue = e.target.value;
+                  if (dateValue && dateValue < MIN_DATE) {
+                    setSearchParams(prev => ({ ...prev, dateFrom: MIN_DATE }));
+                  }
+                }}
                 InputLabelProps={{ shrink: true }}
                 inputProps={{
-                  min: '2001-01-01',
+                  min: MIN_DATE,
                   max: new Date().toISOString().split('T')[0],
+                  step: 1, // Ensure day-by-day selection
                 }}
                 variant="outlined"
                 sx={{
@@ -1119,11 +1137,26 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 label="Transaction Date To"
                 type="date"
                 value={searchParams.dateTo || ''}
-                onChange={(e) => setSearchParams(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
+                onChange={(e) => {
+                  let dateValue = e.target.value || undefined;
+                  // Validate: if date is before minimum, default to minimum
+                  if (dateValue && dateValue < MIN_DATE) {
+                    dateValue = MIN_DATE;
+                  }
+                  setSearchParams(prev => ({ ...prev, dateTo: dateValue }));
+                }}
+                onBlur={(e) => {
+                  // Additional validation on blur to ensure date is not before minimum
+                  const dateValue = e.target.value;
+                  if (dateValue && dateValue < MIN_DATE) {
+                    setSearchParams(prev => ({ ...prev, dateTo: MIN_DATE }));
+                  }
+                }}
                 InputLabelProps={{ shrink: true }}
                 inputProps={{
-                  min: '2001-01-01',
+                  min: MIN_DATE,
                   max: new Date().toISOString().split('T')[0],
+                  step: 1, // Ensure day-by-day selection
                 }}
                 variant="outlined"
                 sx={{
@@ -1493,11 +1526,26 @@ const PoliticianTradesSearchPage: React.FC = () => {
                             label="Filing Date From"
                             type="date"
                             value={searchParams.filingDateFrom || ''}
-                            onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateFrom: e.target.value || undefined }))}
+                            onChange={(e) => {
+                              let dateValue = e.target.value || undefined;
+                              // Validate: if date is before minimum, default to minimum
+                              if (dateValue && dateValue < MIN_DATE) {
+                                dateValue = MIN_DATE;
+                              }
+                              setSearchParams(prev => ({ ...prev, filingDateFrom: dateValue }));
+                            }}
+                            onBlur={(e) => {
+                              // Additional validation on blur to ensure date is not before minimum
+                              const dateValue = e.target.value;
+                              if (dateValue && dateValue < MIN_DATE) {
+                                setSearchParams(prev => ({ ...prev, filingDateFrom: MIN_DATE }));
+                              }
+                            }}
                             InputLabelProps={{ shrink: true }}
                             inputProps={{
-                              min: '2001-01-01',
+                              min: MIN_DATE,
                               max: new Date().toISOString().split('T')[0],
+                              step: 1, // Ensure day-by-day selection
                             }}
                             variant="outlined"
                             sx={{
@@ -1515,11 +1563,26 @@ const PoliticianTradesSearchPage: React.FC = () => {
                             label="Filing Date To"
                             type="date"
                             value={searchParams.filingDateTo || ''}
-                            onChange={(e) => setSearchParams(prev => ({ ...prev, filingDateTo: e.target.value || undefined }))}
+                            onChange={(e) => {
+                              let dateValue = e.target.value || undefined;
+                              // Validate: if date is before minimum, default to minimum
+                              if (dateValue && dateValue < MIN_DATE) {
+                                dateValue = MIN_DATE;
+                              }
+                              setSearchParams(prev => ({ ...prev, filingDateTo: dateValue }));
+                            }}
+                            onBlur={(e) => {
+                              // Additional validation on blur to ensure date is not before minimum
+                              const dateValue = e.target.value;
+                              if (dateValue && dateValue < MIN_DATE) {
+                                setSearchParams(prev => ({ ...prev, filingDateTo: MIN_DATE }));
+                              }
+                            }}
                             InputLabelProps={{ shrink: true }}
                             inputProps={{
-                              min: '2001-01-01',
+                              min: MIN_DATE,
                               max: new Date().toISOString().split('T')[0],
+                              step: 1, // Ensure day-by-day selection
                             }}
                             variant="outlined"
                             sx={{

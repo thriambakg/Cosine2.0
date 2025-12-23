@@ -48,6 +48,9 @@ import {
 } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, getIconByName, getDefaultIconForTileType } from './common';
 import { addLDAFilingToContext, addMultipleLDAFilingsToContext } from './common/contextManager';
+
+// Minimum date for date filters (January 1, 2000)
+const MIN_DATE = '2000-01-01';
 import MultiSelectField from '../MultiSelectField';
 import { Collapse } from '@mui/material';
 import { KeyboardArrowDown as KeyboardArrowDownIcon, KeyboardArrowUp as KeyboardArrowUpIcon, Download as DownloadIcon } from '@mui/icons-material';
@@ -2145,8 +2148,18 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                     label="Date From"
                     type="date"
                     value={currentSearchParams.date_from || ''}
-                    onChange={(e) => setCurrentSearchParams(prev => ({ ...prev, date_from: e.target.value || undefined }))}
+                    onChange={(e) => {
+                      let dateValue = e.target.value || undefined;
+                      // Validate: if date is before minimum, default to minimum
+                      if (dateValue && dateValue < MIN_DATE) {
+                        dateValue = MIN_DATE;
+                      }
+                      setCurrentSearchParams(prev => ({ ...prev, date_from: dateValue }));
+                    }}
                     InputLabelProps={{ shrink: true }}
+                    inputProps={{
+                      min: MIN_DATE,
+                    }}
                     size="small"
                     sx={{
                       '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
@@ -2157,8 +2170,18 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                     label="Date To"
                     type="date"
                     value={currentSearchParams.date_to || ''}
-                    onChange={(e) => setCurrentSearchParams(prev => ({ ...prev, date_to: e.target.value || undefined }))}
+                    onChange={(e) => {
+                      let dateValue = e.target.value || undefined;
+                      // Validate: if date is before minimum, default to minimum
+                      if (dateValue && dateValue < MIN_DATE) {
+                        dateValue = MIN_DATE;
+                      }
+                      setCurrentSearchParams(prev => ({ ...prev, date_to: dateValue }));
+                    }}
                     InputLabelProps={{ shrink: true }}
+                    inputProps={{
+                      min: MIN_DATE,
+                    }}
                     size="small"
                     sx={{
                       '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
