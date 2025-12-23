@@ -399,28 +399,45 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     
                     # Publish failure notification
                     if completion_sns_topic:
-                        sns_client.publish(
-                            TopicArn=completion_sns_topic,
-                            Message=json.dumps({
-                                'request_id': request_id,
-                                'status': 'failed',
-                                'error': str(e)
-                            }),
-                            MessageAttributes={
-                                'request_id': {
-                                    'DataType': 'String',
-                                    'StringValue': request_id
+                        try:
+                            sns_client.publish(
+                                TopicArn=completion_sns_topic,
+                                Message=json.dumps({
+                                    'request_id': request_id,
+                                    'status': 'failed',
+                                    'error': str(e)
+                                }),
+                                MessageAttributes={
+                                    'request_id': {
+                                        'DataType': 'String',
+                                        'StringValue': request_id
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        except Exception as sns_error:
+                            logger.error(f"❌ Failed to publish SNS notification: {str(sns_error)}")
                     
-                    raise
+                    # Return error response with CORS headers instead of raising
+                    return {
+                        'statusCode': 500,
+                        'headers': get_cors_headers(),
+                        'body': json.dumps({'error': 'Internal server error'})
+                    }
             except Exception as e:
                 logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
                 return {
                     'statusCode': 500,
+                    'headers': get_cors_headers(),
                     'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
                 }
     
     # Regular API Gateway or direct invocation
-    return process_file_return_request(event, context)
+    try:
+        return process_file_return_request(event, context)
+    except Exception as e:
+        logger.error(f"❌ Unhandled error in lambda_handler: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': get_cors_headers(),
+            'body': json.dumps({'error': 'Internal server error'})
+        }
