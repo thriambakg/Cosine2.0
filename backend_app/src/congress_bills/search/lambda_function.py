@@ -932,7 +932,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             # Fetch full items for this batch
             items_batch = []
             if source_bill_ids_batch:
-                batch_size = 100
+                batch_size = limit  # Use limit (page size) for batch size
                 for i in range(0, len(source_bill_ids_batch), batch_size):
                     batch_ids = source_bill_ids_batch[i:i + batch_size]
                     dynamodb_client = boto3.client('dynamodb')
@@ -1207,7 +1207,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         last_processed_index = start_index
     
     if bill_ids:
-        batch_size = 100
+        batch_size = limit  # Use limit (page size) for batch size
         # For union queries, fetch in batches until we have enough filtered items
         if config.get('query_type') == 'union_politician':
             # Prepare remaining filters for filtering during fetch
@@ -1229,7 +1229,6 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             filtered_count = 0
             while i < len(bill_ids) and filtered_count < limit:
                 batch_ids = bill_ids[i:i + batch_size]
-                last_processed_index = start_index + i + len(batch_ids)
                 
                 dynamodb_client = boto3.client('dynamodb')
                 # Include both bill_id (hash key) and search_index_sk (range key)
@@ -1256,13 +1255,20 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         items.append(converted_item)
                         filtered_count += 1
                         if filtered_count >= limit:
+                            # We have enough filtered items, stop processing
                             break
                 
-                i += batch_size
+                # Update last_processed_index to the next index after this batch
+                # This tracks how many IDs we've processed in the bill_ids list
+                last_processed_index = start_index + i + len(batch_ids)
+                
+                # If we have enough filtered items, stop fetching more batches
                 if filtered_count >= limit:
                     break
                 
-                logger.info(f"Union pagination: processed {i} IDs, {filtered_count} filtered items (need {limit})")
+                i += batch_size
+                
+                logger.info(f"Union pagination: processed {i} IDs, {filtered_count} filtered items (need {limit}), last_processed_index: {last_processed_index}")
         else:
             # For single queries, fetch all items
             for i in range(0, len(bill_ids), batch_size):
@@ -1327,7 +1333,12 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # last_processed_index is the index we've processed up to (in the original full list)
         # original_bill_ids_count is the total number of IDs we fetched
         # We have more if: (1) we haven't processed all fetched IDs, OR (2) either query has more
+        items_returned = len(filtered_items)
+        
+        # Calculate has_more: true if we haven't processed all IDs OR if either source query has more
         has_more_union = (last_processed_index < original_bill_ids_count) or cosponsor_has_more or sponsor_has_more
+        
+        logger.info(f"Union pagination check - last_processed_index: {last_processed_index}, original_bill_ids_count: {original_bill_ids_count}, items_returned: {items_returned}, limit: {limit}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}, has_more_union: {has_more_union}")
         
         if has_more_union:
             # Return union offset pagination key
