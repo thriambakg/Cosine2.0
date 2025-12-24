@@ -1479,10 +1479,7 @@ export const fileReturnAPI = {
           request_type: 'download',
         }),
       });
-      return {
-        success: true,
-        data: response,
-      };
+      return response;
     } catch (error: any) {
       console.error('❌ File download error:', error);
       return {
@@ -1502,10 +1499,7 @@ export const fileReturnAPI = {
           request_type: 'preview',
         }),
       });
-      return {
-        success: true,
-        data: response,
-      };
+      return response;
     } catch (error: any) {
       console.error('❌ File preview error:', error);
       return {
@@ -1534,7 +1528,7 @@ export interface FilesystemAddContextItemRequest {
   folder_path?: string;
   context_data: any; // Full JSON object
   title: string;
-  item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'politician_trade';
+  item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'politician_trade' | 'govt_contract' | 'news_article' | 'stock_result';
 }
 
 export interface FilesystemCreateFolderRequest {

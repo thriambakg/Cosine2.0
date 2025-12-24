@@ -4805,7 +4805,6 @@ const GovtContractsSearchPage: React.FC = () => {
         open={fileBrowserOpen}
         onClose={() => setFileBrowserOpen(false)}
         onSelect={handleFileBrowserSelect}
-        user_id={user?.id || ''}
         allowCreateFolder={true}
         title="Save to Files"
       />

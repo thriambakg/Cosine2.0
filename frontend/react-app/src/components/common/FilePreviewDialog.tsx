@@ -13,7 +13,6 @@ import {
   Paper,
   Divider,
   Chip,
-  Link as MuiLink,
   Table,
   TableBody,
   TableRow,
@@ -157,7 +156,12 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
       });
 
       if (response.success && response.data) {
-        setPreviewData(response.data);
+        // Ensure preview_type is defined, default to 'text' if missing
+        const previewData: PreviewResponse = {
+          ...response.data,
+          preview_type: response.data.preview_type || 'text',
+        };
+        setPreviewData(previewData);
       } else {
         setError(response.error || 'Failed to load preview');
       }

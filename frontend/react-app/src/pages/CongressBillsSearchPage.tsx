@@ -651,26 +651,11 @@ const CongressBillsSearchPage: React.FC = () => {
         selectedBills.has(bill.bill_id)
       );
 
-      // Format date helper
-      const formatDate = (dateString?: string): string => {
-        if (!dateString) return '';
-        try {
-          return new Date(dateString).toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric' 
-          });
-        } catch {
-          return dateString;
-        }
-      };
-
       // Save each bill to the filesystem with FULL data
       // Note: We use currentResults which contains the full bill objects from the search API
       // The search API already enriches bills with full data (including oversized bills from S3)
       // This ensures we save the complete bill with all fields: actions_json, cosponsors_json, amendments_json, etc.
       for (const bill of selectedBillObjects) {
-        const billId = bill.bill_id || `bill_${Date.now()}`;
         const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
         
         // FULL DATA MODE for filesystem - send complete bill object with ALL fields

@@ -1735,7 +1735,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         open={fileBrowserOpen}
         onClose={() => setFileBrowserOpen(false)}
         onSelect={handleFileBrowserSelect}
-        user_id={user?.id || ''}
         allowCreateFolder={true}
       />
 

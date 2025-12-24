@@ -1026,8 +1026,8 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       // Note: currentResults contains the full filing objects from the search API
       // This ensures we save the complete filing with all fields
       for (const filing of selectedResultObjects) {
-        const title = filing.entity_name 
-          ? `SEC Filing - ${filing.entity_name}${filing.form ? ` (${filing.form})` : ''}`
+        const title = filing.filingEntity 
+          ? `SEC Filing - ${filing.filingEntity}${filing.form ? ` (${filing.form})` : ''}`
           : `SEC Filing ${filing.accession || ''}`;
         
         // FULL DATA MODE for filesystem - send complete filing object with ALL fields
@@ -2855,7 +2855,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         open={fileBrowserOpen}
         onClose={() => setFileBrowserOpen(false)}
         onSelect={handleFileBrowserSelect}
-        user_id={user?.id || ''}
         allowCreateFolder={true}
       />
 

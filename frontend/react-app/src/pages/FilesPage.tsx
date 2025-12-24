@@ -9,7 +9,6 @@ import {
   DialogActions,
   TextField,
   IconButton,
-  Paper,
   List,
   ListItem,
   ListItemIcon,
@@ -34,20 +33,15 @@ import {
   MoreVert as MoreVertIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
-  Download as DownloadIcon,
   Visibility as ViewIcon,
   ArrowBack as ArrowBackIcon,
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import FilePreviewDialog from '@/components/common/FilePreviewDialog';
 import { filesystemAPI } from '@/services/api';
 import { addToContext } from '@/components/tiles/common/contextManager';
-import { addBillToContext, addMultipleBillsToContext } from '@/components/tiles/common/contextManager';
-import { addLDAFilingToContext, addMultipleLDAFilingsToContext } from '@/components/tiles/common/contextManager';
-import { addTradeToContext, addMultipleTradesToContext } from '@/components/tiles/common/contextManager';
 
 // Custom styled components matching other pages
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -919,7 +913,7 @@ const FilesPage: React.FC = () => {
       if (item.type === 'folder') {
         // Only navigate if no items are selected
         if (selectedItems.size === 0) {
-          handleFolderClick(item);
+          handleFolderClick(item as Folder);
         } else {
           // If items are selected, just select this item
           event.preventDefault();
@@ -1478,7 +1472,7 @@ const FilesPage: React.FC = () => {
             )}
             
             {/* Folders */}
-            {folders.map((folder, index) => {
+            {folders.map((folder) => {
               const isSelected = selectedItems.has(folder.id);
               const allItems = [...folders, ...files];
               const itemIndex = allItems.findIndex(item => item.id === folder.id);
@@ -1546,7 +1540,7 @@ const FilesPage: React.FC = () => {
             })}
 
             {/* Files */}
-            {files.map((file, index) => {
+            {files.map((file) => {
               const isSelected = selectedItems.has(file.id);
               const allItems = [...folders, ...files];
               const itemIndex = allItems.findIndex(item => item.id === file.id);

@@ -693,7 +693,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
 
       // Save each trade to the filesystem with FULL data
       for (const trade of selectedTradeObjects) {
-        const title = `${trade.politicianName || 'Politician'} - ${trade.securityName || trade.securityTicker || 'Trade'}`;
+        const title = `${trade.politicianName || 'Politician'} - ${trade.securityName || trade.securitySymbol || 'Trade'}`;
         
         // Use full data mode for filesystem - send complete trade object with all fields
         await filesystemAPI.addContextItem({

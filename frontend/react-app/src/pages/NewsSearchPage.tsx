@@ -479,6 +479,45 @@ const NewsSearchPage: React.FC = () => {
     setSelectedArticles(new Set());
     handleContextMenuClose();
   };
+
+  const handleAddToFiles = () => {
+    if (selectedArticles.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedArticles.size === 0) return;
+    
+    try {
+      const selectedArticleObjects = currentResults.filter(article => 
+        selectedArticles.has(article.id)
+      );
+
+      // Save each article to the filesystem with FULL data
+      // Note: currentResults contains the full article objects from the search API
+      // This ensures we save the complete article with all fields
+      for (const article of selectedArticleObjects) {
+        const title = article.title || `News Article ${article.id || ''}`;
+        
+        // FULL DATA MODE for filesystem - send complete article object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: article, // Full article object with all fields
+          title: title,
+          item_type: 'news_article',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedArticleObjects.length} article(s) to filesystem`);
+      setSelectedArticles(new Set());
+    } catch (error) {
+      console.error('Error saving articles to filesystem:', error);
+    }
+  };
   
   const toggleArticleSelection = (articleId: string) => {
     setSelectedArticles(prev => {

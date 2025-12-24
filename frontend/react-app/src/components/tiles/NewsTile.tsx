@@ -1944,7 +1944,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
         open={fileBrowserOpen}
         onClose={() => setFileBrowserOpen(false)}
         onSelect={handleFileBrowserSelect}
-        user_id={user?.id || ''}
         allowCreateFolder={true}
       />
 

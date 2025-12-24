@@ -31,7 +31,7 @@ const TilePreview: React.FC<TilePreviewProps> = ({
   const [currentTile, setCurrentTile] = useState<UnifiedTile>(tile);
 
   // Handle tile updates (from tile settings changes)
-  const handleTileUpdate = useCallback((id: string, data: any) => {
+  const handleTileUpdate = useCallback((_id: string, data: any) => {
     setCurrentTile(prev => {
       const updated = { ...prev, ...data };
       return updated;
@@ -39,7 +39,7 @@ const TilePreview: React.FC<TilePreviewProps> = ({
   }, []);
 
   // Handle tile settings changes
-  const handleSettingsChange = useCallback(async (id: string, settings: any) => {
+  const handleSettingsChange = useCallback(async (_id: string, settings: any) => {
     setCurrentTile(prev => {
       const updated = { ...prev, ...settings };
       
