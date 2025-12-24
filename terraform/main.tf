@@ -723,7 +723,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "63" # Updated for LDA search and autocomplete endpoints
+  deployment_trigger = "64" # Updated for LDA search and autocomplete endpoints
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
