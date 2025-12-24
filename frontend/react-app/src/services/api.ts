@@ -1437,6 +1437,327 @@ export const ldaAutocompleteAPI = {
   },
 };
 
+// ============================================================================
+// FILE RETURN API
+// ============================================================================
+
+export interface FileDownloadRequest {
+  user_id: string;
+  s3_key?: string;
+  filename?: string;
+  session_id?: string;
+  bucket?: string;
+  request_type?: 'download' | 'preview';
+  item_type?: 'context_item' | 'uploaded_file' | 'agent_file';
+}
+
+export interface FileDownloadResponse {
+  success: boolean;
+  data?: {
+    download_url?: string;
+    preview_url?: string;
+    preview_type?: 'context_item' | 'image' | 'pdf' | 'text' | 'download_only';
+    content?: any;
+    filename?: string;
+    expires_in?: number;
+    content_type?: string;
+    file_size?: number;
+    metadata?: any;
+    message?: string;
+  };
+  error?: string;
+}
+
+export const fileReturnAPI = {
+  downloadFile: async (params: FileDownloadRequest): Promise<FileDownloadResponse> => {
+    console.log('📥 API - File download:', params);
+    try {
+      const response = await apiRequest<FileDownloadResponse>('/file-download', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...params,
+          request_type: 'download',
+        }),
+      });
+      return {
+        success: true,
+        data: response,
+      };
+    } catch (error: any) {
+      console.error('❌ File download error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to download file',
+      };
+    }
+  },
+
+  previewFile: async (params: FileDownloadRequest): Promise<FileDownloadResponse> => {
+    console.log('👁️ API - File preview:', params);
+    try {
+      const response = await apiRequest<FileDownloadResponse>('/file-download', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...params,
+          request_type: 'preview',
+        }),
+      });
+      return {
+        success: true,
+        data: response,
+      };
+    } catch (error: any) {
+      console.error('❌ File preview error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to preview file',
+      };
+    }
+  },
+};
+
+// ============================================================================
+// FILESYSTEM API
+// ============================================================================
+
+export interface FilesystemAddFileRequest {
+  user_id: string;
+  folder_path?: string;
+  file_content: string; // Base64 encoded
+  filename: string;
+  title?: string;
+  description?: string;
+}
+
+export interface FilesystemAddContextItemRequest {
+  user_id: string;
+  folder_path?: string;
+  context_data: any; // Full JSON object
+  title: string;
+  item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'politician_trade';
+}
+
+export interface FilesystemCreateFolderRequest {
+  user_id: string;
+  folder_name: string;
+  parent_path?: string;
+}
+
+export interface FilesystemDeleteItemRequest {
+  user_id: string;
+  folder_path?: string;
+  item_id: string;
+}
+
+export interface FilesystemDeleteFolderRequest {
+  user_id: string;
+  folder_path: string;
+}
+
+export interface FilesystemMoveItemRequest {
+  user_id: string;
+  item_id: string;
+  source_folder_path?: string;
+  dest_folder_path?: string;
+}
+
+export interface FilesystemRenameItemRequest {
+  user_id: string;
+  folder_path?: string;
+  item_id: string;
+  new_name: string;
+}
+
+export interface FilesystemListFolderRequest {
+  user_id: string;
+  folder_path?: string;
+}
+
+export interface FilesystemGetItemRequest {
+  user_id: string;
+  folder_path?: string;
+  item_id: string;
+}
+
+export interface FilesystemResponse<T = any> {
+  success: boolean;
+  result?: T;
+  error?: string;
+}
+
+export const filesystemAPI = {
+  addFile: async (params: FilesystemAddFileRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'add_file',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem add file error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to add file',
+      };
+    }
+  },
+
+  addContextItem: async (params: FilesystemAddContextItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'add_context_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem add context item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to add context item',
+      };
+    }
+  },
+
+  createFolder: async (params: FilesystemCreateFolderRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'create_folder',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem create folder error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to create folder',
+      };
+    }
+  },
+
+  deleteItem: async (params: FilesystemDeleteItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'delete_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem delete item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to delete item',
+      };
+    }
+  },
+
+  deleteFolder: async (params: FilesystemDeleteFolderRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'delete_folder',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem delete folder error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to delete folder',
+      };
+    }
+  },
+
+  moveItem: async (params: FilesystemMoveItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'move_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem move item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to move item',
+      };
+    }
+  },
+
+  renameItem: async (params: FilesystemRenameItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'rename_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem rename item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to rename item',
+      };
+    }
+  },
+
+  listFolder: async (params: FilesystemListFolderRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'list_folder',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem list folder error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to list folder',
+      };
+    }
+  },
+
+  getItem: async (params: FilesystemGetItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'get_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem get item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to get item',
+      };
+    }
+  },
+};
+
 export const api = {
   stockVolatility: stockVolatilityAPI,
   stockData: stockDataAPI,
@@ -1459,6 +1780,8 @@ export const api = {
   congressBillsAutocomplete: congressBillsAutocompleteAPI,
   ldaSearch: ldaSearchAPI,
   ldaAutocomplete: ldaAutocompleteAPI,
+  fileReturn: fileReturnAPI,
+  filesystem: filesystemAPI,
 };
 
 export default api;

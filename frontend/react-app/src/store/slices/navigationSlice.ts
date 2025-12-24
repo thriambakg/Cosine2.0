@@ -34,6 +34,13 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'main'
   },
   {
+    id: 'files',
+    label: 'Files',
+    path: '/files',
+    icon: 'FolderIcon',
+    category: 'main'
+  },
+  {
     id: 'robinhood',
     label: 'Robinhood',
     path: '/robinhood',

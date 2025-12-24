@@ -13,6 +13,7 @@ import {
 import {
   Dashboard as DashboardIcon,
   Chat as ChatIcon,
+  Folder as FolderIcon,
   AccountBalanceWallet as AccountBalanceWalletIcon,
   Assessment as AssessmentIcon,
   TrendingUp as TrendingUpIcon,
@@ -34,6 +35,7 @@ const DRAWER_WIDTH = 280;
 const iconMap = {
   DashboardIcon,
   ChatIcon,
+  FolderIcon,
   AccountBalanceWalletIcon,
   AssessmentIcon,
   TrendingUpIcon,

@@ -26,6 +26,8 @@ SEC_FILINGS_BUCKET = os.environ.get('SEC_FILINGS_BUCKET')
 POLITICIAN_TRADES_BUCKET = os.environ.get('POLITICIAN_TRADES_BUCKET')
 LDA_DISCLOSURES_BUCKET = os.environ.get('LDA_DISCLOSURES_BUCKET')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE')
+S3_BASE_URL = os.environ.get('S3_BASE_URL', 'https://cosine-chat-files-production.s3.amazonaws.com')
+USER_PROFILES_TABLE_NAME = os.environ.get('USER_PROFILES_TABLE_NAME')
 
 def get_cors_headers():
     """Get CORS headers for API responses"""
@@ -139,6 +141,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         
         # Determine file type based on bucket name first, then S3 key pattern as fallback
         # Check bucket name first to avoid misclassification (LDA and SEC both use 'filings/' prefix)
+        is_filesys = False
         if bucket_name == 'SEC_FILINGS':
             is_sec_filing = True
             is_lda_disclosure = False
@@ -153,6 +156,8 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             is_politician_trade = True
         else:
             # Fallback to S3 key pattern when bucket is not specified
+            # Check for filesys path first (user's file system storage)
+            is_filesys = s3_key and s3_key.startswith('users/') and '/filesys/' in s3_key
             # LDA disclosures use 'filings/RR/' or 'filings/LDA/' prefix
             is_lda_disclosure = s3_key and (s3_key.startswith('filings/RR/') or s3_key.startswith('filings/LDA/'))
             is_politician_trade = s3_key and s3_key.startswith('trades/')
@@ -161,7 +166,68 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         
         is_public_filing = is_sec_filing or is_lda_disclosure or is_politician_trade
         
-        logger.info(f"🔍 File type detection: bucket={bucket_name}, s3_key={s3_key}, is_sec_filing={is_sec_filing}, is_lda_disclosure={is_lda_disclosure}, is_politician_trade={is_politician_trade}, is_public_filing={is_public_filing}")
+        logger.info(f"🔍 File type detection: bucket={bucket_name}, s3_key={s3_key}, is_sec_filing={is_sec_filing}, is_lda_disclosure={is_lda_disclosure}, is_politician_trade={is_politician_trade}, is_public_filing={is_public_filing}, is_filesys={is_filesys}")
+        
+        # Handle filesys files (user's file system storage)
+        if is_filesys:
+            if not s3_key:
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Missing required parameter: s3_key'})
+                }
+            
+            # Validate that s3_key belongs to the authenticated user
+            expected_prefix = f"users/{authenticated_user_id}/filesys/"
+            if not s3_key.startswith(expected_prefix):
+                logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to access filesys file {s3_key}")
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
+                }
+            
+            # Extract filename from s3_key
+            filename = s3_key.split('/')[-1]
+            target_bucket = S3_BUCKET
+            
+            # Check if file exists in S3
+            try:
+                s3_client.head_object(Bucket=target_bucket, Key=s3_key)
+            except ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    return {
+                        'statusCode': 404,
+                        'headers': get_cors_headers(),
+                        'body': json.dumps({'error': 'File not found'})
+                    }
+                else:
+                    raise e
+            
+            # Generate fresh presigned URL
+            params = {
+                'Bucket': target_bucket,
+                'Key': s3_key,
+                'ResponseContentDisposition': f'attachment; filename="{filename}"'
+            }
+            
+            presigned_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params=params,
+                ExpiresIn=3600  # 1 hour expiration
+            )
+            
+            logger.info(f"🔗 Generated fresh presigned URL for filesys file {filename}")
+            
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({
+                    'download_url': presigned_url,
+                    'filename': filename,
+                    'expires_in': 3600
+                })
+            }
         
         # Validate user_id (required for all downloads)
         if not user_id:
@@ -305,12 +371,269 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             'body': json.dumps({'error': 'Internal server error'})
         }
 
+def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
+    """
+    Handle file preview requests - return preview data or presigned URLs for viewing
+    Supports context items (JSON), images, PDFs, and text files
+    """
+    try:
+        # Extract request parameters
+        user_id = body.get('user_id')
+        s3_key = body.get('s3_key')
+        item_type = body.get('item_type')  # 'context_item', 'uploaded_file', 'agent_file'
+        
+        logger.info(f"🔍 handle_file_preview called with: user_id={user_id}, s3_key={s3_key}, item_type={item_type}")
+        
+        # Validate user_id
+        if not user_id:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Missing required parameter: user_id'})
+            }
+        
+        # Validate that the authenticated user matches the requested user
+        if authenticated_user_id != user_id:
+            logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to preview file for user {user_id}")
+            return {
+                'statusCode': 403,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Forbidden: User mismatch'})
+            }
+        
+        # For context items, we need s3_key
+        if not s3_key:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Missing required parameter: s3_key'})
+            }
+        
+        # Validate s3_key belongs to user
+        expected_prefix = f"users/{user_id}/filesys/"
+        if not s3_key.startswith(expected_prefix):
+            logger.warning(f"🚫 Security violation: User {user_id} attempted to access file {s3_key}")
+            return {
+                'statusCode': 403,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
+            }
+        
+        # Check if file exists in S3
+        try:
+            head_response = s3_client.head_object(Bucket=S3_BUCKET, Key=s3_key)
+            content_type = head_response.get('ContentType', 'application/octet-stream')
+            file_size = head_response.get('ContentLength', 0)
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return {
+                    'statusCode': 404,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'File not found'})
+                }
+            else:
+                raise e
+        
+        # Determine preview type based on content type and item type
+        is_context_item = item_type == 'context_item' or s3_key.endswith('.json')
+        is_image = content_type.startswith('image/')
+        is_pdf = content_type == 'application/pdf'
+        is_text = content_type.startswith('text/') or content_type in ['application/json', 'application/javascript']
+        
+        # Handle context items (JSON)
+        if is_context_item:
+            try:
+                # Get file content from S3
+                response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
+                content = response['Body'].read().decode('utf-8')
+                context_data = json.loads(content)
+                
+                return {
+                    'statusCode': 200,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({
+                        'preview_type': 'context_item',
+                        'content': context_data,
+                        'metadata': {
+                            'type': context_data.get('type'),
+                            'title': context_data.get('title'),
+                            'subtitle': context_data.get('subtitle'),
+                            'timestamp': context_data.get('timestamp')
+                        },
+                        'download_url': None  # Will be generated on demand
+                    }, default=str)
+                }
+            except Exception as e:
+                logger.error(f"Error reading context item: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Failed to read context item'})
+                }
+        
+        # Handle images - return presigned URL for inline viewing
+        elif is_image:
+            params = {
+                'Bucket': S3_BUCKET,
+                'Key': s3_key,
+                'ResponseContentType': content_type,
+                'ResponseContentDisposition': 'inline'  # View in browser, not download
+            }
+            
+            preview_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params=params,
+                ExpiresIn=3600  # 1 hour expiration
+            )
+            
+            # Also generate download URL
+            download_params = {
+                'Bucket': S3_BUCKET,
+                'Key': s3_key,
+                'ResponseContentDisposition': f'attachment; filename="{os.path.basename(s3_key)}"'
+            }
+            download_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params=download_params,
+                ExpiresIn=3600
+            )
+            
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({
+                    'preview_type': 'image',
+                    'preview_url': preview_url,
+                    'download_url': download_url,
+                    'content_type': content_type,
+                    'file_size': file_size,
+                    'filename': os.path.basename(s3_key)
+                })
+            }
+        
+        # Handle PDFs - return presigned URL for iframe embedding
+        elif is_pdf:
+            params = {
+                'Bucket': S3_BUCKET,
+                'Key': s3_key,
+                'ResponseContentType': 'application/pdf',
+                'ResponseContentDisposition': 'inline'  # View in browser
+            }
+            
+            preview_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params=params,
+                ExpiresIn=3600
+            )
+            
+            # Also generate download URL
+            download_params = {
+                'Bucket': S3_BUCKET,
+                'Key': s3_key,
+                'ResponseContentDisposition': f'attachment; filename="{os.path.basename(s3_key)}"'
+            }
+            download_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params=download_params,
+                ExpiresIn=3600
+            )
+            
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({
+                    'preview_type': 'pdf',
+                    'preview_url': preview_url,
+                    'download_url': download_url,
+                    'content_type': content_type,
+                    'file_size': file_size,
+                    'filename': os.path.basename(s3_key)
+                })
+            }
+        
+        # Handle text files - return content directly
+        elif is_text:
+            try:
+                response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
+                content = response['Body'].read().decode('utf-8')
+                
+                # Generate download URL
+                download_params = {
+                    'Bucket': S3_BUCKET,
+                    'Key': s3_key,
+                    'ResponseContentDisposition': f'attachment; filename="{os.path.basename(s3_key)}"'
+                }
+                download_url = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params=download_params,
+                    ExpiresIn=3600
+                )
+                
+                return {
+                    'statusCode': 200,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({
+                        'preview_type': 'text',
+                        'content': content,
+                        'download_url': download_url,
+                        'content_type': content_type,
+                        'file_size': file_size,
+                        'filename': os.path.basename(s3_key)
+                    })
+                }
+            except Exception as e:
+                logger.error(f"Error reading text file: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Failed to read file'})
+                }
+        
+        # For other file types, just provide download option
+        else:
+            # Generate download URL
+            download_params = {
+                'Bucket': S3_BUCKET,
+                'Key': s3_key,
+                'ResponseContentDisposition': f'attachment; filename="{os.path.basename(s3_key)}"'
+            }
+            download_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params=download_params,
+                ExpiresIn=3600
+            )
+            
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({
+                    'preview_type': 'download_only',
+                    'preview_url': None,
+                    'download_url': download_url,
+                    'content_type': content_type,
+                    'file_size': file_size,
+                    'filename': os.path.basename(s3_key),
+                    'message': 'Preview not available for this file type. Please download to view.'
+                })
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ File preview error: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        
+        return {
+            'statusCode': 500,
+            'headers': get_cors_headers(),
+            'body': json.dumps({'error': 'Internal server error'})
+        }
+
 def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Process file return request (extracted from lambda_handler for reuse)
     """
     try:
-        logger.info(f"🔍 File download request: {json.dumps(event, default=str)}")
+        logger.info(f"🔍 File return request: {json.dumps(event, default=str)}")
         
         # Check if this is a direct Lambda invocation or API Gateway request
         if 'body' in event:
@@ -329,10 +652,16 @@ def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str
                 'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
             }
         
-        # Generate fresh presigned URL for download
-        # handle_file_download will validate user_id and session_id for all requests
-        # For SEC filings, it will skip session access check but still validate user_id
-        return handle_file_download(event, body, authenticated_user_id)
+        # Check if this is a preview request
+        request_type = body.get('request_type', 'download')  # 'download' or 'preview'
+        
+        if request_type == 'preview':
+            return handle_file_preview(event, body, authenticated_user_id)
+        else:
+            # Generate fresh presigned URL for download
+            # handle_file_download will validate user_id and session_id for all requests
+            # For SEC filings, it will skip session access check but still validate user_id
+            return handle_file_download(event, body, authenticated_user_id)
             
     except Exception as e:
         logger.error(f"❌ Lambda handler error: {str(e)}")

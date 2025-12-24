@@ -8,6 +8,7 @@ import { store } from './store/store';
 // Import components from organized structure
 import { LandingPageMUI, AppLayout, LoadingPage } from './components';
 import ChatPage from './pages/ChatPage';
+import FilesPage from './pages/FilesPage';
 import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
 import Robinhood from './pages/Robinhood';
 import PortfolioRisk from './pages/PortfolioRisk';
@@ -63,6 +64,11 @@ function AppContent() {
               <Route path="/chat" element={
                 <ProtectedRoute>
                   <ChatPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/files" element={
+                <ProtectedRoute>
+                  <FilesPage />
                 </ProtectedRoute>
               } />
               <Route path="/robinhood" element={

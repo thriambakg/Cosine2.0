@@ -1572,32 +1572,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               />
             </Box>
           )}
-
-          {/* Load More */}
-          {hasMore && !isLoadingMore && filteredResults.length === allResults.length && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, flexShrink: 0 }}>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={handleLoadMore}
-                sx={{
-                  color: '#3b82f6',
-                  borderColor: '#3b82f6',
-                  '&:hover': {
-                    borderColor: '#60a5fa',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  },
-                }}
-              >
-                Load More ({allResults.length} loaded)
-              </Button>
-            </Box>
-          )}
-          {isLoadingMore && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, flexShrink: 0 }}>
-              <CircularProgress size={20} sx={{ color: '#3b82f6' }} />
-            </Box>
-          )}
         </Box>
       )}
 
