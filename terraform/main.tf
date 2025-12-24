@@ -155,6 +155,9 @@ module "api_gateway" {
     files = {
       path_part = "files"
     }
+    filesystem = {
+      path_part = "filesystem"
+    }
     file_download = {
       path_part = "file-download"
     }
@@ -406,6 +409,15 @@ module "api_gateway" {
       lambda_arn              = aws_lambda_function.chat_agent.arn
       request_parameters      = {}
     }
+    # POST method for filesystem operations
+    filesystem_post = {
+      resource_key            = "filesystem"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.filesystem_lambda.function_arn
+      request_parameters      = {}
+    }
     # POST method for file downloads (fresh presigned URLs)
     file_download_post = {
       resource_key            = "file_download"
@@ -652,6 +664,11 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "files"
     }
+    filesystem_post = {
+      function_arn  = module.filesystem_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "filesystem"
+    }
     file_download_post = {
       function_arn  = module.file_return_lambda.function_arn
       http_method   = "POST"
@@ -723,7 +740,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "64" # Updated for LDA search and autocomplete endpoints
+  deployment_trigger = "65" # Updated for filesystem endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -2086,6 +2103,40 @@ module "session_management_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
+  reserved_concurrent_executions = 20
+
+  tags = var.common_tags
+}
+
+# Filesystem Lambda Function
+module "filesystem_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-filesystem-${var.environment}"
+  description   = "Lambda function for user filesystem management (S3-only storage)"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/filesystem/app"
+
+  environment_variables = {
+    CHAT_FILES_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    S3_BASE_URL            = "https://${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name}.s3.amazonaws.com"
+    ENVIRONMENT            = var.environment
+    LOG_LEVEL              = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  additional_policy_arns = [
+    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
+    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn
+  ]
+
   reserved_concurrent_executions = 20
 
   tags = var.common_tags
