@@ -45,10 +45,14 @@ import {
   Chat as SidebarChatIcon,
   ViewColumn as ViewColumnIcon,
   ExpandMore as ExpandMoreIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { filesystemAPI } from '../../services/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface StockScreenerTileProps {
   id: string;
@@ -203,6 +207,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const { user } = useAuth();
   // Pagination state
   const [hasMore, setHasMore] = useState<boolean>(false);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
@@ -872,6 +878,45 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedStocks.length === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedStocks.length === 0) return;
+    
+    try {
+      const selectedStockObjects = allResults.filter(stock => 
+        selectedStocks.includes(stock.symbol)
+      );
+
+      // Save each stock to the filesystem with FULL data
+      // Note: allResults contains the full stock objects from the screener API
+      // This ensures we save the complete stock with all fields
+      for (const stock of selectedStockObjects) {
+        const title = `${stock.symbol || 'Stock'} - ${stock.name || 'Unknown'}`;
+        
+        // FULL DATA MODE for filesystem - send complete stock object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: stock, // Full stock object with all fields
+          title: title,
+          item_type: 'stock_result',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedStockObjects.length} stock(s) to filesystem`);
+      setSelectedStocks([]);
+    } catch (error) {
+      console.error('Error saving stocks to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -1679,7 +1724,20 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles}>
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+
+      {/* File Browser Dialog */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        user_id={user?.id || ''}
+        allowCreateFolder={true}
+      />
 
       {/* Column Selection Menu */}
       <Menu

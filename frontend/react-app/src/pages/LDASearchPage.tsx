@@ -151,6 +151,7 @@ const LDASearchPage: React.FC = () => {
   // Selection state
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Column visibility state
   const AVAILABLE_COLUMNS = [
@@ -2680,7 +2681,7 @@ const LDASearchPage: React.FC = () => {
           <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
           Add to Current Sidebar Chat
         </MenuItem>
-        <MenuItem onClick={handleAddToFiles} sx={{ color: '#fbbf24', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />
           Add to Files
         </MenuItem>

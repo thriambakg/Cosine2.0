@@ -40,12 +40,15 @@ import {
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
   Launch as LaunchIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../services/api';
-// import { useAuth } from '@/contexts/AuthContext';
+import { filesystemAPI } from '../services/api';
+import { useAuth } from '@/contexts/AuthContext';
 // import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
+import FileBrowserDialog from '../components/common/FileBrowserDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -79,7 +82,7 @@ interface ExpandedFiltersState {
 
 const NewsSearchPage: React.FC = () => {
   // Auth context available for future use
-  // const { user } = useAuth();
+  const { user } = useAuth();
   // const { activeSessionId } = useGlobalChat();
   
   // Session persistence key
@@ -144,6 +147,7 @@ const NewsSearchPage: React.FC = () => {
   // Selection state
   const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Filter state (client-side filtering)
   const [availableFilters, setAvailableFilters] = useState<{
@@ -1798,7 +1802,20 @@ const NewsSearchPage: React.FC = () => {
           <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
+          <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+
+      {/* File Browser Dialog */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
 
       {/* Article Details Dialog */}
       <Dialog

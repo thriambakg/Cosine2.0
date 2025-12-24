@@ -2219,7 +2219,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
           <ListItemText primary="Add to Current Sidebar Chat" />
         </MenuItem>
-        <MenuItem onClick={handleAddToFiles} sx={{ color: '#fbbf24', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>
           <ListItemText primary="Add to Files" />
         </MenuItem>

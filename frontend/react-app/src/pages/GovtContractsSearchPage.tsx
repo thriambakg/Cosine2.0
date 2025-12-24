@@ -43,6 +43,7 @@ import {
   InfoOutlined as InfoIcon,
   Refresh as RefreshIcon,
   ArrowBack as ArrowBackIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { 
   govtContractsSearchAPI, 
@@ -51,10 +52,12 @@ import {
   GovtContractsSearchFilters,
   GovtContractAward 
 } from '../services/api';
+import { filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
 import { addAwardToContext, addMultipleAwardsToContext } from '../components/tiles/common';
+import FileBrowserDialog from '../components/common/FileBrowserDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -103,7 +106,7 @@ interface ExpandedFiltersState {
 }
 
 const GovtContractsSearchPage: React.FC = () => {
-  const {} = useAuth();
+  const { user } = useAuth();
   const {} = useGlobalChat();
   
   // Session persistence key
@@ -156,6 +159,7 @@ const GovtContractsSearchPage: React.FC = () => {
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedAwards, setSelectedAwards] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [selectedAwardForDetails, setSelectedAwardForDetails] = useState<GovtContractAward | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const [parentAwardForDetails, setParentAwardForDetails] = useState<GovtContractAward | null>(null);  // Store parent when viewing child
@@ -900,6 +904,47 @@ const GovtContractsSearchPage: React.FC = () => {
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedAwards.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedAwards.size === 0) return;
+    
+    try {
+      const selectedAwardObjects = currentResults.filter(award => 
+        selectedAwards.has(award.award_id)
+      );
+
+      // Save each award to the filesystem with FULL data
+      // Note: currentResults contains the full award objects from the search API
+      // This ensures we save the complete award with all fields
+      for (const award of selectedAwardObjects) {
+        const title = award.recipient_name 
+          ? `Government Contract - ${award.recipient_name}${award.awarding_agency_name ? ` / ${award.awarding_agency_name}` : ''}`
+          : `Government Contract ${award.award_id || ''}`;
+        
+        // FULL DATA MODE for filesystem - send complete award object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: award, // Full award object with all fields
+          title: title,
+          item_type: 'govt_contract',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedAwardObjects.length} award(s) to filesystem`);
+      setSelectedAwards(new Set());
+    } catch (error) {
+      console.error('Error saving awards to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -4746,7 +4791,24 @@ const GovtContractsSearchPage: React.FC = () => {
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem
+          onClick={handleAddToFiles}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+
+      {/* File Browser Dialog */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        user_id={user?.id || ''}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
     </Box>
   );
 };

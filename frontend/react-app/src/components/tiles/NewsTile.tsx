@@ -48,10 +48,14 @@ import {
   Refresh as RefreshIcon,
   ExpandMore as ExpandMoreIcon,
   ViewColumn as ViewColumnIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
+import { filesystemAPI } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleToContext, addMultipleArticlesToContext, confirmDialog, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface NewsTileProps {
   id: string;
@@ -153,6 +157,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const { user } = useAuth();
   
   // Filter state for client-side filtering - restore from props if available
   const [allResults, setAllResults] = useState<NewsArticle[]>(() => {
@@ -821,6 +827,45 @@ const NewsTile: React.FC<NewsTileProps> = ({
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedArticles.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedArticles.size === 0) return;
+    
+    try {
+      const selectedArticleObjects = currentResults.filter(article => 
+        selectedArticles.has(article.id)
+      );
+
+      // Save each article to the filesystem with FULL data
+      // Note: currentResults contains the full article objects from the search API
+      // This ensures we save the complete article with all fields
+      for (const article of selectedArticleObjects) {
+        const title = article.title || `News Article ${article.id || ''}`;
+        
+        // FULL DATA MODE for filesystem - send complete article object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: article, // Full article object with all fields
+          title: title,
+          item_type: 'news_article',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedArticleObjects.length} article(s) to filesystem`);
+      setSelectedArticles(new Set());
+    } catch (error) {
+      console.error('Error saving articles to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -1888,7 +1933,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
           <ListItemText primary="Add to Current Sidebar Chat" />
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
+          <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>
+          <ListItemText primary="Add to Files" />
+        </MenuItem>
       </Menu>
+
+      {/* File Browser Dialog */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        user_id={user?.id || ''}
+        allowCreateFolder={true}
+      />
 
       {/* Column Selection Menu */}
       <Menu

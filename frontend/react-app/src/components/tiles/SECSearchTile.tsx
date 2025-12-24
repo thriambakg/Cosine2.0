@@ -49,6 +49,7 @@ import {
   ViewColumn as ViewColumnIcon,
   Stop as StopIcon,
   Download as DownloadIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
@@ -56,6 +57,8 @@ import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelpe
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { filesystemAPI } from '../../services/api';
 
 // SEC Form Categories (from SEC website) - simplified for tile
 interface FormCategory {
@@ -220,6 +223,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   
   // Search state - matching SEC search page structure
@@ -1002,6 +1006,47 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedResults.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedResults.size === 0) return;
+    
+    try {
+      const selectedResultObjects = currentResults.filter(result => 
+        selectedResults.has(result.accession)
+      );
+
+      // Save each filing to the filesystem with FULL data
+      // Note: currentResults contains the full filing objects from the search API
+      // This ensures we save the complete filing with all fields
+      for (const filing of selectedResultObjects) {
+        const title = filing.entity_name 
+          ? `SEC Filing - ${filing.entity_name}${filing.form ? ` (${filing.form})` : ''}`
+          : `SEC Filing ${filing.accession || ''}`;
+        
+        // FULL DATA MODE for filesystem - send complete filing object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: filing, // Full filing object with all fields
+          title: title,
+          item_type: 'sec_filing',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedResultObjects.length} filing(s) to filesystem`);
+      setSelectedResults(new Set());
+    } catch (error) {
+      console.error('Error saving filings to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -2799,7 +2844,20 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
           <ListItemText primary="Add to Current Sidebar Chat" />
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
+          <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>
+          <ListItemText primary="Add to Files" />
+        </MenuItem>
       </Menu>
+
+      {/* File Browser Dialog */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        user_id={user?.id || ''}
+        allowCreateFolder={true}
+      />
 
       {/* Column Selection Menu */}
       <Menu
