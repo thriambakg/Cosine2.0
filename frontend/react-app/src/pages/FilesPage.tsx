@@ -24,6 +24,7 @@ import {
   Card,
   CardContent,
   Container,
+  Checkbox,
 } from '@mui/material';
 import {
   Folder as FolderIcon,
@@ -36,10 +37,17 @@ import {
   Download as DownloadIcon,
   Visibility as ViewIcon,
   ArrowBack as ArrowBackIcon,
+  Chat as SidebarChatIcon,
+  AddComment as NewChatIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
+import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import FilePreviewDialog from '@/components/common/FilePreviewDialog';
 import { filesystemAPI } from '@/services/api';
+import { addToContext } from '@/components/tiles/common/contextManager';
+import { addBillToContext, addMultipleBillsToContext } from '@/components/tiles/common/contextManager';
+import { addLDAFilingToContext, addMultipleLDAFilingsToContext } from '@/components/tiles/common/contextManager';
+import { addTradeToContext, addMultipleTradesToContext } from '@/components/tiles/common/contextManager';
 
 // Custom styled components matching other pages
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -112,9 +120,18 @@ const FilesPage: React.FC = () => {
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
   
+  // Multi-select state
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  
   // Preview dialog
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState<FileSystemItem | null>(null);
+  
+  // Rename dialog
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [itemToRename, setItemToRename] = useState<FileSystemItem | null>(null);
+  const [newItemName, setNewItemName] = useState('');
 
   // Drag and drop state
   const [draggedItem, setDraggedItem] = useState<FileSystemItem | null>(null);
@@ -124,6 +141,7 @@ const FilesPage: React.FC = () => {
   // Move dialog state
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState<FileSystemItem | null>(null);
+  const [itemsToMove, setItemsToMove] = useState<FileSystemItem[]>([]); // For bulk move
   const [moveDialogCurrentFolder, setMoveDialogCurrentFolder] = useState<string | null>(null);
   const [moveDialogBreadcrumb, setMoveDialogBreadcrumb] = useState<Array<{ id: string; name: string }>>([
     { id: 'root', name: 'Files' }
@@ -237,6 +255,9 @@ const FilesPage: React.FC = () => {
         setItems(prev => new Map(prev).set(newFolder.id, newFolder));
         setNewFolderName('');
         setCreateFolderDialogOpen(false);
+        
+        // Reload current folder contents to show the new folder
+        await loadFolderContents(folderPath);
       } else {
         console.error('Failed to create folder:', response.error);
         // TODO: Show error message
@@ -314,66 +335,428 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleFolderClick = (folder: Folder) => {
+  const handleFolderClick = async (folder: Folder) => {
     setCurrentFolderId(folder.id);
     setBreadcrumbPath(prev => [...prev, { id: folder.id, name: folder.name }]);
+    // Clear selection when navigating
+    setSelectedItems(new Set());
+    setLastSelectedIndex(null);
+    
+    // Load folder contents from API
+    const folderPath = folder.id === 'root' ? '' : folder.id;
+    await loadFolderContents(folderPath);
   };
 
-  const handleBreadcrumbClick = (folderId: string) => {
+  const handleBreadcrumbClick = async (folderId: string) => {
     const folderIndex = breadcrumbPath.findIndex(f => f.id === folderId);
     if (folderIndex >= 0) {
       const newPath = breadcrumbPath.slice(0, folderIndex + 1);
       setBreadcrumbPath(newPath);
       setCurrentFolderId(folderId === 'root' ? null : folderId);
-    }
-  };
-
-  const handleItemClick = (item: FileSystemItem) => {
-    if (item.type === 'folder') {
-      handleFolderClick(item as Folder);
-    } else {
-      // Open preview for files
-      setPreviewItem(item);
-      setPreviewDialogOpen(true);
+      // Clear selection when navigating
+      setSelectedItems(new Set());
+      setLastSelectedIndex(null);
+      
+      // Load folder contents from API
+      const folderPath = folderId === 'root' ? '' : folderId;
+      await loadFolderContents(folderPath);
     }
   };
 
   const handleContextMenu = (event: React.MouseEvent<HTMLElement>, item: FileSystemItem) => {
+    event.preventDefault(); // Prevent browser context menu
     event.stopPropagation();
     setContextMenuAnchor(event.currentTarget);
     setSelectedItem(item);
   };
 
-  const handleDeleteItem = () => {
-    if (!selectedItem) return;
+  // Bulk actions for selected items
+  const handleBulkDelete = async () => {
+    if (selectedItems.size === 0 || !user) return;
     
-    // Delete item and all children if it's a folder
-    const deleteRecursive = (itemId: string) => {
-      setItems(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(itemId);
-        
-        // Delete children
-        Array.from(newMap.values()).forEach(child => {
-          if (child.parentId === itemId) {
-            deleteRecursive(child.id);
+    const itemsToDelete = Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
+    if (itemsToDelete.length === 0) return;
+    
+    const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+    
+    try {
+      for (const item of itemsToDelete) {
+        if (item.type === 'folder') {
+          const response = await filesystemAPI.deleteFolder({
+            user_id: user.id,
+            folder_path: item.id === 'root' ? '' : item.id,
+          });
+          
+          if (response.success) {
+            setItems(prev => {
+              const newMap = new Map(prev);
+              newMap.delete(item.id);
+              Array.from(newMap.values()).forEach(child => {
+                if (child.parentId === item.id) {
+                  newMap.delete(child.id);
+                }
+              });
+              return newMap;
+            });
           }
-        });
-        
-        return newMap;
-      });
-    };
+        } else {
+          const response = await filesystemAPI.deleteItem({
+            user_id: user.id,
+            folder_path: folderPath,
+            item_id: item.id,
+          });
+          
+          if (response.success) {
+            setItems(prev => {
+              const newMap = new Map(prev);
+              newMap.delete(item.id);
+              return newMap;
+            });
+          }
+        }
+      }
+      
+      await loadFolderContents(folderPath);
+      setSelectedItems(new Set());
+    } catch (error) {
+      console.error('Error deleting items:', error);
+    }
+  };
+
+  const handleBulkMove = async () => {
+    if (selectedItems.size === 0) return;
     
-    deleteRecursive(selectedItem.id);
+    const itemsToMoveArray = Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
+    if (itemsToMoveArray.length === 0) return;
+    
+    // Store all items to move
+    setItemsToMove(itemsToMoveArray);
+    // Set first item for display purposes
+    setItemToMove(itemsToMoveArray[0]);
+    setMoveDialogCurrentFolder(null);
+    setMoveDialogBreadcrumb([{ id: 'root', name: 'Files' }]);
+    setMoveDialogOpen(true);
+    await loadFolderContents('');
+  };
+
+  const handleBulkAddToContext = async (target: 'new' | 'sidebar') => {
+    if (selectedItems.size === 0 || !user) return;
+    
+    const selectedItemsArray = Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
+    
+    for (const item of selectedItemsArray) {
+      let contextItem: any;
+      
+      if (item.type === 'folder') {
+        // For folders, get all nested items' S3 keys
+        const folderPath = item.id === 'root' ? '' : item.id;
+        const nestedS3Keys = await getAllNestedItems(item.id, folderPath);
+        
+        contextItem = {
+          id: `filesystem_folder_${item.id}_${Date.now()}`,
+          type: 'custom' as const,
+          title: item.name,
+          subtitle: `Folder with ${nestedS3Keys.length} item(s)`,
+          data: {
+            filesystem_type: 'folder',
+            folder_id: item.id,
+            folder_path: folderPath,
+            s3_keys: nestedS3Keys,
+          },
+          timestamp: Date.now(),
+        };
+      } else if (item.s3_key) {
+        // For files/context items, send just the S3 key
+        const itemType = item.metadata?.type || 'context_item';
+        
+        contextItem = {
+          id: `filesystem_item_${item.id}_${Date.now()}`,
+          type: itemType as any,
+          title: item.metadata?.title || item.name,
+          subtitle: item.metadata?.subtitle || 'Filesystem Item',
+          data: {
+            filesystem_type: 'item',
+            item_id: item.id,
+            s3_key: item.s3_key,
+            item_type: item.type,
+          },
+          timestamp: Date.now(),
+        };
+      }
+      
+      if (contextItem) {
+        if (target === 'sidebar') {
+          const event = new CustomEvent('add-to-sidebar-context', {
+            detail: contextItem
+          });
+          window.dispatchEvent(event);
+        } else {
+          addToContext(contextItem);
+        }
+      }
+    }
+    
+    setSelectedItems(new Set());
+  };
+
+  const handleAddItemToContext = async (item: FileSystemItem, target: 'new' | 'sidebar') => {
+    if (!user) return;
+    
+    let contextItem: any;
+    
+    if (item.type === 'folder') {
+      // For folders, get all nested items' S3 keys
+      const folderPath = item.id === 'root' ? '' : item.id;
+      const nestedS3Keys = await getAllNestedItems(item.id, folderPath);
+      
+      contextItem = {
+        id: `filesystem_folder_${item.id}_${Date.now()}`,
+        type: 'custom' as const,
+        title: item.name,
+        subtitle: `Folder with ${nestedS3Keys.length} item(s)`,
+        data: {
+          filesystem_type: 'folder',
+          folder_id: item.id,
+          folder_path: folderPath,
+          s3_keys: nestedS3Keys,
+        },
+        timestamp: Date.now(),
+      };
+    } else if (item.s3_key) {
+      // For files/context items, send just the S3 key
+      const itemType = item.metadata?.type || 'context_item';
+      
+      contextItem = {
+        id: `filesystem_item_${item.id}_${Date.now()}`,
+        type: itemType as any,
+        title: item.metadata?.title || item.name,
+        subtitle: item.metadata?.subtitle || 'Filesystem Item',
+        data: {
+          filesystem_type: 'item',
+          item_id: item.id,
+          s3_key: item.s3_key,
+          item_type: item.type,
+        },
+        timestamp: Date.now(),
+      };
+    }
+    
+    if (contextItem) {
+      if (target === 'sidebar') {
+        const event = new CustomEvent('add-to-sidebar-context', {
+          detail: contextItem
+        });
+        window.dispatchEvent(event);
+      } else {
+        addToContext(contextItem);
+      }
+    }
+    
     setContextMenuAnchor(null);
     setSelectedItem(null);
   };
 
+  // Helper function to recursively get all items in a folder (including nested folders)
+  const getAllNestedItems = useCallback(async (folderId: string, folderPath: string = ''): Promise<string[]> => {
+    if (!user) return [];
+    
+    const s3Keys: string[] = [];
+    
+    try {
+      // Get folder contents
+      const response = await filesystemAPI.listFolder({
+        user_id: user.id,
+        folder_path: folderPath,
+      });
+      
+      if (response.success && response.result) {
+        // Add all items' S3 keys
+        if (response.result.items) {
+          response.result.items.forEach((item: any) => {
+            if (item.s3_key) {
+              s3Keys.push(item.s3_key);
+            }
+          });
+        }
+        
+        // Recursively get items from subfolders
+        if (response.result.subfolders) {
+          for (const subfolder of response.result.subfolders) {
+            // Use the subfolder's path if available, otherwise construct it
+            // The path should be relative to the user's filesys directory
+            let subfolderPath: string;
+            if (subfolder.path) {
+              subfolderPath = subfolder.path;
+            } else if (folderPath) {
+              subfolderPath = `${folderPath}/${subfolder.id}`;
+            } else {
+              subfolderPath = subfolder.id;
+            }
+            const nestedKeys = await getAllNestedItems(subfolder.id, subfolderPath);
+            s3Keys.push(...nestedKeys);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error getting nested items for folder ${folderId}:`, error);
+    }
+    
+    return s3Keys;
+  }, [user]);
+
+  const loadFolderContents = useCallback(async (folderPath: string = '') => {
+    if (!user) return;
+    
+    try {
+      const response = await filesystemAPI.listFolder({
+        user_id: user.id,
+        folder_path: folderPath,
+      });
+      
+      if (response.success && response.result) {
+        const folderMap = new Map<string, FileSystemItem>();
+        
+        // Add current folder
+        const currentFolder: Folder = {
+          id: response.result.folder.id || (folderPath ? folderPath.split('/').pop() || 'root' : 'root'),
+          name: response.result.folder.name || 'Files',
+          type: 'folder',
+          parentId: folderPath ? folderPath.split('/').slice(0, -1).join('/') || null : null,
+          created_at: response.result.folder.created_at || Date.now(),
+          updated_at: response.result.folder.updated_at || Date.now(),
+        };
+        folderMap.set(currentFolder.id, currentFolder);
+        
+        // Add subfolders
+        if (response.result.subfolders) {
+          response.result.subfolders.forEach((folder: any) => {
+            const folderItem: Folder = {
+              id: folder.id,
+              name: folder.name,
+              type: 'folder',
+              parentId: folderPath || 'root',
+              created_at: folder.created_at || Date.now(),
+              updated_at: folder.updated_at || Date.now(),
+            };
+            folderMap.set(folder.id, folderItem);
+          });
+        }
+        
+        // Add items
+        if (response.result.items) {
+          response.result.items.forEach((item: any) => {
+            const fileItem: FileItem = {
+              id: item.id,
+              name: item.name,
+              type: item.type as 'context_item' | 'uploaded_file' | 'agent_file',
+              parentId: folderPath || 'root',
+              created_at: item.created_at || Date.now(),
+              updated_at: item.updated_at || Date.now(),
+              metadata: item.metadata,
+              s3_key: item.s3_key,
+            };
+            folderMap.set(item.id, fileItem);
+          });
+        }
+        
+        // Merge with existing items (to preserve other folders)
+        setItems(prev => {
+          const merged = new Map(prev);
+          folderMap.forEach((value, key) => merged.set(key, value));
+          return merged;
+        });
+      }
+    } catch (error) {
+      console.error('Error loading folder contents:', error);
+    }
+  }, [user]);
+
+  const handleDeleteItem = async () => {
+    // Support both single item (from context menu) and multi-select
+    const itemsToDelete = selectedItems.size > 0 
+      ? Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[]
+      : selectedItem 
+        ? [selectedItem]
+        : [];
+    
+    if (itemsToDelete.length === 0 || !user) return;
+    
+    try {
+      const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+      
+      // Delete all selected items
+      for (const item of itemsToDelete) {
+        if (item.type === 'folder') {
+          const response = await filesystemAPI.deleteFolder({
+            user_id: user.id,
+            folder_path: item.id === 'root' ? '' : item.id,
+          });
+          
+          if (response.success) {
+            // Remove from local state
+            setItems(prev => {
+              const newMap = new Map(prev);
+              newMap.delete(item.id);
+              // Also remove children
+              Array.from(newMap.values()).forEach(child => {
+                if (child.parentId === item.id) {
+                  newMap.delete(child.id);
+                }
+              });
+              return newMap;
+            });
+          } else {
+            console.error('Failed to delete folder:', response.error);
+            // TODO: Show error message
+          }
+        } else {
+          const response = await filesystemAPI.deleteItem({
+            user_id: user.id,
+            folder_path: folderPath,
+            item_id: item.id,
+          });
+          
+          if (response.success) {
+            // Remove from local state
+            setItems(prev => {
+              const newMap = new Map(prev);
+              newMap.delete(item.id);
+              return newMap;
+            });
+          } else {
+            console.error('Failed to delete item:', response.error);
+            // TODO: Show error message
+          }
+        }
+      }
+      
+      // Reload current folder
+      await loadFolderContents(folderPath);
+      
+      // Clear selection
+      setSelectedItems(new Set());
+      setContextMenuAnchor(null);
+      setSelectedItem(null);
+    } catch (error) {
+      console.error('Error deleting items:', error);
+      // TODO: Show error message
+    }
+  };
+
   // Drag and drop handlers
   const handleDragStart = (event: React.DragEvent, item: FileSystemItem) => {
-    setDraggedItem(item);
+    // If multiple items are selected and this is one of them, drag all selected
+    if (selectedItems.size > 1 && selectedItems.has(item.id)) {
+      // Store all selected items for multi-drag
+      const selectedItemsArray = Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
+      event.dataTransfer.setData('text/plain', JSON.stringify(selectedItemsArray.map(i => i.id)));
+      // Use the first item as the primary dragged item for visual feedback
+      setDraggedItem(selectedItemsArray[0]);
+    } else {
+      setDraggedItem(item);
+      event.dataTransfer.setData('text/plain', item.id);
+    }
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', item.id);
   };
 
   const handleDragOver = (event: React.DragEvent, itemId: string, isFolder: boolean) => {
@@ -392,46 +775,101 @@ const FilesPage: React.FC = () => {
     setDragOverFolder(null);
   };
 
-  const handleDrop = (event: React.DragEvent, targetItem: FileSystemItem) => {
+  const handleDrop = async (event: React.DragEvent, targetItem: FileSystemItem) => {
     event.preventDefault();
     event.stopPropagation();
     
-    if (!draggedItem || draggedItem.id === targetItem.id) {
+    if (!draggedItem || !user || draggedItem.id === targetItem.id) {
       setDraggedItem(null);
       setDragOverItem(null);
       setDragOverFolder(null);
       return;
     }
 
-    // If dropping on a folder, move the item into that folder
-    if (targetItem.type === 'folder') {
-      setItems(prev => {
-        const newMap = new Map(prev);
-        const item = newMap.get(draggedItem.id);
-        if (item) {
-          newMap.set(draggedItem.id, {
-            ...item,
-            parentId: targetItem.id,
-            updated_at: Date.now(),
-          });
+    try {
+      // Check if we're dragging multiple items
+      const dragData = event.dataTransfer.getData('text/plain');
+      let itemsToMove: FileSystemItem[] = [];
+      
+      try {
+        const parsedIds = JSON.parse(dragData);
+        if (Array.isArray(parsedIds)) {
+          // Multiple items
+          itemsToMove = parsedIds.map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
+        } else {
+          // Single item
+          itemsToMove = [draggedItem];
         }
-        return newMap;
-      });
-    } else {
-      // If dropping on a file, move to the same parent (reordering)
-      const targetParentId = targetItem.parentId;
-      setItems(prev => {
-        const newMap = new Map(prev);
-        const item = newMap.get(draggedItem.id);
-        if (item) {
-          newMap.set(draggedItem.id, {
-            ...item,
-            parentId: targetParentId,
-            updated_at: Date.now(),
+      } catch {
+        // Single item (not JSON)
+        itemsToMove = [draggedItem];
+      }
+      
+      if (itemsToMove.length === 0) {
+        setDraggedItem(null);
+        setDragOverItem(null);
+        setDragOverFolder(null);
+        return;
+      }
+      
+      // Determine destination folder path
+      let destFolderPath: string;
+      if (targetItem.type === 'folder') {
+        // Dropping on a folder - move into that folder
+        destFolderPath = targetItem.id === 'root' ? '' : targetItem.id;
+      } else {
+        // Dropping on a file - move to the same parent folder
+        destFolderPath = targetItem.parentId === 'root' ? '' : targetItem.parentId || '';
+      }
+      
+      // Move all items
+      const sourceFolderPaths = new Set<string>();
+      for (const item of itemsToMove) {
+        const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
+        
+        // Don't move if already in the same folder
+        if (sourceFolderPath === destFolderPath) continue;
+        
+        sourceFolderPaths.add(sourceFolderPath);
+        
+        const response = await filesystemAPI.moveItem({
+          user_id: user.id,
+          item_id: item.id,
+          source_folder_path: sourceFolderPath,
+          dest_folder_path: destFolderPath,
+        });
+        
+        if (response.success && response.result) {
+          // Update local state
+          setItems(prev => {
+            const newMap = new Map(prev);
+            const itemToUpdate = newMap.get(item.id);
+            if (itemToUpdate) {
+              newMap.set(item.id, {
+                ...itemToUpdate,
+                parentId: destFolderPath || 'root',
+                updated_at: response.result.updated_at || Date.now(),
+              });
+            }
+            return newMap;
           });
+        } else {
+          console.error('Failed to move item:', response.error);
+          // TODO: Show error message
         }
-        return newMap;
-      });
+      }
+      
+      // Reload all affected folders
+      for (const sourcePath of sourceFolderPaths) {
+        await loadFolderContents(sourcePath);
+      }
+      await loadFolderContents(destFolderPath);
+      
+      // Clear selection
+      setSelectedItems(new Set());
+    } catch (error) {
+      console.error('Error moving items:', error);
+      // TODO: Show error message
     }
     
     setDraggedItem(null);
@@ -445,70 +883,276 @@ const FilesPage: React.FC = () => {
     setDragOverFolder(null);
   };
 
-  const handleRenameItem = () => {
-    // TODO: Implement rename functionality
-    setContextMenuAnchor(null);
+  // Multi-select handlers
+  const handleItemClick = (item: FileSystemItem, index: number, event: React.MouseEvent) => {
+    // Prevent default navigation on folders if items are selected
+    if (event.ctrlKey || event.metaKey) {
+      // CTRL/CMD+Click: Toggle selection
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedItems(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(item.id)) {
+          newSet.delete(item.id);
+        } else {
+          newSet.add(item.id);
+        }
+        return newSet;
+      });
+      setLastSelectedIndex(index);
+    } else if (event.shiftKey && lastSelectedIndex !== null) {
+      // SHIFT+Click: Select range
+      event.preventDefault();
+      event.stopPropagation();
+      const currentItems = getCurrentFolderItems();
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      setSelectedItems(prev => {
+        const newSet = new Set(prev);
+        for (let i = start; i <= end; i++) {
+          newSet.add(currentItems[i].id);
+        }
+        return newSet;
+      });
+    } else {
+      // Regular click: Clear selection and navigate (for folders) or select single item
+      if (item.type === 'folder') {
+        // Only navigate if no items are selected
+        if (selectedItems.size === 0) {
+          handleFolderClick(item);
+        } else {
+          // If items are selected, just select this item
+          event.preventDefault();
+          setSelectedItems(new Set([item.id]));
+          setLastSelectedIndex(index);
+        }
+      } else {
+        // For files, just select
+        event.preventDefault();
+        setSelectedItems(new Set([item.id]));
+        setLastSelectedIndex(index);
+      }
+    }
   };
 
-  const handleMoveItem = () => {
+  const handleSelectAll = () => {
+    const currentItems = getCurrentFolderItems();
+    if (selectedItems.size === currentItems.length) {
+      // Deselect all
+      setSelectedItems(new Set());
+    } else {
+      // Select all
+      setSelectedItems(new Set(currentItems.map(item => item.id)));
+    }
+  };
+
+  const handleRenameItem = () => {
     if (!selectedItem) return;
-    setItemToMove(selectedItem);
+    setItemToRename(selectedItem);
+    setNewItemName(selectedItem.name);
+    setRenameDialogOpen(true);
+    setContextMenuAnchor(null);
+    setSelectedItem(null);
+  };
+
+  const handleConfirmRename = async () => {
+    if (!itemToRename || !newItemName.trim() || !user) return;
+    
+    try {
+      const folderPath = itemToRename.parentId === 'root' ? '' : itemToRename.parentId || '';
+      const response = await filesystemAPI.renameItem({
+        user_id: user.id,
+        folder_path: folderPath,
+        item_id: itemToRename.id,
+        new_name: newItemName.trim(),
+      });
+      
+      if (response.success && response.result) {
+        // Update local state
+        setItems(prev => {
+          const newMap = new Map(prev);
+          const item = newMap.get(itemToRename.id);
+          if (item) {
+            newMap.set(itemToRename.id, {
+              ...item,
+              name: newItemName.trim(),
+              updated_at: response.result.updated_at || Date.now(),
+            });
+          }
+          return newMap;
+        });
+        
+        // Reload folder contents
+        await loadFolderContents(folderPath);
+      } else {
+        console.error('Failed to rename item:', response.error);
+        // TODO: Show error message
+      }
+    } catch (error) {
+      console.error('Error renaming item:', error);
+      // TODO: Show error message
+    }
+    
+    setRenameDialogOpen(false);
+    setItemToRename(null);
+    setNewItemName('');
+  };
+
+  const handleMoveItem = async () => {
+    // Support both single item (from context menu) and multi-select
+    const itemsToMoveArray = selectedItems.size > 0 
+      ? Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[]
+      : selectedItem 
+        ? [selectedItem]
+        : [];
+    
+    if (itemsToMoveArray.length === 0) return;
+    
+    // Store all items to move
+    setItemsToMove(itemsToMoveArray);
+    // Set first item for display purposes
+    setItemToMove(itemsToMoveArray[0]);
     setMoveDialogCurrentFolder(null);
     setMoveDialogBreadcrumb([{ id: 'root', name: 'Files' }]);
     setMoveDialogOpen(true);
     setContextMenuAnchor(null);
     setSelectedItem(null);
+    
+    // Load root folder contents for the move dialog
+    await loadFolderContents('');
   };
 
-  const handleMoveDialogFolderClick = (folder: Folder) => {
+  const handleMoveDialogFolderClick = async (folder: Folder) => {
     setMoveDialogCurrentFolder(folder.id);
     setMoveDialogBreadcrumb(prev => [...prev, { id: folder.id, name: folder.name }]);
+    
+    // Load folder contents for the move dialog
+    const folderPath = folder.id === 'root' ? '' : folder.id;
+    await loadFolderContents(folderPath);
   };
 
-  const handleMoveDialogBreadcrumbClick = (folderId: string) => {
+  const handleMoveDialogBreadcrumbClick = async (folderId: string) => {
     const folderIndex = moveDialogBreadcrumb.findIndex(f => f.id === folderId);
     if (folderIndex >= 0) {
       const newPath = moveDialogBreadcrumb.slice(0, folderIndex + 1);
       setMoveDialogBreadcrumb(newPath);
       setMoveDialogCurrentFolder(folderId === 'root' ? null : folderId);
+      
+      // Load folder contents for the move dialog
+      const folderPath = folderId === 'root' ? '' : folderId;
+      await loadFolderContents(folderPath);
     }
   };
 
-  const handleConfirmMove = (destinationFolderId: string | null) => {
-    if (!itemToMove) return;
+  const handleConfirmMove = async (destinationFolderId: string | null) => {
+    // Use itemsToMove if available (bulk move), otherwise use itemToMove (single move)
+    const itemsToMoveArray = itemsToMove.length > 0 ? itemsToMove : (itemToMove ? [itemToMove] : []);
     
-    // Prevent moving item into itself or its own children
-    if (itemToMove.type === 'folder') {
-      const isDescendant = (folderId: string, targetId: string): boolean => {
-        const folder = items.get(folderId);
-        if (!folder || folder.parentId === null) return false;
-        if (folder.parentId === targetId) return true;
-        return isDescendant(folder.parentId, targetId);
-      };
-      
-      if (destinationFolderId === itemToMove.id || isDescendant(destinationFolderId || 'root', itemToMove.id)) {
-        // Don't allow moving folder into itself or its descendants
-        setMoveDialogOpen(false);
-        setItemToMove(null);
-        return;
+    if (itemsToMoveArray.length === 0 || !user) return;
+    
+    const destFolderPath = destinationFolderId === 'root' ? '' : destinationFolderId || '';
+    const sourceFolderPaths = new Set<string>();
+    
+    // Helper function to check if a folder is a descendant of another folder
+    const isDescendant = (folderId: string, targetId: string): boolean => {
+      if (folderId === targetId) return true;
+      const folder = items.get(folderId);
+      if (!folder || !folder.parentId || folder.parentId === 'root') return false;
+      if (folder.parentId === targetId) return true;
+      return isDescendant(folder.parentId, targetId);
+    };
+    
+    // Validate all moves first
+    for (const item of itemsToMoveArray) {
+      // Prevent moving item into itself or its own children
+      if (item.type === 'folder') {
+        if (destinationFolderId === item.id || (destinationFolderId && isDescendant(destinationFolderId, item.id))) {
+          // Don't allow moving folder into itself or its descendants
+          console.warn(`Cannot move folder ${item.name} into itself or its descendants`);
+          continue;
+        }
       }
+      
+      const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
+      
+      // Don't move if already in the same folder
+      if (sourceFolderPath === destFolderPath) {
+        continue;
+      }
+      
+      sourceFolderPaths.add(sourceFolderPath);
     }
     
-    setItems(prev => {
-      const newMap = new Map(prev);
-      const item = newMap.get(itemToMove.id);
-      if (item) {
-        newMap.set(itemToMove.id, {
-          ...item,
-          parentId: destinationFolderId || 'root',
-          updated_at: Date.now(),
+    if (sourceFolderPaths.size === 0) {
+      // No valid moves
+      setMoveDialogOpen(false);
+      setItemToMove(null);
+      setItemsToMove([]);
+      return;
+    }
+    
+    try {
+      // Move all items
+      for (const item of itemsToMoveArray) {
+        const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
+        
+        // Skip invalid moves (already validated above, but double-check)
+        if (sourceFolderPath === destFolderPath) continue;
+        if (item.type === 'folder') {
+          if (destinationFolderId === item.id || (destinationFolderId && isDescendant(destinationFolderId, item.id))) {
+            continue;
+          }
+        }
+        
+        const response = await filesystemAPI.moveItem({
+          user_id: user.id,
+          item_id: item.id,
+          source_folder_path: sourceFolderPath,
+          dest_folder_path: destFolderPath,
         });
+        
+        if (response.success && response.result) {
+          // Update local state
+          setItems(prev => {
+            const newMap = new Map(prev);
+            const itemToUpdate = newMap.get(item.id);
+            if (itemToUpdate) {
+              newMap.set(item.id, {
+                ...itemToUpdate,
+                parentId: destinationFolderId || 'root',
+                updated_at: response.result.updated_at || Date.now(),
+              });
+            }
+            return newMap;
+          });
+        } else {
+          console.error('Failed to move item:', response.error);
+          // TODO: Show error message
+        }
       }
-      return newMap;
-    });
+      
+      // Reload all affected folders
+      for (const sourcePath of sourceFolderPaths) {
+        await loadFolderContents(sourcePath);
+      }
+      await loadFolderContents(destFolderPath);
+      
+      // Also reload current folder if we're viewing it
+      const currentFolderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+      if (sourceFolderPaths.has(currentFolderPath) || currentFolderPath === destFolderPath) {
+        await loadFolderContents(currentFolderPath);
+      }
+      
+      // Clear selection
+      setSelectedItems(new Set());
+    } catch (error) {
+      console.error('Error moving items:', error);
+      // TODO: Show error message
+    }
     
     setMoveDialogOpen(false);
     setItemToMove(null);
+    setItemsToMove([]);
   };
 
   const getMoveDialogFolderItems = () => {
@@ -739,89 +1383,213 @@ const FilesPage: React.FC = () => {
           </Box>
         ) : (
           <List sx={{ p: 0 }}>
-            {/* Folders */}
-            {folders.map((folder) => (
+            {/* Header with select all checkbox and bulk actions */}
+            {currentItems.length > 0 && (
               <ListItem
-                key={folder.id}
-                button
-                draggable
-                onDragStart={(e) => handleDragStart(e, folder)}
-                onDragOver={(e) => handleDragOver(e, folder.id, true)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleDrop(e, folder)}
-                onDragEnd={handleDragEnd}
-                onClick={() => handleItemClick(folder)}
-                onContextMenu={(e) => handleContextMenu(e, folder)}
                 sx={{
-                  borderBottom: '1px solid #374151',
-                  backgroundColor: 'transparent',
-                  cursor: 'grab',
-                  opacity: draggedItem?.id === folder.id ? 0.5 : 1,
-                  borderLeft: dragOverFolder === folder.id ? '3px solid #3b82f6' : 'none',
-                  '&:hover': { 
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    borderLeft: dragOverFolder === folder.id ? '3px solid #3b82f6' : '2px solid #3b82f6',
-                  },
-                  '&:active': {
-                    cursor: 'grabbing',
-                  },
+                  borderBottom: '2px solid #374151',
+                  backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                  py: 1,
                 }}
               >
-                <ListItemIcon>
-                  <FolderIcon sx={{ color: '#fbbf24' }} />
+                <ListItemIcon sx={{ minWidth: 40 }}>
+                  <Checkbox
+                    size="small"
+                    indeterminate={selectedItems.size > 0 && selectedItems.size < currentItems.length}
+                    checked={currentItems.length > 0 && selectedItems.size === currentItems.length}
+                    onChange={handleSelectAll}
+                    sx={{ 
+                      color: '#9ca3af', 
+                      '&.Mui-checked': { color: '#10b981' }, 
+                      '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
+                    }}
+                  />
                 </ListItemIcon>
                 <ListItemText
-                  primary={folder.name}
-                  secondary={`Folder • ${new Date(folder.created_at).toLocaleDateString()}`}
-                  primaryTypographyProps={{ sx: { color: '#ffffff', fontWeight: 500 } }}
-                  secondaryTypographyProps={{ sx: { color: '#9ca3af', fontSize: '0.875rem' } }}
+                  primary={
+                    <Typography sx={{ color: '#9ca3af', fontSize: '0.875rem', fontWeight: 600 }}>
+                      {selectedItems.size > 0 ? `${selectedItems.size} selected` : 'Select all'}
+                    </Typography>
+                  }
                 />
-                <ListItemSecondaryAction>
-                  <IconButton
-                    edge="end"
-                    onClick={(e) => handleContextMenu(e, folder)}
-                    sx={{ 
-                      color: '#9ca3af',
-                      '&:hover': { 
-                        color: '#ffffff',
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                      },
-                    }}
-                  >
-                    <MoreVertIcon />
-                  </IconButton>
-                </ListItemSecondaryAction>
+                {selectedItems.size > 0 && (
+                  <ListItemSecondaryAction>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Tooltip title="Add to New Chat">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleBulkAddToContext('new')}
+                          sx={{
+                            color: '#10b981',
+                            '&:hover': {
+                              backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                            },
+                          }}
+                        >
+                          <NewChatIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Add to Sidebar Chat">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleBulkAddToContext('sidebar')}
+                          sx={{
+                            color: '#3b82f6',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            },
+                          }}
+                        >
+                          <SidebarChatIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Move">
+                        <IconButton
+                          size="small"
+                          onClick={handleBulkMove}
+                          sx={{
+                            color: '#3b82f6',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            },
+                          }}
+                        >
+                          <FolderIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete">
+                        <IconButton
+                          size="small"
+                          onClick={handleBulkDelete}
+                          sx={{
+                            color: '#ef4444',
+                            '&:hover': {
+                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                            },
+                          }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </ListItemSecondaryAction>
+                )}
               </ListItem>
-            ))}
+            )}
+            
+            {/* Folders */}
+            {folders.map((folder, index) => {
+              const isSelected = selectedItems.has(folder.id);
+              const allItems = [...folders, ...files];
+              const itemIndex = allItems.findIndex(item => item.id === folder.id);
+              
+              return (
+                <ListItem
+                  key={folder.id}
+                  button
+                  disableRipple
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, folder)}
+                  onDragOver={(e) => handleDragOver(e, folder.id, true)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, folder)}
+                  onDragEnd={handleDragEnd}
+                  onClick={(e) => handleItemClick(folder, itemIndex, e)}
+                  onContextMenu={(e) => handleContextMenu(e, folder)}
+                  onMouseDown={(e) => {
+                    // Prevent browser context menu on right click
+                    if (e.button === 2) {
+                      e.preventDefault();
+                    }
+                  }}
+                  sx={{
+                    borderBottom: '1px solid #374151',
+                    backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                    cursor: isSelected ? 'default' : 'grab',
+                    opacity: draggedItem?.id === folder.id ? 0.5 : 1,
+                    borderLeft: dragOverFolder === folder.id ? '3px solid #3b82f6' : isSelected ? '3px solid #10b981' : 'none',
+                    '&:hover': { 
+                      backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.1)',
+                      borderLeft: dragOverFolder === folder.id ? '3px solid #3b82f6' : isSelected ? '3px solid #10b981' : '2px solid #3b82f6',
+                    },
+                    '&:active': {
+                      cursor: 'grabbing',
+                    },
+                  }}
+                >
+                  <ListItemIcon>
+                    <FolderIcon sx={{ color: '#fbbf24' }} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={folder.name}
+                    secondary={`Folder • ${new Date(folder.created_at).toLocaleDateString()}`}
+                    primaryTypographyProps={{ sx: { color: '#ffffff', fontWeight: 500 } }}
+                    secondaryTypographyProps={{ sx: { color: '#9ca3af', fontSize: '0.875rem' } }}
+                  />
+                  <ListItemSecondaryAction>
+                    <IconButton
+                      edge="end"
+                      onClick={(e) => handleContextMenu(e, folder)}
+                      sx={{ 
+                        color: '#9ca3af',
+                        '&:hover': { 
+                          color: '#ffffff',
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        },
+                      }}
+                    >
+                      <MoreVertIcon />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                </ListItem>
+              );
+            })}
 
             {/* Files */}
-            {files.map((file) => (
-              <ListItem
-                key={file.id}
-                button
-                draggable
-                onDragStart={(e) => handleDragStart(e, file)}
-                onDragOver={(e) => handleDragOver(e, file.id, false)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleDrop(e, file)}
-                onDragEnd={handleDragEnd}
-                onClick={() => handleItemClick(file)}
-                onContextMenu={(e) => handleContextMenu(e, file)}
-                sx={{
-                  borderBottom: '1px solid #374151',
-                  backgroundColor: 'transparent',
-                  cursor: 'grab',
-                  opacity: draggedItem?.id === file.id ? 0.5 : 1,
-                  borderLeft: dragOverItem === file.id ? '3px solid #3b82f6' : 'none',
-                  '&:hover': { 
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    borderLeft: dragOverItem === file.id ? '3px solid #3b82f6' : '2px solid #3b82f6',
-                  },
-                  '&:active': {
-                    cursor: 'grabbing',
-                  },
-                }}
-              >
+            {files.map((file, index) => {
+              const isSelected = selectedItems.has(file.id);
+              const allItems = [...folders, ...files];
+              const itemIndex = allItems.findIndex(item => item.id === file.id);
+              
+              return (
+                <ListItem
+                  key={file.id}
+                  button
+                  disableRipple
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, file)}
+                  onDragOver={(e) => handleDragOver(e, file.id, false)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, file)}
+                  onDragEnd={handleDragEnd}
+                  onClick={(e) => handleItemClick(file, itemIndex, e)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setPreviewItem(file);
+                    setPreviewDialogOpen(true);
+                  }}
+                  onContextMenu={(e) => handleContextMenu(e, file)}
+                  onMouseDown={(e) => {
+                    // Prevent browser context menu on right click
+                    if (e.button === 2) {
+                      e.preventDefault();
+                    }
+                  }}
+                  sx={{
+                    borderBottom: '1px solid #374151',
+                    backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                    cursor: isSelected ? 'default' : 'grab',
+                    opacity: draggedItem?.id === file.id ? 0.5 : 1,
+                    borderLeft: dragOverItem === file.id ? '3px solid #3b82f6' : isSelected ? '3px solid #10b981' : 'none',
+                    '&:hover': { 
+                      backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.1)',
+                      borderLeft: dragOverItem === file.id ? '3px solid #3b82f6' : isSelected ? '3px solid #10b981' : '2px solid #3b82f6',
+                    },
+                    '&:active': {
+                      cursor: 'grabbing',
+                    },
+                  }}
+                >
                 <ListItemIcon>
                   <FileIcon sx={{ color: '#3b82f6' }} />
                 </ListItemIcon>
@@ -884,7 +1652,8 @@ const FilesPage: React.FC = () => {
                   </IconButton>
                 </ListItemSecondaryAction>
               </ListItem>
-            ))}
+              );
+            })}
           </List>
         )}
       </Box>
@@ -1143,7 +1912,7 @@ const FilesPage: React.FC = () => {
           },
         }}
       >
-        {selectedItem?.type !== 'folder' && (
+        {selectedItem && selectedItem.type !== 'folder' && (
           <MenuItem onClick={() => {
             if (selectedItem) {
               setPreviewItem(selectedItem);
@@ -1154,6 +1923,18 @@ const FilesPage: React.FC = () => {
             <ViewIcon sx={{ mr: 1.5, fontSize: 18, color: '#3b82f6' }} />
             View
           </MenuItem>
+        )}
+        {selectedItem && (
+          <>
+            <MenuItem onClick={() => handleAddItemToContext(selectedItem, 'new')}>
+              <NewChatIcon sx={{ mr: 1.5, fontSize: 18, color: '#10b981' }} />
+              Add to New Chat
+            </MenuItem>
+            <MenuItem onClick={() => handleAddItemToContext(selectedItem, 'sidebar')}>
+              <SidebarChatIcon sx={{ mr: 1.5, fontSize: 18, color: '#3b82f6' }} />
+              Add to Sidebar Chat
+            </MenuItem>
+          </>
         )}
         <MenuItem onClick={handleRenameItem}>
           <EditIcon sx={{ mr: 1.5, fontSize: 18, color: '#9ca3af' }} />
@@ -1191,10 +1972,103 @@ const FilesPage: React.FC = () => {
             type: previewItem.type as 'context_item' | 'uploaded_file' | 'agent_file',
             s3_key: previewItem.s3_key || '',
             metadata: previewItem.metadata,
+            parentId: previewItem.parentId,
           }}
           user_id={user?.id || ''}
+          folder_path={currentFolderId === 'root' ? '' : currentFolderId || ''}
         />
       )}
+
+      {/* Rename Dialog */}
+      <Dialog
+        open={renameDialogOpen}
+        onClose={() => {
+          setRenameDialogOpen(false);
+          setItemToRename(null);
+          setNewItemName('');
+        }}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid #374151',
+            borderRadius: '0px',
+            color: '#ffffff',
+            backdropFilter: 'blur(10px)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2 }}>
+          Rename {itemToRename?.type === 'folder' ? 'Folder' : 'Item'}
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Name"
+            fullWidth
+            variant="outlined"
+            value={newItemName}
+            onChange={(e) => setNewItemName(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleConfirmRename();
+              }
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: '#ffffff',
+                borderRadius: '0px',
+                '& fieldset': { borderColor: '#374151', borderWidth: '2px' },
+                '&:hover fieldset': { borderColor: '#4b5563' },
+                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+              },
+              '& .MuiInputLabel-root': { color: '#9ca3af' },
+            }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button 
+            onClick={() => {
+              setRenameDialogOpen(false);
+              setItemToRename(null);
+              setNewItemName('');
+            }} 
+            sx={{ 
+              color: '#9ca3af',
+              borderRadius: '0px',
+              border: '1px solid #374151',
+              '&:hover': {
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderColor: '#ef4444',
+                color: '#ef4444',
+              },
+            }}
+            variant="outlined"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmRename}
+            variant="contained"
+            disabled={!newItemName.trim()}
+            sx={{
+              backgroundColor: '#3b82f6',
+              color: '#ffffff',
+              borderRadius: '0px',
+              border: '1px solid #2563eb',
+              '&:hover': { backgroundColor: '#2563eb' },
+              '&:disabled': {
+                backgroundColor: '#374151',
+                color: '#6b7280',
+                borderColor: '#374151',
+              },
+            }}
+          >
+            Rename
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Move Dialog */}
       <Dialog
@@ -1202,6 +2076,7 @@ const FilesPage: React.FC = () => {
         onClose={() => {
           setMoveDialogOpen(false);
           setItemToMove(null);
+          setItemsToMove([]);
         }}
         maxWidth="sm"
         fullWidth
@@ -1217,7 +2092,7 @@ const FilesPage: React.FC = () => {
         }}
       >
         <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2 }}>
-          Move "{itemToMove?.name}"
+          Move {itemsToMove.length > 1 ? `${itemsToMove.length} items` : `"${itemToMove?.name}"`}
         </DialogTitle>
         <DialogContent sx={{ pt: 3, minHeight: '400px' }}>
           {/* Breadcrumbs */}
@@ -1250,10 +2125,15 @@ const FilesPage: React.FC = () => {
           {moveDialogCurrentFolder && (
             <Button
               startIcon={<ArrowBackIcon />}
-              onClick={() => {
+              onClick={async () => {
                 const newPath = moveDialogBreadcrumb.slice(0, -1);
                 setMoveDialogBreadcrumb(newPath);
-                setMoveDialogCurrentFolder(newPath.length > 1 ? newPath[newPath.length - 1].id : null);
+                const newFolderId = newPath.length > 1 ? newPath[newPath.length - 1].id : null;
+                setMoveDialogCurrentFolder(newFolderId);
+                
+                // Load folder contents for the move dialog
+                const folderPath = newFolderId === 'root' ? '' : newFolderId || '';
+                await loadFolderContents(folderPath);
               }}
               sx={{ 
                 mb: 2, 
@@ -1347,6 +2227,7 @@ const FilesPage: React.FC = () => {
             onClick={() => {
               setMoveDialogOpen(false);
               setItemToMove(null);
+              setItemsToMove([]);
             }} 
             sx={{ 
               color: '#9ca3af',

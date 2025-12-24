@@ -463,6 +463,39 @@ def list_folder(user_id: str, folder_path: str = '') -> Dict[str, Any]:
         logger.error(f"Error listing folder: {str(e)}")
         raise
 
+def update_item(user_id: str, folder_path: str, item_id: str, content_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Update an item's content in S3"""
+    try:
+        manifest = get_folder_manifest(user_id, folder_path)
+        
+        if item_id not in manifest['items']:
+            raise ValueError(f"Item {item_id} not found")
+        
+        item = manifest['items'][item_id]
+        s3_key = item.get('s3_key')
+        
+        if not s3_key or not validate_s3_key(user_id, s3_key):
+            raise ValueError(f"Invalid S3 key for item {item_id}")
+        
+        # Update content in S3
+        content_json = json.dumps(content_data, default=str, indent=2)
+        s3_client.put_object(
+            Bucket=CHAT_FILES_BUCKET_NAME,
+            Key=s3_key,
+            Body=content_json.encode('utf-8'),
+            ContentType='application/json'
+        )
+        
+        # Update manifest
+        item['updated_at'] = int(datetime.now().timestamp())
+        manifest['items'][item_id] = item
+        save_folder_manifest(user_id, folder_path, manifest)
+        
+        return item
+    except Exception as e:
+        logger.error(f"Error updating item: {str(e)}")
+        raise
+
 def get_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
     """Get item metadata and optionally content"""
     try:
@@ -569,6 +602,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             source_folder_path = body.get('source_folder_path', '')
             dest_folder_path = body.get('dest_folder_path', '')
             result = move_item(user_id, item_id, source_folder_path, dest_folder_path)
+            
+        elif operation == 'update_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            content_data = body.get('content_data', {})
+            result = update_item(user_id, folder_path, item_id, content_data)
             
         elif operation == 'rename_item':
             folder_path = body.get('folder_path', '')

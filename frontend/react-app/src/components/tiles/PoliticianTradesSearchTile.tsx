@@ -47,7 +47,10 @@ import {
   Refresh as RefreshIcon,
   ExpandMore as ExpandMoreIcon,
   ViewColumn as ViewColumnIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { filesystemAPI } from '../../services/api';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
@@ -173,6 +176,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Filter state for client-side filtering - restore from props if available
   const [allResults, setAllResults] = useState<PoliticianTrade[]>([]);
@@ -713,6 +717,41 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedTrades.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedTrades.size === 0) return;
+    
+    try {
+      const selectedTradeObjects = currentResults.filter(trade => 
+        selectedTrades.has(trade.tradeId)
+      );
+
+      // Save each trade to the filesystem with FULL data
+      for (const trade of selectedTradeObjects) {
+        const title = `${trade.politicianName || 'Politician'} - ${trade.securityName || trade.securityTicker || 'Trade'}`;
+        
+        // Use full data mode for filesystem - send complete trade object with all fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: trade, // Full trade object with all fields (metadata, formS3Key, etc.)
+          title: title,
+          item_type: 'politician_trade',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedTradeObjects.length} trade(s) to filesystem`);
+      setSelectedTrades(new Set());
+    } catch (error) {
+      console.error('Error saving trades to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -2180,7 +2219,19 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
           <ListItemText primary="Add to Current Sidebar Chat" />
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles} sx={{ color: '#fbbf24', fontWeight: 600 }}>
+          <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>
+          <ListItemText primary="Add to Files" />
+        </MenuItem>
       </Menu>
+      
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
 
       {/* Search Dialog */}
       {renderSearchDialog()}

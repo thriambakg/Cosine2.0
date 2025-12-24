@@ -1,6 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Dashboard as ContextIcon, Chat as SidebarChatIcon } from '@mui/icons-material';
+import { Dashboard as ContextIcon, Chat as SidebarChatIcon, Folder as FolderIcon } from '@mui/icons-material';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { filesystemAPI } from '@/services/api';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -86,6 +89,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     contextMenuAnchor: null,
     contextMenuPosition: null,
   });
+
+  const { user } = useAuth();
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
 
   // State for responsive grid dimensions
   const [gridColumns, setGridColumns] = useState(12);
@@ -798,6 +804,47 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     // Close context menu
     handleContextMenuClose();
   }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
+
+  const handleAddToFiles = useCallback(() => {
+    if (selectionState.selectedTiles.size === 0 || !user) {
+      return;
+    }
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  }, [selectionState.selectedTiles, user, handleContextMenuClose]);
+
+  const handleFileBrowserSelect = useCallback(async (folderPath: string) => {
+    if (!user || selectionState.selectedTiles.size === 0) return;
+    
+    try {
+      const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
+      
+      // Save each tile to the filesystem with FULL data
+      for (const tile of selectedTilesData) {
+        // For filesystem, send full tile data including all configuration and results
+        const fullTileData = {
+          ...tile,
+          tileId: tile.id,
+          tileType: tile.type,
+        };
+        const title = tile.symbol 
+          ? `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} - ${tile.symbol}`
+          : `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`;
+        
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: fullTileData, // Full tile object with all fields
+          title: title,
+          item_type: 'tile',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedTilesData.length} tile(s) to filesystem`);
+    } catch (error) {
+      console.error('Error saving tiles to filesystem:', error);
+    }
+  }, [user, selectionState.selectedTiles, tiles]);
 
   // Render tile with grid positioning
   const renderTile = (tile: UnifiedTile) => {
@@ -1562,7 +1609,24 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             Add to Sidebar Chat ({selectionState.selectedTiles.size} selected)
           </ListItemText>
         </MenuItem>
+        
+        <MenuItem onClick={handleAddToFiles} disabled={selectionState.selectedTiles.size === 0}>
+          <ListItemIcon>
+            <FolderIcon sx={{ color: '#fbbf24' }} />
+          </ListItemIcon>
+          <ListItemText>
+            Add to Files ({selectionState.selectedTiles.size} selected)
+          </ListItemText>
+        </MenuItem>
       </Menu>
+      
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
     </>
   );
 };

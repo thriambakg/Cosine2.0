@@ -41,7 +41,10 @@ import {
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
   AddComment as NewChatIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
+import FileBrowserDialog from '../components/common/FileBrowserDialog';
+import { filesystemAPI } from '../services/api';
 import { 
   congressBillsSearchAPI, 
   CongressBillsSearchFilters,
@@ -102,11 +105,12 @@ const BIPARTISAN_OPTIONS = [
 ];
 
 const CongressBillsSearchPage: React.FC = () => {
-  const {} = useAuth();
+  const { user } = useAuth();
   const {} = useGlobalChat();
   
   // Context menu state
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'congress-bills-search-page-state';
@@ -631,6 +635,60 @@ const CongressBillsSearchPage: React.FC = () => {
   // Context menu handlers
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedBills.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedBills.size === 0) return;
+    
+    try {
+      const selectedBillObjects = currentResults.filter(bill => 
+        selectedBills.has(bill.bill_id)
+      );
+
+      // Format date helper
+      const formatDate = (dateString?: string): string => {
+        if (!dateString) return '';
+        try {
+          return new Date(dateString).toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+          });
+        } catch {
+          return dateString;
+        }
+      };
+
+      // Save each bill to the filesystem with FULL data
+      // Note: We use currentResults which contains the full bill objects from the search API
+      // The search API already enriches bills with full data (including oversized bills from S3)
+      // This ensures we save the complete bill with all fields: actions_json, cosponsors_json, amendments_json, etc.
+      for (const bill of selectedBillObjects) {
+        const billId = bill.bill_id || `bill_${Date.now()}`;
+        const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
+        
+        // FULL DATA MODE for filesystem - send complete bill object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: bill, // Full bill object: includes actions_json, cosponsors_json, amendments_json, etc.
+          title: title,
+          item_type: 'congress_bill',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedBillObjects.length} bill(s) to filesystem`);
+    } catch (error) {
+      console.error('Error saving bills to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -2983,7 +3041,22 @@ const CongressBillsSearchPage: React.FC = () => {
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem
+          onClick={handleAddToFiles}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+      
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
     </Box>
   );
 };

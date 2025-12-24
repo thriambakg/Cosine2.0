@@ -43,11 +43,14 @@ import {
   AddComment as NewChatIcon,
   Download as DownloadIcon,
   ViewColumn as ViewColumnIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutocompleteItem } from '../services/api';
 import MultiSelectField from '../components/MultiSelectField';
 import { useAuth } from '../contexts/AuthContext';
 import { useGlobalChat } from '../contexts/GlobalChatContext';
+import FileBrowserDialog from '../components/common/FileBrowserDialog';
+import { filesystemAPI } from '../services/api';
 
 // Minimum date for date filters (January 1, 2000)
 const MIN_DATE = '2000-01-01';
@@ -657,6 +660,44 @@ const LDASearchPage: React.FC = () => {
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedFilings.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedFilings.size === 0) return;
+    
+    try {
+      const selectedFilingObjects = currentResults.filter(filing => 
+        selectedFilings.has(filing.id || filing.filing_uuid || '')
+      );
+
+      // Save each filing to the filesystem with FULL data
+      for (const filing of selectedFilingObjects) {
+        const filingId = filing.id || filing.filing_uuid || `filing_${Date.now()}`;
+        const title = filing.registrant_name 
+          ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+          : `LDA Filing ${filingId}`;
+        
+        // Use full data mode for filesystem - send complete filing object with all fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: filing, // Full filing object with all fields
+          title: title,
+          item_type: 'lda_disclosure',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedFilingObjects.length} filing(s) to filesystem`);
+      setSelectedFilings(new Set());
+    } catch (error) {
+      console.error('Error saving filings to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -2639,7 +2680,19 @@ const LDASearchPage: React.FC = () => {
           <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles} sx={{ color: '#fbbf24', fontWeight: 600 }}>
+          <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+      
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
 
       {/* Filing Details Dialog */}
       <Dialog

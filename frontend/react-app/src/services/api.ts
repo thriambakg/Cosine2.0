@@ -1568,6 +1568,13 @@ export interface FilesystemRenameItemRequest {
   new_name: string;
 }
 
+export interface FilesystemUpdateItemRequest {
+  user_id: string;
+  folder_path?: string;
+  item_id: string;
+  content_data: any; // Full JSON object to save
+}
+
 export interface FilesystemListFolderRequest {
   user_id: string;
   folder_path?: string;
@@ -1715,6 +1722,25 @@ export const filesystemAPI = {
       return {
         success: false,
         error: error.message || 'Failed to rename item',
+      };
+    }
+  },
+
+  updateItem: async (params: FilesystemUpdateItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'update_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem update item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update item',
       };
     }
   },

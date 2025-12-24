@@ -12,6 +12,12 @@ import {
   IconButton,
   Paper,
   Divider,
+  Chip,
+  Link as MuiLink,
+  Table,
+  TableBody,
+  TableRow,
+  TableCell,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -20,8 +26,11 @@ import {
   PictureAsPdf as PdfIcon,
   Description as TextIcon,
   InsertDriveFile as FileIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { fileReturnAPI } from '@/services/api';
+import TilePreview from './TilePreview';
+import { UnifiedTile } from '../../types/dashboardTypes';
 
 interface FilePreviewDialogProps {
   open: boolean;
@@ -32,8 +41,10 @@ interface FilePreviewDialogProps {
     type: 'context_item' | 'uploaded_file' | 'agent_file';
     s3_key?: string;
     metadata?: any;
+    parentId?: string | null;
   };
   user_id: string;
+  folder_path?: string; // Optional folder path for tile updates
 }
 
 interface PreviewResponse {
@@ -53,6 +64,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   onClose,
   item,
   user_id,
+  folder_path = '',
 }) => {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
@@ -62,23 +74,40 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     if (open && item) {
       // If item has metadata with data (mock data), use it directly
       if (item.metadata?.data && Object.keys(item.metadata.data).length > 0) {
-        setPreviewData({
-          preview_type: 'context_item',
-          content: {
-            id: item.id,
-            type: item.metadata.type || 'context_item',
-            title: item.metadata.title || item.name,
-            subtitle: item.metadata.subtitle,
-            data: item.metadata.data,
-            timestamp: item.metadata.timestamp,
-          },
-          metadata: {
-            type: item.metadata.type,
-            title: item.metadata.title || item.name,
-            subtitle: item.metadata.subtitle,
-            timestamp: item.metadata.timestamp,
-          },
-        });
+        // Check if it's a tile
+        const tileType = item.metadata.data.tileType || item.metadata.data.type;
+        const isTileData = ['crypto', 'stock', 'stock_screener', 'news', 'portfolio',
+          'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures'].includes(tileType);
+        
+        if (isTileData) {
+          // For tiles, pass the full data object
+          setPreviewData({
+            preview_type: 'context_item',
+            content: item.metadata.data,
+            metadata: {
+              type: item.metadata.type,
+              title: item.metadata.title || item.name,
+            },
+          });
+        } else {
+          setPreviewData({
+            preview_type: 'context_item',
+            content: {
+              id: item.id,
+              type: item.metadata.type || 'context_item',
+              title: item.metadata.title || item.name,
+              subtitle: item.metadata.subtitle,
+              data: item.metadata.data,
+              timestamp: item.metadata.timestamp,
+            },
+            metadata: {
+              type: item.metadata.type,
+              title: item.metadata.title || item.name,
+              subtitle: item.metadata.subtitle,
+              timestamp: item.metadata.timestamp,
+            },
+          });
+        }
         setLoading(false);
       } else if (item.metadata && item.type === 'context_item') {
         // For context items with metadata but no data, construct from metadata
@@ -181,6 +210,454 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     }
   };
 
+  // Formatting functions
+  const formatCurrency = (amount?: number): string => {
+    if (amount === undefined || amount === null) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatTransactionDate = (transactionDate?: number): string => {
+    if (!transactionDate) return 'N/A';
+    const dateStr = transactionDate.toString();
+    if (dateStr.length !== 8) return 'N/A';
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
+    try {
+      const date = new Date(`${year}-${month}-${day}`);
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const formatAmountRange = (trade: any): string => {
+    if (trade.amountMin !== undefined && trade.amountMax !== undefined) {
+      if (trade.amountMin === trade.amountMax) {
+        return formatCurrency(trade.amountMin);
+      }
+      return `${formatCurrency(trade.amountMin)} - ${formatCurrency(trade.amountMax)}`;
+    }
+    if (trade.exactAmount) {
+      return formatCurrency(trade.exactAmount);
+    }
+    return 'N/A';
+  };
+
+  const formatDate = (dateString?: string): string => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Check if content is a tile
+  const isTile = (content: any): boolean => {
+    if (!content) return false;
+    
+    // Check for tileType or type being a tile type
+    const tileType = content.tileType || content.type;
+    const validTileTypes = [
+      'crypto', 'stock', 'stock_screener', 'news', 'portfolio',
+      'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures'
+    ];
+    
+    return validTileTypes.includes(tileType);
+  };
+
+  // Convert content to UnifiedTile format
+  const contentToTile = (content: any): UnifiedTile | null => {
+    if (!isTile(content)) return null;
+    
+    // If content is already in UnifiedTile format, use it
+    if (content.id && content.type) {
+      return content as UnifiedTile;
+    }
+    
+    // Otherwise, construct from data
+    const data = content.data || content;
+    return {
+      id: content.id || data.id || data.tileId || `tile_${Date.now()}`,
+      type: content.tileType || content.type || data.tileType || data.type,
+      title: content.title || data.title || data.name || 'Untitled Tile',
+      customTitle: data.customTitle,
+      customColor: data.customColor,
+      customIcon: data.customIcon,
+      symbol: data.symbol,
+      timeframe: data.timeframe,
+      criteria: data.criteria,
+      results: data.results,
+      searchParams: data.searchParams,
+      filterSettings: data.filterSettings,
+      articles: data.articles,
+      trades: data.trades,
+      portfolioData: data.portfolioData,
+      displayOptions: data.displayOptions || {},
+      paginationState: data.paginationState,
+      autoRefresh: data.autoRefresh || false,
+      isPinned: data.isPinned || false,
+      size: data.size || { width: 600, height: 600 },
+      position: data.position,
+      dashboard_id: data.dashboard_id || 'filesystem',
+      created_at: data.created_at,
+    } as UnifiedTile;
+  };
+
+  const renderContextItem = (content: any) => {
+    // Check if this is a tile
+    const tile = contentToTile(content);
+    if (tile && folder_path !== undefined) {
+      return (
+        <TilePreview
+          tile={tile}
+          user_id={user_id}
+          folder_path={folder_path || ''}
+          item_id={item.id}
+          onUpdate={(updatedTile) => {
+            // Update local state if needed
+            console.log('Tile updated:', updatedTile);
+          }}
+        />
+      );
+    }
+    
+    // Handle both nested data structure and flat structure
+    let data = content;
+    if (content.data && typeof content.data === 'object') {
+      data = content.data;
+    }
+    const itemType = content.type || data.item_type || 'context_item';
+    
+    // Politician Trade
+    if (itemType === 'politician_trade' || data.tradeId || data.politicianName || data.transactionType) {
+      const infoFields = [
+        { label: 'Politician', value: data.politicianName },
+        { label: 'Position', value: data.position },
+        { label: 'Party', value: data.party },
+        { label: 'State/District', value: data.stateDistrict },
+        { label: 'Security Symbol', value: data.securitySymbol },
+        { label: 'Security Name', value: data.securityName },
+        { label: 'Asset Type', value: data.assetType },
+        { label: 'Transaction Type', value: data.transactionType },
+        { label: 'Transaction Date', value: formatTransactionDate(data.transactionDate) },
+        { label: 'Filing Date', value: formatDate(data.filingDate) },
+        { label: 'Amount Range', value: formatAmountRange(data) },
+        { label: 'Owner', value: data.owner },
+        { label: 'Source', value: data.source },
+        { label: 'Form Type', value: data.formType },
+      ];
+
+      return (
+        <Box 
+          sx={{ 
+            p: 3,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            // Blue scrollbar
+            '&::-webkit-scrollbar': {
+              width: '12px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#1f2937',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '6px',
+              '&:hover': {
+                backgroundColor: '#2563eb',
+              },
+            },
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+            {content.title || data.politicianName || 'Politician Trade'}
+          </Typography>
+          {content.subtitle && (
+            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+              {content.subtitle}
+            </Typography>
+          )}
+          <Divider sx={{ my: 3, borderColor: '#374151' }} />
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
+            {infoFields
+              .filter((field) => field.value && field.value !== 'N/A')
+              .map((field) => (
+                <Box 
+                  key={field.label} 
+                  sx={{ 
+                    backgroundColor: 'rgba(16, 185, 129, 0.08)', 
+                    borderRadius: 1, 
+                    p: 1.5,
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                    {field.label}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
+                    {field.value}
+                  </Typography>
+                </Box>
+              ))}
+          </Box>
+
+          {data.websiteUrl && (
+            <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip
+                label="Politician Website"
+                size="small"
+                sx={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', fontWeight: 600 }}
+                icon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
+                component="a"
+                href={data.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                clickable
+              />
+            </Box>
+          )}
+
+          {data.formS3Key && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="subtitle2" sx={{ color: '#f8fafc', mb: 1, fontWeight: 600 }}>
+                Filing Document
+              </Typography>
+              <Paper sx={{ backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 1, border: '1px solid #374151' }}>
+                <Table size="small">
+                  <TableBody>
+                    <TableRow>
+                      <TableCell sx={{ borderColor: '#374151' }}>
+                        <Typography variant="caption" sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          Filing Document
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
+                          {data.formS3Key.split('/').pop() || data.formS3Key}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </Paper>
+            </Box>
+          )}
+        </Box>
+      );
+    }
+
+    // Congress Bill
+    if (itemType === 'congress_bill' || data.bill_id || data.bill_type || data.bill_number) {
+      const infoFields = [
+        { label: 'Bill Type', value: data.bill_type },
+        { label: 'Bill Number', value: data.bill_number },
+        { label: 'Congress', value: data.congress ? `${data.congress}th Congress` : null },
+        { label: 'Introduced Date', value: formatDate(data.introduced_date) },
+        { label: 'Sponsor Name', value: data.sponsor_name },
+        { label: 'Sponsor Party', value: data.sponsor_party },
+        { label: 'Sponsor State', value: data.sponsor_state },
+        { label: 'Policy Area', value: data.policy_area },
+        { label: 'Latest Action', value: data.latest_action },
+        { label: 'Latest Action Date', value: formatDate(data.latest_action_date) },
+      ];
+
+      return (
+        <Box 
+          sx={{ 
+            p: 3,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            // Blue scrollbar
+            '&::-webkit-scrollbar': {
+              width: '12px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#1f2937',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '6px',
+              '&:hover': {
+                backgroundColor: '#2563eb',
+              },
+            },
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+            {content.title || `${data.bill_type || 'Bill'} ${data.bill_number || ''}` || 'Congress Bill'}
+          </Typography>
+          {content.subtitle && (
+            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+              {content.subtitle}
+            </Typography>
+          )}
+          {data.bill_title && (
+            <Typography variant="body1" sx={{ color: '#e5e7eb', mb: 3, fontStyle: 'italic' }}>
+              {data.bill_title}
+            </Typography>
+          )}
+          <Divider sx={{ my: 3, borderColor: '#374151' }} />
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
+            {infoFields
+              .filter((field) => field.value && field.value !== 'N/A')
+              .map((field) => (
+                <Box 
+                  key={field.label} 
+                  sx={{ 
+                    backgroundColor: 'rgba(59, 130, 246, 0.08)', 
+                    borderRadius: 1, 
+                    p: 1.5,
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                    {field.label}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
+                    {field.value}
+                  </Typography>
+                </Box>
+              ))}
+          </Box>
+        </Box>
+      );
+    }
+
+    // LDA Disclosure
+    if (itemType === 'lda_disclosure' || data.filing_uuid || data.registrant_name || data.client_name) {
+      const infoFields = [
+        { label: 'Registrant', value: data.registrant_name },
+        { label: 'Client', value: data.client_name },
+        { label: 'Filing Type', value: data.filing_type },
+        { label: 'Filing Period', value: data.filing_period },
+        { label: 'Filing Year', value: data.filing_year },
+        { label: 'Amount', value: data.amount ? formatCurrency(data.amount) : null },
+        { label: 'Date Posted', value: formatDate(data.date_posted) },
+      ];
+
+      return (
+        <Box 
+          sx={{ 
+            p: 3,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            // Blue scrollbar
+            '&::-webkit-scrollbar': {
+              width: '12px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#1f2937',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#3b82f6',
+              borderRadius: '6px',
+              '&:hover': {
+                backgroundColor: '#2563eb',
+              },
+            },
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+            {content.title || 'LDA Disclosure'}
+          </Typography>
+          {content.subtitle && (
+            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+              {content.subtitle}
+            </Typography>
+          )}
+          <Divider sx={{ my: 3, borderColor: '#374151' }} />
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
+            {infoFields
+              .filter((field) => field.value && field.value !== 'N/A')
+              .map((field) => (
+                <Box 
+                  key={field.label} 
+                  sx={{ 
+                    backgroundColor: 'rgba(251, 191, 36, 0.08)', 
+                    borderRadius: 1, 
+                    p: 1.5,
+                    border: '1px solid rgba(251, 191, 36, 0.2)',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                    {field.label}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
+                    {field.value}
+                  </Typography>
+                </Box>
+              ))}
+          </Box>
+        </Box>
+      );
+    }
+
+    // Default: Show formatted JSON for unknown types
+    return (
+      <Box 
+        sx={{ 
+          p: 3,
+          maxHeight: '70vh',
+          overflow: 'auto',
+          // Blue scrollbar
+          '&::-webkit-scrollbar': {
+            width: '12px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: '#1f2937',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: '#3b82f6',
+            borderRadius: '6px',
+            '&:hover': {
+              backgroundColor: '#2563eb',
+            },
+          },
+        }}
+      >
+        <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+          {content.title || item.name}
+        </Typography>
+        {content.subtitle && (
+          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
+            {content.subtitle}
+          </Typography>
+        )}
+        <Divider sx={{ my: 3, borderColor: '#374151' }} />
+        <Paper
+          sx={{
+            p: 2,
+            backgroundColor: '#111827',
+            border: '1px solid #374151',
+            '& pre': {
+              color: '#e5e7eb',
+              fontFamily: 'monospace',
+              fontSize: '0.875rem',
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            },
+          }}
+        >
+          <pre>{JSON.stringify(data, null, 2)}</pre>
+        </Paper>
+      </Box>
+    );
+  };
+
   const renderPreview = () => {
     if (loading) {
       return (
@@ -204,38 +681,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
 
     switch (previewData.preview_type) {
       case 'context_item':
-        return (
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" sx={{ color: '#ffffff', mb: 2 }}>
-              {previewData.metadata?.title || item.name}
-            </Typography>
-            {previewData.metadata?.subtitle && (
-              <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
-                {previewData.metadata.subtitle}
-              </Typography>
-            )}
-            <Divider sx={{ my: 2, borderColor: '#374151' }} />
-            <Paper
-              sx={{
-                p: 2,
-                backgroundColor: '#111827',
-                border: '1px solid #374151',
-                maxHeight: '60vh',
-                overflow: 'auto',
-                '& pre': {
-                  color: '#e5e7eb',
-                  fontFamily: 'monospace',
-                  fontSize: '0.875rem',
-                  margin: 0,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                },
-              }}
-            >
-              <pre>{JSON.stringify(previewData.content, null, 2)}</pre>
-            </Paper>
-          </Box>
-        );
+        return renderContextItem(previewData.content);
 
       case 'image':
         return (
@@ -286,6 +732,20 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                   margin: 0,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
+                },
+                // Blue scrollbar
+                '&::-webkit-scrollbar': {
+                  width: '12px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  backgroundColor: '#1f2937',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: '#3b82f6',
+                  borderRadius: '6px',
+                  '&:hover': {
+                    backgroundColor: '#2563eb',
+                  },
                 },
               }}
             >
@@ -372,7 +832,26 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         </IconButton>
       </DialogTitle>
 
-      <DialogContent sx={{ p: 0, mt: 2 }}>
+      <DialogContent 
+        sx={{ 
+          p: 0, 
+          mt: 2,
+          // Blue scrollbar for dialog content
+          '&::-webkit-scrollbar': {
+            width: '12px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: '#1f2937',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: '#3b82f6',
+            borderRadius: '6px',
+            '&:hover': {
+              backgroundColor: '#2563eb',
+            },
+          },
+        }}
+      >
         {renderPreview()}
       </DialogContent>
 

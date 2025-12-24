@@ -40,7 +40,11 @@ import {
   AutoAwesome as AutoRefreshIcon,
   Gavel as GavelIcon,
   ViewColumn as ViewColumnIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { useAuth } from '../../contexts/AuthContext';
+import { filesystemAPI } from '../../services/api';
 import { 
   congressBillsSearchAPI, 
   CongressBillsSearchFilters,
@@ -182,8 +186,9 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
 }) => {
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
-  // const { user } = useAuth();
+  const { user } = useAuth();
   // const { activeSessionId } = useGlobalChat();
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -881,6 +886,46 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     setContextMenuAnchor(null);
   };
   
+  const handleAddToFiles = () => {
+    if (selectedBills.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedBills.size === 0) return;
+    
+    try {
+      const selectedBillObjects = filteredResults.filter(bill => 
+        selectedBills.has(bill.bill_id)
+      );
+
+      // Save each bill to the filesystem with FULL data
+      // Note: filteredResults contains the full bill objects from the search API
+      // The search API already enriches bills with full data (including oversized bills from S3)
+      // This ensures we save the complete bill with all fields: actions_json, cosponsors_json, amendments_json, etc.
+      for (const bill of selectedBillObjects) {
+        const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
+        
+        // FULL DATA MODE for filesystem - send complete bill object with ALL fields
+        // Unlike chat agent context (which uses partial data), filesystem needs full data
+        // because it doesn't have database access to fetch missing fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: bill, // Full bill object: includes actions_json, cosponsors_json, amendments_json, etc.
+          title: title,
+          item_type: 'congress_bill',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedBillObjects.length} bill(s) to filesystem`);
+      setSelectedBills(new Set());
+    } catch (error) {
+      console.error('Error saving bills to filesystem:', error);
+    }
+  };
+
   const handleAddToContext = (target: 'new' | 'sidebar') => {
     const selectedBillObjects = filteredResults.filter(bill => 
       selectedBills.has(bill.bill_id)
@@ -3057,7 +3102,22 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem
+          onClick={handleAddToFiles}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+      
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
 
       {/* Tile Customization Dialog */}
       <TileCustomizationDialog

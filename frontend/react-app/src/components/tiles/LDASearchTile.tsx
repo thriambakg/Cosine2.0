@@ -38,7 +38,11 @@ import {
   Refresh as RefreshIcon,
   ExpandMore as ExpandMoreIcon,
   ViewColumn as ViewColumnIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
+import FileBrowserDialog from '../common/FileBrowserDialog';
+import { useAuth } from '../../contexts/AuthContext';
+import { filesystemAPI } from '../../services/api';
 import { 
   ldaSearchAPI, 
   ldaAutocompleteAPI,
@@ -157,8 +161,9 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
   
-  // const { user } = useAuth();
+  const { user } = useAuth();
   // const { activeSessionId } = useGlobalChat();
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
@@ -1032,6 +1037,44 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+  };
+
+  const handleAddToFiles = () => {
+    if (selectedFilings.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedFilings.size === 0) return;
+    
+    try {
+      const selectedFilingObjects = currentResults.filter(filing => 
+        selectedFilings.has(filing.id || filing.filing_uuid || filing.PK || '')
+      );
+
+      // Save each filing to the filesystem with FULL data
+      for (const filing of selectedFilingObjects) {
+        const filingId = filing.id || filing.filing_uuid || `filing_${Date.now()}`;
+        const title = filing.registrant_name 
+          ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+          : `LDA Filing ${filingId}`;
+        
+        // Use full data mode for filesystem - send complete filing object with all fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: filing, // Full filing object with all fields
+          title: title,
+          item_type: 'lda_disclosure',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedFilingObjects.length} filing(s) to filesystem`);
+      setSelectedFilings(new Set());
+    } catch (error) {
+      console.error('Error saving filings to filesystem:', error);
+    }
   };
 
   const handleAddToContext = (target: 'new' | 'sidebar') => {
@@ -3725,7 +3768,22 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem
+          onClick={handleAddToFiles}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+      
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
 
       {/* Tile Customization Dialog */}
       <TileCustomizationDialog
