@@ -57,6 +57,7 @@ function MultiSelectField<T = string>({
   const [inputValue, setInputValue] = useState('');
   const [dynamicSuggestions, setDynamicSuggestions] = useState<T[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const isSelectingRef = useRef(false); // Track if we're selecting to prevent input clearing
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [currentQuery, setCurrentQuery] = useState<string>('');
@@ -65,6 +66,7 @@ function MultiSelectField<T = string>({
   // Track last search query to prevent duplicate calls
   const lastSearchQueryRef = useRef<string>('');
   const listboxRef = useRef<HTMLUListElement | null>(null);
+  const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Track blur timeout
 
   // Helper function to extract results from search response
   const extractResults = (response: any): { results: T[]; hasMore: boolean } => {
@@ -123,6 +125,11 @@ function MultiSelectField<T = string>({
       setDynamicSuggestions([]);
       setHasMore(false);
       setCurrentQuery('');
+      return;
+    }
+
+    // Don't trigger search if we're in the middle of selecting (prevents reload on selection)
+    if (isSelectingRef.current) {
       return;
     }
 
@@ -216,22 +223,46 @@ function MultiSelectField<T = string>({
 
   const availableOptions = dynamicSuggestions.length > 0 ? dynamicSuggestions : (suggestions || []);
 
+
   return (
     <Box>
       {/* Inline Autocomplete */}
       <Autocomplete
         value={null}
         inputValue={inputValue}
-        onInputChange={(_, value) => {
+        onInputChange={(_, value, reason) => {
+          // Prevent MUI from clearing the input when selecting an option
+          if (reason === 'reset' && isSelectingRef.current) {
+            console.log('🟡 MultiSelectField: Preventing input clear during selection');
+            // Don't update the input value - keep it as is
+            return;
+          }
           setInputValue(value);
         }}
         onChange={(_, value, reason) => {
+          console.log('🟢 MultiSelectField: onChange called', { value: value ? renderItem(value) : null, reason, label });
           if (value && reason === 'selectOption') {
+            // Mark that we're selecting to prevent input clearing
+            // Set this BEFORE handleAddItem to ensure it's set when onInputChange fires
+            isSelectingRef.current = true;
+            
+            // Cancel any pending blur close
+            if (blurTimeoutRef.current) {
+              clearTimeout(blurTimeoutRef.current);
+              blurTimeoutRef.current = null;
+              console.log('🟢 MultiSelectField: Cancelled blur close, selection detected');
+            }
+            
             handleAddItem(value);
-            // Clear input after selection
-            setInputValue('');
-            // Close dropdown after selection
-            setIsDropdownOpen(false);
+            
+            // Keep dropdown open - no need for setTimeout, just ensure it stays open
+            setIsDropdownOpen(true);
+            
+            // Reset the selecting flag after MUI has finished its reset attempt
+            setTimeout(() => {
+              isSelectingRef.current = false;
+            }, 50);
+            console.log('✅ MultiSelectField: Item added, keeping dropdown open and text in search bar');
           }
         }}
         options={availableOptions}
@@ -252,9 +283,42 @@ function MultiSelectField<T = string>({
         freeSolo={false}
         loading={isLoading || isLoadingMore}
         clearOnBlur={false}
-        open={isDropdownOpen && (availableOptions.length > 0 || isLoading || isLoadingMore)}
-        onOpen={() => setIsDropdownOpen(true)}
-        onClose={() => setIsDropdownOpen(false)}
+        disableCloseOnSelect={true}
+        open={isDropdownOpen}
+        onOpen={() => {
+          console.log('🔵 MultiSelectField: onOpen called');
+          setIsDropdownOpen(true);
+        }}
+        onClose={(_, reason) => {
+          console.log('🔴 MultiSelectField: onClose called', { reason, isDropdownOpen, label });
+          // Don't close if we just selected an option (allow multiple selections)
+          if (reason === 'selectOption') {
+            console.log('✅ MultiSelectField: Keeping dropdown open after selection');
+            // Explicitly keep it open by setting state in next tick
+            setTimeout(() => {
+              setIsDropdownOpen(true);
+            }, 0);
+            return; // Keep dropdown open after selection
+          }
+          // For blur, delay closing to see if a selection is coming
+          if (reason === 'blur') {
+            console.log('🟡 MultiSelectField: Blur detected, delaying close to check for selection');
+            // Clear any existing timeout
+            if (blurTimeoutRef.current) {
+              clearTimeout(blurTimeoutRef.current);
+            }
+            // Delay closing to allow onChange to fire first
+            blurTimeoutRef.current = setTimeout(() => {
+              console.log('❌ MultiSelectField: Closing dropdown after blur delay');
+              setIsDropdownOpen(false);
+              blurTimeoutRef.current = null;
+            }, 150); // 150ms delay to allow selection to be detected
+            return;
+          }
+          // Close for all other reasons: 'escape', 'toggleInput', etc.
+          console.log('❌ MultiSelectField: Closing dropdown, reason:', reason);
+          setIsDropdownOpen(false);
+        }}
         PaperComponent={(props) => (
           <Paper 
             {...props} 
@@ -356,6 +420,40 @@ function MultiSelectField<T = string>({
                 e.preventDefault();
                 handleAddItem(inputValue.trim());
               }
+            }}
+            onBlur={(e) => {
+              console.log('🟡 MultiSelectField: TextField onBlur', { 
+                label, 
+                relatedTarget: e.relatedTarget,
+                isDropdownOpen 
+              });
+              
+              // Check if the blur is happening because we clicked on a dropdown option
+              // The relatedTarget (where focus is moving to) should be within the Autocomplete popper
+              const relatedTarget = e.relatedTarget as HTMLElement | null;
+              
+              if (relatedTarget) {
+                // Check if the click target is within the Autocomplete dropdown (popper)
+                const popperElements = document.querySelectorAll('.MuiAutocomplete-popper');
+                for (const popper of popperElements) {
+                  if (popper.contains(relatedTarget)) {
+                    console.log('🟡 MultiSelectField: Blur is due to clicking dropdown option, keeping open');
+                    // This is a selection, don't close - the onChange will handle it
+                    return;
+                  }
+                }
+                
+                // Check if it's within the input area itself (clicking on buttons)
+                const autocompleteRoot = e.currentTarget.closest('.MuiAutocomplete-root');
+                if (autocompleteRoot && autocompleteRoot.contains(relatedTarget)) {
+                  console.log('🟡 MultiSelectField: Blur is within Autocomplete component, keeping open');
+                  return;
+                }
+              }
+              
+              // Blur is happening because we clicked outside
+              // Let the onClose handler deal with it (it has the delay logic)
+              console.log('🟡 MultiSelectField: Blur is outside, will be handled by onClose');
             }}
           />
         )}

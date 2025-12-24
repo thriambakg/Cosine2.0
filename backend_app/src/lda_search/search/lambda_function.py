@@ -985,12 +985,20 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         gsi_pagination_key = None
         gsi_config = None
         union_offset = None
+        fetch_next_batches = False
         if last_evaluated_key and isinstance(last_evaluated_key, dict):
             query_type = last_evaluated_key.get('query_type')
             if query_type == 'union_offset':
                 # Offset-based pagination for union of IDs
-                union_offset = last_evaluated_key.get('offset', 0)
-                logger.info(f"Continuing pagination from union offset: {union_offset}")
+                fetch_next_batches = last_evaluated_key.get('fetch_next_batches', False)
+                if fetch_next_batches:
+                    # We're fetching next batches from queries - reset offset to 0 for new intersection
+                    union_offset = 0
+                    logger.info(f"Fetching next batches from queries - resetting union_offset to 0 for new intersection")
+                else:
+                    # Continue from previous offset
+                    union_offset = last_evaluated_key.get('offset', 0)
+                    logger.info(f"Continuing pagination from union offset: {union_offset}")
             elif query_type == 'search_index':
                 # Extract the actual DynamoDB key from our custom format
                 search_index_key_obj = last_evaluated_key.get('search_index_key')
@@ -1035,113 +1043,247 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     if gsi_pagination_key:
                         logger.info(f"Continuing pagination for GSI: {gsi_config['index_name'] if gsi_config else 'unknown'}")
         
-        # Query each filter to get initial batch of filing IDs (GSI or parameter-filing mapping)
+        # Query each filter to get batches of filing IDs (GSI or parameter-filing mapping)
+        # Continue fetching batches until we have enough items in the intersection to meet the limit
         # Use a unique key for each query config to handle multiple values in the same category
-        gsi_results = {}
+        
+        # If we need to fetch next batches, extract query keys from pagination token
+        query_keys_from_token = {}
+        if fetch_next_batches and last_evaluated_key and isinstance(last_evaluated_key, dict):
+            query_keys_from_token = last_evaluated_key.get('query_keys', {})
+            logger.info(f"Fetching next batches from queries using stored pagination keys: {list(query_keys_from_token.keys())}")
+        
+        # Track pagination keys for each query to continue fetching
+        query_pagination_keys = {}
+        query_config_map = {}  # Map unique_key to config for easy lookup
         for idx, config in enumerate(query_configs):
-            # Create unique key: use category if available, otherwise use filter_key + hash_value
             if config.get('category'):
                 unique_key = f"{config['category']}_{idx}"
             else:
                 unique_key = f"{config['filter_key']}_{config.get('hash_value', idx)}"
+            query_config_map[unique_key] = config
             
-            if config.get('query_type') == 'search_index':
-                # Use search index query
-                logger.info(f"Querying search index for {config['search_type']} with values: {config['search_values']}")
-                
-                # If this is the config we're paginating on, use the pagination key
-                exclusive_start_key = None
-                if search_index_config and config == search_index_config and search_index_pagination_key:
-                    exclusive_start_key = search_index_pagination_key
-                    logger.info(f"Using pagination key for search index query")
-                
-                # Extract date filters from filters dict
-                date_from = filters.get('date_from')
-                date_to = filters.get('date_to')
-                
-                # Query search index - returns entityPKs (FILING#uuid or CONTRIBUTION#uuid)
-                entity_pks, search_last_key = query_search_index(
-                    search_type=config['search_type'],
-                    search_values=config['search_values'],
-                    limit=1000,
-                    exclusive_start_key=exclusive_start_key,
-                    date_from=date_from,
-                    date_to=date_to
-                )
-                
-                # Convert entityPKs to filing_ids (remove FILING# or CONTRIBUTION# prefix)
-                filing_ids = []
-                for entity_pk in entity_pks:
-                    if entity_pk.startswith('FILING#'):
-                        filing_id = entity_pk.replace('FILING#', '')
-                        filing_ids.append(filing_id)
-                    elif entity_pk.startswith('CONTRIBUTION#'):
-                        filing_id = entity_pk.replace('CONTRIBUTION#', '')
-                        filing_ids.append(filing_id)
-                
-                gsi_results[unique_key] = {
-                    'filing_ids': set(filing_ids),
-                    'config': config,
-                    'total_count': len(filing_ids),
-                    'last_eval_key': search_last_key,
-                    'query_type': 'search_index'
-                }
-                logger.info(f"Found {len(filing_ids)} filing IDs from search index for {config['search_type']} (has_more: {search_last_key is not None})")
-            elif config.get('query_type') == 'parameter_filing_mapping':
-                # Use parameter-filing mapping query (legacy - kept for backward compatibility)
-                logger.info(f"Querying parameter-filing mappings for {config['parameter_type']} with values: {config['parameter_values']}")
-                
-                # If this is the config we're paginating on, use the pagination key
-                exclusive_start_key = None
-                if param_mapping_config and config == param_mapping_config and param_mapping_pagination_key:
-                    exclusive_start_key = param_mapping_pagination_key
-                    logger.info(f"Using pagination key for parameter-filing mapping query")
-                
-                filing_ids, param_last_key = query_parameter_filing_mappings(
-                    parameter_type=config['parameter_type'],
-                    parameter_values=config['parameter_values'],
-                    limit=1000,
-                    exclusive_start_key=exclusive_start_key,
-                    per_param_limit=1000
-                )
-                gsi_results[unique_key] = {
-                    'filing_ids': set(filing_ids),
-                    'config': config,
-                    'total_count': len(filing_ids),
-                    'last_eval_key': param_last_key,
-                    'query_type': 'parameter_filing_mapping'
-                }
-                logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings for {config['parameter_type']} (has_more: {param_last_key is not None})")
+            # Initialize pagination key from token if available
+            if fetch_next_batches and unique_key in query_keys_from_token:
+                query_key_info = query_keys_from_token[unique_key]
+                query_pagination_keys[unique_key] = query_key_info.get('key')
             else:
-                # Use GSI query
-                # For GSI queries, capture LastEvaluatedKey for pagination support
-                logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+                query_pagination_keys[unique_key] = None
+        
+        # Continue fetching batches until we have enough items or all queries are exhausted
+        max_batch_iterations = 10  # Limit iterations to prevent infinite loops
+        batch_iteration = 0
+        accumulated_gsi_results = {}  # Accumulate results across batches
+        
+        while batch_iteration < max_batch_iterations:
+            batch_iteration += 1
+            logger.info(f"Fetching batch {batch_iteration} from queries...")
+            
+            # Query each filter to get a batch of filing IDs
+            batch_gsi_results = {}
+            all_queries_exhausted = True
+            
+            for unique_key, config in query_config_map.items():
+                # Skip if this query is exhausted (no pagination key)
+                if query_pagination_keys[unique_key] is None and batch_iteration > 1:
+                    # Use accumulated results from previous batches
+                    if unique_key in accumulated_gsi_results:
+                        batch_gsi_results[unique_key] = accumulated_gsi_results[unique_key]
+                    continue
                 
-                # Check if we have a pagination key for this specific GSI query
-                exclusive_start_key = None
-                if gsi_config and config == gsi_config and gsi_pagination_key:
-                    exclusive_start_key = gsi_pagination_key
-                    logger.info(f"Using pagination key for GSI query: {config['index_name']}")
+                all_queries_exhausted = False
                 
-                filing_ids, last_eval_key = query_gsi_for_filing_ids(
-                    index_name=config['index_name'],
-                    hash_key_name=config['hash_key'],
-                    hash_key_value=config['hash_value'],
-                    range_key_name=config.get('range_key'),
-                    range_key_value=config.get('range_value'),
-                    range_key_condition=config.get('range_condition'),
-                    limit=1000,
-                    exclusive_start_key=exclusive_start_key,
-                    get_all=False
-                )
-                gsi_results[unique_key] = {
-                    'filing_ids': set(filing_ids),
-                    'config': config,
-                    'total_count': len(filing_ids),
-                    'last_eval_key': last_eval_key,  # Store the actual LastEvaluatedKey from GSI query
-                    'query_type': 'gsi'
-                }
-                logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (first batch, has_more: {last_eval_key is not None})")
+                if config.get('query_type') == 'search_index':
+                    # Use search index query
+                    logger.info(f"Querying search index for {config['search_type']} with values: {config['search_values']}")
+                    
+                    # Use pagination key from our tracking
+                    exclusive_start_key = query_pagination_keys[unique_key]
+                    if exclusive_start_key and batch_iteration == 1 and fetch_next_batches:
+                        logger.info(f"Using stored pagination key for search index query (fetch_next_batches)")
+                    elif exclusive_start_key:
+                        logger.info(f"Using pagination key for search index query (batch {batch_iteration})")
+                    
+                    # Extract date filters from filters dict
+                    date_from = filters.get('date_from')
+                    date_to = filters.get('date_to')
+                    
+                    # Query search index - returns entityPKs (FILING#uuid or CONTRIBUTION#uuid)
+                    entity_pks, search_last_key = query_search_index(
+                        search_type=config['search_type'],
+                        search_values=config['search_values'],
+                        limit=1000,
+                        exclusive_start_key=exclusive_start_key,
+                        date_from=date_from,
+                        date_to=date_to
+                    )
+                    
+                    # Convert entityPKs to filing_ids (remove FILING# or CONTRIBUTION# prefix)
+                    filing_ids = []
+                    for entity_pk in entity_pks:
+                        if entity_pk.startswith('FILING#'):
+                            filing_id = entity_pk.replace('FILING#', '')
+                            filing_ids.append(filing_id)
+                        elif entity_pk.startswith('CONTRIBUTION#'):
+                            filing_id = entity_pk.replace('CONTRIBUTION#', '')
+                            filing_ids.append(filing_id)
+                    
+                    # Accumulate IDs across batches (union)
+                    if unique_key in accumulated_gsi_results:
+                        accumulated_gsi_results[unique_key]['filing_ids'] = accumulated_gsi_results[unique_key]['filing_ids'] | set(filing_ids)
+                    else:
+                        accumulated_gsi_results[unique_key] = {
+                            'filing_ids': set(filing_ids),
+                            'config': config,
+                            'query_type': 'search_index'
+                        }
+                    
+                    # Update pagination key for next iteration
+                    query_pagination_keys[unique_key] = search_last_key
+                    logger.info(f"Found {len(filing_ids)} filing IDs from search index for {config['search_type']} (has_more: {search_last_key is not None}, total accumulated: {len(accumulated_gsi_results[unique_key]['filing_ids'])})")
+                    
+                elif config.get('query_type') == 'parameter_filing_mapping':
+                    # Use parameter-filing mapping query (legacy - kept for backward compatibility)
+                    logger.info(f"Querying parameter-filing mappings for {config['parameter_type']} with values: {config['parameter_values']}")
+                    
+                    # Use pagination key from our tracking
+                    exclusive_start_key = query_pagination_keys[unique_key]
+                    
+                    filing_ids, param_last_key = query_parameter_filing_mappings(
+                        parameter_type=config['parameter_type'],
+                        parameter_values=config['parameter_values'],
+                        limit=1000,
+                        exclusive_start_key=exclusive_start_key,
+                        per_param_limit=1000
+                    )
+                    
+                    # Accumulate IDs across batches (union)
+                    if unique_key in accumulated_gsi_results:
+                        accumulated_gsi_results[unique_key]['filing_ids'] = accumulated_gsi_results[unique_key]['filing_ids'] | set(filing_ids)
+                    else:
+                        accumulated_gsi_results[unique_key] = {
+                            'filing_ids': set(filing_ids),
+                            'config': config,
+                            'query_type': 'parameter_filing_mapping'
+                        }
+                    
+                    # Update pagination key for next iteration
+                    query_pagination_keys[unique_key] = param_last_key
+                    logger.info(f"Found {len(filing_ids)} filing IDs from parameter-filing mappings for {config['parameter_type']} (has_more: {param_last_key is not None}, total accumulated: {len(accumulated_gsi_results[unique_key]['filing_ids'])})")
+                    
+                else:
+                    # Use GSI query
+                    logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+                    
+                    # Use pagination key from our tracking
+                    exclusive_start_key = query_pagination_keys[unique_key]
+                    if exclusive_start_key and batch_iteration == 1 and fetch_next_batches:
+                        logger.info(f"Using stored pagination key for GSI query (fetch_next_batches): {config['index_name']}")
+                    elif exclusive_start_key:
+                        logger.info(f"Using pagination key for GSI query (batch {batch_iteration}): {config['index_name']}")
+                    
+                    filing_ids, last_eval_key = query_gsi_for_filing_ids(
+                        index_name=config['index_name'],
+                        hash_key_name=config['hash_key'],
+                        hash_key_value=config['hash_value'],
+                        range_key_name=config.get('range_key'),
+                        range_key_value=config.get('range_value'),
+                        range_key_condition=config.get('range_condition'),
+                        limit=1000,
+                        exclusive_start_key=exclusive_start_key,
+                        get_all=False
+                    )
+                    
+                    # Accumulate IDs across batches (union)
+                    if unique_key in accumulated_gsi_results:
+                        accumulated_gsi_results[unique_key]['filing_ids'] = accumulated_gsi_results[unique_key]['filing_ids'] | set(filing_ids)
+                    else:
+                        accumulated_gsi_results[unique_key] = {
+                            'filing_ids': set(filing_ids),
+                            'config': config,
+                            'query_type': 'gsi'
+                        }
+                    
+                    # Update pagination key for next iteration
+                    query_pagination_keys[unique_key] = last_eval_key
+                    logger.info(f"Found {len(filing_ids)} filing IDs from {config['index_name']} (has_more: {last_eval_key is not None}, total accumulated: {len(accumulated_gsi_results[unique_key]['filing_ids'])})")
+            
+            # Quick intersection check to see if we have enough items
+            # Group results by category for intersection computation
+            temp_general_text_search_results = {}
+            temp_advanced_search_results = {}
+            temp_other_filters_results = {}
+            
+            for key, result in accumulated_gsi_results.items():
+                config = result['config']
+                if config.get('from_general_text_search', False):
+                    temp_general_text_search_results[key] = result
+                elif config.get('is_advanced_search', False):
+                    category = config.get('category', key)
+                    if category not in temp_advanced_search_results:
+                        temp_advanced_search_results[category] = []
+                    temp_advanced_search_results[category].append(result)
+                else:
+                    temp_other_filters_results[key] = result
+            
+            # Compute quick intersection
+            temp_intersection = None
+            if temp_advanced_search_results:
+                category_unions = {}
+                for category, results in temp_advanced_search_results.items():
+                    category_union = set()
+                    for result in results:
+                        category_union = category_union | result['filing_ids']
+                    category_unions[category] = category_union
+                
+                category_list = list(category_unions.keys())
+                if category_list:
+                    temp_intersection = category_unions[category_list[0]]
+                    for category in category_list[1:]:
+                        temp_intersection = temp_intersection & category_unions[category]
+            
+            if temp_general_text_search_results:
+                general_text_union = set()
+                for key, result in temp_general_text_search_results.items():
+                    general_text_union = general_text_union | result['filing_ids']
+                if temp_intersection is not None:
+                    temp_intersection = temp_intersection & general_text_union
+                else:
+                    temp_intersection = general_text_union
+            
+            if temp_other_filters_results:
+                for key, result in temp_other_filters_results.items():
+                    if temp_intersection is not None:
+                        temp_intersection = temp_intersection & result['filing_ids']
+                    else:
+                        temp_intersection = result['filing_ids']
+            
+            intersection_size = len(temp_intersection) if temp_intersection else 0
+            logger.info(f"After batch {batch_iteration}: intersection size = {intersection_size}, limit = {limit}")
+            
+            # Check if we have enough items in intersection or all queries exhausted
+            if all_queries_exhausted:
+                logger.info(f"All queries exhausted after batch {batch_iteration}")
+                break
+            
+            # If we have enough items in the intersection (with some buffer), we can stop fetching
+            # We use limit * 2 as buffer because not all items will pass Python filters
+            if intersection_size >= limit * 2:
+                logger.info(f"Intersection has enough items ({intersection_size} >= {limit * 2}), stopping batch fetching")
+                break
+            
+            # Check if any query has more results
+            has_more_results = any(
+                query_pagination_keys[key] is not None 
+                for key in query_pagination_keys.keys()
+            )
+            
+            if not has_more_results:
+                logger.info(f"All queries exhausted after batch {batch_iteration}")
+                break
+        
+        # Use accumulated results for intersection computation
+        gsi_results = accumulated_gsi_results
         
         # Separate filters into three groups:
         # 1. general_text_search_fields (OR logic - union all)
@@ -1223,7 +1365,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             logger.info(f"After intersecting with {len(other_filters_results)} other filters: {len(source_filing_ids_set)} filing IDs")
         
         source_filing_ids = list(source_filing_ids_set)
-        logger.info(f"Final result: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields, OR within/AND across for advanced search, and AND for other filters")
+        logger.info(f"Initial intersection: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields, OR within/AND across for advanced search, and AND for other filters")
         
         # Remove all queryable filters from filters
         # For general_text_search_fields, we've already queried all terms via separate query configs
@@ -1293,8 +1435,9 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
-        # Fetch items directly from the intersected filing IDs (no need to paginate through source query)
-        # Since we've already intersected all query results, we can fetch items directly
+        # For multi-query intersection, we need to continue fetching batches from all queries
+        # until we have enough items in the intersection to meet the limit
+        # Use union offset pagination consistently to avoid switching between pagination methods
         all_matching_items = []
         next_offset = None  # Initialize next_offset
         
@@ -1347,12 +1490,15 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             all_matching_items = filtered_items
             logger.info(f"Fetched and filtered {len(all_matching_items)} items (processed up to index {last_processed_index} of {len(source_filing_ids)})")
             
-            # Calculate next offset for union pagination
-            # Use the last processed index as the next offset
+            # If we don't have enough items and haven't processed all IDs, we need to fetch more batches
+            # from the queries and re-intersect. However, for now, we'll use union offset pagination
+            # to continue from where we left off in the current intersection
             if last_processed_index < len(source_filing_ids):
                 next_offset = last_processed_index
             else:
-                next_offset = None  # No more items to fetch
+                # We've processed all IDs in the current intersection
+                # Check if any queries have more results to fetch
+                next_offset = None  # Will be set below if queries have more results
         else:
             next_offset = None
         
@@ -1371,73 +1517,61 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         serializable_last_key = None
         has_more = False
         
-        # Find search index queries first (preferred - new pattern)
-        for key, result in gsi_results.items():
-            if result['query_type'] == 'search_index' and result.get('last_eval_key'):
-                config = result['config']
-                try:
-                    # Store the search index key for continuation
+        # For multi-query intersection, always use union offset pagination for consistency
+        # This ensures we paginate through the intersected results consistently
+        # Individual query pagination keys cause inconsistent results when queries are intersected
+        if union_offset is not None:
+            # We're continuing union offset pagination - use it consistently
+            current_offset = union_offset
+            has_more = next_offset is not None and next_offset < len(source_filing_ids)
+            if has_more:
+                # Return union offset pagination key
+                serializable_last_key = {
+                    'offset': next_offset,
+                    'query_type': 'union_offset',
+                    'total_ids': len(source_filing_ids)
+                }
+                logger.info(f"Continuing union offset pagination - next offset: {next_offset}, total IDs: {len(source_filing_ids)}")
+            else:
+                # Check if we need to fetch more batches from queries to get more items in intersection
+                # If we have more results available from any query, we should continue
+                has_more = False
+                query_pagination_keys = {}  # Store pagination keys for each query
+                for key, result in gsi_results.items():
+                    if result.get('last_eval_key'):
+                        has_more = True
+                        # Store the pagination key for this query
+                        config = result['config']
+                        if result['query_type'] == 'search_index':
+                            query_pagination_keys[key] = {
+                                'type': 'search_index',
+                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'search_type': config['search_type'],
+                                'filter_key': config['filter_key']
+                            }
+                        elif result['query_type'] == 'gsi':
+                            query_pagination_keys[key] = {
+                                'type': 'gsi',
+                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'index_name': config['index_name'],
+                                'hash_key': config['hash_key'],
+                                'hash_value': config['hash_value']
+                            }
+                if has_more:
+                    # We have more results from queries, but we've exhausted current intersection
+                    # Return union offset with query pagination keys to fetch next batches
                     serializable_last_key = {
-                        'search_index_key': convert_decimal_to_float(result['last_eval_key']),
-                        'search_type': config['search_type'],
-                        'filter_key': config['filter_key'],
-                        'query_type': 'search_index'
+                        'offset': len(source_filing_ids),  # Signal to fetch next batches
+                        'query_type': 'union_offset',
+                        'total_ids': len(source_filing_ids),
+                        'fetch_next_batches': True,  # Flag to fetch next batches from queries
+                        'query_keys': query_pagination_keys  # Store pagination keys for each query
                     }
-                    has_more = True
-                    logger.info(f"Search index has more results - pagination key available for {config['search_type']}")
-                    break  # Use the first search index query's pagination key
-                except Exception as e:
-                    logger.warning(f"Error converting search index key: {e}")
-        
-        # If no search index pagination key, check parameter-filing mapping queries (legacy)
-        if not serializable_last_key:
-            for key, result in gsi_results.items():
-                if result['query_type'] == 'parameter_filing_mapping' and result.get('last_eval_key'):
-                    config = result['config']
-                    try:
-                        # Store the parameter mapping key for continuation
-                        serializable_last_key = {
-                            'parameter_mapping_key': convert_decimal_to_float(result['last_eval_key']),
-                            'parameter_type': config['parameter_type'],
-                            'filter_key': config['filter_key'],
-                            'query_type': 'parameter_filing_mapping'
-                        }
-                        has_more = True
-                        logger.info(f"Parameter-filing mapping has more results - pagination key available")
-                        break  # Use the first parameter-filing mapping query's pagination key
-                    except Exception as e:
-                        logger.warning(f"Error converting parameter mapping key: {e}")
-        
-        # If no search index or parameter mapping pagination key, check GSI queries
-        if not serializable_last_key:
-            for key, result in gsi_results.items():
-                if result['query_type'] == 'gsi' and result.get('last_eval_key'):
-                    config = result['config']
-                    try:
-                        # Store the GSI query key for continuation
-                        serializable_last_key = {
-                            'gsi_key': convert_decimal_to_float(result['last_eval_key']),
-                            'index_name': config['index_name'],
-                            'hash_key': config['hash_key'],
-                            'hash_value': config['hash_value'],
-                            'range_key': config.get('range_key'),
-                            'range_value': config.get('range_value'),
-                            'range_condition': config.get('range_condition'),
-                            'filter_key': config['filter_key'],
-                            'query_type': 'gsi',
-                            'from_general_text_search': config.get('from_general_text_search', False),
-                            'category': config.get('category')
-                        }
-                        has_more = True
-                        logger.info(f"GSI query has more results - pagination key available for {config['index_name']}")
-                        break  # Use the first GSI query's pagination key
-                    except Exception as e:
-                        logger.warning(f"Error converting GSI key: {e}")
-        
-        # If no pagination key from individual queries, use union offset pagination
-        if not serializable_last_key:
-            # Check if we have more items to fetch from the union
-            current_offset = union_offset if union_offset is not None else 0
+                    logger.info(f"Exhausted current intersection ({len(source_filing_ids)} items), but queries have more - will fetch next batches")
+        else:
+            # First page - for multi-query, use union offset pagination from start
+            # Check if we have more items to fetch from the current intersection
+            current_offset = 0
             has_more = next_offset is not None and next_offset < len(source_filing_ids)
             if has_more:
                 # Return union offset pagination key
@@ -1448,7 +1582,42 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 }
                 logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs: {len(source_filing_ids)}")
             else:
-                has_more = len(source_filing_ids) > (current_offset + len(items))
+                # Check if any queries have more results to fetch
+                has_more = False
+                query_pagination_keys = {}  # Store pagination keys for each query
+                for key, result in gsi_results.items():
+                    if result.get('last_eval_key'):
+                        has_more = True
+                        # Store the pagination key for this query
+                        config = result['config']
+                        if result['query_type'] == 'search_index':
+                            query_pagination_keys[key] = {
+                                'type': 'search_index',
+                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'search_type': config['search_type'],
+                                'filter_key': config['filter_key']
+                            }
+                        elif result['query_type'] == 'gsi':
+                            query_pagination_keys[key] = {
+                                'type': 'gsi',
+                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'index_name': config['index_name'],
+                                'hash_key': config['hash_key'],
+                                'hash_value': config['hash_value']
+                            }
+                if has_more:
+                    # We have more results from queries, but we've exhausted current intersection
+                    # Return union offset with query pagination keys to fetch next batches
+                    serializable_last_key = {
+                        'offset': len(source_filing_ids),  # Signal to fetch next batches
+                        'query_type': 'union_offset',
+                        'total_ids': len(source_filing_ids),
+                        'fetch_next_batches': True,  # Flag to fetch next batches from queries
+                        'query_keys': query_pagination_keys  # Store pagination keys for each query
+                    }
+                    logger.info(f"Exhausted current intersection ({len(source_filing_ids)} items), but queries have more - will fetch next batches")
+                else:
+                    has_more = len(source_filing_ids) > len(items)
         
         return {
             'success': True,
