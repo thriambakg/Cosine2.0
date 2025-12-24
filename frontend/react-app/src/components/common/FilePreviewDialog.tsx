@@ -13,10 +13,8 @@ import {
   Paper,
   Divider,
   Chip,
-  Table,
-  TableBody,
-  TableRow,
-  TableCell,
+  Grid,
+  Link,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -26,6 +24,8 @@ import {
   Description as TextIcon,
   InsertDriveFile as FileIcon,
   OpenInNew as OpenInNewIcon,
+  Launch as LaunchIcon,
+  Description as DocumentIcon,
 } from '@mui/icons-material';
 import { fileReturnAPI } from '@/services/api';
 import TilePreview from './TilePreview';
@@ -331,6 +331,34 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     } as UnifiedTile;
   };
 
+  // Helper function to download filing document
+  const handleDownloadFiling = useCallback(async (s3Key: string, filename: string) => {
+    try {
+      const response = await fileReturnAPI.downloadFile({
+        user_id,
+        s3_key: s3Key,
+        filename: filename,
+        bucket: 'POLITICIAN_TRADES',
+      });
+      
+      if (response.success && response.data?.download_url) {
+        window.open(response.data.download_url, '_blank');
+      } else {
+        setError('Failed to download filing document');
+      }
+    } catch (err: any) {
+      console.error('Error downloading filing:', err);
+      setError('Failed to download filing document');
+    }
+  }, [user_id]);
+
+  const formatLDACurrency = (amount?: number | string): string => {
+    if (amount === undefined || amount === null || amount === '') return 'N/A';
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount)) return 'N/A';
+    return formatCurrency(numAmount);
+  };
+
   const renderContextItem = (content: any) => {
     // Check if this is a tile
     const tile = contentToTile(content);
@@ -356,263 +384,979 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     }
     const itemType = content.type || data.item_type || 'context_item';
     
-    // Politician Trade
+    const scrollbarStyles = {
+      '&::-webkit-scrollbar': {
+        width: '8px',
+      },
+      '&::-webkit-scrollbar-track': {
+        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+      },
+      '&::-webkit-scrollbar-thumb': {
+        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+        borderRadius: '4px',
+      },
+      '&::-webkit-scrollbar-thumb:hover': {
+        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+      },
+    };
+    
+    // Politician Trade - New clean details page format
     if (itemType === 'politician_trade' || data.tradeId || data.politicianName || data.transactionType) {
-      const infoFields = [
-        { label: 'Politician', value: data.politicianName },
-        { label: 'Position', value: data.position },
-        { label: 'Party', value: data.party },
-        { label: 'State/District', value: data.stateDistrict },
-        { label: 'Security Symbol', value: data.securitySymbol },
-        { label: 'Security Name', value: data.securityName },
-        { label: 'Asset Type', value: data.assetType },
-        { label: 'Transaction Type', value: data.transactionType },
-        { label: 'Transaction Date', value: formatTransactionDate(data.transactionDate) },
-        { label: 'Filing Date', value: formatDate(data.filingDate) },
-        { label: 'Amount Range', value: formatAmountRange(data) },
-        { label: 'Owner', value: data.owner },
-        { label: 'Source', value: data.source },
-        { label: 'Form Type', value: data.formType },
-      ];
-
       return (
         <Box 
           sx={{ 
             p: 3,
             maxHeight: '70vh',
             overflow: 'auto',
-            // Blue scrollbar
-            '&::-webkit-scrollbar': {
-              width: '12px',
-            },
-            '&::-webkit-scrollbar-track': {
-              backgroundColor: '#1f2937',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#3b82f6',
-              borderRadius: '6px',
-              '&:hover': {
-                backgroundColor: '#2563eb',
-              },
-            },
+            ...scrollbarStyles,
           }}
         >
-          <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
             {content.title || data.politicianName || 'Politician Trade'}
           </Typography>
-          {content.subtitle && (
-            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-              {content.subtitle}
+          
+          {/* Trade Information Section */}
+          <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+            <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+              Trade Information
             </Typography>
-          )}
-          <Divider sx={{ my: 3, borderColor: '#374151' }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
-            {infoFields
-              .filter((field) => field.value && field.value !== 'N/A')
-              .map((field) => (
-                <Box 
-                  key={field.label} 
-                  sx={{ 
-                    backgroundColor: 'rgba(16, 185, 129, 0.08)', 
-                    borderRadius: 1, 
-                    p: 1.5,
-                    border: '1px solid rgba(16, 185, 129, 0.2)',
-                  }}
-                >
-                  <Typography variant="caption" sx={{ color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
-                    {field.label}
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+              {data.politicianName && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Politician
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
-                    {field.value}
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.politicianName}
                   </Typography>
                 </Box>
-              ))}
+              )}
+              {data.position && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Position
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.position}
+                  </Typography>
+                </Box>
+              )}
+              {data.party && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Party
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.party}
+                  </Typography>
+                </Box>
+              )}
+              {data.stateDistrict && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    State/District
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.stateDistrict}
+                  </Typography>
+                </Box>
+              )}
+              {data.securitySymbol && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Security Symbol
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                    {data.securitySymbol}
+                  </Typography>
+                </Box>
+              )}
+              {data.securityName && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Security Name
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.securityName}
+                  </Typography>
+                </Box>
+              )}
+              {data.assetType && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Asset Type
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.assetType}
+                  </Typography>
+                </Box>
+              )}
+              {data.transactionType && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Transaction Type
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.transactionType}
+                  </Typography>
+                </Box>
+              )}
+              {data.transactionDate && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Transaction Date
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {formatTransactionDate(data.transactionDate)}
+                  </Typography>
+                </Box>
+              )}
+              {data.filingDate && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Filing Date
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {formatDate(data.filingDate)}
+                  </Typography>
+                </Box>
+              )}
+              {formatAmountRange(data) !== 'N/A' && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Amount Range
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {formatAmountRange(data)}
+                  </Typography>
+                </Box>
+              )}
+              {data.owner && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Owner
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.owner}
+                  </Typography>
+                </Box>
+              )}
+              {data.formType && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Form Type
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.formType}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
           </Box>
 
+          {/* Filing Document Section */}
+          {data.formS3Key && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Filing Document
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1 }}>
+                  {data.formS3Key.split('/').pop() || data.formS3Key}
+                </Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => handleDownloadFiling(data.formS3Key, data.formS3Key.split('/').pop() || 'filing.pdf')}
+                  sx={{
+                    color: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#60a5fa',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                  }}
+                >
+                  Download
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Politician Website */}
           {data.websiteUrl && (
-            <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip
-                label="Politician Website"
-                size="small"
-                sx={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', fontWeight: 600 }}
-                icon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
+            <Box sx={{ mb: 3 }}>
+              <Button
+                variant="outlined"
                 component="a"
                 href={data.websiteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                clickable
-              />
-            </Box>
-          )}
-
-          {data.formS3Key && (
-            <Box sx={{ mt: 3 }}>
-              <Typography variant="subtitle2" sx={{ color: '#f8fafc', mb: 1, fontWeight: 600 }}>
-                Filing Document
-              </Typography>
-              <Paper sx={{ backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 1, border: '1px solid #374151' }}>
-                <Table size="small">
-                  <TableBody>
-                    <TableRow>
-                      <TableCell sx={{ borderColor: '#374151' }}>
-                        <Typography variant="caption" sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                          Filing Document
-                        </Typography>
-                        <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
-                          {data.formS3Key.split('/').pop() || data.formS3Key}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </Paper>
+                startIcon={<LaunchIcon />}
+                sx={{
+                  color: '#3b82f6',
+                  borderColor: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              >
+                View Politician Website
+              </Button>
             </Box>
           )}
         </Box>
       );
     }
 
-    // Congress Bill
+    // Congress Bill - Match details page format
     if (itemType === 'congress_bill' || data.bill_id || data.bill_type || data.bill_number) {
-      const infoFields = [
-        { label: 'Bill Type', value: data.bill_type },
-        { label: 'Bill Number', value: data.bill_number },
-        { label: 'Congress', value: data.congress ? `${data.congress}th Congress` : null },
-        { label: 'Introduced Date', value: formatDate(data.introduced_date) },
-        { label: 'Sponsor Name', value: data.sponsor_name },
-        { label: 'Sponsor Party', value: data.sponsor_party },
-        { label: 'Sponsor State', value: data.sponsor_state },
-        { label: 'Policy Area', value: data.policy_area },
-        { label: 'Latest Action', value: data.latest_action },
-        { label: 'Latest Action Date', value: formatDate(data.latest_action_date) },
-      ];
-
       return (
         <Box 
           sx={{ 
             p: 3,
             maxHeight: '70vh',
             overflow: 'auto',
-            // Blue scrollbar
-            '&::-webkit-scrollbar': {
-              width: '12px',
-            },
-            '&::-webkit-scrollbar-track': {
-              backgroundColor: '#1f2937',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#3b82f6',
-              borderRadius: '6px',
-              '&:hover': {
-                backgroundColor: '#2563eb',
-              },
-            },
+            ...scrollbarStyles,
           }}
         >
-          <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
             {content.title || `${data.bill_type || 'Bill'} ${data.bill_number || ''}` || 'Congress Bill'}
           </Typography>
-          {content.subtitle && (
-            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-              {content.subtitle}
-            </Typography>
-          )}
           {data.bill_title && (
             <Typography variant="body1" sx={{ color: '#e5e7eb', mb: 3, fontStyle: 'italic' }}>
               {data.bill_title}
             </Typography>
           )}
-          <Divider sx={{ my: 3, borderColor: '#374151' }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
-            {infoFields
-              .filter((field) => field.value && field.value !== 'N/A')
-              .map((field) => (
-                <Box 
-                  key={field.label} 
-                  sx={{ 
-                    backgroundColor: 'rgba(59, 130, 246, 0.08)', 
-                    borderRadius: 1, 
-                    p: 1.5,
-                    border: '1px solid rgba(59, 130, 246, 0.2)',
-                  }}
-                >
-                  <Typography variant="caption" sx={{ color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
-                    {field.label}
+
+          {/* Bill Overview Section */}
+          <Box sx={{ mb: 4, borderBottom: '1px solid #374151', pb: 3 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              {/* Left Column: Sponsor & Bill Info */}
+              <Box>
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                    Sponsor
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
-                    {field.value}
+                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {data.sponsor_full_name || data.sponsor_name || 'N/A'}
                   </Typography>
+                  {data.sponsor_party && data.sponsor_state && (
+                    <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>
+                      {data.sponsor_party} - {data.sponsor_state}
+                    </Typography>
+                  )}
                 </Box>
-              ))}
+                
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                    Bill Information
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {data.bill_type && data.bill_number && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Type:</strong> {data.bill_type}.{data.bill_number}
+                      </Typography>
+                    )}
+                    {data.congress && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Congress:</strong> {data.congress}
+                      </Typography>
+                    )}
+                    {data.policy_area && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Policy Area:</strong> {data.policy_area}
+                      </Typography>
+                    )}
+                    {data.bipartisan !== undefined && data.bipartisan !== null && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Bipartisan:</strong> {data.bipartisan === 1 ? 'Yes' : 'No'}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              </Box>
+              
+              {/* Right Column: Dates & Actions */}
+              <Box>
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                    Dates
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {data.introduced_date && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Introduced:</strong> {formatDate(data.introduced_date)}
+                      </Typography>
+                    )}
+                    {data.latest_action_date && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Latest Action:</strong> {formatDate(data.latest_action_date)}
+                      </Typography>
+                    )}
+                    {data.update_date && (
+                      <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                        <strong>Last Updated:</strong> {formatDate(data.update_date)}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+                
+                {data.action_count !== undefined && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                      Actions
+                    </Typography>
+                    <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                      {data.action_count || 0} action(s)
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Box>
           </Box>
+
+          {/* Summary Section */}
+          {data.summary_text && (
+            <Box sx={{ mb: 4, p: 3, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                Summary
+              </Typography>
+              <Typography 
+                variant="body1" 
+                sx={{ 
+                  color: '#e2e8f0', 
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                }}
+                dangerouslySetInnerHTML={{ 
+                  __html: data.summary_text?.replace(/\n/g, '<br />') || '' 
+                }}
+              />
+            </Box>
+          )}
+
+          {/* Cosponsors Section */}
+          {data.cosponsor_count > 0 && data.cosponsors_json && (() => {
+            try {
+              const cosponsors = JSON.parse(data.cosponsors_json);
+              return (
+                <Box sx={{ mb: 4 }}>
+                  <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                    Cosponsors ({data.cosponsor_count})
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {Array.isArray(cosponsors) && cosponsors.map((cosponsor: any, idx: number) => (
+                      <Chip
+                        key={idx}
+                        label={`${cosponsor.fullName || cosponsor.name || 'Unknown'} (${cosponsor.party || ''}-${cosponsor.state || ''})`}
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              );
+            } catch {
+              return null;
+            }
+          })()}
+
+          {/* Bill URL */}
+          {data.bill_url && (
+            <Box sx={{ mt: 3 }}>
+              <Button
+                variant="outlined"
+                component="a"
+                href={data.bill_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                startIcon={<LaunchIcon />}
+                sx={{
+                  color: '#3b82f6',
+                  borderColor: '#3b82f6',
+                  '&:hover': {
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              >
+                View on Congress.gov
+              </Button>
+            </Box>
+          )}
         </Box>
       );
     }
 
-    // LDA Disclosure
+    // LDA Disclosure - Match details page format
     if (itemType === 'lda_disclosure' || data.filing_uuid || data.registrant_name || data.client_name) {
-      const infoFields = [
-        { label: 'Registrant', value: data.registrant_name },
-        { label: 'Client', value: data.client_name },
-        { label: 'Filing Type', value: data.filing_type },
-        { label: 'Filing Period', value: data.filing_period },
-        { label: 'Filing Year', value: data.filing_year },
-        { label: 'Amount', value: data.amount ? formatCurrency(data.amount) : null },
-        { label: 'Date Posted', value: formatDate(data.date_posted) },
-      ];
-
       return (
         <Box 
           sx={{ 
             p: 3,
             maxHeight: '70vh',
             overflow: 'auto',
-            // Blue scrollbar
-            '&::-webkit-scrollbar': {
-              width: '12px',
-            },
-            '&::-webkit-scrollbar-track': {
-              backgroundColor: '#1f2937',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: '#3b82f6',
-              borderRadius: '6px',
-              '&:hover': {
-                backgroundColor: '#2563eb',
-              },
-            },
+            ...scrollbarStyles,
           }}
         >
-          <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
-            {content.title || 'LDA Disclosure'}
-          </Typography>
-          {content.subtitle && (
-            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-              {content.subtitle}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600 }}>
+              {content.title || 'LDA Disclosure'}
             </Typography>
+            {data.filing_document_url && (
+              <Button
+                component="a"
+                href={data.filing_document_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="outlined"
+                size="small"
+                sx={{
+                  color: '#3b82f6',
+                  borderColor: '#3b82f6',
+                  fontSize: '0.75rem',
+                  py: 0.5,
+                  px: 1.5,
+                  textTransform: 'none',
+                  '&:hover': {
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              >
+                View Filing Document
+              </Button>
+            )}
+          </Box>
+
+          {/* Filing Information */}
+          <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+            <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+              Filing Information
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {data.filing_uuid && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Filing UUID:</strong> <span style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{data.filing_uuid}</span>
+                </Typography>
+              )}
+              {(data.report_type || data.filing_type) && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Filing Type:</strong> {data.report_type || data.filing_type || 'N/A'}
+                  {(data.report_type_display || data.filing_type_display) && ` (${data.report_type_display || data.filing_type_display})`}
+                </Typography>
+              )}
+              {(data.filing_period_display || data.filing_period) && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Filing Period:</strong> {data.filing_period_display || data.filing_period || 'N/A'}
+                </Typography>
+              )}
+              {data.filing_year && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Filing Year:</strong> {data.filing_year}
+                </Typography>
+              )}
+              {(data.dt_posted || data.date_posted) && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Date Posted:</strong> {formatDate(data.dt_posted || data.date_posted)}
+                </Typography>
+              )}
+              {(data.amount_reported || data.amount) && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>Amount:</strong> {formatLDACurrency(data.amount_reported || data.amount)}
+                </Typography>
+              )}
+              {data.general_issue_code && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>General Issue Code:</strong> {data.general_issue_code}
+                  {data.general_issue_code_display && ` (${data.general_issue_code_display})`}
+                </Typography>
+              )}
+              {data.state && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                  <strong>State:</strong> {data.state}
+                </Typography>
+              )}
+            </Box>
+          </Box>
+
+          {/* Registrant Information */}
+          {(data.registrant || data.registrant_name) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Registrant
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.95rem' }}>
+                {data.registrant?.name || data.registrant_name || 'N/A'}
+              </Typography>
+              {data.registrant?.description && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 1, fontStyle: 'italic' }}>
+                  {data.registrant.description}
+                </Typography>
+              )}
+            </Box>
           )}
-          <Divider sx={{ my: 3, borderColor: '#374151' }} />
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
-            {infoFields
-              .filter((field) => field.value && field.value !== 'N/A')
-              .map((field) => (
-                <Box 
-                  key={field.label} 
-                  sx={{ 
-                    backgroundColor: 'rgba(251, 191, 36, 0.08)', 
-                    borderRadius: 1, 
-                    p: 1.5,
-                    border: '1px solid rgba(251, 191, 36, 0.2)',
+
+          {/* Client Information */}
+          {(data.client || data.client_name) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Client
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '0.95rem' }}>
+                {data.client?.name || data.client_name || 'N/A'}
+              </Typography>
+              {data.client?.general_description && (
+                <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 1, fontStyle: 'italic' }}>
+                  {data.client.general_description}
+                </Typography>
+              )}
+            </Box>
+          )}
+        </Box>
+      );
+    }
+
+    // SEC Filing - Match details page format
+    if (itemType === 'sec_filing' || data.form || data.filingEntity || data.accession) {
+      return (
+        <Box 
+          sx={{ 
+            p: 3,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            ...scrollbarStyles,
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
+            {content.title || `${data.form || 'Filing'} - ${data.filingEntity || data.reportingFor || 'SEC Filing'}`}
+          </Typography>
+
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
+                Filing Information
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {data.form && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>Form</Typography>
+                    <Typography variant="body2" sx={{ color: '#ffffff' }}>{data.form}</Typography>
+                  </Box>
+                )}
+                {data.filingDate && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>Filing Date</Typography>
+                    <Typography variant="body2" sx={{ color: '#ffffff' }}>{data.filingDate}</Typography>
+                  </Box>
+                )}
+                {(data.reportingFor || data.filingEntity) && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>Reporting For</Typography>
+                    <Typography variant="body2" sx={{ color: '#ffffff' }}>{data.reportingFor || data.filingEntity}</Typography>
+                  </Box>
+                )}
+                {data.cik && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>CIK</Typography>
+                    <Typography variant="body2" sx={{ color: '#ffffff', fontFamily: 'monospace' }}>{data.cik}</Typography>
+                  </Box>
+                )}
+                {data.accession && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#6b7280' }}>Accession Number</Typography>
+                    <Typography variant="body2" sx={{ color: '#ffffff', fontFamily: 'monospace' }}>{data.accession}</Typography>
+                  </Box>
+                )}
+              </Box>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                Filing Page
+              </Typography>
+              {data.filingPageUrl ? (
+                <Link
+                  href={data.filingPageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{
+                    color: '#3b82f6',
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
                   }}
                 >
-                  <Typography variant="caption" sx={{ color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
-                    {field.label}
+                  <OpenInNewIcon sx={{ fontSize: 16 }} />
+                  View on SEC.gov
+                </Link>
+              ) : (
+                <Typography variant="body2" sx={{ color: '#9ca3af' }}>Not available</Typography>
+              )}
+            </Grid>
+
+            {/* Document URLs */}
+            {data.documentUrls && data.documentUrls.length > 0 && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                  Document Format Files ({data.documentUrls.length})
+                </Typography>
+                <Box sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: 1, 
+                  maxHeight: '400px', 
+                  overflowY: 'auto',
+                  ...scrollbarStyles,
+                }}>
+                  {data.documentUrls.map((url: string, index: number) => {
+                    const filename = url.split('/').pop() || `Document ${index + 1}`;
+                    return (
+                      <Box
+                        key={index}
+                        sx={{
+                          p: 1.5,
+                          border: '1px solid #374151',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+                          <Link
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{
+                              color: '#3b82f6',
+                              textDecoration: 'none',
+                              fontSize: '0.875rem',
+                              flex: 1,
+                              '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                            }}
+                          >
+                            {filename}
+                            <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                          </Link>
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Grid>
+            )}
+          </Grid>
+        </Box>
+      );
+    }
+
+    // Government Contract - Match details page format
+    if (itemType === 'govt_contract' || data.award_id || data.recipient_name) {
+      return (
+        <Box 
+          sx={{ 
+            p: 3,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            ...scrollbarStyles,
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
+            {content.title || `Government Contract - ${data.recipient_name || data.award_id || 'Contract'}`}
+          </Typography>
+
+          {/* Award Information */}
+          <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+            <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+              Award Information
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+              {data.award_id && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Award ID
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#ffffff', wordBreak: 'break-word', mt: 0.5 }}>
-                    {field.value}
+                  <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                    {data.award_id}
                   </Typography>
                 </Box>
-              ))}
+              )}
+              {data.award_type && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Award Type
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.award_type}
+                  </Typography>
+                </Box>
+              )}
+              {data.is_assistance !== undefined && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Type
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.is_assistance ? 'Financial Assistance' : 'Contract'}
+                  </Typography>
+                </Box>
+              )}
+              {data.fiscal_year && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Fiscal Year
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {data.fiscal_year}
+                  </Typography>
+                </Box>
+              )}
+              {(data.combined_obligated_amount || data.total_obligated_amount || data.total_obligation) && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    {data.combined_obligated_amount && data.award_or_idv_flag === 'IDV' 
+                      ? 'Combined Obligated Amount' 
+                      : 'Total Obligated Amount'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {formatCurrency(
+                      data.combined_obligated_amount || 
+                      data.total_obligated_amount || 
+                      data.total_obligation
+                    )}
+                  </Typography>
+                </Box>
+              )}
+              {(data.period_of_performance_start_date || data.period_start_date) && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Period Start Date
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {formatDate(data.period_of_performance_start_date || data.period_start_date)}
+                  </Typography>
+                </Box>
+              )}
+              {(data.period_of_performance_current_end_date || data.period_end_date) && (
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Period End Date
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                    {formatDate(data.period_of_performance_current_end_date || data.period_end_date)}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+            {data.usaspending_permalink && (
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  href={data.usaspending_permalink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{
+                    color: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#60a5fa',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                  }}
+                >
+                  View on USAspending.gov
+                </Button>
+              </Box>
+            )}
+          </Box>
+
+          {/* Agency Information */}
+          {(data.awarding_agency_name || data.funding_agency_name) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Agency Information
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                {data.awarding_agency_name && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 600 }}>
+                      Awarding Agency
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                      {data.awarding_agency_name}
+                    </Typography>
+                    {data.awarding_agency_code && (
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>
+                        Code: {data.awarding_agency_code}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                {data.funding_agency_name && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1, fontWeight: 600 }}>
+                      Funding Agency
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                      {data.funding_agency_name}
+                    </Typography>
+                    {data.funding_agency_code && (
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>
+                        Code: {data.funding_agency_code}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Recipient Information */}
+          {data.recipient_name && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Recipient Information
+              </Typography>
+              <Box>
+                <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                  Recipient Name
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                  {data.recipient_name}
+                </Typography>
+                {data.recipient_location && (
+                  <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 1 }}>
+                    {data.recipient_location}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Description */}
+          {data.description && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 1, fontWeight: 600 }}>
+                Description
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
+                {data.description}
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      );
+    }
+
+    // News Article - Match details page format
+    if (itemType === 'news_article' || data.title || data.source_name || data.source_url) {
+      return (
+        <Box 
+          sx={{ 
+            p: 3,
+            maxHeight: '70vh',
+            overflow: 'auto',
+            ...scrollbarStyles,
+          }}
+        >
+          <Typography variant="h5" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
+            {content.title || data.title || 'News Article'}
+          </Typography>
+          {(data.source_name || data.source_url) && (
+            <Typography variant="body2" sx={{ color: '#94a3b8', mb: 3 }}>
+              {data.source_name || data.source_url}
+            </Typography>
+          )}
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {/* Image */}
+            {data.image_url && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, fontWeight: 600 }}>
+                  Image
+                </Typography>
+                <Box
+                  component="img"
+                  src={data.image_url}
+                  alt={data.title || 'Article image'}
+                  sx={{
+                    width: '100%',
+                    maxHeight: 400,
+                    objectFit: 'contain',
+                    borderRadius: '4px',
+                    border: '1px solid #374151',
+                  }}
+                />
+              </Box>
+            )}
+
+            {/* Description */}
+            {data.description && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, fontWeight: 600 }}>
+                  Description
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#e2e8f0', lineHeight: 1.6 }}>
+                  {data.description}
+                </Typography>
+              </Box>
+            )}
+
+            {/* Keywords */}
+            {data.keywords && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, fontWeight: 600 }}>
+                  Keywords
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {data.keywords.split(',').map((keyword: string, index: number) => (
+                    <Chip
+                      key={index}
+                      label={keyword.trim()}
+                      size="small"
+                      sx={{
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        color: '#93c5fd',
+                        border: '1px solid #3b82f6',
+                        fontSize: '0.75rem',
+                      }}
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
+
+            {/* Source URL */}
+            {data.source_url && (
+              <Box>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    window.open(data.source_url, '_blank', 'noopener,noreferrer');
+                  }}
+                  startIcon={<LaunchIcon />}
+                  sx={{
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                    '&:hover': { 
+                      background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' 
+                    },
+                    color: '#ffffff',
+                    fontWeight: 600,
+                  }}
+                >
+                  Open Article
+                </Button>
+              </Box>
+            )}
           </Box>
         </Box>
       );
@@ -625,20 +1369,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           p: 3,
           maxHeight: '70vh',
           overflow: 'auto',
-          // Blue scrollbar
-          '&::-webkit-scrollbar': {
-            width: '12px',
-          },
-          '&::-webkit-scrollbar-track': {
-            backgroundColor: '#1f2937',
-          },
-          '&::-webkit-scrollbar-thumb': {
-            backgroundColor: '#3b82f6',
-            borderRadius: '6px',
-            '&:hover': {
-              backgroundColor: '#2563eb',
-            },
-          },
+          ...scrollbarStyles,
         }}
       >
         <Typography variant="h5" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
