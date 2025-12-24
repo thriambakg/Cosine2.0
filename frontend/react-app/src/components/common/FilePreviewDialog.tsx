@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -69,9 +69,50 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchPreview = useCallback(async () => {
+    if (!item.s3_key) {
+      setError('No S3 key available for preview');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fileReturnAPI.previewFile({
+        user_id,
+        s3_key: item.s3_key,
+        item_type: item.type,
+        request_type: 'preview',
+      });
+
+      if (response.success && response.data) {
+        // Ensure preview_type is defined, default to 'text' if missing
+        const previewData: PreviewResponse = {
+          ...response.data,
+          preview_type: response.data.preview_type || 'text',
+        };
+        setPreviewData(previewData);
+      } else {
+        setError(response.error || 'Failed to load preview');
+      }
+    } catch (err: any) {
+      console.error('Error fetching preview:', err);
+      setError(err.message || 'Failed to load preview');
+    } finally {
+      setLoading(false);
+    }
+  }, [user_id, item.s3_key, item.type]);
+
   useEffect(() => {
     if (open && item) {
-      // If item has metadata with data (mock data), use it directly
+      // Reset state when opening
+      setPreviewData(null);
+      setError(null);
+      setLoading(false);
+
+      // If item has metadata with data, use it directly
       if (item.metadata?.data && Object.keys(item.metadata.data).length > 0) {
         // Check if it's a tile
         const tileType = item.metadata.data.tileType || item.metadata.data.type;
@@ -107,7 +148,6 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             },
           });
         }
-        setLoading(false);
       } else if (item.metadata && item.type === 'context_item') {
         // For context items with metadata but no data, construct from metadata
         setPreviewData({
@@ -127,51 +167,20 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             timestamp: item.metadata.timestamp,
           },
         });
-        setLoading(false);
       } else if (item.s3_key) {
         // For real files, fetch from API
         fetchPreview();
       } else {
         // No data available
         setError('No preview data available');
-        setLoading(false);
       }
     } else {
       // Reset state when dialog closes
       setPreviewData(null);
       setError(null);
-    }
-  }, [open, item]);
-
-  const fetchPreview = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await fileReturnAPI.previewFile({
-        user_id,
-        s3_key: item.s3_key,
-        item_type: item.type,
-        request_type: 'preview',
-      });
-
-      if (response.success && response.data) {
-        // Ensure preview_type is defined, default to 'text' if missing
-        const previewData: PreviewResponse = {
-          ...response.data,
-          preview_type: response.data.preview_type || 'text',
-        };
-        setPreviewData(previewData);
-      } else {
-        setError(response.error || 'Failed to load preview');
-      }
-    } catch (err: any) {
-      console.error('Error fetching preview:', err);
-      setError(err.message || 'Failed to load preview');
-    } finally {
       setLoading(false);
     }
-  };
+  }, [open, item, fetchPreview]);
 
   const handleDownload = async () => {
     if (!previewData?.download_url) {

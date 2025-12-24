@@ -1492,14 +1492,33 @@ export const fileReturnAPI = {
   previewFile: async (params: FileDownloadRequest): Promise<FileDownloadResponse> => {
     console.log('👁️ API - File preview:', params);
     try {
-      const response = await apiRequest<FileDownloadResponse>('/file-download', {
+      const response = await apiRequest<any>('/file-download', {
         method: 'POST',
         body: JSON.stringify({
           ...params,
           request_type: 'preview',
         }),
       });
-      return response;
+      
+      // The lambda returns the preview data directly in the body, not wrapped in {success, data}
+      // Check if response already has success field (wrapped) or is direct data
+      if (response && typeof response === 'object' && 'success' in response) {
+        // Already wrapped
+        return response as FileDownloadResponse;
+      } else if (response && typeof response === 'object' && ('preview_type' in response || 'content' in response)) {
+        // Direct response from lambda - wrap it
+        return {
+          success: true,
+          data: response,
+        };
+      } else {
+        // Unexpected response format
+        console.error('Unexpected response format:', response);
+        return {
+          success: false,
+          error: 'Unexpected response format from server',
+        };
+      }
     } catch (error: any) {
       console.error('❌ File preview error:', error);
       return {
