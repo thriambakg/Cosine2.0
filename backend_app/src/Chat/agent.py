@@ -901,7 +901,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 5. calculate_stock_correlation(tickers, period) - LIVE correlation matrix between stocks using yfinance data
 6. python_financial_calculator(calculation) - Advanced calculations (Fama-French, VaR, Sharpe ratios)
 7. http_request - Web requests for additional context
-8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3
+8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3. Automatically decrypts .cosine encrypted context items from the filesystem.
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
 11. get_chat_history_tool(session_id, user_id, limit, include_recent) - Get chat history on-demand with smart pagination
@@ -1106,6 +1106,20 @@ FOR UPLOADED FILE QUESTIONS:
 3. read_s3_file_tool(s3_key, file_type) → Read and analyze specific uploaded files
 4. Use file content for analysis, calculations, or context
 5. Provide insights based on file data combined with market data
+
+🔐 .COSINE FILE DECRYPTION:
+- .cosine files are encrypted context items stored in the user's filesystem (users/{user_id}/filesys/*)
+- These files contain encrypted context data (news articles, SEC filings, LDA disclosures, politician trades, etc.)
+- The read_s3_file_tool automatically decrypts .cosine files when you read them - no special action needed
+- When you see a file with .cosine extension in session context or file listings, you can read it normally using read_s3_file_tool(s3_key)
+- The tool will automatically:
+  1. Detect the .cosine extension
+  2. Extract the user_id from the S3 key path
+  3. Decrypt the file using the decryption helper
+  4. Return the decrypted JSON data for analysis
+- Example: If you see "users/abc123/filesys/folder/item.cosine" in file listings, simply call read_s3_file_tool("users/abc123/filesys/folder/item.cosine")
+- The decrypted content will be a JSON object with context item data (type, title, subtitle, timestamp, and content fields)
+- NEVER say ".cosine files are encrypted and cannot be read" - they CAN be read and decrypted automatically!
 
 FOR CRYPTOCURRENCY QUESTIONS:
 1. get_crypto_data_tool(symbol, timeframe) → Get real-time crypto data for a specific cryptocurrency

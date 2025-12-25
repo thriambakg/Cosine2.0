@@ -8,6 +8,10 @@ import boto3
 import logging
 from typing import Dict, Any
 from botocore.exceptions import ClientError
+import sys
+
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 
 # Configure logging
 logger = logging.getLogger()
@@ -97,6 +101,30 @@ class S3FileReader:
             # Get the object from S3
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()
+            
+            # Handle .cosine encrypted files (context items from filesystem)
+            if s3_key.endswith('.cosine') or file_type == 'cosine':
+                try:
+                    from decryption_helper import decrypt_cosine_file
+                    # Extract user_id from s3_key (format: users/{user_id}/filesys/...)
+                    s3_key_parts = s3_key.split('/')
+                    if len(s3_key_parts) >= 2 and s3_key_parts[0] == 'users':
+                        user_id = s3_key_parts[1]
+                        logger.info(f"Decrypting .cosine file for user {user_id}")
+                        decrypted_data = decrypt_cosine_file(user_id, content)
+                        return json.dumps(decrypted_data, indent=2, default=str)
+                    else:
+                        # Fallback: try to get user_id from environment
+                        user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+                        if user_id:
+                            logger.info(f"Decrypting .cosine file for user {user_id} (from environment)")
+                            decrypted_data = decrypt_cosine_file(user_id, content)
+                            return json.dumps(decrypted_data, indent=2, default=str)
+                        else:
+                            return f"Error: Cannot decrypt .cosine file - user_id not found in S3 key or environment"
+                except Exception as e:
+                    logger.error(f"Error decrypting .cosine file: {str(e)}")
+                    return f"Error decrypting .cosine file: {str(e)}"
             
             # Decode based on content type
             content_type = response.get('ContentType', '')
