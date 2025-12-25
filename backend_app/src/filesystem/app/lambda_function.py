@@ -188,39 +188,27 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         display_name = title or filename
         s3_key = f"users/{user_id}/filesys/{folder_path}/{file_id}{file_extension}" if folder_path else f"users/{user_id}/filesys/{file_id}{file_extension}"
         
-        # Check if this is a .cosine encrypted context item file
-        # Only .cosine files are encrypted context items - all other files (PDFs, JSON, images, etc.) are regular files
-        is_cosine_file = file_extension.lower() == CONTEXT_ITEM_EXTENSION
+        # All user-uploaded files are stored as-is (no encryption/decryption)
+        # This includes .cosine files - they are stored exactly as uploaded
+        # Only context items created from the website (via add_context_item) are encrypted
         
-        # If it's a .cosine file, decrypt it and re-encrypt for storage (maintain encryption)
-        # This handles re-uploading of downloaded context items
-        if is_cosine_file:
-            try:
-                # Decrypt the file content
-                decrypted_data = decrypt_context_data(user_id, file_content)
-                
-                # Re-encrypt for storage (maintain encryption format)
-                encrypted_data = encrypt_context_data(user_id, decrypted_data)
-                file_content = encrypted_data
-                content_type = CONTEXT_ITEM_MIME_TYPE
-                item_type = 'context_item'
-            except Exception as e:
-                logger.error(f"Failed to decrypt .cosine file: {str(e)}")
-                raise ValueError("Failed to decrypt Cosine context item file. File may be corrupted or from a different user.")
-        else:
-            # Regular files (PDFs, images, JSON, etc.) - NO encryption, store as-is
-            content_type = 'application/octet-stream'
-            if file_extension.lower() == '.json':
-                content_type = 'application/json'
-            elif file_extension.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
-                content_type = f'image/{file_extension[1:].lower()}'
-            elif file_extension.lower() == '.pdf':
-                content_type = 'application/pdf'
-            elif file_extension.lower() in ['.txt', '.md']:
-                content_type = 'text/plain'
-            
-            # Regular uploaded files are always 'uploaded_file' type (not context_item)
-            item_type = 'uploaded_file'
+        # Determine content type based on file extension
+        content_type = 'application/octet-stream'
+        if file_extension.lower() == '.json':
+            content_type = 'application/json'
+        elif file_extension.lower() == CONTEXT_ITEM_EXTENSION:
+            # .cosine files uploaded by users are stored as-is
+            content_type = CONTEXT_ITEM_MIME_TYPE
+        elif file_extension.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
+            content_type = f'image/{file_extension[1:].lower()}'
+        elif file_extension.lower() == '.pdf':
+            content_type = 'application/pdf'
+        elif file_extension.lower() in ['.txt', '.md']:
+            content_type = 'text/plain'
+        
+        # All uploaded files are 'uploaded_file' type (not context_item)
+        # Context items are only created via add_context_item operation
+        item_type = 'uploaded_file'
         
         # Upload file to S3
         s3_client.put_object(

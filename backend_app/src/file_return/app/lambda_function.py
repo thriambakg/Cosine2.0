@@ -36,6 +36,9 @@ S3_BASE_URL = os.environ.get('S3_BASE_URL', 'https://cosine-chat-files-productio
 USER_PROFILES_TABLE_NAME = os.environ.get('USER_PROFILES_TABLE_NAME')
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')  # Should match filesystem Lambda
 
+# Manifest file name (matches filesystem Lambda)
+MANIFEST_FILE = '.manifest.json'
+
 def derive_key_from_user_id(user_id: str) -> bytes:
     """Derive encryption key from user ID using PBKDF2"""
     salt = hashlib.sha256(f"{ENCRYPTION_SECRET}{user_id}".encode()).digest()[:16]
@@ -267,8 +270,8 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                     'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
                 }
             
-            # Extract filename from s3_key
-            filename = s3_key.split('/')[-1]
+            # Get filename from request parameter, or extract from S3 key as fallback
+            requested_filename = body.get('filename')
             target_bucket = S3_BUCKET
             
             # Check if file exists in S3
@@ -284,6 +287,57 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                     }
                 else:
                     raise e
+            
+            # Try to get original filename from filesystem manifest
+            # Extract file_id from s3_key (format: users/{user_id}/filesys/{folder_path}/{file_id}{extension})
+            s3_key_parts = s3_key.split('/')
+            if len(s3_key_parts) >= 3 and s3_key_parts[0] == 'users' and s3_key_parts[2] == 'filesys':
+                try:
+                    # Get the file_id from the S3 key (last part before extension)
+                    file_id_with_ext = s3_key_parts[-1]
+                    # Try to find the folder path and get manifest
+                    folder_path_parts = s3_key_parts[3:-1] if len(s3_key_parts) > 4 else []
+                    folder_path = '/'.join(folder_path_parts) if folder_path_parts else ''
+                    
+                    # Get manifest to find original filename
+                    manifest_key = f"users/{authenticated_user_id}/filesys/{folder_path}/{MANIFEST_FILE}" if folder_path else f"users/{authenticated_user_id}/filesys/{MANIFEST_FILE}"
+                    try:
+                        manifest_response = s3_client.get_object(Bucket=target_bucket, Key=manifest_key)
+                        manifest = json.loads(manifest_response['Body'].read().decode('utf-8'))
+                        
+                        # Find the item by matching s3_key
+                        for item_id, item_data in manifest.get('items', {}).items():
+                            if item_data.get('s3_key') == s3_key:
+                                # Use current name first (respects renames), then fall back to original filename
+                                # Priority: name (current/renamed) > filename > original_filename > name from metadata
+                                current_name = item_data.get('name')
+                                filename_field = item_data.get('filename')
+                                original_filename = item_data.get('metadata', {}).get('original_filename')
+                                
+                                # Use current name if available (this is what the user sees and may have renamed)
+                                if current_name:
+                                    requested_filename = current_name
+                                    logger.info(f"📝 Using current name from manifest: {current_name}")
+                                elif filename_field:
+                                    requested_filename = filename_field
+                                    logger.info(f"📝 Using filename field from manifest: {filename_field}")
+                                elif original_filename:
+                                    requested_filename = original_filename
+                                    logger.info(f"📝 Using original filename from metadata: {original_filename}")
+                                break
+                    except ClientError:
+                        # Manifest not found or can't read - use fallback
+                        logger.debug(f"Could not read manifest for folder: {folder_path}")
+                        pass
+                except Exception as e:
+                    logger.debug(f"Error trying to get filename from manifest: {str(e)}")
+                    pass
+            
+            # Use requested filename if provided, otherwise extract from S3 key
+            if requested_filename:
+                filename = requested_filename
+            else:
+                filename = s3_key.split('/')[-1]
             
             # For .cosine encrypted context items, ensure proper content-type and filename
             is_cosine_file = s3_key.endswith('.cosine')

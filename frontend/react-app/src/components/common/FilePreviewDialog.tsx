@@ -199,7 +199,22 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         });
 
         if (response.success && response.data?.download_url) {
-          window.open(response.data.download_url, '_blank');
+          // Create a temporary anchor element for smooth download without page navigation
+          const link = document.createElement('a');
+          link.href = response.data.download_url;
+          link.download = response.data.filename || item.name;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.style.display = 'none';
+          
+          // Append to body, click, then remove
+          document.body.appendChild(link);
+          link.click();
+          
+          // Clean up after a short delay
+          setTimeout(() => {
+            document.body.removeChild(link);
+          }, 100);
         } else {
           setError('Failed to get download URL');
         }
@@ -211,7 +226,22 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
       }
     } else if (previewData?.download_url) {
       // Fallback to preview data download URL if available
-      window.open(previewData.download_url, '_blank');
+      // Create a temporary anchor element for smooth download without page navigation
+      const link = document.createElement('a');
+      link.href = previewData.download_url;
+      link.download = previewData.filename || item.name;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.display = 'none';
+      
+      // Append to body, click, then remove
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up after a short delay
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
     } else {
       setError('Download not available for this item');
     }
