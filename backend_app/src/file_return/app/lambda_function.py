@@ -48,16 +48,54 @@ def derive_key_from_user_id(user_id: str) -> bytes:
     key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{ENCRYPTION_SECRET}".encode()))
     return key
 
+def derive_key_from_user_id_with_secret(user_id: str, encryption_secret: str) -> bytes:
+    """Derive encryption key from user ID using PBKDF2 with a specific secret"""
+    salt = hashlib.sha256(f"{encryption_secret}{user_id}".encode()).digest()[:16]
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{encryption_secret}".encode()))
+    return key
+
 def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
-    """Decrypt context data using Fernet"""
+    """Decrypt context data using Fernet with fallback to default secret"""
+    from cryptography.fernet import InvalidToken
+    
+    # Try with current ENCRYPTION_SECRET first
     try:
+        logger.debug(f"🔐 Starting decryption for user {user_id}, data length: {len(encrypted_data)} bytes")
         key = derive_key_from_user_id(user_id)
+        logger.debug(f"🔐 Derived key length: {len(key)} bytes")
         fernet = Fernet(key)
+        logger.debug(f"🔐 Attempting Fernet decryption with current secret...")
         decrypted_data = fernet.decrypt(encrypted_data)
+        logger.debug(f"🔐 Decrypted data length: {len(decrypted_data)} bytes")
         json_data = json.loads(decrypted_data.decode('utf-8'))
+        logger.debug(f"🔐 Successfully parsed JSON, keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'N/A'}")
         return json_data
+    except InvalidToken:
+        # If decryption fails, try with default secret (for files encrypted before secret was set)
+        logger.warning(f"⚠️ Decryption failed with current secret, trying default secret...")
+        try:
+            default_secret = 'default-secret-change-in-production'
+            key = derive_key_from_user_id_with_secret(user_id, default_secret)
+            fernet = Fernet(key)
+            logger.debug(f"🔐 Attempting Fernet decryption with default secret...")
+            decrypted_data = fernet.decrypt(encrypted_data)
+            logger.warning(f"⚠️ Successfully decrypted with default secret - file should be re-encrypted with current secret")
+            json_data = json.loads(decrypted_data.decode('utf-8'))
+            return json_data
+        except InvalidToken:
+            logger.error(f"❌ Decryption failed with both current and default secrets")
+            raise ValueError("Failed to decrypt: File was encrypted with a different secret. Please re-save the file.")
     except Exception as e:
-        logger.error(f"Error decrypting context data: {str(e)}")
+        logger.error(f"❌ Error decrypting context data: {str(e)}")
+        logger.error(f"❌ Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise
 
 def get_cors_headers():
@@ -562,10 +600,18 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                         }
                     except Exception as decrypt_error:
                         logger.error(f"❌ Failed to decrypt .cosine file: {str(decrypt_error)}")
+                        import traceback
+                        logger.error(f"❌ Decryption error traceback: {traceback.format_exc()}")
+                        logger.error(f"❌ ENCRYPTION_SECRET configured: {bool(ENCRYPTION_SECRET)}")
+                        logger.error(f"❌ ENCRYPTION_SECRET length: {len(ENCRYPTION_SECRET) if ENCRYPTION_SECRET else 0}")
+                        logger.error(f"❌ Encrypted data length: {len(content_bytes)} bytes")
                         return {
                             'statusCode': 500,
                             'headers': get_cors_headers(),
-                            'body': json.dumps({'error': 'Failed to decrypt encrypted context item. File may be corrupted or from a different user.'})
+                            'body': json.dumps({
+                                'error': 'Failed to decrypt encrypted context item. File may be corrupted or from a different user.',
+                                'details': str(decrypt_error) if logger.level == logging.DEBUG else None
+                            })
                         }
                 else:
                     # Legacy unencrypted JSON file - parse and return as before
