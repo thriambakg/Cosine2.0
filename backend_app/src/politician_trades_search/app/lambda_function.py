@@ -10,7 +10,7 @@ import logging
 import boto3
 import re
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key, Attr
 
@@ -803,6 +803,174 @@ def is_valid_ticker(security: str) -> bool:
             security_value.isupper())
 
 
+def search_by_date_range(table, filters: Dict[str, Any], max_results: int = 1000) -> List[Dict[str, Any]]:
+    """
+    Search for trades by date range using GSI queries for each day.
+    This is more efficient than scanning the entire table.
+    
+    For each day in the date range, we query using a GSI with common hash key values.
+    We use PositionTradeDateIndex with position values ['House', 'Senate'] to cover most trades.
+    
+    Args:
+        table: DynamoDB table resource
+        filters: Filters including dateFrom and dateTo
+        max_results: Maximum number of results to return
+    
+    Returns:
+        List of deduplicated trade records
+    """
+    all_results = []
+    seen_trade_ids = set()
+    
+    date_from = filters.get('dateFrom')
+    date_to = filters.get('dateTo')
+    
+    if not date_from and not date_to:
+        logger.warning("⚠️ search_by_date_range called without date filters")
+        return []
+    
+    # Parse dates
+    try:
+        if date_from:
+            date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+        else:
+            # If no date_from, use a very early date
+            date_from_obj = datetime(2000, 1, 1).date()
+        
+        if date_to:
+            date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+        else:
+            # If no date_to, use today
+            date_to_obj = datetime.now().date()
+    except ValueError as e:
+        logger.error(f"❌ Invalid date format: {e}")
+        return []
+    
+    # Generate list of dates to query
+    current_date = date_from_obj
+    dates_to_query = []
+    while current_date <= date_to_obj:
+        dates_to_query.append(current_date)
+        current_date += timedelta(days=1)
+    
+    logger.info(f"📅 Querying {len(dates_to_query)} days from {date_from_obj} to {date_to_obj}")
+    
+    # Use PositionTradeDateIndex with common position values
+    # Most trades are either House or Senate
+    position_values = ['House', 'Senate']
+    index_name = GSI_NAMES['position']
+    
+    # Build filter expression for non-date filters
+    filter_conditions = []
+    
+    # Add other filters (excluding dateFrom/dateTo which are handled in key condition)
+    other_filters = {k: v for k, v in filters.items() if k not in ['dateFrom', 'dateTo']}
+    
+    # Build filter expression from other filters (reuse logic from build_query_params)
+    if other_filters.get('security'):
+        securities = other_filters['security']
+        if isinstance(securities, list) and len(securities) > 0:
+            def create_security_filter(security_value):
+                security_value = security_value.strip()
+                security_upper = security_value.upper()
+                security_lower = security_value.lower()
+                return (
+                    Attr('securitySymbol').eq(security_upper) |
+                    Attr('securitySymbol').contains(security_upper) |
+                    Attr('securityName').contains(security_value) |
+                    Attr('securityName').contains(security_lower) |
+                    Attr('securityName').contains(security_upper) |
+                    Attr('securityName').begins_with(security_value) |
+                    Attr('securityName').begins_with(security_value.title()) |
+                    (Attr('securitySymbol').not_exists() & Attr('securityName').contains(security_value)) |
+                    (Attr('securitySymbol').eq('') & Attr('securityName').contains(security_value)) |
+                    (Attr('securitySymbol').eq('--') & Attr('securityName').contains(security_value))
+                )
+            
+            if len(securities) == 1:
+                filter_conditions.append(create_security_filter(securities[0]))
+            else:
+                combined_filter = None
+                for security_value in securities:
+                    single_filter = create_security_filter(security_value)
+                    if combined_filter is None:
+                        combined_filter = single_filter
+                    else:
+                        combined_filter = combined_filter | single_filter
+                filter_conditions.append(combined_filter)
+    
+    # Add other filters (party, transactionType, etc.)
+    for filter_key in ['party', 'transactionType', 'stateDistrict']:
+        if other_filters.get(filter_key):
+            filter_value = other_filters[filter_key]
+            if isinstance(filter_value, list):
+                if len(filter_value) == 1:
+                    filter_conditions.append(Attr(filter_key).eq(filter_value[0]))
+                elif len(filter_value) > 1:
+                    combined = None
+                    for val in filter_value:
+                        if combined is None:
+                            combined = Attr(filter_key).eq(val)
+                        else:
+                            combined = combined | Attr(filter_key).eq(val)
+                    filter_conditions.append(combined)
+            else:
+                filter_conditions.append(Attr(filter_key).eq(filter_value))
+    
+    # Combine filter conditions
+    filter_expression = None
+    if filter_conditions:
+        filter_expression = filter_conditions[0]
+        for condition in filter_conditions[1:]:
+            filter_expression = filter_expression & condition
+    
+    # Query each day for each position
+    for query_date in dates_to_query:
+        date_num = int(query_date.strftime('%Y%m%d'))
+        
+        for position in position_values:
+            try:
+                key_condition = Key('position').eq(position) & Key('transactionDate').eq(date_num)
+                
+                query_kwargs = {
+                    'IndexName': index_name,
+                    'KeyConditionExpression': key_condition,
+                    'Limit': max_results,  # Limit per query to avoid too many results
+                    'ScanIndexForward': False
+                }
+                
+                if filter_expression:
+                    query_kwargs['FilterExpression'] = filter_expression
+                
+                response = table.query(**query_kwargs)
+                items = response.get('Items', [])
+                
+                # Deduplicate and add to results
+                for item in items:
+                    trade_id = item.get('tradeId')
+                    if trade_id and trade_id not in seen_trade_ids:
+                        seen_trade_ids.add(trade_id)
+                        all_results.append(item)
+                        
+                        # Stop if we've reached max results
+                        if len(all_results) >= max_results:
+                            logger.info(f"🛑 Reached maximum results limit: {max_results}")
+                            break
+                
+                if len(all_results) >= max_results:
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Error querying {position} for date {query_date}: {e}")
+                continue
+        
+        if len(all_results) >= max_results:
+            break
+    
+    logger.info(f"✅ Date range search complete: {len(all_results)} total deduplicated results")
+    return all_results
+
+
 def search_securities(table, securities: List[str], filters: Dict[str, Any], max_results: int = 1000) -> List[Dict[str, Any]]:
     """
     Unified security search that handles both tickers (GSI) and security names (scan).
@@ -1149,6 +1317,92 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50, l
                 'last_evaluated_key': next_cursor  # Cursor for next "load more" request
             }
         
+        # Check if this is a date-only search (no other GSI hash key filters)
+        has_date_range = filters.get('dateFrom') or filters.get('dateTo')
+        
+        # Check for GSI hash key filters (excluding empty lists/None/empty strings)
+        def has_value(v):
+            """Check if a filter value is non-empty"""
+            if v is None:
+                return False
+            if isinstance(v, list):
+                return len(v) > 0
+            if isinstance(v, str):
+                return len(v.strip()) > 0
+            return True
+        
+        has_gsi_hash_key = any([
+            has_value(filters.get('politicianName')),
+            has_value(filters.get('position')),
+            has_value(filters.get('party')),
+            has_value(filters.get('transactionType')),
+            has_value(filters.get('amountRange')),
+            has_value(filters.get('stateDistrict')),
+            (has_value(filters.get('security')) and 
+             isinstance(filters.get('security'), list) and 
+             len(filters.get('security')) > 0 and 
+             is_valid_ticker(filters.get('security')[0].strip()))
+        ])
+        
+        # If we have a date range but no GSI hash key filter, use efficient date range query
+        if has_date_range and not has_gsi_hash_key:
+            logger.info("✅ Date-only search detected, using efficient GSI day-by-day query approach")
+            
+            # For cursor-based pagination, we need to fetch more results and filter
+            fetch_limit = 2000 if last_evaluated_key else 1000
+            
+            # Use the date range search approach
+            all_items = search_by_date_range(table, filters, max_results=fetch_limit)
+            
+            # Sort by transactionDate descending (most recent first), then by tradeId for stability
+            all_items.sort(key=lambda x: (x.get('transactionDate', 0), x.get('tradeId', '')), reverse=True)
+            
+            # Apply cursor-based pagination if cursor provided
+            if last_evaluated_key:
+                cursor_date = last_evaluated_key.get('transactionDate')
+                cursor_trade_id = last_evaluated_key.get('tradeId')
+                if cursor_date is not None:
+                    # Filter items that come AFTER the cursor in descending sort order
+                    filtered_items = []
+                    for item in all_items:
+                        item_date = item.get('transactionDate', 0)
+                        item_trade_id = item.get('tradeId', '')
+                        if item_date < cursor_date:
+                            filtered_items.append(item)
+                        elif item_date == cursor_date:
+                            if item_trade_id < cursor_trade_id:
+                                filtered_items.append(item)
+                            elif item_trade_id == cursor_trade_id:
+                                continue
+                    all_items = filtered_items
+                    logger.info(f"📄 Applied cursor filter, {len(all_items)} items remaining after cursor")
+            
+            # Apply pagination
+            paginated_items = all_items[:page_size]
+            
+            # Convert from DynamoDB format
+            converted_items = [convert_from_dynamodb_format(item) for item in paginated_items]
+            
+            # Generate cursor for next page if we have more items
+            next_cursor = None
+            if len(all_items) > page_size:
+                last_item = paginated_items[-1]
+                next_cursor = {
+                    'transactionDate': last_item.get('transactionDate'),
+                    'tradeId': last_item.get('tradeId')
+                }
+            
+            logger.info(f"✅ Date range search complete - success: True, results_count: {len(converted_items)}, total_found: {len(all_items)}, has_more: {next_cursor is not None}")
+            return {
+                'success': True,
+                'results': converted_items,
+                'total_found': len(all_items),
+                'page': page,
+                'page_size': page_size,
+                'has_more': next_cursor is not None,
+                'last_evaluated_key': next_cursor
+            }
+        
         # Build query parameters for single politician or other GSI filters
         index_name, key_condition, filter_expression = build_query_params(table, filters, page, page_size)
         logger.info(f"🔧 Query params - index_name: {index_name}, has_key_condition: {key_condition is not None}, has_filter_expression: {filter_expression is not None}")
@@ -1265,34 +1519,127 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50, l
                 elif filing_date_to:
                     scan_kwargs['FilterExpression'] = existing_filter & Attr('filingDate').lte(filing_date_to)
             
-            # Execute scan
-            logger.info(f"🔍 Executing scan with kwargs: {json.dumps({k: str(v) for k, v in scan_kwargs.items() if k != 'FilterExpression'}, default=str)}")
-            response = table.scan(**scan_kwargs)
-            items = response.get('Items', [])
+            # Execute scan with pagination continuation until we get results or exhaust date range
+            all_items = []
+            last_evaluated_key_raw = None
+            max_scan_iterations = 10  # Limit iterations to avoid infinite loops
+            scan_iteration = 0
+            date_from_num = None
+            date_to_num = None
             
-            # Handle pagination
-            total_scanned = response.get('ScannedCount', 0)
-            last_evaluated_key_raw = response.get('LastEvaluatedKey')
+            # Extract date range for checking if we've exhausted it
+            if filters.get('dateFrom') or filters.get('dateTo'):
+                try:
+                    if filters.get('dateFrom'):
+                        date_from_obj = datetime.strptime(filters.get('dateFrom'), '%Y-%m-%d').date()
+                        date_from_num = int(date_from_obj.strftime('%Y%m%d'))
+                    if filters.get('dateTo'):
+                        date_to_obj = datetime.strptime(filters.get('dateTo'), '%Y-%m-%d').date()
+                        date_to_num = int(date_to_obj.strftime('%Y%m%d'))
+                except ValueError:
+                    pass
             
-            logger.info(f"📊 Scan results - Items found: {len(items)}, Scanned: {total_scanned}, Has more: {last_evaluated_key_raw is not None}")
+            logger.info(f"🔍 Executing scan with pagination continuation (max {max_scan_iterations} iterations)")
+            
+            while scan_iteration < max_scan_iterations:
+                scan_iteration += 1
+                logger.info(f"🔍 Scan iteration {scan_iteration} - Current items: {len(all_items)}")
+                
+                # Update ExclusiveStartKey if we have one from previous iteration
+                if last_evaluated_key_raw:
+                    scan_kwargs['ExclusiveStartKey'] = last_evaluated_key_raw
+                
+                # Execute scan
+                logger.info(f"🔍 Executing scan iteration {scan_iteration} with kwargs: {json.dumps({k: str(v) for k, v in scan_kwargs.items() if k not in ['FilterExpression', 'ExclusiveStartKey']}, default=str)}")
+                response = table.scan(**scan_kwargs)
+                items = response.get('Items', [])
+                total_scanned = response.get('ScannedCount', 0)
+                last_evaluated_key_raw = response.get('LastEvaluatedKey')
+                
+                logger.info(f"📊 Scan iteration {scan_iteration} - Items found: {len(items)}, Scanned: {total_scanned}, Has more: {last_evaluated_key_raw is not None}")
+                
+                # Add items to results
+                all_items.extend(items)
+                
+                # If we have enough items for the page, we can stop
+                if len(all_items) >= page_size:
+                    logger.info(f"✅ Collected {len(all_items)} items, enough for pagination")
+                    break
+                
+                # If no more pages, stop
+                if not last_evaluated_key_raw:
+                    logger.info(f"✅ No more pages to scan")
+                    break
+                
+                # If we have a date range filter, check if we've exhausted the range
+                # (This is a heuristic - we can't know for sure without checking item dates)
+                # For now, we'll continue scanning but limit iterations
+                
+                # Remove ExclusiveStartKey from kwargs for next iteration (we'll add it fresh)
+                if 'ExclusiveStartKey' in scan_kwargs:
+                    del scan_kwargs['ExclusiveStartKey']
+            
+            # Apply pagination to collected items
+            # If we have a cursor, we need to filter items after the cursor
+            if last_evaluated_key and len(all_items) > 0:
+                cursor_date = last_evaluated_key.get('transactionDate')
+                cursor_trade_id = last_evaluated_key.get('tradeId')
+                if cursor_date is not None:
+                    # Filter items that come AFTER the cursor
+                    filtered_items = []
+                    for item in all_items:
+                        item_date = item.get('transactionDate', 0)
+                        item_trade_id = item.get('tradeId', '')
+                        if item_date < cursor_date:
+                            filtered_items.append(item)
+                        elif item_date == cursor_date:
+                            if item_trade_id < cursor_trade_id:
+                                filtered_items.append(item)
+                            elif item_trade_id == cursor_trade_id:
+                                continue
+                    all_items = filtered_items
+                    logger.info(f"📄 Applied cursor filter, {len(all_items)} items remaining after cursor")
+            
+            # Sort by transactionDate descending, then by tradeId
+            all_items.sort(key=lambda x: (x.get('transactionDate', 0), x.get('tradeId', '')), reverse=True)
+            
+            # Take only the page_size items we need
+            paginated_items = all_items[:page_size]
             
             # Convert items
-            results = [convert_from_dynamodb_format(item) for item in items]
+            results = [convert_from_dynamodb_format(item) for item in paginated_items]
             logger.info(f"✅ Converted {len(results)} items from DynamoDB format")
             
-            # Convert LastEvaluatedKey to JSON-serializable format
-            last_key = None
-            if last_evaluated_key_raw:
-                last_key = convert_from_dynamodb_format(last_evaluated_key_raw)
+            # Determine if there are more results
+            # We have more if:
+            # 1. We collected more items than page_size, OR
+            # 2. There's a LastEvaluatedKey from the last scan
+            has_more = len(all_items) > page_size or last_evaluated_key_raw is not None
+            
+            # Generate cursor for next page
+            next_cursor = None
+            if has_more:
+                if len(paginated_items) > 0:
+                    # Use the last item as the cursor
+                    last_item = paginated_items[-1]
+                    next_cursor = {
+                        'transactionDate': last_item.get('transactionDate'),
+                        'tradeId': last_item.get('tradeId')
+                    }
+                elif last_evaluated_key_raw:
+                    # Use the LastEvaluatedKey from DynamoDB
+                    next_cursor = convert_from_dynamodb_format(last_evaluated_key_raw)
+            
+            logger.info(f"📊 Final scan results - Items returned: {len(results)}, Total collected: {len(all_items)}, Has more: {has_more}")
             
             return {
                 'success': True,
                 'results': results,
-                'total_found': len(results),  # Approximate for scan
+                'total_found': len(all_items),  # Total collected
                 'page': page,
                 'page_size': page_size,
-                'has_more': last_key is not None,
-                'last_evaluated_key': last_key  # Cursor for next "load more" request
+                'has_more': has_more,
+                'last_evaluated_key': next_cursor  # Cursor for next "load more" request
             }
         else:
             # Use GSI query (more efficient)

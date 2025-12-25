@@ -1382,10 +1382,78 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
   policy_arn = aws_iam_policy.lambda_secrets_policy.arn
 }
 
-# Attach S3 policy for chat files access
+# IAM Policy for Chat Agent S3 access with restricted filesys permissions
+# Chat agent can only read from filesys folder, but has full access elsewhere
+resource "aws_iam_policy" "chat_agent_s3_restricted_policy" {
+  name        = "${var.project_name}-chat-agent-s3-restricted-${var.environment}"
+  description = "Allows Chat Agent to read from filesys folder (read-only) and full access to other chat files"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # Explicitly deny write operations to filesys folder (must come first - Deny takes precedence)
+      {
+        Effect = "Deny"
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:PutObjectAcl",
+          "s3:DeleteObjectVersion"
+        ]
+        Resource = [
+          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/users/*/filesys/*"
+        ]
+      },
+      # Allow read-only access to filesys folder
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject"
+        ]
+        Resource = [
+          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/users/*/filesys/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn
+        ]
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["users/*/filesys/*"]
+          }
+        }
+      },
+      # Allow full access to rest of the bucket (for normal file operations)
+      # Note: This applies to all paths except filesys (which is already restricted above)
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GeneratePresignedUrl"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach restricted S3 policy for chat files access
 resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
+  policy_arn = aws_iam_policy.chat_agent_s3_restricted_policy.arn
 }
 
 # ECR policy for container image access
