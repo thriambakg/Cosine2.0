@@ -102,9 +102,8 @@ const FilesPage: React.FC = () => {
     { id: 'root', name: 'Files' }
   ]);
   
-  // Loading state
+  // Loading state (only for initial page load)
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingFolder, setIsLoadingFolder] = useState(false);
   
   // Dialog states
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -612,7 +611,6 @@ const FilesPage: React.FC = () => {
   const loadFolderContents = useCallback(async (folderPath: string = '') => {
     if (!user) return;
     
-    setIsLoadingFolder(true);
     try {
       const response = await filesystemAPI.listFolder({
         user_id: user.id,
@@ -674,8 +672,6 @@ const FilesPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading folder contents:', error);
-    } finally {
-      setIsLoadingFolder(false);
     }
   }, [user]);
 
@@ -1342,7 +1338,7 @@ const FilesPage: React.FC = () => {
           backgroundColor: dragOverFolder === 'empty-area' ? 'rgba(59, 130, 246, 0.1)' : undefined,
         }}
       >
-        {isLoading || isLoadingFolder ? (
+        {isLoading ? (
           <Box 
             sx={{ 
               p: 8, 

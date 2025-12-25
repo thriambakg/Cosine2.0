@@ -30,13 +30,33 @@ const TilePreview: React.FC<TilePreviewProps> = ({
 }) => {
   const [currentTile, setCurrentTile] = useState<UnifiedTile>(tile);
 
-  // Handle tile updates (from tile settings changes)
+  // Handle tile updates (from tile data changes like portfolio recalculations)
   const handleTileUpdate = useCallback((_id: string, data: any) => {
     setCurrentTile(prev => {
       const updated = { ...prev, ...data };
+      
+      // Save to filesystem when tile data changes (e.g., portfolio recalculations)
+      const saveTile = async () => {
+        try {
+          // Remove gridSize and gridPosition before saving
+          const { gridSize, gridPosition, ...tileToSave } = updated;
+          await filesystemAPI.updateItem({
+            user_id,
+            folder_path,
+            item_id,
+            content_data: tileToSave,
+          });
+          onUpdate(updated);
+        } catch (error) {
+          console.error('Error saving tile update:', error);
+        }
+      };
+      
+      saveTile();
+      
       return updated;
     });
-  }, []);
+  }, [user_id, folder_path, item_id, onUpdate]);
 
   // Handle tile settings changes
   const handleSettingsChange = useCallback(async (_id: string, settings: any) => {

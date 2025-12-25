@@ -532,7 +532,11 @@ def list_folder(user_id: str, folder_path: str = '') -> Dict[str, Any]:
         raise
 
 def update_item(user_id: str, folder_path: str, item_id: str, content_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Update an item's content in S3"""
+    """Update an item's content in S3
+    
+    For encrypted .cosine files: decrypts old file, updates with new data, re-encrypts and saves.
+    For regular files: updates content directly.
+    """
     try:
         manifest = get_folder_manifest(user_id, folder_path)
         
@@ -545,14 +549,37 @@ def update_item(user_id: str, folder_path: str, item_id: str, content_data: Dict
         if not s3_key or not validate_s3_key(user_id, s3_key):
             raise ValueError(f"Invalid S3 key for item {item_id}")
         
-        # Update content in S3
-        content_json = json.dumps(content_data, default=str, indent=2)
-        s3_client.put_object(
-            Bucket=CHAT_FILES_BUCKET_NAME,
-            Key=s3_key,
-            Body=content_json.encode('utf-8'),
-            ContentType='application/json'
-        )
+        logger.info(f"🔄 Updating item {item_id}, s3_key: {s3_key}")
+        
+        # Check if this is a .cosine encrypted context item file
+        is_cosine_file = s3_key.endswith(CONTEXT_ITEM_EXTENSION)
+        
+        if is_cosine_file:
+            # For encrypted .cosine files: encrypt the new content and save
+            logger.info(f"🔐 Updating encrypted .cosine file: {s3_key}")
+            logger.info(f"🔐 Encrypting updated content for user {user_id}...")
+            encrypted_data = encrypt_context_data(user_id, content_data)
+            logger.info(f"🔐 Encryption successful, encrypted data size: {len(encrypted_data)} bytes")
+            
+            # Save encrypted content (overwrites existing file at same S3 key)
+            s3_client.put_object(
+                Bucket=CHAT_FILES_BUCKET_NAME,
+                Key=s3_key,  # Keep same S3 key so subsequent edits work
+                Body=encrypted_data,
+                ContentType=CONTEXT_ITEM_MIME_TYPE
+            )
+            logger.info(f"✅ Successfully updated encrypted context item in S3: {s3_key}")
+        else:
+            # For regular files: save as JSON or raw content
+            logger.info(f"📄 Updating regular file: {s3_key}")
+            content_json = json.dumps(content_data, default=str, indent=2)
+            s3_client.put_object(
+                Bucket=CHAT_FILES_BUCKET_NAME,
+                Key=s3_key,  # Keep same S3 key
+                Body=content_json.encode('utf-8'),
+                ContentType='application/json'
+            )
+            logger.info(f"✅ Successfully updated regular file in S3: {s3_key}")
         
         # Update manifest
         item['updated_at'] = int(datetime.now().timestamp())
