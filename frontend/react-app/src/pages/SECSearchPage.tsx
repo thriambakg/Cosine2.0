@@ -17,7 +17,6 @@ import {
   TableHead,
   TableRow,
   Paper,
-  Link,
   CircularProgress,
   Checkbox,
   FormControlLabel,
@@ -38,15 +37,12 @@ import {
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  Description as DocumentIcon,
-  OpenInNew as OpenInNewIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   ExpandMore as ExpandMoreIcon,
   Close as CloseIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
-  Download as DownloadIcon,
   Dashboard as AddToContextIcon,
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
@@ -56,8 +52,8 @@ import {
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addFilingToContext, addMultipleFilingsToContext } from '../components/tiles/common';
+import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -689,7 +685,6 @@ const LOCATION_OPTIONS = [
 const SECSearchPage: React.FC = () => {
   // Get user and session info for authenticated downloads
   const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
@@ -3452,358 +3447,14 @@ const SECSearchPage: React.FC = () => {
       </Container>
 
       {/* Filing Details Dialog */}
-      <Dialog
+      <ItemDetailsDialog
         open={selectedFiling !== null}
         onClose={() => setSelectedFiling(null)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '2px solid #374151',
-            borderRadius: '8px',
-            color: '#ffffff',
-          },
-        }}
-      >
-        {selectedFiling && (
-          <>
-            <DialogTitle sx={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              borderBottom: '1px solid #374151',
-              pb: 2,
-              color: '#ffffff',
-              fontWeight: 600,
-            }}>
-              Filing Details: {selectedFiling.form} - {selectedFiling.filingEntity}
-              <IconButton
-                onClick={() => setSelectedFiling(null)}
-                sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
-              >
-                <CloseIcon />
-              </IconButton>
-            </DialogTitle>
-            <DialogContent sx={{ 
-              mt: 2,
-              '&::-webkit-scrollbar': {
-                width: '8px',
-              },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                borderRadius: '4px',
-              },
-              '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: 'rgba(59, 130, 246, 0.7)',
-              },
-            }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
-                    Filing Information
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Box>
-                      <Typography variant="caption" sx={{ color: '#6b7280' }}>Form</Typography>
-                      <Typography variant="body2" sx={{ color: '#ffffff' }}>{selectedFiling.form}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" sx={{ color: '#6b7280' }}>Filing Date</Typography>
-                      <Typography variant="body2" sx={{ color: '#ffffff' }}>{selectedFiling.filingDate}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" sx={{ color: '#6b7280' }}>Reporting For</Typography>
-                      <Typography variant="body2" sx={{ color: '#ffffff' }}>{selectedFiling.reportingFor}</Typography>
-                    </Box>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Filing Page
-                  </Typography>
-                  {selectedFiling.filingPageUrl ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Link
-                        href={selectedFiling.filingPageUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        sx={{
-                          color: '#3b82f6',
-                          textDecoration: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 0.5,
-                          '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                        }}
-                      >
-                        <OpenInNewIcon sx={{ fontSize: 16 }} />
-                        View on SEC.gov
-                      </Link>
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>Not available</Typography>
-                  )}
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Document Format Files ({selectedFiling.documentUrls?.length || 0})
-                  </Typography>
-                  {selectedFiling.documentUrls && selectedFiling.documentUrls.length > 0 ? (
-                    <Box sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      gap: 1, 
-                      maxHeight: '400px', 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '8px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '4px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {selectedFiling.documentUrls.map((url, index) => {
-                        const filename = url.split('/').pop() || `Document ${index + 1}`;
-                        const s3Key = selectedFiling.documentS3Keys?.[url];
-                        return (
-                          <Box
-                            key={index}
-                            sx={{
-                              p: 1.5,
-                              border: '1px solid #374151',
-                              borderRadius: '4px',
-                              backgroundColor: 'rgba(31, 41, 55, 0.5)',
-                            }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
-                              <Link
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                sx={{
-                                  color: '#3b82f6',
-                                  textDecoration: 'none',
-                                  fontSize: '0.875rem',
-                                  flex: 1,
-                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                                }}
-                              >
-                                {filename}
-                                <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
-                              </Link>
-                              {s3Key && (
-                                <IconButton
-                                  size="small"
-                                  onClick={async () => {
-                                    try {
-                                      console.log('📥 Downloading SEC filing document:', filename);
-                                      
-                                      if (!user?.id) {
-                                        console.error('Missing user ID for file download');
-                                        alert('Please log in to download files');
-                                        return;
-                                      }
-                                      
-                                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                      const response = await fetch(`${apiUrl}/file-download`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                          user_id: user.id,
-                                          session_id: activeSessionId || '', // Optional for SEC filings
-                                          bucket: 'SEC_FILINGS',
-                                          s3_key: s3Key,
-                                          filename: filename
-                                        })
-                                      });
-                                      
-                                      if (!response.ok) {
-                                        throw new Error(`Download request failed: ${response.status}`);
-                                      }
-                                      
-                                      const { download_url } = await response.json();
-                                      
-                                      // Create download link and trigger download
-                                      const link = document.createElement('a');
-                                      link.href = download_url;
-                                      link.download = filename;
-                                      link.target = '_blank';
-                                      document.body.appendChild(link);
-                                      link.click();
-                                      document.body.removeChild(link);
-                                      
-                                      console.log('✅ File download started');
-                                    } catch (error) {
-                                      console.error('❌ Download failed:', error);
-                                    }
-                                  }}
-                                  sx={{
-                                    color: '#3b82f6',
-                                    ml: 'auto',
-                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
-                                  }}
-                                >
-                                  <DownloadIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                            </Box>
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No document format files available</Typography>
-                  )}
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
-                    Data Files ({selectedFiling.dataFileUrls?.length || 0})
-                  </Typography>
-                  {selectedFiling.dataFileUrls && selectedFiling.dataFileUrls.length > 0 ? (
-                    <Box sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      gap: 1, 
-                      maxHeight: '400px', 
-                      overflowY: 'auto',
-                      '&::-webkit-scrollbar': {
-                        width: '8px',
-                      },
-                      '&::-webkit-scrollbar-track': {
-                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                        borderRadius: '4px',
-                      },
-                      '&::-webkit-scrollbar-thumb:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                      },
-                    }}>
-                      {selectedFiling.dataFileUrls.map((url, index) => {
-                        const filename = url.split('/').pop() || `Data File ${index + 1}`;
-                        const s3Key = selectedFiling.dataFileS3Keys?.[url];
-                        return (
-                          <Box
-                            key={index}
-                            sx={{
-                              p: 1.5,
-                              border: '1px solid #374151',
-                              borderRadius: '4px',
-                              backgroundColor: 'rgba(31, 41, 55, 0.5)',
-                            }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
-                              <Link
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                sx={{
-                                  color: '#3b82f6',
-                                  textDecoration: 'none',
-                                  fontSize: '0.875rem',
-                                  flex: 1,
-                                  '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                                }}
-                              >
-                                {filename}
-                                <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
-                              </Link>
-                              {s3Key && (
-                                <IconButton
-                                  size="small"
-                                  onClick={async () => {
-                                    try {
-                                      console.log('📥 Downloading SEC filing data file:', filename);
-                                      
-                                      if (!user?.id || !activeSessionId) {
-                                        console.error('Missing user ID or session ID for file download');
-                                        return;
-                                      }
-                                      
-                                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                      const response = await fetch(`${apiUrl}/file-download`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                          user_id: user.id,
-                                          session_id: activeSessionId,
-                                          bucket: 'SEC_FILINGS',
-                                          s3_key: s3Key,
-                                          filename: filename
-                                        })
-                                      });
-                                      
-                                      if (!response.ok) {
-                                        throw new Error(`Download request failed: ${response.status}`);
-                                      }
-                                      
-                                      const { download_url } = await response.json();
-                                      
-                                      // Create download link and trigger download
-                                      const link = document.createElement('a');
-                                      link.href = download_url;
-                                      link.download = filename;
-                                      link.target = '_blank';
-                                      document.body.appendChild(link);
-                                      link.click();
-                                      document.body.removeChild(link);
-                                      
-                                      console.log('✅ File download started');
-                                    } catch (error) {
-                                      console.error('❌ Download failed:', error);
-                                    }
-                                  }}
-                                  sx={{
-                                    color: '#3b82f6',
-                                    ml: 'auto',
-                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
-                                  }}
-                                >
-                                  <DownloadIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                            </Box>
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" sx={{ color: '#9ca3af' }}>No data files available</Typography>
-                  )}
-                </Grid>
-              </Grid>
-            </DialogContent>
-            <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
-              <Button
-                onClick={() => setSelectedFiling(null)}
-                sx={{
-                  color: '#9ca3af',
-                  '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' },
-                }}
-              >
-                Close
-              </Button>
-            </DialogActions>
-          </>
-        )}
-      </Dialog>
+        itemType="sec_filing"
+        data={selectedFiling}
+        title={selectedFiling ? `Filing Details: ${selectedFiling.form} - ${selectedFiling.filingEntity}` : 'Filing Details'}
+        user_id={user?.id}
+      />
 
       {/* Context Target Menu */}
       <Menu

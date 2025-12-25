@@ -46,11 +46,13 @@ import {
   ViewColumn as ViewColumnIcon,
   ExpandMore as ExpandMoreIcon,
   Folder as FolderIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import FileBrowserDialog from '../common/FileBrowserDialog';
+import ItemDetailsDialog from '../common/ItemDetailsDialog';
 import { filesystemAPI } from '../../services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -208,6 +210,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [selectedStockForDetails, setSelectedStockForDetails] = useState<StockResult | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const { user } = useAuth();
   // Pagination state
   const [hasMore, setHasMore] = useState<boolean>(false);
@@ -237,6 +241,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     priceChange: localDisplayOptions.showPriceChange,
     peRatio: localDisplayOptions.showPERatio,
     dividendYield: localDisplayOptions.showDividendYield,
+    details: true, // Details column visible by default
   });
 
   // Sync visibleColumns with localDisplayOptions when it changes
@@ -248,6 +253,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       priceChange: localDisplayOptions.showPriceChange,
       peRatio: localDisplayOptions.showPERatio,
       dividendYield: localDisplayOptions.showDividendYield,
+      details: true, // Details column always visible
     });
   }, [localDisplayOptions.showIndustry, localDisplayOptions.showMarketCap, localDisplayOptions.showVolatility, localDisplayOptions.showPriceChange, localDisplayOptions.showPERatio, localDisplayOptions.showDividendYield]);
 
@@ -1575,6 +1581,9 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                   {visibleColumns.dividendYield && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Div Yield</TableCell>
                   )}
+                  {visibleColumns.details && (
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Details</TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1594,7 +1603,16 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                       key={stock.symbol} 
                       hover
                       selected={selectedStocks.includes(stock.symbol)}
+                      onClick={(e) => {
+                        // Don't select if clicking on checkbox (checkbox handles its own selection)
+                        if ((e.target as HTMLElement).closest('input[type="checkbox"]') || (e.target as HTMLElement).closest('span.MuiCheckbox-root')) {
+                          return;
+                        }
+                        // Single click = select for context addition
+                        handleStockSelect(stock.symbol);
+                      }}
                       sx={{
+                        cursor: 'pointer',
                         '&.Mui-selected': {
                           backgroundColor: 'rgba(16, 185, 129, 0.08)',
                         },
@@ -1603,7 +1621,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                         },
                       }}
                     >
-                      <TableCell padding="checkbox">
+                      <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           size="small"
                           checked={selectedStocks.includes(stock.symbol)}
@@ -1646,6 +1664,27 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                       {visibleColumns.dividendYield && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
                           {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : 'N/A'}
+                        </TableCell>
+                      )}
+                      {visibleColumns.details && (
+                        <TableCell>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedStockForDetails(stock);
+                              setDetailsDialogOpen(true);
+                            }}
+                            sx={{
+                              color: '#3b82f6',
+                              '&:hover': {
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                color: '#60a5fa',
+                              },
+                            }}
+                          >
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
                         </TableCell>
                       )}
                     </TableRow>
@@ -1758,6 +1797,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           { key: 'priceChange', label: 'Price Change' },
           { key: 'peRatio', label: 'P/E Ratio' },
           { key: 'dividendYield', label: 'Dividend Yield' },
+          { key: 'details', label: 'Details' },
         ].map((column) => (
           <MenuItem
             key={column.key}
@@ -2522,6 +2562,19 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         currentTitle={customTitle || 'Stock Screener'}
         currentColor={customColor}
         currentIcon={customIcon}
+      />
+
+      {/* Stock Details Dialog */}
+      <ItemDetailsDialog
+        open={detailsDialogOpen}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+          setSelectedStockForDetails(null);
+        }}
+        itemType="stock_result"
+        data={selectedStockForDetails}
+        title={selectedStockForDetails?.name}
+        user_id={user?.id}
       />
     </Box>
   );

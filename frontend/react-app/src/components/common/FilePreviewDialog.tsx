@@ -15,6 +15,7 @@ import {
   Chip,
   Grid,
   Link,
+  Tooltip,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -26,10 +27,13 @@ import {
   OpenInNew as OpenInNewIcon,
   Launch as LaunchIcon,
   Description as DocumentIcon,
+  Warning as WarningIcon,
+  InfoOutlined as InfoIcon,
 } from '@mui/icons-material';
 import { fileReturnAPI } from '@/services/api';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
+import ItemDetailsDialog, { ItemType } from './ItemDetailsDialog';
 
 interface FilePreviewDialogProps {
   open: boolean;
@@ -191,7 +195,9 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${item.name}.json`;
+        // Use .cosine extension for context items (encrypted format)
+        const extension = item.type === 'context_item' ? '.cosine' : '.json';
+        a.download = `${item.name}${extension}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -767,6 +773,84 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             }
           })()}
 
+          {/* Actions Section */}
+          {data.actions_json && (() => {
+            try {
+              const actions = JSON.parse(data.actions_json);
+              if (Array.isArray(actions) && actions.length > 0) {
+                return (
+                  <Box sx={{ mb: 4 }}>
+                    <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                      Actions ({data.action_count || actions.length})
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {actions.map((action: any, idx: number) => (
+                        <Box
+                          key={idx}
+                          sx={{
+                            p: 2,
+                            backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                            borderRadius: '4px',
+                            border: '1px solid #374151',
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                            <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                              {action.actionDate && formatDate(action.actionDate)}
+                            </Typography>
+                            {action.type && (
+                              <Chip
+                                label={action.type}
+                                size="small"
+                                sx={{
+                                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                  color: '#93c5fd',
+                                  border: '1px solid #3b82f6',
+                                }}
+                              />
+                            )}
+                          </Box>
+                          {action.text && (
+                            <Typography variant="body1" sx={{ color: '#e2e8f0', mt: 1 }}>
+                              {action.text}
+                            </Typography>
+                          )}
+                          {action.committees && Array.isArray(action.committees) && action.committees.length > 0 && (
+                            <Box sx={{ mt: 1 }}>
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                                Committees:
+                              </Typography>
+                              {action.committees.map((committee: any, cIdx: number) => (
+                                <Typography key={cIdx} variant="body2" sx={{ color: '#e2e8f0', ml: 1 }}>
+                                  • {committee.name || committee.systemCode}
+                                </Typography>
+                              ))}
+                            </Box>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                );
+              }
+            } catch (e) {
+              // If parsing fails, show the summary text
+              if (data.actions_summary) {
+                return (
+                  <Box sx={{ mb: 4 }}>
+                    <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                      Actions Summary
+                    </Typography>
+                    <Typography variant="body1" sx={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
+                      {data.actions_summary}
+                    </Typography>
+                  </Box>
+                );
+              }
+            }
+            return null;
+          })()}
+
           {/* Bill URL */}
           {data.bill_url && (
             <Box sx={{ mt: 3 }}>
@@ -1019,6 +1103,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                 }}>
                   {data.documentUrls.map((url: string, index: number) => {
                     const filename = url.split('/').pop() || `Document ${index + 1}`;
+                    const s3Key = data.documentS3Keys?.[url];
                     return (
                       <Box
                         key={index}
@@ -1046,6 +1131,170 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                             {filename}
                             <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
                           </Link>
+                          {s3Key && (
+                            <IconButton
+                              size="small"
+                              onClick={async () => {
+                                try {
+                                  console.log('📥 Downloading SEC filing document:', filename);
+                                  
+                                  if (!user_id) {
+                                    console.error('Missing user ID for file download');
+                                    alert('Please log in to download files');
+                                    return;
+                                  }
+                                  
+                                  const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                  const response = await fetch(`${apiUrl}/file-download`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      user_id: user_id,
+                                      session_id: '', // Optional for SEC filings
+                                      bucket: 'SEC_FILINGS',
+                                      s3_key: s3Key,
+                                      filename: filename
+                                    })
+                                  });
+                                  
+                                  if (!response.ok) {
+                                    throw new Error(`Download request failed: ${response.status}`);
+                                  }
+                                  
+                                  const { download_url } = await response.json();
+                                  
+                                  // Create download link and trigger download
+                                  const link = document.createElement('a');
+                                  link.href = download_url;
+                                  link.download = filename;
+                                  link.target = '_blank';
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                  
+                                  console.log('✅ File download started');
+                                } catch (error) {
+                                  console.error('❌ Download failed:', error);
+                                  alert('Failed to download file. Please try again.');
+                                }
+                              }}
+                              sx={{
+                                color: '#3b82f6',
+                                ml: 'auto',
+                                '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                              }}
+                            >
+                              <DownloadIcon fontSize="small" />
+                            </IconButton>
+                          )}
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Grid>
+            )}
+
+            {/* Data Files */}
+            {data.dataFileUrls && data.dataFileUrls.length > 0 && (
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, mt: 2 }}>
+                  Data Files ({data.dataFileUrls.length})
+                </Typography>
+                <Box sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: 1, 
+                  maxHeight: '400px', 
+                  overflowY: 'auto',
+                  ...scrollbarStyles,
+                }}>
+                  {data.dataFileUrls.map((url: string, index: number) => {
+                    const filename = url.split('/').pop() || `Data File ${index + 1}`;
+                    const s3Key = data.dataFileS3Keys?.[url];
+                    return (
+                      <Box
+                        key={index}
+                        sx={{
+                          p: 1.5,
+                          border: '1px solid #374151',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
+                          <Link
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{
+                              color: '#3b82f6',
+                              textDecoration: 'none',
+                              fontSize: '0.875rem',
+                              flex: 1,
+                              '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                            }}
+                          >
+                            {filename}
+                            <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                          </Link>
+                          {s3Key && (
+                            <IconButton
+                              size="small"
+                              onClick={async () => {
+                                try {
+                                  console.log('📥 Downloading SEC filing data file:', filename);
+                                  
+                                  if (!user_id) {
+                                    console.error('Missing user ID for file download');
+                                    alert('Please log in to download files');
+                                    return;
+                                  }
+                                  
+                                  const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+                                  const response = await fetch(`${apiUrl}/file-download`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      user_id: user_id,
+                                      session_id: '', // Optional for SEC filings
+                                      bucket: 'SEC_FILINGS',
+                                      s3_key: s3Key,
+                                      filename: filename
+                                    })
+                                  });
+                                  
+                                  if (!response.ok) {
+                                    throw new Error(`Download request failed: ${response.status}`);
+                                  }
+                                  
+                                  const { download_url } = await response.json();
+                                  
+                                  // Create download link and trigger download
+                                  const link = document.createElement('a');
+                                  link.href = download_url;
+                                  link.download = filename;
+                                  link.target = '_blank';
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                  
+                                  console.log('✅ File download started');
+                                } catch (error) {
+                                  console.error('❌ Download failed:', error);
+                                  alert('Failed to download file. Please try again.');
+                                }
+                              }}
+                              sx={{
+                                color: '#3b82f6',
+                                ml: 'auto',
+                                '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                              }}
+                            >
+                              <DownloadIcon fontSize="small" />
+                            </IconButton>
+                          )}
                         </Box>
                       </Box>
                     );
@@ -1072,6 +1321,247 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           <Typography variant="h5" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
             {content.title || `Government Contract - ${data.recipient_name || data.award_id || 'Contract'}`}
           </Typography>
+
+          {/* Award Overview Section - Two Columns */}
+          <Box sx={{ mb: 4, borderBottom: '1px solid #374151', pb: 3 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              {/* Left Column: Awarding Agency & Recipient */}
+              <Box>
+                {(data.awarding_agency_name || data.awarding_agency_code) && (
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                      Awarding Agency
+                    </Typography>
+                    <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      {data.awarding_agency_name || 'N/A'}
+                      {data.awarding_agency_code && (
+                        <Typography component="span" variant="body2" sx={{ color: '#64748b', ml: 1 }}>
+                          ({data.awarding_agency_code})
+                        </Typography>
+                      )}
+                    </Typography>
+                  </Box>
+                )}
+                
+                {data.recipient_name && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                      Recipient
+                    </Typography>
+                    <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      {data.recipient_name}
+                    </Typography>
+                    {data.recipient_location && (
+                      <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>
+                        {data.recipient_location}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+              
+              {/* Right Column: Award Status & Dates */}
+              <Box>
+                {(() => {
+                  const startDate = data.period_of_performance_start_date || data.period_start_date;
+                  const endDate = data.period_of_performance_current_end_date || 
+                                (data.award_or_idv_flag === 'IDV' ? data.ordering_period_end_date : null) ||
+                                data.period_end_date;
+                  if (startDate && endDate) {
+                    const end = new Date(endDate);
+                    const now = new Date();
+                    const remainingDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+                    const yearsRemaining = Math.floor(remainingDays / 365);
+                    
+                    return (
+                      <Box sx={{ mb: 3 }}>
+                        <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                          Status
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>
+                          In Progress
+                        </Typography>
+                        {yearsRemaining > 0 && (
+                          <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                            ({yearsRemaining} {yearsRemaining === 1 ? 'year' : 'years'} remain)
+                          </Typography>
+                        )}
+                      </Box>
+                    );
+                  }
+                  return null;
+                })()}
+                
+                {(data.period_of_performance_start_date || data.period_start_date) && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                      Period of Performance
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {formatDate(data.period_of_performance_start_date || data.period_start_date)} - {formatDate(data.period_of_performance_current_end_date || data.period_end_date)}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          </Box>
+
+          {/* Chart Visualization */}
+          {(() => {
+            const obligatedAmount = data.combined_obligated_amount || 
+                                   data.total_obligated_amount || 
+                                   data.total_obligation || 0;
+            const outlayedAmount = parseFloat(data.total_outlayed_amount_for_overall_award as string) || 0;
+            const nonFederalFunding = parseFloat(data.total_non_federal_funding_amount as string) || 0;
+            const totalFunding = obligatedAmount;
+            
+            if (obligatedAmount > 0) {
+              return (
+                <Box sx={{ mb: 4 }}>
+                  <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                    Funding Overview
+                  </Typography>
+                  <Box sx={{ mb: 3, position: 'relative', width: '100%', minHeight: '400px' }}>
+                    {(() => {
+                      const chartWidth = 647;
+                      const chartHeight = 400;
+                      const barHeight = 50;
+                      const barY = 160;
+                      
+                      // Calculate widths based on obligated amount as the full bar
+                      const obligatedWidth = chartWidth;
+                      const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
+                      
+                      return (
+                        <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'hidden' }}>
+                          <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth}px` }}>
+                            {/* Base rectangle (light gray background) */}
+                            <rect x="0" y={barY} width={chartWidth} height={barHeight} fill="#dce4ee" rx="5" ry="5" />
+                            
+                            {/* Obligated amount bar (blue - full width) */}
+                            <rect x="0" y={barY + 5} width={obligatedWidth} height={barHeight - 10} fill="#4773aa" rx="5" ry="5" />
+                            
+                            {/* Outlayed amount progress bar (darker blue/green overlay showing what's been paid) */}
+                            {outlayedAmount > 0 && (
+                              <rect 
+                                x="0" 
+                                y={barY + 5} 
+                                width={outlayedWidth} 
+                                height={barHeight - 10} 
+                                fill="#10b981" 
+                                rx="5" 
+                                ry="5"
+                                opacity="0.8"
+                              />
+                            )}
+                            
+                            {/* Vertical line for obligated amount */}
+                            <line 
+                              x1={obligatedWidth} 
+                              y1={90} 
+                              x2={obligatedWidth} 
+                              y2={barY + barHeight + 10} 
+                              stroke="#4773aa" 
+                              strokeWidth="4"
+                            />
+                            
+                            {/* Vertical line for outlayed amount (if different from obligated) */}
+                            {outlayedAmount > 0 && outlayedWidth < obligatedWidth && (
+                              <line 
+                                x1={outlayedWidth} 
+                                y1={barY} 
+                                x2={outlayedWidth} 
+                                y2={barY + barHeight} 
+                                stroke="#10b981" 
+                                strokeWidth="4"
+                              />
+                            )}
+                            
+                            {/* Outlayed Amount Label (if outlayed > 0) */}
+                            {outlayedAmount > 0 && outlayedWidth > 50 && (
+                              <foreignObject width={outlayedWidth} height="70" x="0" y={90}>
+                                <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px', maxWidth: `${outlayedWidth}px` }}>
+                                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '18px' }}>
+                                    {formatCurrency(outlayedAmount)}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
+                                </Box>
+                              </foreignObject>
+                            )}
+                            
+                            {/* Obligated Amount Label */}
+                            <foreignObject width={chartWidth} height="70" x="-8" y={90}>
+                              <Box sx={{ float: 'right', textAlign: 'right', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
+                                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
+                                  {formatCurrency(obligatedAmount)}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
+                              </Box>
+                            </foreignObject>
+                            
+                            {/* Total Funding Label */}
+                            <foreignObject width={chartWidth} height="60" x="0" y={300}>
+                              <Box sx={{ float: 'right', textAlign: 'right', padding: '4px 8px' }}>
+                                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
+                                  {formatCurrency(totalFunding)}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Total Funding</Typography>
+                              </Box>
+                            </foreignObject>
+                          </svg>
+                        </Box>
+                      );
+                    })()}
+                  </Box>
+                  
+                  {/* Amount Details */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#10b981' }} />
+                        <Typography variant="body2" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                        {formatCurrency(outlayedAmount)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#4773aa' }} />
+                        <Typography variant="body2" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                        {formatCurrency(obligatedAmount)}
+                      </Typography>
+                    </Box>
+                    {nonFederalFunding > 0 && (
+                      <>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: 'rgba(71, 115, 170, 0.3)' }} />
+                            <Typography variant="body2" sx={{ color: '#94a3b8' }}>Non-Federal Funding</Typography>
+                          </Box>
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                            {formatCurrency(nonFederalFunding)}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#64748b' }} />
+                            <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Funding</Typography>
+                          </Box>
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                            {formatCurrency(totalFunding)}
+                          </Typography>
+                        </Box>
+                      </>
+                    )}
+                  </Box>
+                </Box>
+              );
+            }
+            return null;
+          })()}
 
           {/* Award Information */}
           <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
@@ -1199,6 +1689,18 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                         Code: {data.awarding_agency_code}
                       </Typography>
                     )}
+                    {data.awarding_sub_agency_name && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        Sub-Agency: {data.awarding_sub_agency_name}
+                        {data.awarding_sub_agency_code && ` (${data.awarding_sub_agency_code})`}
+                      </Typography>
+                    )}
+                    {data.awarding_office_name && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        Office: {data.awarding_office_name}
+                        {data.awarding_office_code && ` (${data.awarding_office_code})`}
+                      </Typography>
+                    )}
                   </Box>
                 )}
                 {data.funding_agency_name && (
@@ -1214,6 +1716,18 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                         Code: {data.funding_agency_code}
                       </Typography>
                     )}
+                    {data.funding_sub_agency_name && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        Sub-Agency: {data.funding_sub_agency_name}
+                        {data.funding_sub_agency_code && ` (${data.funding_sub_agency_code})`}
+                      </Typography>
+                    )}
+                    {data.funding_office_name && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        Office: {data.funding_office_name}
+                        {data.funding_office_code && ` (${data.funding_office_code})`}
+                      </Typography>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -1226,17 +1740,625 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
               <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
                 Recipient Information
               </Typography>
-              <Box>
-                <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
-                  Recipient Name
-                </Typography>
-                <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                  {data.recipient_name}
-                </Typography>
-                {data.recipient_location && (
-                  <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 1 }}>
-                    {data.recipient_location}
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                    Recipient Name
                   </Typography>
+                  <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {data.recipient_name || (data.recipient_name_normalized ? data.recipient_name_normalized.toUpperCase() : 'N/A')}
+                  </Typography>
+                </Box>
+                {(data.recipient_id || data.recipient_uei) && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      {data.recipient_uei ? 'UEI' : 'Recipient ID'}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                      {data.recipient_uei || data.recipient_id || 'N/A'}
+                    </Typography>
+                  </Box>
+                )}
+                {data.recipient_location_state && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      State
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.recipient_location_state}
+                      {data.recipient_state_name && ` (${data.recipient_state_name})`}
+                    </Typography>
+                  </Box>
+                )}
+                {data.recipient_location_country && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Country
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.recipient_location_country}
+                      {data.recipient_country_name && ` (${data.recipient_country_name})`}
+                    </Typography>
+                  </Box>
+                )}
+                {data.recipient_city_name && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      City
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.recipient_city_name}
+                      {data.recipient_county_name && `, ${data.recipient_county_name}`}
+                    </Typography>
+                  </Box>
+                )}
+                {data.recipient_address_line_1 && (
+                  <Box sx={{ gridColumn: '1 / -1' }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Address
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.recipient_address_line_1}
+                      {data.recipient_address_line_2 && `, ${data.recipient_address_line_2}`}
+                      {data.recipient_zip_code && `, ${data.recipient_zip_code}`}
+                    </Typography>
+                  </Box>
+                )}
+                {data.recipient_parent_name && (
+                  <Box sx={{ gridColumn: '1 / -1' }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Parent Organization
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.recipient_parent_name}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Classification Codes */}
+          {(data.naics_code || data.psc_code || data.cfda_number) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Classification Codes
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                {data.naics_code && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      NAICS Code
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                      {data.naics_code}
+                    </Typography>
+                    {data.naics_description && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        {data.naics_description}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                {data.psc_code && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      PSC Code
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                      {data.psc_code}
+                    </Typography>
+                    {data.psc_description && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        {data.psc_description}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                {data.cfda_number && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      CFDA Number
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                      {data.cfda_number}
+                    </Typography>
+                    {data.cfda_title && (
+                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                        {data.cfda_title}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Funding Information */}
+          {(data.federal_accounts_funding_this_award ||
+            data.treasury_accounts_funding_this_award ||
+            data.program_activities_funding_this_award ||
+            data.object_classes_funding_this_award ||
+            data.disaster_emergency_fund_codes_for_overall_award) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Funding Information
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 2 }}>
+                {data.federal_accounts_funding_this_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Federal Account
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                      {data.federal_accounts_funding_this_award}
+                    </Typography>
+                  </Box>
+                )}
+                {data.treasury_accounts_funding_this_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Treasury Account
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontFamily: 'monospace' }}>
+                      {data.treasury_accounts_funding_this_award}
+                    </Typography>
+                  </Box>
+                )}
+                {data.disaster_emergency_fund_codes_for_overall_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Disaster/Emergency Fund Code (DEFC)
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.disaster_emergency_fund_codes_for_overall_award}
+                    </Typography>
+                  </Box>
+                )}
+                {data.program_activities_funding_this_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Program Activity
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.program_activities_funding_this_award}
+                    </Typography>
+                  </Box>
+                )}
+                {data.object_classes_funding_this_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Object Class
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.object_classes_funding_this_award}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Transactions */}
+          {data.transactions && Array.isArray(data.transactions) && data.transactions.length > 0 && (
+            <Box sx={{ mb: 3, position: 'relative' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                  Transactions ({data.transactions.length})
+                </Typography>
+                <Tooltip
+                  title={
+                    <Box>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        The data available here may not represent the full transaction history.
+                      </Typography>
+                      {data.usaspending_permalink ? (
+                        <Typography variant="body2">
+                          For complete transaction history, please visit{' '}
+                          <Box
+                            component="a"
+                            href={data.usaspending_permalink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{
+                              color: '#60a5fa',
+                              textDecoration: 'underline',
+                              '&:hover': {
+                                color: '#93c5fd',
+                              },
+                            }}
+                          >
+                            USAspending.gov
+                          </Box>
+                          .
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2">
+                          For complete transaction history, please visit the official USAspending.gov website.
+                        </Typography>
+                      )}
+                    </Box>
+                  }
+                  arrow
+                  placement="left"
+                >
+                  <WarningIcon 
+                    sx={{ 
+                      color: '#fbbf24', 
+                      fontSize: '20px',
+                      cursor: 'help',
+                      '&:hover': {
+                        color: '#f59e0b',
+                      },
+                    }} 
+                  />
+                </Tooltip>
+              </Box>
+              <Box sx={{ 
+                maxHeight: '300px', 
+                overflowY: 'auto',
+                ...scrollbarStyles,
+              }}>
+                {data.transactions.map((transaction: any, idx: number) => (
+                  <Box
+                    key={transaction.transaction_id || idx}
+                    sx={{
+                      p: 2,
+                      mb: 1,
+                      backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                      borderRadius: '4px',
+                      border: '1px solid #374151',
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                      <strong>ID:</strong> {transaction.transaction_id || 'N/A'}
+                    </Typography>
+                    {transaction.action_date && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                        <strong>Date:</strong> {formatDate(transaction.action_date)}
+                      </Typography>
+                    )}
+                    {transaction.federal_action_obligation && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                        <strong>Amount:</strong> {formatCurrency(parseFloat(transaction.federal_action_obligation))}
+                      </Typography>
+                    )}
+                    {transaction.transaction_description && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                        <strong>Description:</strong> {transaction.transaction_description}
+                      </Typography>
+                    )}
+                    {transaction.action_type && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Type:</strong> {transaction.action_type}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Subawards */}
+          {data.subawards && Array.isArray(data.subawards) && data.subawards.length > 0 && (
+            <Box sx={{ mb: 3, position: 'relative' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                  Subawards ({data.subawards.length})
+                </Typography>
+                <Tooltip
+                  title={
+                    <Box>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        The data available here may not represent the full subaward history.
+                      </Typography>
+                      {data.usaspending_permalink ? (
+                        <Typography variant="body2">
+                          For complete subaward history, please visit{' '}
+                          <Box
+                            component="a"
+                            href={data.usaspending_permalink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{
+                              color: '#60a5fa',
+                              textDecoration: 'underline',
+                              '&:hover': {
+                                color: '#93c5fd',
+                              },
+                            }}
+                          >
+                            USAspending.gov
+                          </Box>
+                          .
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2">
+                          For complete subaward history, please visit the official USAspending.gov website.
+                        </Typography>
+                      )}
+                    </Box>
+                  }
+                  arrow
+                  placement="left"
+                >
+                  <WarningIcon 
+                    sx={{ 
+                      color: '#fbbf24', 
+                      fontSize: '20px',
+                      cursor: 'help',
+                      '&:hover': {
+                        color: '#f59e0b',
+                      },
+                    }} 
+                  />
+                </Tooltip>
+              </Box>
+              <Box sx={{ 
+                maxHeight: '300px', 
+                overflowY: 'auto',
+                ...scrollbarStyles,
+              }}>
+                {data.subawards.map((subaward: any, idx: number) => (
+                  <Box
+                    key={subaward.subaward_id || idx}
+                    sx={{
+                      p: 2,
+                      mb: 1,
+                      backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                      borderRadius: '4px',
+                      border: '1px solid #374151',
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                      <strong>ID:</strong> {subaward.subaward_id || 'N/A'}
+                    </Typography>
+                    {subaward.subawardee_name && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                        <strong>Recipient:</strong> {subaward.subawardee_name}
+                      </Typography>
+                    )}
+                    {subaward.subaward_amount && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                        <strong>Amount:</strong> {formatCurrency(parseFloat(subaward.subaward_amount))}
+                      </Typography>
+                    )}
+                    {subaward.subaward_date && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                        <strong>Date:</strong> {formatDate(subaward.subaward_date)}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Child Awards (for IDV parents) */}
+          {data.is_idv_parent && data.child_awards_details && Array.isArray(data.child_awards_details) && data.child_awards_details.length > 0 && (
+            <Box sx={{ mb: 3, position: 'relative' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                  Child Awards ({data.child_awards_details.length})
+                </Typography>
+                <Tooltip
+                  title={
+                    <Box>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        Child awards (delivery orders) issued under this IDV. Each child award is a separate contract with its own transactions and obligations.
+                      </Typography>
+                      {data.usaspending_permalink && (
+                        <Typography variant="body2">
+                          For complete child award details, please visit{' '}
+                          <Box
+                            component="a"
+                            href={data.usaspending_permalink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{
+                              color: '#60a5fa',
+                              textDecoration: 'underline',
+                              '&:hover': {
+                                color: '#93c5fd',
+                              },
+                            }}
+                          >
+                            USAspending.gov
+                          </Box>
+                          .
+                        </Typography>
+                      )}
+                    </Box>
+                  }
+                  arrow
+                  placement="left"
+                >
+                  <InfoIcon 
+                    sx={{ 
+                      color: '#3b82f6', 
+                      fontSize: '20px',
+                      cursor: 'help',
+                      '&:hover': {
+                        color: '#60a5fa',
+                      },
+                    }} 
+                  />
+                </Tooltip>
+              </Box>
+              <Box sx={{ 
+                maxHeight: '400px', 
+                overflowY: 'auto',
+                ...scrollbarStyles,
+              }}>
+                {data.child_awards_details.map((childAward: any, idx: number) => (
+                  <Box
+                    key={childAward.award_id || idx}
+                    sx={{
+                      p: 2,
+                      mb: 1,
+                      backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                      borderRadius: '4px',
+                      border: '1px solid #374151',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                      <Box>
+                        {childAward.award_id_piid && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5, fontFamily: 'monospace' }}>
+                            <strong>PIID:</strong> {childAward.award_id_piid}
+                          </Typography>
+                        )}
+                        {childAward.description && (
+                          <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 0.5 }}>
+                            <strong>Description:</strong> {childAward.description}
+                          </Typography>
+                        )}
+                        {childAward.award_type_description && (
+                          <Typography variant="body2" sx={{ color: '#94a3b8', mb: 0.5 }}>
+                            {childAward.award_type_description}
+                          </Typography>
+                        )}
+                      </Box>
+                      {childAward.total_obligated_amount && (
+                        <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>
+                          {formatCurrency(parseFloat(childAward.total_obligated_amount.toString()))}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 1 }}>
+                      {childAward.recipient_name && (
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                          <strong>Recipient:</strong> {childAward.recipient_name}
+                        </Typography>
+                      )}
+                      {childAward.awarding_agency_name && (
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                          <strong>Agency:</strong> {childAward.awarding_agency_name}
+                        </Typography>
+                      )}
+                      {childAward.period_of_performance_start_date && (
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                          <strong>Start:</strong> {formatDate(String(childAward.period_of_performance_start_date))}
+                        </Typography>
+                      )}
+                      {childAward.period_of_performance_current_end_date && (
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                          <strong>End:</strong> {formatDate(String(childAward.period_of_performance_current_end_date))}
+                        </Typography>
+                      )}
+                      {childAward.transaction_count !== undefined && (
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                          <strong>Transactions:</strong> {childAward.transaction_count}
+                        </Typography>
+                      )}
+                      {childAward.subaward_count !== undefined && (
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                          <strong>Subawards:</strong> {childAward.subaward_count}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Additional Financial Information */}
+          {(data.current_total_value_of_award || 
+            data.potential_total_value_of_award ||
+            data.base_and_exercised_options_value ||
+            data.base_and_all_options_value) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Additional Financial Information
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                {data.current_total_value_of_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Current Total Value
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {formatCurrency(parseFloat(String(data.current_total_value_of_award)))}
+                    </Typography>
+                  </Box>
+                )}
+                {data.potential_total_value_of_award && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Potential Total Value
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {formatCurrency(parseFloat(String(data.potential_total_value_of_award)))}
+                    </Typography>
+                  </Box>
+                )}
+                {data.base_and_exercised_options_value && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Base and Exercised Options
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {formatCurrency(parseFloat(String(data.base_and_exercised_options_value)))}
+                    </Typography>
+                  </Box>
+                )}
+                {data.base_and_all_options_value && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Base and All Options
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {formatCurrency(parseFloat(String(data.base_and_all_options_value)))}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Place of Performance */}
+          {(data.primary_place_of_performance_city_name ||
+            data.primary_place_of_performance_state_name ||
+            data.primary_place_of_performance_country_name) && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Place of Performance
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                {data.primary_place_of_performance_city_name && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      City
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.primary_place_of_performance_city_name}
+                      {data.primary_place_of_performance_county_name && 
+                        `, ${data.primary_place_of_performance_county_name}`}
+                    </Typography>
+                  </Box>
+                )}
+                {data.primary_place_of_performance_state_name && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      State
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.primary_place_of_performance_state_name}
+                      {data.primary_place_of_performance_state_code && 
+                        ` (${data.primary_place_of_performance_state_code})`}
+                    </Typography>
+                  </Box>
+                )}
+                {data.primary_place_of_performance_country_name && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
+                      Country
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                      {data.primary_place_of_performance_country_name}
+                    </Typography>
+                  </Box>
                 )}
               </Box>
             </Box>
@@ -1425,7 +2547,66 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
 
     switch (previewData.preview_type) {
       case 'context_item':
-        return renderContextItem(previewData.content);
+        // Use ItemDetailsDialog for context items
+        const content = previewData.content;
+        const metadata = previewData.metadata || {};
+        
+        // Determine item type from content
+        let itemType: ItemType = 'tile';
+        let itemData = content;
+        
+        // Check if it's a tile
+        const tile = contentToTile(content);
+        if (tile) {
+          return renderContextItem(previewData.content); // Use existing tile rendering for now
+        }
+        
+        // Handle nested data structure
+        if (content?.data && typeof content.data === 'object') {
+          itemData = content.data;
+        }
+        
+        // Determine item type from data
+        if (itemData?.award_id || itemData?.recipient_name) {
+          itemType = 'govt_contract';
+        } else if (itemData?.form || itemData?.filingEntity || itemData?.accession) {
+          itemType = 'sec_filing';
+        } else if (itemData?.title || itemData?.source_name || itemData?.source_url) {
+          itemType = 'news_article';
+        } else if (itemData?.tradeId || itemData?.politicianName || itemData?.transactionType) {
+          itemType = 'politician_trade';
+        } else if (itemData?.bill_id || itemData?.bill_type || itemData?.bill_number) {
+          itemType = 'congress_bill';
+        } else if (itemData?.filing_uuid || itemData?.registrant_name || itemData?.client_name) {
+          itemType = 'lda_disclosure';
+        } else if (itemData?.symbol || itemData?.ticker) {
+          itemType = 'stock_result';
+        }
+        
+        // Use ItemDetailsDialog to render the content in contentOnly mode
+        return (
+          <ItemDetailsDialog
+            open={true}
+            onClose={() => {}}
+            itemType={itemType}
+            data={itemData}
+            title={metadata.title || content.title || item.name}
+            user_id={user_id}
+            folder_path={folder_path}
+            item_id={item.id}
+            contentOnly={true}
+            onEnrich={(enrichedData) => {
+              // Update preview data with enriched data
+              setPreviewData({
+                ...previewData,
+                content: {
+                  ...content,
+                  data: enrichedData,
+                },
+              });
+            }}
+          />
+        );
 
       case 'image':
         return (

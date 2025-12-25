@@ -881,6 +881,30 @@ resource "aws_iam_policy" "lda_disclosures_s3_policy" {
   tags = var.common_tags
 }
 
+resource "aws_iam_policy" "congress_bills_s3_policy" {
+  name        = "${var.project_name}-congress-bills-s3-policy-${var.environment}"
+  description = "Policy for file return Lambda to access S3 Congress bills bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # IAM Policy for Lambda functions to access DynamoDB
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
   name        = "${var.project_name}-lambda-dynamodb-policy-${var.environment}"
@@ -2156,11 +2180,12 @@ module "file_return_lambda" {
   source_dir = "../backend_app/src/file_return/app"
 
   environment_variables = {
-    S3_BUCKET                = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
-    SEC_FILINGS_BUCKET       = "cosine-sec-filings-${var.environment}"
-    POLITICIAN_TRADES_BUCKET = "cosine-politician-trades-${var.environment}"
-    LDA_DISCLOSURES_BUCKET   = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
-    SESSIONS_TABLE           = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    S3_BUCKET                          = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    SEC_FILINGS_BUCKET                 = "cosine-sec-filings-${var.environment}"
+    POLITICIAN_TRADES_BUCKET           = "cosine-politician-trades-${var.environment}"
+    LDA_DISCLOSURES_BUCKET             = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
+    CONGRESS_BILLS_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_name
+    SESSIONS_TABLE                     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
     # WebSocket endpoint removed to avoid circular dependency with websocket_api module
     # The file_return Lambda can discover the endpoint at runtime if needed
     ENVIRONMENT = var.environment
@@ -2178,7 +2203,8 @@ module "file_return_lambda" {
     data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
     aws_iam_policy.sec_search_s3_policy.arn,        # Add SEC filings bucket access
     aws_iam_policy.politician_trades_s3_policy.arn, # Add politician trades bucket access
-    aws_iam_policy.lda_disclosures_s3_policy.arn    # Add LDA disclosures bucket access
+    aws_iam_policy.lda_disclosures_s3_policy.arn,   # Add LDA disclosures bucket access
+    aws_iam_policy.congress_bills_s3_policy.arn     # Add Congress bills bucket access
   ]
 
   reserved_concurrent_executions = 20

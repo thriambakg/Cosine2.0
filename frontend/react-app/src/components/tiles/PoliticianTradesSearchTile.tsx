@@ -39,7 +39,6 @@ import {
   Search as SearchIcon,
   AccountBalance as GovernmentIcon,
   Launch as LaunchIcon,
-  Download as DownloadIcon,
   Dashboard as AddToContextIcon,
   AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
@@ -48,8 +47,10 @@ import {
   ExpandMore as ExpandMoreIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
+import ItemDetailsDialog from '../common/ItemDetailsDialog';
 import { filesystemAPI } from '../../services/api';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../../services/api';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addTradeToContext, addMultipleTradesToContext, confirmDialog } from './common';
@@ -196,6 +197,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   });
 
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
+  const [selectedTradeForDetails, setSelectedTradeForDetails] = useState<PoliticianTrade | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -239,10 +242,10 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     'Transaction Date',
     'Filing Date',
     'Amount',
-    'File',
+    'Details',
   ] as const;
   
-  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'File'];
+  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'Details'];
   const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
     // Convert display options to column array
     const cols: string[] = [];
@@ -255,7 +258,10 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     if (localDisplayOptions.showTransactionDate) cols.push('Transaction Date');
     if (localDisplayOptions.showDate) cols.push('Filing Date');
     if (localDisplayOptions.showAmount) cols.push('Amount');
-    if (localDisplayOptions.showFile) cols.push('File');
+    // Details column is always available but not tied to displayOptions
+    if (cols.length > 0 && !cols.includes('Details')) {
+      cols.push('Details');
+    }
     return cols.length > 0 ? cols : DEFAULT_VISIBLE_COLUMNS;
   });
   
@@ -266,7 +272,12 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         ? prev.filter((c) => c !== column)
         : [...prev, column];
       
-      // Update display options
+      // Don't update displayOptions for 'Details' column as it's not tied to displayOptions
+      if (column === 'Details') {
+        return newColumns;
+      }
+      
+      // Update display options (excluding Details)
       const newDisplayOptions = {
         ...localDisplayOptions,
         showPolitician: newColumns.includes('Politician'),
@@ -278,7 +289,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         showTransactionDate: newColumns.includes('Transaction Date'),
         showDate: newColumns.includes('Filing Date'),
         showAmount: newColumns.includes('Amount'),
-        showFile: newColumns.includes('File'),
       };
       setLocalDisplayOptions(newDisplayOptions);
       onSettingsChange(id, { displayOptions: newDisplayOptions });
@@ -344,70 +354,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     }
   }, [isSecurityDataLoaded]);
 
-  // Handle file download
-  const handleDownload = async (trade: PoliticianTrade) => {
-    if (!trade.formS3Key) {
-      console.error('No S3 key available for download');
-      return;
-    }
-    
-    if (!user?.id) {
-      console.error('Missing user ID for file download', { 
-        user,
-        userExists: !!user,
-        userId: user?.id 
-      });
-      return;
-    }
-    
-    // Generate a session ID if one doesn't exist (fallback for tiles)
-    const sessionId = activeSessionId || `tile-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    console.log('📥 Downloading with session ID:', sessionId);
-    
-    try {
-      console.log('📥 Downloading politician trade filing:', trade.formS3Key);
-      
-      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-      const response = await fetch(`${apiUrl}/file-download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id,
-          session_id: sessionId,
-          s3_key: trade.formS3Key,
-          filename: trade.formS3Key.split('/').pop() || 'filing',
-          bucket: 'POLITICIAN_TRADES', // Indicate this is a politician trades file
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Download request failed: ${response.status}`);
-      }
-      
-      const { download_url } = await response.json();
-      
-      // Create download link and trigger download
-      const link = document.createElement('a');
-      link.href = download_url;
-      link.download = trade.formS3Key.split('/').pop() || 'filing';
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      console.log('✅ File download started');
-    } catch (error) {
-      console.error('❌ Download failed:', error);
-      console.error('Download context:', {
-        userId: user.id,
-        sessionId: sessionId,
-        s3Key: trade.formS3Key,
-        filename: trade.formS3Key.split('/').pop() || 'filing'
-      });
-      // Could add a toast notification here
-    }
-  };
 
   const performSearch = useCallback(async () => {
     if (!currentSearchParams) return;
@@ -837,21 +783,25 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   }, [applyFilters]);
 
   // Sync visible columns with display options when display options change
+  // Note: This preserves the Details column state since it's not tied to displayOptions
   useEffect(() => {
-    const cols: string[] = [];
-    if (localDisplayOptions.showPolitician) cols.push('Politician');
-    if (localDisplayOptions.showPosition) cols.push('Position');
-    if (localDisplayOptions.showParty) cols.push('Party');
-    if (localDisplayOptions.showStateDistrict) cols.push('Jurisdiction');
-    if (localDisplayOptions.showSecurity) cols.push('Security');
-    if (localDisplayOptions.showTransactionType) cols.push('Transaction');
-    if (localDisplayOptions.showTransactionDate) cols.push('Transaction Date');
-    if (localDisplayOptions.showDate) cols.push('Filing Date');
-    if (localDisplayOptions.showAmount) cols.push('Amount');
-    if (localDisplayOptions.showFile) cols.push('File');
-    if (cols.length > 0) {
-      setVisibleColumns(cols);
-    }
+    setVisibleColumns((prev) => {
+      const cols: string[] = [];
+      if (localDisplayOptions.showPolitician) cols.push('Politician');
+      if (localDisplayOptions.showPosition) cols.push('Position');
+      if (localDisplayOptions.showParty) cols.push('Party');
+      if (localDisplayOptions.showStateDistrict) cols.push('Jurisdiction');
+      if (localDisplayOptions.showSecurity) cols.push('Security');
+      if (localDisplayOptions.showTransactionType) cols.push('Transaction');
+      if (localDisplayOptions.showTransactionDate) cols.push('Transaction Date');
+      if (localDisplayOptions.showDate) cols.push('Filing Date');
+      if (localDisplayOptions.showAmount) cols.push('Amount');
+      // Preserve Details column state from previous visibleColumns
+      if (prev.includes('Details')) {
+        cols.push('Details');
+      }
+      return cols.length > 0 ? cols : DEFAULT_VISIBLE_COLUMNS;
+    });
   }, [localDisplayOptions]);
 
   // Generate available filters from all results
@@ -1036,10 +986,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     
     if (visibleColumns.includes('Filing Date')) {
       widths.date = minWidths.date; // Fixed for date format
-    }
-    
-    if (visibleColumns.includes('File')) {
-      widths.file = minWidths.file; // Fixed for "View File" or "N/A"
     }
     
     return widths;
@@ -1847,15 +1793,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       minWidth: columnWidths.date,
                     }}>Filing Date</TableCell>
                   )}
-                  {visibleColumns.includes('File') && (
-                    <TableCell sx={{ 
-                      color: '#9ca3af', 
-                      fontWeight: 600, 
-                      fontSize: '0.875rem',
-                      width: columnWidths.file,
-                      minWidth: columnWidths.file,
-                    }}>File</TableCell>
-                  )}
                   {visibleColumns.includes('Details') && (
                     <TableCell sx={{ 
                       color: '#9ca3af', 
@@ -2078,35 +2015,28 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         {formatDate(trade.filingDate)}
                       </TableCell>
                     )}
-                    {visibleColumns.includes('File') && (
+                    {visibleColumns.includes('Details') && (
                       <TableCell sx={{ 
                         color: '#9ca3af', 
                         fontSize: '0.875rem',
-                        width: columnWidths.file,
-                        minWidth: columnWidths.file,
                         padding: '8px 12px',
                       }}>
-                        {trade.formS3Key ? (
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownload(trade);
-                            }}
-                            sx={{
-                              color: '#3b82f6',
-                              '&:hover': {
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            <DownloadIcon fontSize="small" />
-                          </IconButton>
-                        ) : (
-                          <Typography sx={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                            N/A
-                          </Typography>
-                        )}
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTradeForDetails(trade);
+                            setDetailsDialogOpen(true);
+                          }}
+                          sx={{
+                            color: '#3b82f6',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                          }}
+                        >
+                          <VisibilityIcon fontSize="small" />
+                        </IconButton>
                       </TableCell>
                     )}
                   </TableRow>
@@ -3058,6 +2988,18 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         currentTitle={customTitle || 'Politician Trades'}
         currentColor={customColor}
         currentIcon={customIcon}
+      />
+
+      {/* Trade Details Dialog */}
+      <ItemDetailsDialog
+        open={detailsDialogOpen}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+        }}
+        itemType="politician_trade"
+        data={selectedTradeForDetails}
+        title="Trade Details"
+        user_id={user?.id}
       />
     </Box>
   );

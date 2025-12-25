@@ -9,9 +9,14 @@ import os
 import logging
 import boto3
 import uuid
+import base64
+import hashlib
 from typing import Dict, Any, Optional, List
 from botocore.exceptions import ClientError
 from datetime import datetime
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configure logging
 logger = logging.getLogger()
@@ -136,16 +141,39 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         display_name = title or filename
         s3_key = f"users/{user_id}/filesys/{folder_path}/{file_id}{file_extension}" if folder_path else f"users/{user_id}/filesys/{file_id}{file_extension}"
         
-        # Determine content type
-        content_type = 'application/octet-stream'
-        if file_extension.lower() == '.json':
-            content_type = 'application/json'
-        elif file_extension.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
-            content_type = f'image/{file_extension[1:].lower()}'
-        elif file_extension.lower() == '.pdf':
-            content_type = 'application/pdf'
-        elif file_extension.lower() in ['.txt', '.md']:
-            content_type = 'text/plain'
+        # Check if this is a .cosine encrypted context item file
+        # Only .cosine files are encrypted context items - all other files (PDFs, JSON, images, etc.) are regular files
+        is_cosine_file = file_extension.lower() == CONTEXT_ITEM_EXTENSION
+        
+        # If it's a .cosine file, decrypt it and re-encrypt for storage (maintain encryption)
+        # This handles re-uploading of downloaded context items
+        if is_cosine_file:
+            try:
+                # Decrypt the file content
+                decrypted_data = decrypt_context_data(user_id, file_content)
+                
+                # Re-encrypt for storage (maintain encryption format)
+                encrypted_data = encrypt_context_data(user_id, decrypted_data)
+                file_content = encrypted_data
+                content_type = CONTEXT_ITEM_MIME_TYPE
+                item_type = 'context_item'
+            except Exception as e:
+                logger.error(f"Failed to decrypt .cosine file: {str(e)}")
+                raise ValueError("Failed to decrypt Cosine context item file. File may be corrupted or from a different user.")
+        else:
+            # Regular files (PDFs, images, JSON, etc.) - NO encryption, store as-is
+            content_type = 'application/octet-stream'
+            if file_extension.lower() == '.json':
+                content_type = 'application/json'
+            elif file_extension.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
+                content_type = f'image/{file_extension[1:].lower()}'
+            elif file_extension.lower() == '.pdf':
+                content_type = 'application/pdf'
+            elif file_extension.lower() in ['.txt', '.md']:
+                content_type = 'text/plain'
+            
+            # Regular uploaded files are always 'uploaded_file' type (not context_item)
+            item_type = 'uploaded_file'
         
         # Upload file to S3
         s3_client.put_object(
@@ -158,9 +186,6 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         # Get file size
         response = s3_client.head_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
         file_size = response.get('ContentLength', 0)
-        
-        # Determine item type
-        item_type = 'context_item' if file_extension.lower() == '.json' else 'uploaded_file'
         
         # Add to manifest
         item_data = {
@@ -188,22 +213,22 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         raise
 
 def add_context_item(user_id: str, folder_path: str, context_data: Dict[str, Any], title: str, item_type: str = 'context_item') -> Dict[str, Any]:
-    """Add a context item (full JSON object) to the filesystem"""
+    """Add a context item (full JSON object) to the filesystem - encrypted and saved as .cosine file"""
     try:
         # Get folder manifest
         manifest = get_folder_manifest(user_id, folder_path)
         
-        # Generate item ID and S3 key
+        # Generate item ID and S3 key (using .cosine extension for encrypted context items)
         item_id = str(uuid.uuid4())
-        s3_key = f"users/{user_id}/filesys/{folder_path}/{item_id}.json" if folder_path else f"users/{user_id}/filesys/{item_id}.json"
+        s3_key = f"users/{user_id}/filesys/{folder_path}/{item_id}{CONTEXT_ITEM_EXTENSION}" if folder_path else f"users/{user_id}/filesys/{item_id}{CONTEXT_ITEM_EXTENSION}"
         
-        # Store full context data as JSON in S3
-        context_json = json.dumps(context_data, default=str, indent=2)
+        # Encrypt and store context data
+        encrypted_data = encrypt_context_data(user_id, context_data)
         s3_client.put_object(
             Bucket=CHAT_FILES_BUCKET_NAME,
             Key=s3_key,
-            Body=context_json.encode('utf-8'),
-            ContentType='application/json'
+            Body=encrypted_data,
+            ContentType=CONTEXT_ITEM_MIME_TYPE
         )
         
         # Add to manifest
@@ -508,11 +533,19 @@ def get_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
             if include_content and item.get('s3_key'):
                 try:
                     response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=item['s3_key'])
-                    content = response['Body'].read().decode('utf-8')
-                    if item.get('type') == 'context_item' or item['s3_key'].endswith('.json'):
-                        item['content'] = json.loads(content)
+                    content_bytes = response['Body'].read()
+                    
+                    # Check if this is a .cosine encrypted context item file
+                    # Only .cosine files are encrypted - all other files are stored as-is
+                    if item['s3_key'].endswith(CONTEXT_ITEM_EXTENSION):
+                        # Decrypt the encrypted context item for preview
+                        item['content'] = decrypt_context_data(user_id, content_bytes)
+                    elif item.get('type') == 'context_item' and item['s3_key'].endswith('.json'):
+                        # Legacy unencrypted context items (old format - should be migrated)
+                        item['content'] = json.loads(content_bytes.decode('utf-8'))
                     else:
-                        item['content'] = content
+                        # Regular files (PDFs, images, etc.) - no decryption needed
+                        item['content'] = content_bytes.decode('utf-8')
                 except Exception as e:
                     logger.warning(f"Error fetching content: {str(e)}")
             return item

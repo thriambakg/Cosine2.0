@@ -27,10 +27,6 @@ import {
   Tooltip,
   Link,
   Pagination,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -49,6 +45,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
+import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -1857,149 +1854,14 @@ const NewsSearchPage: React.FC = () => {
       />
 
       {/* Article Details Dialog */}
-      <Dialog
+      <ItemDetailsDialog
         open={detailsDialogOpen}
         onClose={() => setDetailsDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '2px solid #374151',
-            borderRadius: '0px',
-            color: '#ffffff',
-          },
-        }}
-      >
-        {selectedArticleForDetails && (
-          <>
-            <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-                {selectedArticleForDetails.title}
-              </Typography>
-            </DialogTitle>
-            <DialogContent sx={{ 
-              pt: 3,
-              maxHeight: '70vh',
-              overflowY: 'auto',
-              '&::-webkit-scrollbar': {
-                width: '6px',
-                height: '6px',
-              },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                borderRadius: '3px',
-              },
-              '&::-webkit-scrollbar-thumb:hover': {
-                backgroundColor: 'rgba(59, 130, 246, 0.7)',
-              },
-              '&::-webkit-scrollbar-corner': {
-                backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              },
-            }}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {/* Image */}
-                {selectedArticleForDetails.image_url && (
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, fontWeight: 600 }}>
-                      Image
-                    </Typography>
-                    <Box
-                      component="img"
-                      src={selectedArticleForDetails.image_url}
-                      alt={selectedArticleForDetails.title || 'Article image'}
-                      sx={{
-                        width: '100%',
-                        maxHeight: 400,
-                        objectFit: 'contain',
-                        borderRadius: '4px',
-                        border: '1px solid #374151',
-                      }}
-                    />
-                  </Box>
-                )}
-
-                {/* Description */}
-                {selectedArticleForDetails.description && (
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, fontWeight: 600 }}>
-                      Description
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: '#e2e8f0', lineHeight: 1.6 }}>
-                      {selectedArticleForDetails.description}
-                    </Typography>
-                  </Box>
-                )}
-
-                {/* Keywords */}
-                {selectedArticleForDetails.keywords && (
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1, fontWeight: 600 }}>
-                      Keywords
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {selectedArticleForDetails.keywords.split(',').map((keyword, index) => (
-                        <Chip
-                          key={index}
-                          label={keyword.trim()}
-                          size="small"
-                          sx={{
-                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            color: '#93c5fd',
-                            border: '1px solid #3b82f6',
-                            fontSize: '0.75rem',
-                          }}
-                        />
-                      ))}
-                    </Box>
-                  </Box>
-                )}
-              </Box>
-            </DialogContent>
-            <DialogActions sx={{ 
-              borderTop: '1px solid #374151', 
-              pt: 2, 
-              pb: 2,
-              px: 3,
-              justifyContent: 'space-between',
-            }}>
-              <Button
-                onClick={() => setDetailsDialogOpen(false)}
-                sx={{
-                  color: '#9ca3af',
-                  '&:hover': {
-                    backgroundColor: 'rgba(148, 163, 184, 0.1)',
-                  },
-                }}
-              >
-                Close
-              </Button>
-              {selectedArticleForDetails.source_url && (
-                <Button
-                  variant="contained"
-                  onClick={() => {
-                    window.open(selectedArticleForDetails.source_url, '_blank', 'noopener,noreferrer');
-                  }}
-                  startIcon={<LaunchIcon />}
-                  sx={{
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                    '&:hover': { 
-                      background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' 
-                    },
-                    color: '#ffffff',
-                    fontWeight: 600,
-                  }}
-                >
-                  Open Article
-                </Button>
-              )}
-            </DialogActions>
-          </>
-        )}
-      </Dialog>
+        itemType="news_article"
+        data={selectedArticleForDetails}
+        title={selectedArticleForDetails?.title}
+        user_id={user?.id}
+      />
     </Box>
   );
 };

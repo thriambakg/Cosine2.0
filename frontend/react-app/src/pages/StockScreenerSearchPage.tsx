@@ -33,11 +33,13 @@ import {
   AddComment as NewChatIcon,
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../hooks/useAPI';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addStockToContext, addMultipleStocksToContext } from '../components/tiles/common';
+import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -88,7 +90,7 @@ interface StockResult {
 }
 
 const StockScreenerSearchPage: React.FC = () => {
-  const {} = useAuth();
+  const { user } = useAuth();
   const {} = useGlobalChat();
   
   // Session persistence key
@@ -134,6 +136,8 @@ const StockScreenerSearchPage: React.FC = () => {
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedStocks, setSelectedStocks] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedStockForDetails, setSelectedStockForDetails] = useState<StockResult | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   
   // Column visibility state
   const AVAILABLE_COLUMNS = [
@@ -146,9 +150,10 @@ const StockScreenerSearchPage: React.FC = () => {
     'industry',
     'peRatio',
     'dividendYield',
+    'details',
   ] as const;
   
-  const DEFAULT_VISIBLE_COLUMNS = ['symbol', 'name', 'price', 'priceChange', 'marketCap', 'volatility', 'industry'];
+  const DEFAULT_VISIBLE_COLUMNS = ['symbol', 'name', 'price', 'priceChange', 'marketCap', 'volatility', 'industry', 'details'];
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
     savedState?.visibleColumns || DEFAULT_VISIBLE_COLUMNS
   );
@@ -1007,18 +1012,29 @@ const StockScreenerSearchPage: React.FC = () => {
                               {visibleColumns.includes('dividendYield') && (
                                 <TableCell sx={{ color: '#f1f5f9', fontWeight: 600 }}>Dividend Yield</TableCell>
                               )}
+                              {visibleColumns.includes('details') && (
+                                <TableCell sx={{ color: '#f1f5f9', fontWeight: 600 }}>Details</TableCell>
+                              )}
                             </TableRow>
                           </TableHead>
                           <TableBody>
                             {currentResults.map((stock) => (
                               <TableRow
                                 key={stock.symbol}
+                                onClick={(e) => {
+                                  // Don't select if clicking on checkbox (checkbox handles its own selection)
+                                  if ((e.target as HTMLElement).closest('input[type="checkbox"]') || (e.target as HTMLElement).closest('span.MuiCheckbox-root')) {
+                                    return;
+                                  }
+                                  // Single click = select for context addition
+                                  handleStockSelect(stock.symbol);
+                                }}
                                 sx={{
                                   '&:hover': { background: 'rgba(59, 130, 246, 0.1)' },
                                   cursor: 'pointer',
                                 }}
                               >
-                                <TableCell padding="checkbox">
+                                <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
                                   <Checkbox
                                     checked={selectedStocks.has(stock.symbol)}
                                     onChange={() => handleStockSelect(stock.symbol)}
@@ -1059,6 +1075,27 @@ const StockScreenerSearchPage: React.FC = () => {
                                 {visibleColumns.includes('dividendYield') && (
                                   <TableCell sx={{ color: '#cbd5e1' }}>
                                     {stock.dividendYield ? `${stock.dividendYield.toFixed(2)}%` : 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('details') && (
+                                  <TableCell>
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedStockForDetails(stock);
+                                        setDetailsDialogOpen(true);
+                                      }}
+                                      sx={{
+                                        color: '#3b82f6',
+                                        '&:hover': {
+                                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                          color: '#60a5fa',
+                                        },
+                                      }}
+                                    >
+                                      <VisibilityIcon fontSize="small" />
+                                    </IconButton>
                                   </TableCell>
                                 )}
                               </TableRow>
@@ -1701,7 +1738,7 @@ const StockScreenerSearchPage: React.FC = () => {
               sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' } }}
             />
             <Typography sx={{ color: '#f1f5f9', textTransform: 'capitalize' }}>
-              {column === 'priceChange' ? 'Price Change' : column === 'peRatio' ? 'P/E Ratio' : column === 'dividendYield' ? 'Dividend Yield' : column === 'marketCap' ? 'Market Cap' : column}
+              {column === 'priceChange' ? 'Price Change' : column === 'peRatio' ? 'P/E Ratio' : column === 'dividendYield' ? 'Dividend Yield' : column === 'marketCap' ? 'Market Cap' : column === 'details' ? 'Details' : column}
             </Typography>
           </MenuItem>
         ))}
@@ -1729,6 +1766,19 @@ const StockScreenerSearchPage: React.FC = () => {
           <Typography sx={{ color: '#f1f5f9' }}>Sidebar Chat</Typography>
         </MenuItem>
       </Menu>
+
+      {/* Stock Details Dialog */}
+      <ItemDetailsDialog
+        open={detailsDialogOpen}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+          setSelectedStockForDetails(null);
+        }}
+        itemType="stock_result"
+        data={selectedStockForDetails}
+        title={selectedStockForDetails?.name}
+        user_id={user?.id}
+      />
     </Box>
   );
 };

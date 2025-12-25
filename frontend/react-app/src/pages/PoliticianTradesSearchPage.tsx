@@ -33,22 +33,22 @@ import {
   ChevronRight as ChevronRightIcon,
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
-  Download as DownloadIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   AddComment as NewChatIcon,
   Launch as LaunchIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
 import { securitySuggestionsServiceV2 } from '../services/securitySuggestionsV2';
 import { useAuth } from '@/contexts/AuthContext';
-import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
+import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
 import { filesystemAPI } from '../services/api';
 
 // Minimum date for date filters (January 1, 2025)
@@ -126,7 +126,6 @@ interface ExpandedFiltersState {
 
 const PoliticianTradesSearchPage: React.FC = () => {
   const { user } = useAuth();
-  const { activeSessionId } = useGlobalChat();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'politician-trades-search-page-state';
@@ -180,10 +179,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
     'Transaction Date',
     'Filing Date',
     'Amount',
-    'File',
+    'Details',
   ] as const;
   
-  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'File'];
+  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'Details'];
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
     savedState?.visibleColumns || DEFAULT_VISIBLE_COLUMNS
   );
@@ -194,6 +193,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
     savedState?.allSearchResults || []
   );
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>([]);
+  const [selectedTradeForDetails, setSelectedTradeForDetails] = useState<PoliticianTrade | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [isSearching, setIsSearching] = useState<boolean>(savedState?.isSearching || false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
@@ -414,54 +415,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
     };
   };
   
-  // Handle file download
-  const handleDownload = async (trade: PoliticianTrade) => {
-    if (!trade.formS3Key) {
-      console.error('No S3 key available for download');
-      return;
-    }
-    
-    if (!user?.id || !activeSessionId) {
-      console.error('Missing user ID or session ID for file download');
-      return;
-    }
-    
-    try {
-      console.log('📥 Downloading politician trade filing:', trade.formS3Key);
-      
-      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-      const response = await fetch(`${apiUrl}/file-download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id,
-          session_id: activeSessionId,
-          s3_key: trade.formS3Key,
-          filename: trade.formS3Key.split('/').pop() || 'filing',
-          bucket: 'POLITICIAN_TRADES', // Indicate this is a politician trades file
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Download request failed: ${response.status}`);
-      }
-      
-      const { download_url } = await response.json();
-      
-      // Create download link and trigger download
-      const link = document.createElement('a');
-      link.href = download_url;
-      link.download = trade.formS3Key.split('/').pop() || 'filing';
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      console.log('✅ File download started');
-    } catch (error) {
-      console.error('❌ Download failed:', error);
-    }
-  };
   
   // Convert amountMin/amountMax to amountRange string for API
   const convertAmountRangeToAPI = (min: number | '', max: number | ''): string | undefined => {
@@ -2145,13 +2098,12 @@ const PoliticianTradesSearchPage: React.FC = () => {
                               fontSize: '0.875rem',
                             }}>Amount</TableCell>
                           )}
-                          {visibleColumns.includes('File') && (
+                          {visibleColumns.includes('Details') && (
                             <TableCell sx={{ 
                               color: '#9ca3af', 
                               fontWeight: 600, 
                               fontSize: '0.875rem',
-                              width: '80px',
-                            }}>File</TableCell>
+                            }}>Details</TableCell>
                           )}
                         </TableRow>
                       </TableHead>
@@ -2302,28 +2254,27 @@ const PoliticianTradesSearchPage: React.FC = () => {
                                 {formatAmountRange(trade)}
                               </TableCell>
                             )}
-                            {visibleColumns.includes('File') && (
+                            {visibleColumns.includes('Details') && (
                               <TableCell sx={{ 
                                 fontSize: '0.875rem',
                                 padding: '12px',
                               }}>
-                                {trade.formS3Key && (
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDownload(trade);
-                                    }}
-                                    sx={{
-                                      color: '#3b82f6',
-                                      '&:hover': {
-                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                      },
-                                    }}
-                                  >
-                                    <DownloadIcon fontSize="small" />
-                                  </IconButton>
-                                )}
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTradeForDetails(trade);
+                                    setDetailsDialogOpen(true);
+                                  }}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    },
+                                  }}
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
                               </TableCell>
                             )}
                           </TableRow>
@@ -3475,6 +3426,18 @@ const PoliticianTradesSearchPage: React.FC = () => {
           )}
         </Box>
       </Container>
+
+      {/* Trade Details Dialog */}
+      <ItemDetailsDialog
+        open={detailsDialogOpen}
+        onClose={() => {
+          setDetailsDialogOpen(false);
+        }}
+        itemType="politician_trade"
+        data={selectedTradeForDetails}
+        title="Trade Details"
+        user_id={user?.id}
+      />
     </Box>
   );
 };
