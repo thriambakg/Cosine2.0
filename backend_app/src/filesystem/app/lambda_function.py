@@ -32,6 +32,47 @@ S3_BASE_URL = os.environ.get('S3_BASE_URL', 'https://cosine-chat-files-productio
 # Manifest file name
 MANIFEST_FILE = '.manifest.json'
 
+# Context item encryption constants
+CONTEXT_ITEM_EXTENSION = '.cosine'
+CONTEXT_ITEM_MIME_TYPE = 'application/octet-stream'
+ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')  # Should be set via environment variable
+
+def derive_key_from_user_id(user_id: str) -> bytes:
+    """Derive encryption key from user ID using PBKDF2"""
+    salt = hashlib.sha256(f"{ENCRYPTION_SECRET}{user_id}".encode()).digest()[:16]
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{ENCRYPTION_SECRET}".encode()))
+    return key
+
+def encrypt_context_data(user_id: str, data: Dict[str, Any]) -> bytes:
+    """Encrypt context data using Fernet (AES-128 in CBC mode with HMAC)"""
+    try:
+        key = derive_key_from_user_id(user_id)
+        fernet = Fernet(key)
+        json_data = json.dumps(data, default=str)
+        encrypted_data = fernet.encrypt(json_data.encode('utf-8'))
+        return encrypted_data
+    except Exception as e:
+        logger.error(f"Error encrypting context data: {str(e)}")
+        raise
+
+def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
+    """Decrypt context data using Fernet"""
+    try:
+        key = derive_key_from_user_id(user_id)
+        fernet = Fernet(key)
+        decrypted_data = fernet.decrypt(encrypted_data)
+        json_data = json.loads(decrypted_data.decode('utf-8'))
+        return json_data
+    except Exception as e:
+        logger.error(f"Error decrypting context data: {str(e)}")
+        raise
+
 def get_cors_headers():
     """Get CORS headers for API responses"""
     return {

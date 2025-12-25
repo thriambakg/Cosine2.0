@@ -205,7 +205,8 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             
             # Check if file exists in S3
             try:
-                s3_client.head_object(Bucket=target_bucket, Key=s3_key)
+                head_response = s3_client.head_object(Bucket=target_bucket, Key=s3_key)
+                content_type = head_response.get('ContentType', 'application/octet-stream')
             except ClientError as e:
                 if e.response['Error']['Code'] == '404':
                     return {
@@ -216,12 +217,29 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 else:
                     raise e
             
-            # Generate fresh presigned URL
-            params = {
-                'Bucket': target_bucket,
-                'Key': s3_key,
-                'ResponseContentDisposition': f'attachment; filename="{filename}"'
-            }
+            # For .cosine encrypted context items, ensure proper content-type and filename
+            is_cosine_file = s3_key.endswith('.cosine')
+            if is_cosine_file:
+                # Ensure filename has .cosine extension
+                if not filename.endswith('.cosine'):
+                    filename = f"{filename}.cosine" if '.' not in filename else filename.rsplit('.', 1)[0] + '.cosine'
+                
+                # Set proper content-type for encrypted files
+                params = {
+                    'Bucket': target_bucket,
+                    'Key': s3_key,
+                    'ResponseContentType': 'application/octet-stream',
+                    'ResponseContentDisposition': f'attachment; filename="{filename}"'
+                }
+            else:
+                # Regular files - use detected content-type
+                params = {
+                    'Bucket': target_bucket,
+                    'Key': s3_key,
+                    'ResponseContentDisposition': f'attachment; filename="{filename}"'
+                }
+                if content_type and content_type != 'application/octet-stream':
+                    params['ResponseContentType'] = content_type
             
             presigned_url = s3_client.generate_presigned_url(
                 'get_object',
@@ -229,7 +247,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 ExpiresIn=3600  # 1 hour expiration
             )
             
-            logger.info(f"🔗 Generated fresh presigned URL for filesys file {filename}")
+            logger.info(f"🔗 Generated fresh presigned URL for filesys file {filename} (cosine={is_cosine_file})")
             
             return {
                 'statusCode': 200,
