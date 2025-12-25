@@ -70,6 +70,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   folder_path = '',
 }) => {
   const [loading, setLoading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -187,45 +188,32 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   }, [open, item, fetchPreview]);
 
   const handleDownload = async () => {
-    if (!previewData?.download_url) {
-      // For mock data, create a JSON download
-      if (previewData?.content && previewData.preview_type === 'context_item') {
-        const jsonStr = JSON.stringify(previewData.content, null, 2);
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        // Use .cosine extension for context items (encrypted format)
-        const extension = item.type === 'context_item' ? '.cosine' : '.json';
-        a.download = `${item.name}${extension}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        return;
-      }
-      
-      // Generate download URL if s3_key is available
-      if (item.s3_key) {
-        try {
-          const response = await fileReturnAPI.downloadFile({
-            user_id,
-            s3_key: item.s3_key,
-            filename: item.name,
-          });
+    // Always make an API call to get the download URL (ensures encrypted .cosine files are downloaded correctly)
+    if (item.s3_key) {
+      try {
+        setDownloadLoading(true);
+        const response = await fileReturnAPI.downloadFile({
+          user_id,
+          s3_key: item.s3_key,
+          filename: item.name,
+        });
 
-          if (response.success && response.data?.download_url) {
-            window.open(response.data.download_url, '_blank');
-          }
-        } catch (err) {
-          console.error('Error downloading file:', err);
-          setError('Failed to download file');
+        if (response.success && response.data?.download_url) {
+          window.open(response.data.download_url, '_blank');
+        } else {
+          setError('Failed to get download URL');
         }
-      } else {
-        setError('Download not available for this item');
+      } catch (err) {
+        console.error('Error downloading file:', err);
+        setError('Failed to download file');
+      } finally {
+        setDownloadLoading(false);
       }
-    } else {
+    } else if (previewData?.download_url) {
+      // Fallback to preview data download URL if available
       window.open(previewData.download_url, '_blank');
+    } else {
+      setError('Download not available for this item');
     }
   };
 
@@ -2795,7 +2783,8 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         <Button
           onClick={handleDownload}
           variant="contained"
-          startIcon={<DownloadIcon />}
+          disabled={downloadLoading}
+          startIcon={downloadLoading ? <CircularProgress size={16} /> : <DownloadIcon />}
           sx={{
             backgroundColor: '#3b82f6',
             color: '#ffffff',

@@ -1472,14 +1472,36 @@ export const fileReturnAPI = {
   downloadFile: async (params: FileDownloadRequest): Promise<FileDownloadResponse> => {
     console.log('📥 API - File download:', params);
     try {
-      const response = await apiRequest<FileDownloadResponse>('/file-download', {
+      const response = await apiRequest<any>('/file-download', {
         method: 'POST',
         body: JSON.stringify({
           ...params,
           request_type: 'download',
         }),
       });
-      return response;
+      
+      // Wrap the response in the expected format
+      if (response && typeof response === 'object' && 'download_url' in response) {
+        // Direct response from lambda - wrap it
+        return {
+          success: true,
+          data: {
+            download_url: response.download_url,
+            filename: response.filename,
+            expires_in: response.expires_in,
+          },
+        };
+      } else if (response && typeof response === 'object' && 'success' in response) {
+        // Already wrapped response
+        return response as FileDownloadResponse;
+      } else {
+        // Unexpected response format
+        console.error('Unexpected download response format:', response);
+        return {
+          success: false,
+          error: 'Unexpected response format from server',
+        };
+      }
     } catch (error: any) {
       console.error('❌ File download error:', error);
       return {

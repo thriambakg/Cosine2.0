@@ -52,13 +52,19 @@ def derive_key_from_user_id(user_id: str) -> bytes:
 def encrypt_context_data(user_id: str, data: Dict[str, Any]) -> bytes:
     """Encrypt context data using Fernet (AES-128 in CBC mode with HMAC)"""
     try:
+        logger.debug(f"🔐 Starting encryption for user {user_id}")
         key = derive_key_from_user_id(user_id)
+        logger.debug(f"🔐 Derived encryption key (length: {len(key)})")
         fernet = Fernet(key)
         json_data = json.dumps(data, default=str)
+        logger.debug(f"🔐 JSON data size: {len(json_data)} bytes")
         encrypted_data = fernet.encrypt(json_data.encode('utf-8'))
+        logger.debug(f"🔐 Encrypted data size: {len(encrypted_data)} bytes")
         return encrypted_data
     except Exception as e:
-        logger.error(f"Error encrypting context data: {str(e)}")
+        logger.error(f"❌ Error encrypting context data: {str(e)}")
+        import traceback
+        logger.error(f"❌ Encryption traceback: {traceback.format_exc()}")
         raise
 
 def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
@@ -256,6 +262,8 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
 def add_context_item(user_id: str, folder_path: str, context_data: Dict[str, Any], title: str, item_type: str = 'context_item') -> Dict[str, Any]:
     """Add a context item (full JSON object) to the filesystem - encrypted and saved as .cosine file"""
     try:
+        logger.info(f"🔐 Adding context item: user_id={user_id}, item_type={item_type}, title={title}")
+        
         # Get folder manifest
         manifest = get_folder_manifest(user_id, folder_path)
         
@@ -263,14 +271,20 @@ def add_context_item(user_id: str, folder_path: str, context_data: Dict[str, Any
         item_id = str(uuid.uuid4())
         s3_key = f"users/{user_id}/filesys/{folder_path}/{item_id}{CONTEXT_ITEM_EXTENSION}" if folder_path else f"users/{user_id}/filesys/{item_id}{CONTEXT_ITEM_EXTENSION}"
         
+        logger.info(f"🔐 Generated S3 key with .cosine extension: {s3_key}")
+        
         # Encrypt and store context data
+        logger.info(f"🔐 Encrypting context data for user {user_id}...")
         encrypted_data = encrypt_context_data(user_id, context_data)
+        logger.info(f"🔐 Encryption successful, encrypted data size: {len(encrypted_data)} bytes")
+        
         s3_client.put_object(
             Bucket=CHAT_FILES_BUCKET_NAME,
             Key=s3_key,
             Body=encrypted_data,
             ContentType=CONTEXT_ITEM_MIME_TYPE
         )
+        logger.info(f"✅ Successfully saved encrypted context item to S3: {s3_key}")
         
         # Add to manifest
         item_data = {

@@ -8,8 +8,13 @@ import os
 import logging
 import time
 import boto3
+import base64
+import hashlib
 from typing import Dict, Any
 from botocore.exceptions import ClientError
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,6 +34,31 @@ CONGRESS_BILLS_BUCKET = os.environ.get('CONGRESS_BILLS_DATA_S3_BUCKET_NAME')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE')
 S3_BASE_URL = os.environ.get('S3_BASE_URL', 'https://cosine-chat-files-production.s3.amazonaws.com')
 USER_PROFILES_TABLE_NAME = os.environ.get('USER_PROFILES_TABLE_NAME')
+ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')  # Should match filesystem Lambda
+
+def derive_key_from_user_id(user_id: str) -> bytes:
+    """Derive encryption key from user ID using PBKDF2"""
+    salt = hashlib.sha256(f"{ENCRYPTION_SECRET}{user_id}".encode()).digest()[:16]
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{ENCRYPTION_SECRET}".encode()))
+    return key
+
+def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
+    """Decrypt context data using Fernet"""
+    try:
+        key = derive_key_from_user_id(user_id)
+        fernet = Fernet(key)
+        decrypted_data = fernet.decrypt(encrypted_data)
+        json_data = json.loads(decrypted_data.decode('utf-8'))
+        return json_data
+    except Exception as e:
+        logger.error(f"Error decrypting context data: {str(e)}")
+        raise
 
 def get_cors_headers():
     """Get CORS headers for API responses"""
@@ -479,18 +509,51 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 raise e
         
         # Determine preview type based on content type and item type
-        is_context_item = item_type == 'context_item' or s3_key.endswith('.json')
+        # .cosine files are ALWAYS encrypted context items (regardless of item_type parameter)
+        is_cosine_file = s3_key.lower().endswith('.cosine')
+        # Legacy .json files in filesys are context items if they match known context item types
+        # Check if it's in the filesys directory to avoid false positives
+        is_in_filesys = s3_key.startswith(f"users/{user_id}/filesys/")
+        is_legacy_json = (
+            s3_key.lower().endswith('.json') and 
+            is_in_filesys and (
+                item_type == 'context_item' or 
+                item_type in ['news_article', 'lda_disclosure', 'sec_filing', 'politician_trade', 'govt_contract', 'congress_bill', 'stock_result'] or
+                content_type == 'application/json'  # JSON files in filesys are likely context items
+            )
+        )
+        # .cosine files are always context items, legacy .json files in filesys may be context items
+        is_context_item = is_cosine_file or is_legacy_json
         is_image = content_type.startswith('image/')
         is_pdf = content_type == 'application/pdf'
         is_text = content_type.startswith('text/') or content_type in ['application/json', 'application/javascript']
         
-        # Handle context items (JSON)
+        logger.info(f"🔍 Preview type detection: is_cosine_file={is_cosine_file}, is_legacy_json={is_legacy_json}, is_context_item={is_context_item}, content_type={content_type}, item_type={item_type}")
+        
+        # Handle context items (.cosine encrypted or legacy .json)
         if is_context_item:
             try:
                 # Get file content from S3
                 response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
-                content = response['Body'].read().decode('utf-8')
-                context_data = json.loads(content)
+                content_bytes = response['Body'].read()
+                
+                # Decrypt if it's a .cosine file, otherwise parse as JSON (legacy)
+                if is_cosine_file:
+                    logger.info(f"🔐 Decrypting .cosine encrypted file for preview: {s3_key}")
+                    try:
+                        context_data = decrypt_context_data(user_id, content_bytes)
+                        logger.info(f"✅ Successfully decrypted .cosine file, data keys: {list(context_data.keys()) if isinstance(context_data, dict) else 'N/A'}")
+                    except Exception as decrypt_error:
+                        logger.error(f"❌ Failed to decrypt .cosine file: {str(decrypt_error)}")
+                        return {
+                            'statusCode': 500,
+                            'headers': get_cors_headers(),
+                            'body': json.dumps({'error': 'Failed to decrypt encrypted context item. File may be corrupted or from a different user.'})
+                        }
+                else:
+                    # Legacy unencrypted JSON file
+                    logger.info(f"📄 Reading legacy unencrypted JSON file for preview: {s3_key}")
+                    context_data = json.loads(content_bytes.decode('utf-8'))
                 
                 return {
                     'statusCode': 200,
