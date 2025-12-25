@@ -1697,6 +1697,8 @@ resource "aws_lambda_function" "chat_agent" {
       CONGRESS_BILLS_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_name
       AGENT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
 
+      # Encryption secret for decrypting .cosine files from filesystem
+      ENCRYPTION_SECRET = aws_secretsmanager_secret_version.encryption_secret.secret_string
 
       # File Return Lambda Function Name for direct invocation
       FILE_RETURN_LAMBDA_NAME = module.file_return_lambda.function_name
