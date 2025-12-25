@@ -9,9 +9,14 @@
 const FILE_EXTENSION = '.cosine';
 const FILE_MIME_TYPE = 'application/x-cosine-context';
 
+// Legacy encryption key for frontend-encrypted context items (deprecated - use backend encryption)
+// Note: New context items should be encrypted by the backend, not the frontend
+const ENCRYPTION_KEY = 'cosine-context-item-encryption-v1';
+
 // This should match the backend ENCRYPTION_SECRET
 // In production, this should come from an environment variable or be fetched securely
 // For now, we'll need to get it from the backend or use a different approach
+// Note: This is no longer used since we're doing backend decryption
 const BACKEND_ENCRYPTION_SECRET = import.meta.env.VITE_ENCRYPTION_SECRET || 'default-secret-change-in-production';
 
 /**
