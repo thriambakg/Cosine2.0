@@ -24,6 +24,7 @@ import {
   CardContent,
   Container,
   Checkbox,
+  CircularProgress,
 } from '@mui/material';
 import {
   Folder as FolderIcon,
@@ -101,6 +102,10 @@ const FilesPage: React.FC = () => {
     { id: 'root', name: 'Files' }
   ]);
   
+  // Loading state
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingFolder, setIsLoadingFolder] = useState(false);
+  
   // Dialog states
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
   const [addFileDialogOpen, setAddFileDialogOpen] = useState(false);
@@ -144,8 +149,12 @@ const FilesPage: React.FC = () => {
   // Load filesystem data from API
   React.useEffect(() => {
     const loadFilesystem = async () => {
-      if (!user) return;
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
       
+      setIsLoading(true);
       try {
         const response = await filesystemAPI.listFolder({
           user_id: user.id,
@@ -212,6 +221,8 @@ const FilesPage: React.FC = () => {
           updated_at: Date.now(),
         };
         setItems(new Map([['root', rootFolder]]));
+      } finally {
+        setIsLoading(false);
       }
     };
     
@@ -601,6 +612,7 @@ const FilesPage: React.FC = () => {
   const loadFolderContents = useCallback(async (folderPath: string = '') => {
     if (!user) return;
     
+    setIsLoadingFolder(true);
     try {
       const response = await filesystemAPI.listFolder({
         user_id: user.id,
@@ -662,6 +674,8 @@ const FilesPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading folder contents:', error);
+    } finally {
+      setIsLoadingFolder(false);
     }
   }, [user]);
 
@@ -1328,7 +1342,30 @@ const FilesPage: React.FC = () => {
           backgroundColor: dragOverFolder === 'empty-area' ? 'rgba(59, 130, 246, 0.1)' : undefined,
         }}
       >
-        {currentItems.length === 0 ? (
+        {isLoading || isLoadingFolder ? (
+          <Box 
+            sx={{ 
+              p: 8, 
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '200px',
+            }}
+          >
+            <CircularProgress 
+              size={48} 
+              sx={{ 
+                color: '#3b82f6',
+                mb: 2,
+              }} 
+            />
+            <Typography variant="body1" sx={{ color: '#9ca3af' }}>
+              Loading files...
+            </Typography>
+          </Box>
+        ) : currentItems.length === 0 ? (
           <Box 
             sx={{ 
               p: 4, 
