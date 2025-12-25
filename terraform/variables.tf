@@ -163,3 +163,10 @@ variable "chat_agent_deployment_trigger" {
   type        = string
   default     = ""
 }
+
+variable "encryption_secret" {
+  description = "Secret key for encrypting/decrypting context items. If not provided, a random secret will be generated."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

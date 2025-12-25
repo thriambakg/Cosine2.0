@@ -759,7 +759,8 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*",
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-alpha-vantage-api-${var.environment}*"
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-alpha-vantage-api-${var.environment}*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-encryption-secret-${var.environment}*"
         ]
       },
       {
@@ -779,6 +780,33 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
   })
 
   tags = var.common_tags
+}
+
+# Encryption Secret for context item encryption/decryption
+resource "aws_secretsmanager_secret" "encryption_secret" {
+  name        = "${var.project_name}-encryption-secret-${var.environment}"
+  description = "Secret key for encrypting/decrypting context items in the filesystem"
+
+  recovery_window_in_days = 7
+
+  tags = var.common_tags
+}
+
+# Encryption Secret Version (randomly generated)
+resource "aws_secretsmanager_secret_version" "encryption_secret" {
+  secret_id     = aws_secretsmanager_secret.encryption_secret.id
+  secret_string = var.encryption_secret != "" ? var.encryption_secret : random_password.encryption_secret.result
+}
+
+# Random password for encryption secret (if not provided)
+resource "random_password" "encryption_secret" {
+  length  = 64
+  special = true
+}
+
+# Data source to read the encryption secret
+data "aws_secretsmanager_secret_version" "encryption_secret" {
+  secret_id = aws_secretsmanager_secret.encryption_secret.id
 }
 
 # IAM Policy for Lambda functions to access S3 chat files bucket
@@ -2150,6 +2178,7 @@ module "filesystem_lambda" {
     S3_BASE_URL            = "https://${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name}.s3.amazonaws.com"
     ENVIRONMENT            = var.environment
     LOG_LEVEL              = var.environment == "development" ? "DEBUG" : "INFO"
+    ENCRYPTION_SECRET      = data.aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
 
   layers = [
@@ -2159,7 +2188,8 @@ module "filesystem_lambda" {
 
   additional_policy_arns = [
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
-    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn
+    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
+    aws_iam_policy.lambda_secrets_policy.arn
   ]
 
   reserved_concurrent_executions = 20
@@ -2189,12 +2219,14 @@ module "file_return_lambda" {
     SESSIONS_TABLE                     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
     # WebSocket endpoint removed to avoid circular dependency with websocket_api module
     # The file_return Lambda can discover the endpoint at runtime if needed
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    ENVIRONMENT       = var.environment
+    LOG_LEVEL         = var.environment == "development" ? "DEBUG" : "INFO"
+    ENCRYPTION_SECRET = data.aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
 
   layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
   additional_policy_arns = [
@@ -2205,7 +2237,8 @@ module "file_return_lambda" {
     aws_iam_policy.sec_search_s3_policy.arn,        # Add SEC filings bucket access
     aws_iam_policy.politician_trades_s3_policy.arn, # Add politician trades bucket access
     aws_iam_policy.lda_disclosures_s3_policy.arn,   # Add LDA disclosures bucket access
-    aws_iam_policy.congress_bills_s3_policy.arn     # Add Congress bills bucket access
+    aws_iam_policy.congress_bills_s3_policy.arn,    # Add Congress bills bucket access
+    aws_iam_policy.lambda_secrets_policy.arn        # Add secrets manager access for encryption secret
   ]
 
   reserved_concurrent_executions = 20
