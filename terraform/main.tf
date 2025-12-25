@@ -740,7 +740,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "67" # Updated for filesystem endpoint
+  deployment_trigger = "68" # Updated for filesystem endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -2153,7 +2153,8 @@ module "filesystem_lambda" {
   }
 
   layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
   additional_policy_arns = [
