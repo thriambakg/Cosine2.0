@@ -362,42 +362,6 @@ jobs:
           echo "  - Sign In Redirect: ${NEXT_PUBLIC_REDIRECT_SIGN_IN}"
           echo "  - Sign Out Redirect: ${NEXT_PUBLIC_REDIRECT_SIGN_OUT}"
 
-      - name: Get encryption secret from AWS Secrets Manager
-        id: get-encryption-secret
-        env:
-          ENVIRONMENT: ${{ needs.setup.outputs.environment }}
-        run: |
-          echo "🔐 Retrieving encryption secret from AWS Secrets Manager..."
-          
-          # Get the secret name from Terraform (matches the naming convention)
-          SECRET_NAME="cosine-encryption-secret-${ENVIRONMENT}"
-          
-          echo "🔍 Looking for secret: ${SECRET_NAME}"
-          
-          # Retrieve the secret value
-          ENCRYPTION_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id "${SECRET_NAME}" \
-            --query 'SecretString' \
-            --output text \
-            --region $AWS_REGION 2>/dev/null || echo "")
-          
-          if [ -z "$ENCRYPTION_SECRET" ] || [ "$ENCRYPTION_SECRET" = "None" ]; then
-            echo "⚠️  Could not retrieve encryption secret from Secrets Manager"
-            echo "💡 Using default secret (not recommended for production)"
-            echo "🚨 Note: Frontend decryption may not work correctly without the correct secret"
-            ENCRYPTION_SECRET="default-secret-change-in-production"
-          else
-            echo "✅ Encryption secret retrieved successfully"
-            # Mask the secret in logs (only show first 4 chars)
-            SECRET_PREVIEW="${ENCRYPTION_SECRET:0:4}..."
-            echo "   Secret preview: ${SECRET_PREVIEW}"
-          fi
-          
-          # Set as output (will be masked by GitHub Actions)
-          echo "encryption_secret=${ENCRYPTION_SECRET}" >> $GITHUB_OUTPUT
-          
-          echo "🔐 Encryption secret configured for build"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -458,7 +422,6 @@ jobs:
           VITE_API_GATEWAY_URL: ${{ steps.get-build-env.outputs.next_public_api_gateway_url }}
           VITE_REDIRECT_SIGN_IN: ${{ steps.get-build-env.outputs.next_public_redirect_sign_in }}
           VITE_REDIRECT_SIGN_OUT: ${{ steps.get-build-env.outputs.next_public_redirect_sign_out }}
-          VITE_ENCRYPTION_SECRET: ${{ steps.get-encryption-secret.outputs.encryption_secret }}
         run: |
           echo "🔨 Building React.js (Vite) application with environment variables..."
           echo "  - AWS Region: $VITE_AWS_REGION"

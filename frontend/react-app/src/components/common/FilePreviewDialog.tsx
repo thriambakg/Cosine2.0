@@ -2539,6 +2539,15 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         const content = previewData.content;
         const metadata = previewData.metadata || {};
         
+        // Handle case where content might be undefined (shouldn't happen with backend decryption, but be safe)
+        if (!content) {
+          return (
+            <Alert severity="error" sx={{ m: 2 }}>
+              No content available for preview
+            </Alert>
+          );
+        }
+        
         // Determine item type from content
         let itemType: ItemType = 'tile';
         let itemData = content;
@@ -2578,7 +2587,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             onClose={() => {}}
             itemType={itemType}
             data={itemData}
-            title={metadata.title || content.title || item.name}
+            title={metadata?.title || content?.title || item.name}
             user_id={user_id}
             folder_path={folder_path}
             item_id={item.id}
