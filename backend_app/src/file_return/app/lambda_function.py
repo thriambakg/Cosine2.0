@@ -537,39 +537,47 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
                 content_bytes = response['Body'].read()
                 
-                # Decrypt if it's a .cosine file, otherwise parse as JSON (legacy)
+                # For .cosine files, return encrypted data as base64 for client-side decryption
                 if is_cosine_file:
-                    logger.info(f"🔐 Decrypting .cosine encrypted file for preview: {s3_key}")
-                    try:
-                        context_data = decrypt_context_data(user_id, content_bytes)
-                        logger.info(f"✅ Successfully decrypted .cosine file, data keys: {list(context_data.keys()) if isinstance(context_data, dict) else 'N/A'}")
-                    except Exception as decrypt_error:
-                        logger.error(f"❌ Failed to decrypt .cosine file: {str(decrypt_error)}")
-                        return {
-                            'statusCode': 500,
-                            'headers': get_cors_headers(),
-                            'body': json.dumps({'error': 'Failed to decrypt encrypted context item. File may be corrupted or from a different user.'})
-                        }
+                    logger.info(f"🔐 Returning encrypted .cosine file for client-side decryption: {s3_key}")
+                    encrypted_base64 = base64.b64encode(content_bytes).decode('utf-8')
+                    
+                    return {
+                        'statusCode': 200,
+                        'headers': get_cors_headers(),
+                        'body': json.dumps({
+                            'preview_type': 'context_item',
+                            'encrypted': True,
+                            'encrypted_data': encrypted_base64,
+                            'user_id': user_id,  # Include user_id for key derivation
+                            'metadata': {
+                                'type': 'encrypted_context_item',
+                                'filename': os.path.basename(s3_key)
+                            },
+                            'download_url': None  # Will be generated on demand
+                        })
+                    }
                 else:
-                    # Legacy unencrypted JSON file
+                    # Legacy unencrypted JSON file - parse and return as before
                     logger.info(f"📄 Reading legacy unencrypted JSON file for preview: {s3_key}")
                     context_data = json.loads(content_bytes.decode('utf-8'))
-                
-                return {
-                    'statusCode': 200,
-                    'headers': get_cors_headers(),
-                    'body': json.dumps({
-                        'preview_type': 'context_item',
-                        'content': context_data,
-                        'metadata': {
-                            'type': context_data.get('type'),
-                            'title': context_data.get('title'),
-                            'subtitle': context_data.get('subtitle'),
-                            'timestamp': context_data.get('timestamp')
-                        },
-                        'download_url': None  # Will be generated on demand
-                    }, default=str)
-                }
+                    
+                    return {
+                        'statusCode': 200,
+                        'headers': get_cors_headers(),
+                        'body': json.dumps({
+                            'preview_type': 'context_item',
+                            'encrypted': False,
+                            'content': context_data,
+                            'metadata': {
+                                'type': context_data.get('type'),
+                                'title': context_data.get('title'),
+                                'subtitle': context_data.get('subtitle'),
+                                'timestamp': context_data.get('timestamp')
+                            },
+                            'download_url': None  # Will be generated on demand
+                        }, default=str)
+                    }
             except Exception as e:
                 logger.error(f"Error reading context item: {str(e)}")
                 return {
