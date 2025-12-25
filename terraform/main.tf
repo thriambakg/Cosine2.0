@@ -804,11 +804,6 @@ resource "random_password" "encryption_secret" {
   special = true
 }
 
-# Data source to read the encryption secret
-data "aws_secretsmanager_secret_version" "encryption_secret" {
-  secret_id = aws_secretsmanager_secret.encryption_secret.id
-}
-
 # IAM Policy for Lambda functions to access S3 chat files bucket
 # Using base infrastructure policy instead of duplicating
 
@@ -2178,7 +2173,7 @@ module "filesystem_lambda" {
     S3_BASE_URL            = "https://${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name}.s3.amazonaws.com"
     ENVIRONMENT            = var.environment
     LOG_LEVEL              = var.environment == "development" ? "DEBUG" : "INFO"
-    ENCRYPTION_SECRET      = data.aws_secretsmanager_secret_version.encryption_secret.secret_string
+    ENCRYPTION_SECRET      = aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
 
   layers = [
@@ -2221,7 +2216,7 @@ module "file_return_lambda" {
     # The file_return Lambda can discover the endpoint at runtime if needed
     ENVIRONMENT       = var.environment
     LOG_LEVEL         = var.environment == "development" ? "DEBUG" : "INFO"
-    ENCRYPTION_SECRET = data.aws_secretsmanager_secret_version.encryption_secret.secret_string
+    ENCRYPTION_SECRET = aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
 
   layers = [
