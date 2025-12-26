@@ -192,6 +192,12 @@ const FilesPage: React.FC = () => {
           // Add items
           if (response.result.items) {
             response.result.items.forEach((item: any) => {
+              // Ensure s3_key is always included - it should be in the manifest
+              // If missing, log a warning but still create the item
+              if (!item.s3_key && item.type === 'context_item') {
+                console.warn(`⚠️ Item ${item.id} (${item.name}) is missing s3_key in manifest response`);
+              }
+              
               const fileItem: FileItem = {
                 id: item.id,
                 name: item.name,
@@ -200,7 +206,7 @@ const FilesPage: React.FC = () => {
                 created_at: item.created_at || Date.now(),
                 updated_at: item.updated_at || Date.now(),
                 metadata: item.metadata,
-                s3_key: item.s3_key,
+                s3_key: item.s3_key || undefined, // Explicitly set to undefined if missing
               };
               folderMap.set(item.id, fileItem);
             });
@@ -526,26 +532,186 @@ const FilesPage: React.FC = () => {
         },
         timestamp: Date.now(),
       };
-    } else if (item.s3_key) {
+    } else {
       // For files/context items, send just the S3 key
       const itemType = item.metadata?.type || 'context_item';
+      
+      // CRITICAL: Always ensure s3_key is included in the context item data
+      // First, try to use s3_key from the item (should be in manifest)
+      let s3_key = item.s3_key;
+      
+      // Log what we have from the item for debugging
+      console.log(`🔍 handleAddItemToContext - Item details:`, {
+        id: item.id,
+        name: item.name,
+        type: item.type,
+        s3_key_from_item: item.s3_key,
+        has_s3_key: !!item.s3_key,
+        metadata: item.metadata
+      });
+      
+      // Check if this is a .cosine file (by name, type, or metadata)
+      // Also check metadata.original_filename if it exists (for uploaded files)
+      const isCosineFile = item.type === 'context_item' || 
+                          item.name?.toLowerCase().endsWith('.cosine') ||
+                          item.metadata?.type === 'context_item' ||
+                          (item.metadata && typeof item.metadata === 'object' && 'original_filename' in item.metadata && 
+                           String(item.metadata.original_filename || '').toLowerCase().endsWith('.cosine'));
+      
+      console.log(`🔍 isCosineFile check:`, {
+        type_check: item.type === 'context_item',
+        name_check: item.name?.toLowerCase().endsWith('.cosine'),
+        metadata_type_check: item.metadata?.type === 'context_item',
+        isCosineFile,
+        final_s3_key_before_construction: s3_key
+      });
+      
+      // If s3_key is missing from manifest, construct it for .cosine files
+      if (!s3_key && user && isCosineFile) {
+        // Determine folder path - check parentId and current folder
+        let folderPath = '';
+        if (item.parentId && item.parentId !== 'root') {
+          folderPath = item.parentId;
+        } else if (currentFolderId && currentFolderId !== 'root') {
+          // Fallback: use current folder if parentId is not set
+          folderPath = currentFolderId;
+        }
+        
+        // Construct s3_key for .cosine files
+        const folderPathPart = folderPath ? `${folderPath}/` : '';
+        s3_key = `users/${user.id}/filesys/${folderPathPart}${item.id}.cosine`;
+        console.warn(`⚠️ s3_key missing from manifest for item ${item.id} (${item.name}), constructed: ${s3_key}`);
+      } else if (!s3_key && !isCosineFile) {
+        // For non-.cosine files, we need the s3_key from the manifest
+        console.error(`❌ s3_key missing from ${item.type} item ${item.id} (${item.name}) - cannot add to context`);
+        alert(`Cannot add "${item.name}" to context: file location information is missing. Please refresh the page and try again.`);
+        setContextMenuAnchor(null);
+        setSelectedItem(null);
+        return;
+      } else if (!s3_key && !user) {
+        // User is required to construct s3_key
+        console.error(`❌ Cannot construct s3_key: user is not available`);
+        alert(`Cannot add "${item.name}" to context: user information is missing. Please refresh the page and try again.`);
+        setContextMenuAnchor(null);
+        setSelectedItem(null);
+        return;
+      }
+      
+      // CRITICAL: Ensure s3_key is ALWAYS set before creating context item
+      // Last resort: construct s3_key with empty folder path (root folder) for .cosine files
+      if (!s3_key && user && isCosineFile) {
+        s3_key = `users/${user.id}/filesys/${item.id}.cosine`;
+        console.error(`❌ CRITICAL: s3_key was still missing after all attempts, using last-resort construction: ${s3_key}`);
+      }
+      
+      // CRITICAL: Ensure s3_key is set - use from manifest if available, otherwise construct
+      if (!s3_key) {
+        console.error(`❌ CRITICAL: s3_key is still undefined after all checks!`, {
+          item_id: item.id,
+          item_name: item.name,
+          item_type: item.type,
+          item_s3_key: item.s3_key,
+          user_available: !!user,
+          isCosineFile
+        });
+        alert(`Cannot add "${item.name}" to context: file location information is missing. Please refresh the page and try again.`);
+        setContextMenuAnchor(null);
+        setSelectedItem(null);
+        return;
+      }
+      
+      // Always create the context item with s3_key - it should always be available at this point
+      // Create data object with s3_key FIRST to ensure it's always included
+      const contextData: any = {
+        filesystem_type: 'item',
+        item_id: item.id,
+        s3_key: s3_key, // CRITICAL: Always include s3_key in data
+        item_type: item.type,
+      };
+      
+      // Verify s3_key is a non-empty string
+      if (!s3_key || typeof s3_key !== 'string' || s3_key.trim() === '') {
+        console.error(`❌ CRITICAL: s3_key is invalid:`, s3_key);
+        alert(`Cannot add "${item.name}" to context: invalid file location. Please refresh the page and try again.`);
+        setContextMenuAnchor(null);
+        setSelectedItem(null);
+        return;
+      }
       
       contextItem = {
         id: `filesystem_item_${item.id}_${Date.now()}`,
         type: itemType as any,
         title: item.metadata?.title || item.name,
         subtitle: item.metadata?.subtitle || 'Filesystem Item',
-        data: {
-          filesystem_type: 'item',
-          item_id: item.id,
-          s3_key: item.s3_key,
-          item_type: item.type,
-        },
+        data: contextData, // Use pre-constructed data object with s3_key
         timestamp: Date.now(),
       };
+      
+      // CRITICAL: Triple-check that s3_key is actually in the data object
+      if (!contextItem.data || !contextItem.data.s3_key) {
+        console.error(`❌ CRITICAL ERROR: s3_key not set in contextItem.data!`, {
+          contextItem,
+          s3_key,
+          item,
+          contextData,
+          data_s3_key: contextItem.data?.s3_key
+        });
+        // Force set it
+        if (!contextItem.data) {
+          contextItem.data = {};
+        }
+        contextItem.data.s3_key = s3_key;
+      }
+      
+      // Log for debugging - verify s3_key is in the data
+      console.log(`✅ Adding filesystem item to context:`, {
+        item_id: item.id,
+        name: item.name,
+        item_type: item.type,
+        item_s3_key_from_manifest: item.s3_key,
+        final_s3_key: s3_key,
+        constructed: !item.s3_key,
+        contextItem_data_s3_key: contextItem.data.s3_key, // Verify it's set
+        contextItem_data: JSON.stringify(contextItem.data), // Show full data object as JSON
+        contextItem_full: JSON.stringify(contextItem) // Show full context item
+      });
+      
+      // Final verification before proceeding
+      if (!contextItem.data.s3_key) {
+        console.error(`❌ FINAL CHECK FAILED: s3_key still missing!`, contextItem);
+        alert(`Error: Cannot add "${item.name}" to context - file location is missing. Please refresh and try again.`);
+        setContextMenuAnchor(null);
+        setSelectedItem(null);
+        return;
+      }
     }
     
     if (contextItem) {
+      // Verify s3_key is in the data before adding to context
+      if (contextItem.data && contextItem.data.filesystem_type === 'item' && !contextItem.data.s3_key) {
+        console.error(`❌ CRITICAL: Context item created without s3_key:`, contextItem);
+        // Try to fix it if we have the item info
+        if (user && item.id) {
+          const fallbackS3Key = `users/${user.id}/filesys/${item.id}.cosine`;
+          contextItem.data.s3_key = fallbackS3Key;
+          console.warn(`⚠️ Fixed missing s3_key with fallback: ${fallbackS3Key}`);
+        } else {
+          alert(`Error: Cannot add "${item.name}" to context - file location is missing. Please refresh and try again.`);
+          setContextMenuAnchor(null);
+          setSelectedItem(null);
+          return;
+        }
+      }
+      
+      // Final verification - log the exact data being sent
+      console.log(`🔍 FINAL VERIFICATION - Context item data before dispatch:`, {
+        id: contextItem.id,
+        type: contextItem.type,
+        title: contextItem.title,
+        data: JSON.stringify(contextItem.data),
+        data_s3_key: contextItem.data?.s3_key
+      });
+      
       if (target === 'sidebar') {
         const event = new CustomEvent('add-to-sidebar-context', {
           detail: contextItem

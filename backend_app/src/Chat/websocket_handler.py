@@ -397,6 +397,17 @@ class WebSocketHandler:
             
             # Extract context items and check for file attachment flag
             context_items = message_data.get('contextItems', [])
+            
+            # Log context items to verify data field is present
+            if context_items:
+                logger.info(f"📥 Received {len(context_items)} context items from WebSocket message")
+                for i, item in enumerate(context_items):
+                    logger.info(f"  Context item {i+1}: id={item.get('id')}, type={item.get('type')}, title={item.get('title')}")
+                    if 'data' in item and item.get('data'):
+                        logger.info(f"    ✅ data field present: {json.dumps(item.get('data'), default=str)}")
+                    else:
+                        logger.warning(f"    ⚠️ data field missing or empty in context item {i+1}")
+            
             session_variables_updated = message_data.get('session_variables_updated', False)
             
             # Check if message has files attached (files were uploaded via REST API)
@@ -861,7 +872,24 @@ class WebSocketHandler:
     def _store_context_items(self, user_id: str, session_id: str, context_items: List[Dict[str, Any]]):
         """Store context items in session_variables"""
         try:
+            # Log incoming context items to verify data field is present
+            logger.info(f"📥 Received {len(context_items)} context items to store")
+            for i, item in enumerate(context_items):
+                logger.info(f"  Item {i+1}: id={item.get('id')}, type={item.get('type')}, title={item.get('title')}")
+                if 'data' in item:
+                    logger.info(f"    data field present: {json.dumps(item.get('data'), default=str)}")
+                else:
+                    logger.warning(f"    ⚠️ data field MISSING in item {i+1}")
+            
             context_items_decimal = convert_floats_to_decimal(context_items)
+            
+            # Verify data field is preserved after conversion
+            for i, item in enumerate(context_items_decimal):
+                if 'data' not in item:
+                    logger.error(f"❌ CRITICAL: data field lost after convert_floats_to_decimal for item {i+1}: {item.get('id')}")
+                else:
+                    logger.info(f"  ✅ Item {i+1} data field preserved: {json.dumps(item.get('data'), default=str)}")
+            
             context_summary = extract_context_summary(context_items)
             context_summary_decimal = convert_floats_to_decimal(context_summary)
             
@@ -879,6 +907,15 @@ class WebSocketHandler:
                 'last_updated': int(datetime.now().timestamp())
             }
             
+            # Log what we're about to store
+            logger.info(f"📤 Storing context items to DynamoDB:")
+            for i, item in enumerate(session_vars.get('context_items', [])):
+                logger.info(f"  Item {i+1} to store: id={item.get('id')}, type={item.get('type')}")
+                if 'data' in item:
+                    logger.info(f"    data field: {json.dumps(item.get('data'), default=str)}")
+                else:
+                    logger.error(f"    ❌ data field MISSING in item {i+1} before storing!")
+            
             self.chat_sessions_table.update_item(
                 Key={'user_id': user_id, 'session_id': session_id},
                 UpdateExpression='SET session_variables = :vars, last_updated = :updated',
@@ -888,8 +925,21 @@ class WebSocketHandler:
                 }
             )
             logger.info(f"📌 Stored context items in session_variables")
+            
+            # Verify what was actually stored by reading it back
+            verify_response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            if 'Item' in verify_response:
+                stored_items = verify_response['Item'].get('session_variables', {}).get('context_items', [])
+                logger.info(f"🔍 Verification: Read back {len(stored_items)} context items from DynamoDB")
+                for i, item in enumerate(stored_items):
+                    if 'data' in item:
+                        logger.info(f"  ✅ Item {i+1} data field present in stored item: {json.dumps(item.get('data'), default=str)}")
+                    else:
+                        logger.error(f"  ❌ Item {i+1} data field MISSING in stored item!")
         except Exception as e:
-            logger.error(f"❌ Failed to store context items: {e}")
+            logger.error(f"❌ Failed to store context items: {e}", exc_info=True)
     
     def _send_session_update(self, user_id: str, session_id: str):
         """Send session update message to frontend (fetches session_variables from DynamoDB)"""
