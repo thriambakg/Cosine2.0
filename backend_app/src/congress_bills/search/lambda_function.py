@@ -10,6 +10,7 @@ import boto3
 import gzip
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
+from datetime import datetime, timedelta
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
 
@@ -464,18 +465,27 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         if parties:
             # Use first party for hash key
             party = parties[0].strip()
-            introduced_date = None
-            if filters.get('introduced_date_from'):
-                introduced_date = filters['introduced_date_from']
+            introduced_date_from = filters.get('introduced_date_from')
+            introduced_date_to = filters.get('introduced_date_to')
+            
+            # Use BETWEEN if we have both dates, otherwise use gte for from date
+            range_condition = None
+            range_value = None
+            if introduced_date_from and introduced_date_to:
+                range_condition = 'between'
+                range_value = (introduced_date_from, introduced_date_to)
+            elif introduced_date_from:
+                range_condition = 'gte'
+                range_value = introduced_date_from
             
             query_configs.append({
                 'filter_key': 'sponsor_party',
                 'index_name': 'SponsorPartyDateIndex',
                 'hash_key': 'sponsor_party',
                 'hash_value': party,
-                'range_key': 'introduced_date' if introduced_date else None,
-                'range_value': introduced_date,
-                'range_condition': 'gte' if introduced_date else None
+                'range_key': 'introduced_date' if range_value else None,
+                'range_value': range_value,
+                'range_condition': range_condition
             })
     
     # SponsorStateDateIndex: hash_key=sponsor_state, range_key=introduced_date
@@ -540,19 +550,41 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     # BillNumberDateIndex: hash_key=bill_number, range_key=introduced_date
     if filters.get('bill_number') is not None:
         bill_number = filters['bill_number']
-        introduced_date = None
-        if filters.get('introduced_date_from'):
-            introduced_date = filters['introduced_date_from']
+        introduced_date_from = filters.get('introduced_date_from')
+        introduced_date_to = filters.get('introduced_date_to')
         
-        query_configs.append({
-            'filter_key': 'bill_number',
-            'index_name': 'BillNumberDateIndex',
-            'hash_key': 'bill_number',
-            'hash_value': bill_number,
-            'range_key': 'introduced_date' if introduced_date else None,
-            'range_value': introduced_date,
-            'range_condition': 'gte' if introduced_date else None
-        })
+        # Use BETWEEN if we have both dates, otherwise use gte for from date
+        if introduced_date_from and introduced_date_to:
+            query_configs.append({
+                'filter_key': 'bill_number',
+                'index_name': 'BillNumberDateIndex',
+                'hash_key': 'bill_number',
+                'hash_value': bill_number,
+                'range_key': 'introduced_date',
+                'range_value': introduced_date_from,  # Start of range
+                'range_value_to': introduced_date_to,  # End of range
+                'range_condition': 'between'
+            })
+        elif introduced_date_from:
+            query_configs.append({
+                'filter_key': 'bill_number',
+                'index_name': 'BillNumberDateIndex',
+                'hash_key': 'bill_number',
+                'hash_value': bill_number,
+                'range_key': 'introduced_date' if introduced_date_from else None,
+                'range_value': introduced_date_from,
+                'range_condition': 'gte' if introduced_date_from else None
+            })
+        else:
+            query_configs.append({
+                'filter_key': 'bill_number',
+                'index_name': 'BillNumberDateIndex',
+                'hash_key': 'bill_number',
+                'hash_value': bill_number,
+                'range_key': None,
+                'range_value': None,
+                'range_condition': None
+            })
     
     # CongressBillTypeIndex: hash_key=congress, range_key=bill_type
     if filters.get('congress'):
@@ -640,10 +672,12 @@ def query_cosponsor_search_index(
     - bill_id = SEARCH#COSPONSOR#<cosponsor_name> (hash key)
     - search_index_sk = INTRODUCED_DATE#<date>#<original_bill_id> (range key)
     
+    For date ranges, queries each day individually using begins_with to ensure all dates are covered.
+    
     Args:
         cosponsor_name: Name of the cosponsor
         limit: Maximum number of bill IDs to return
-        exclusive_start_key: Pagination token from previous query
+        exclusive_start_key: Pagination token from previous query (can contain date_offset for date range queries)
         date_from: Optional date filter (YYYY-MM-DD)
         date_to: Optional date filter (YYYY-MM-DD)
     
@@ -662,24 +696,137 @@ def query_cosponsor_search_index(
         # Construct hash key for search index: SEARCH#COSPONSOR#<name>
         search_bill_id = f"SEARCH#COSPONSOR#{normalized_name}"
         
+        # Helper to extract date from string
+        def extract_date(date_str):
+            if not date_str:
+                return None
+            if 'T' in date_str:
+                return date_str.split('T')[0]
+            elif ' ' in date_str:
+                return date_str.split(' ')[0]
+            return date_str[:10] if len(date_str) >= 10 else date_str
+        
+        date_from_part = extract_date(date_from) if date_from else None
+        date_to_part = extract_date(date_to) if date_to else None
+        
+        # If we have a date range, query each day individually for better coverage
+        if date_from_part and date_to_part:
+            try:
+                from datetime import datetime, timedelta
+                
+                # Parse dates
+                date_from_obj = datetime.strptime(date_from_part, '%Y-%m-%d').date()
+                date_to_obj = datetime.strptime(date_to_part, '%Y-%m-%d').date()
+                
+                # Handle pagination - continue from where we left off
+                date_offset = 0
+                if exclusive_start_key and isinstance(exclusive_start_key, dict):
+                    if exclusive_start_key.get('query_type') == 'cosponsor_date_range':
+                        date_offset = exclusive_start_key.get('date_offset', 0)
+                        logger.info(f"Continuing cosponsor date range search from offset: {date_offset}")
+                
+                # If the offset is already past the end date, return no more results
+                if date_from_obj + timedelta(days=date_offset) > date_to_obj:
+                    logger.info(f"📅 Cosponsor date range offset {date_offset} is past end date {date_to_obj} - no more days to query.")
+                    return [], None
+                
+                # Generate list of dates to query (skip dates we've already queried)
+                current_date_obj = date_from_obj + timedelta(days=date_offset)
+                dates_to_query_batch = []
+                while current_date_obj <= date_to_obj:
+                    dates_to_query_batch.append(current_date_obj)
+                    current_date_obj += timedelta(days=1)
+                    # Limit number of days to query per request to avoid timeout
+                    if len(dates_to_query_batch) >= 30:  # Query max 30 days per request
+                        break
+                
+                if not dates_to_query_batch:
+                    logger.info(f"📅 No more days to query in cosponsor search (offset: {date_offset}, end date: {date_to_obj})")
+                    return [], None
+                
+                logger.info(f"📅 Querying cosponsor search index for {len(dates_to_query_batch)} days from {dates_to_query_batch[0]} to {dates_to_query_batch[-1]} (offset: {date_offset})")
+                
+                # Query each day and collect bill_ids
+                all_bill_ids = set()
+                seen_bill_ids = set()
+                
+                for query_date in dates_to_query_batch:
+                    date_str = query_date.strftime('%Y-%m-%d')
+                    try:
+                        # Use begins_with to match INTRODUCED_DATE#YYYY-MM-DD# pattern
+                        sk_prefix = f"INTRODUCED_DATE#{date_str}#"
+                        key_condition = Key('bill_id').eq(search_bill_id) & Key('search_index_sk').begins_with(sk_prefix)
+                        
+                        query_params = {
+                            'KeyConditionExpression': key_condition,
+                            'ProjectionExpression': 'entity_bill_id, search_index_sk',
+                            'Limit': 1000,  # Get up to 1000 per day
+                        }
+                        
+                        response = bills_table.query(**query_params)
+                        items_from_day = response.get('Items', [])
+                        
+                        # Extract bill_ids
+                        bill_ids_for_date = []
+                        for item in items_from_day:
+                            entity_bill_id = item.get('entity_bill_id')
+                            if entity_bill_id and entity_bill_id not in seen_bill_ids:
+                                seen_bill_ids.add(entity_bill_id)
+                                all_bill_ids.add(entity_bill_id)
+                                bill_ids_for_date.append(entity_bill_id)
+                            elif not entity_bill_id:
+                                # Fallback: extract from search_index_sk
+                                search_index_sk = item.get('search_index_sk', '')
+                                if search_index_sk and '#' in search_index_sk:
+                                    parts = search_index_sk.split('#')
+                                    if len(parts) >= 3:
+                                        fallback_bill_id = parts[2]
+                                        if fallback_bill_id not in seen_bill_ids:
+                                            seen_bill_ids.add(fallback_bill_id)
+                                            all_bill_ids.add(fallback_bill_id)
+                                            bill_ids_for_date.append(fallback_bill_id)
+                        
+                        if bill_ids_for_date:
+                            logger.debug(f"📅 Cosponsor date {date_str}: fetched {len(items_from_day)} items, extracted {len(bill_ids_for_date)} unique bill_ids")
+                    
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error querying cosponsor date {date_str}: {e}")
+                        continue
+                
+                bill_ids = list(all_bill_ids)
+                logger.info(f"✅ Cosponsor date range query complete: {len(bill_ids)} unique bill_ids from {len(dates_to_query_batch)} days")
+                
+                # Determine if there are more days to query
+                last_queried_date = date_from_obj + timedelta(days=date_offset + len(dates_to_query_batch) - 1)
+                has_more = last_queried_date < date_to_obj
+                
+                if has_more:
+                    # Return pagination token with next date offset
+                    last_eval_key = {
+                        'query_type': 'cosponsor_date_range',
+                        'date_offset': date_offset + len(dates_to_query_batch),
+                        'cosponsor_name': normalized_name,
+                        'date_from': date_from_part,
+                        'date_to': date_to_part,
+                    }
+                    logger.info(f"📅 More days available in cosponsor search: last queried {last_queried_date}, end date {date_to_obj}, next offset {date_offset + len(dates_to_query_batch)}")
+                else:
+                    last_eval_key = None
+                    logger.info(f"📅 Cosponsor date range query complete: queried all days from {date_from_obj} to {date_to_obj}")
+                
+                return bill_ids[:limit], last_eval_key
+                
+            except ValueError as e:
+                logger.error(f"❌ Invalid date format in cosponsor search: {e}")
+                # Fall back to between query
+                pass
+        
+        # Fallback: use between query for single date or no date range
         # Build query parameters
         # search_index_sk format: INTRODUCED_DATE#YYYY-MM-DD#<bill_id>
-        # We can use range key conditions for date filtering
         key_condition = Key('bill_id').eq(search_bill_id)
         
-        if date_from or date_to:
-            def extract_date(date_str):
-                if not date_str:
-                    return None
-                if 'T' in date_str:
-                    return date_str.split('T')[0]
-                elif ' ' in date_str:
-                    return date_str.split(' ')[0]
-                return date_str[:10] if len(date_str) >= 10 else date_str
-            
-            date_from_part = extract_date(date_from) if date_from else None
-            date_to_part = extract_date(date_to) if date_to else None
-            
+        if date_from_part or date_to_part:
             if date_from_part and date_to_part:
                 sk_start = f"INTRODUCED_DATE#{date_from_part}#"
                 sk_end = f"INTRODUCED_DATE#{date_to_part}#~"  # ~ ensures we get all items on that date
@@ -704,20 +851,58 @@ def query_cosponsor_search_index(
         
         # Extract bill_ids from entity_bill_id field
         bill_ids = []
-        for item in response.get('Items', []):
+        items_fetched = response.get('Items', [])
+        logger.info(f"Query cosponsor search index '{normalized_name}': fetched {len(items_fetched)} items from DynamoDB")
+        
+        for item in items_fetched:
             entity_bill_id = item.get('entity_bill_id')
             if entity_bill_id:
                 bill_ids.append(entity_bill_id)
+            else:
+                # Fallback: try to extract from search_index_sk if entity_bill_id is missing
+                search_index_sk = item.get('search_index_sk', '')
+                if search_index_sk and '#' in search_index_sk:
+                    # Format: INTRODUCED_DATE#YYYY-MM-DD#<bill_id>
+                    parts = search_index_sk.split('#')
+                    if len(parts) >= 3:
+                        fallback_bill_id = parts[2]
+                        logger.warning(f"Cosponsor search index item missing entity_bill_id, extracted from search_index_sk: {fallback_bill_id}")
+                        bill_ids.append(fallback_bill_id)
+                    else:
+                        logger.warning(f"Cosponsor search index item missing entity_bill_id and invalid search_index_sk format: {search_index_sk}")
+                else:
+                    logger.warning(f"Cosponsor search index item missing entity_bill_id and search_index_sk: {item}")
         
         last_eval_key = response.get('LastEvaluatedKey')
         
-        logger.info(f"Query cosponsor search index '{normalized_name}': found {len(bill_ids)} bill IDs, has_more: {last_eval_key is not None}")
+        logger.info(f"Query cosponsor search index '{normalized_name}': extracted {len(bill_ids)} bill IDs from {len(items_fetched)} items, has_more: {last_eval_key is not None}")
         
         return bill_ids, last_eval_key
         
     except Exception as e:
         logger.error(f"Error querying cosponsor search index '{cosponsor_name}': {str(e)}", exc_info=True)
         raise
+
+
+def prepare_range_key_value_for_query(config: Dict[str, Any]) -> tuple[Any, Optional[str]]:
+    """
+    Helper function to prepare range_key_value and range_key_condition for query_gsi_for_bill_ids.
+    Handles BETWEEN condition by converting range_value and range_value_to to a tuple.
+    
+    Args:
+        config: Query config dictionary with range_key, range_value, range_condition, and optionally range_value_to
+    
+    Returns:
+        Tuple of (range_key_value, range_key_condition) ready for query_gsi_for_bill_ids
+    """
+    range_key_condition = config.get('range_condition')
+    range_key_value = config.get('range_value')
+    
+    if range_key_condition == 'between' and config.get('range_value_to'):
+        # For BETWEEN, pass tuple of (start, end)
+        range_key_value = (config.get('range_value'), config.get('range_value_to'))
+    
+    return range_key_value, range_key_condition
 
 
 def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: Any,
@@ -799,6 +984,315 @@ def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: 
     return bill_ids[:limit], last_eval_key
 
 
+def search_by_introduced_date_range(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    Search for bills by introduced date range using day-by-day GSI queries.
+    This is more efficient than scanning when we have a date range.
+    
+    For each day in the date range, we query IntroducedDateIndex and union the results.
+    Then we apply other filters in Python.
+    
+    Args:
+        filters: Filters including introduced_date_from and introduced_date_to
+        limit: Maximum number of results to return
+        last_evaluated_key: Pagination token (contains date_offset for continuing through date range)
+    
+    Returns:
+        Dictionary with search results and pagination info
+    """
+    if not bills_table:
+        raise Exception("DynamoDB bills table not initialized")
+    
+    date_from = filters.get('introduced_date_from')
+    date_to = filters.get('introduced_date_to')
+    
+    if not date_from and not date_to:
+        logger.warning("⚠️ search_by_introduced_date_range called without date filters")
+        return {'success': False, 'error': 'Date range required'}
+    
+    # Parse dates
+    try:
+        if date_from:
+            date_from_obj = datetime.strptime(date_from, '%Y-%m-%d').date()
+        else:
+            date_from_obj = datetime(2000, 1, 1).date()
+        
+        if date_to:
+            date_to_obj = datetime.strptime(date_to, '%Y-%m-%d').date()
+        else:
+            date_to_obj = datetime.now().date()
+    except ValueError as e:
+        logger.error(f"❌ Invalid date format: {e}")
+        return {'success': False, 'error': f'Invalid date format: {e}'}
+    
+    # Handle pagination - continue from where we left off
+    date_offset = 0
+    if last_evaluated_key and isinstance(last_evaluated_key, dict):
+        if last_evaluated_key.get('query_type') == 'date_range':
+            date_offset = last_evaluated_key.get('date_offset', 0)
+            logger.info(f"Continuing date range search from offset: {date_offset}")
+    
+    # Generate list of dates to query (skip dates we've already queried)
+    current_date = date_from_obj + timedelta(days=date_offset)
+    dates_to_query = []
+    while current_date <= date_to_obj:
+        dates_to_query.append(current_date)
+        current_date += timedelta(days=1)
+        # Limit number of days to query per request to avoid timeout
+        if len(dates_to_query) >= 30:  # Query max 30 days per request
+            break
+    
+    if not dates_to_query:
+        logger.info(f"📅 No more days to query (offset: {date_offset}, end date: {date_to_obj})")
+        return {
+            'success': True,
+            'results': [],
+            'count': 0,
+            'has_more': False,
+            'last_evaluated_key': None,
+            'method': 'date_range_query',
+            'index_used': 'IntroducedDateIndex'
+        }
+    
+    logger.info(f"📅 Querying {len(dates_to_query)} days from {dates_to_query[0]} to {dates_to_query[-1]} (offset: {date_offset})")
+    logger.info(f"📅 Date range is INCLUSIVE: includes {dates_to_query[0]} (start) and {dates_to_query[-1]} (end)")
+    
+    # Query each day and collect bill_ids
+    all_bill_ids = set()
+    seen_bill_ids = set()
+    
+    for query_date in dates_to_query:
+        date_str = query_date.strftime('%Y-%m-%d')
+        try:
+            key_condition = Key('introduced_date').eq(date_str)
+            
+            query_kwargs = {
+                'IndexName': 'IntroducedDateIndex',
+                'KeyConditionExpression': key_condition,
+                'ProjectionExpression': 'bill_id',
+                'Limit': 1000,  # Get up to 1000 per day
+            }
+            
+            response = bills_table.query(**query_kwargs)
+            items = response.get('Items', [])
+            
+            # Extract bill_ids
+            bill_ids_for_date = []
+            for item in items:
+                bill_id = item.get('bill_id')
+                if bill_id and bill_id not in seen_bill_ids:
+                    seen_bill_ids.add(bill_id)
+                    all_bill_ids.add(bill_id)
+                    bill_ids_for_date.append(bill_id)
+            
+            if bill_ids_for_date:
+                logger.debug(f"📅 Date {date_str}: found {len(bill_ids_for_date)} bill_ids (total so far: {len(all_bill_ids)})")
+            
+            # Don't stop early - we need to query all days in the range to ensure we get all matching bills
+            # The filtering will happen after we fetch all items
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error querying date {date_str}: {e}")
+            continue
+    
+    bill_ids = list(all_bill_ids)
+    logger.info(f"✅ Date range query complete: {len(bill_ids)} unique bill_ids from {len(dates_to_query)} days")
+    
+    # Fetch full items using BatchGetItem
+    items = []
+    if bill_ids:
+        batch_size = 100
+        for i in range(0, len(bill_ids), batch_size):
+            batch_ids = bill_ids[i:i + batch_size]
+            # Deduplicate batch_ids to avoid ValidationException for duplicate keys
+            batch_ids = list(dict.fromkeys(batch_ids))
+            
+            dynamodb_client = boto3.client('dynamodb')
+            request_items = {
+                BILLS_TABLE_NAME: {
+                    'Keys': [
+                        {
+                            'bill_id': {'S': str(bid)},
+                            'search_index_sk': {'S': str(bid)}
+                        }
+                        for bid in batch_ids
+                    ]
+                }
+            }
+            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+            batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+            deserializer = TypeDeserializer()
+            
+            for item in batch_items:
+                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                # Filter out search index items
+                if not is_search_index_item(converted_item):
+                    items.append(converted_item)
+    
+    # Apply remaining filters in Python
+    remaining_filters = filters.copy()
+    if 'introduced_date_from' in remaining_filters:
+        del remaining_filters['introduced_date_from']
+    if 'introduced_date_to' in remaining_filters:
+        del remaining_filters['introduced_date_to']
+    
+    filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
+    
+    # Continue querying more days until we have enough results or exhaust the date range
+    all_filtered_items = filtered_items.copy()
+    current_date_offset = date_offset + len(dates_to_query)
+    
+    # Keep querying more days if we don't have enough results
+    while len(all_filtered_items) < limit:
+        # Check if we've exhausted the date range
+        next_date = date_from_obj + timedelta(days=current_date_offset)
+        if next_date > date_to_obj:
+            # No more days to query
+            break
+        
+        # Query next batch of days
+        next_dates = []
+        current_date = next_date
+        while current_date <= date_to_obj and len(next_dates) < 30:
+            next_dates.append(current_date)
+            current_date += timedelta(days=1)
+        
+        if not next_dates:
+            break
+        
+        logger.info(f"📅 Querying additional {len(next_dates)} days (offset: {current_date_offset}) to reach limit of {limit}")
+        
+        # Query these days
+        next_bill_ids = set()
+        for query_date in next_dates:
+            date_str = query_date.strftime('%Y-%m-%d')
+            try:
+                key_condition = Key('introduced_date').eq(date_str)
+                query_kwargs = {
+                    'IndexName': 'IntroducedDateIndex',
+                    'KeyConditionExpression': key_condition,
+                    'ProjectionExpression': 'bill_id',
+                    'Limit': 1000,
+                }
+                response = bills_table.query(**query_kwargs)
+                for item in response.get('Items', []):
+                    bill_id = item.get('bill_id')
+                    if bill_id and bill_id not in seen_bill_ids:
+                        seen_bill_ids.add(bill_id)
+                        next_bill_ids.add(bill_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Error querying date {date_str}: {e}")
+                continue
+        
+        if not next_bill_ids:
+            current_date_offset += len(next_dates)
+            continue
+        
+        # Fetch full items for these bill_ids
+        next_items = []
+        batch_size = 100
+        next_bill_ids_list = list(next_bill_ids)
+        for i in range(0, len(next_bill_ids_list), batch_size):
+            batch_ids = next_bill_ids_list[i:i + batch_size]
+            batch_ids = list(dict.fromkeys(batch_ids))
+            
+            dynamodb_client = boto3.client('dynamodb')
+            request_items = {
+                BILLS_TABLE_NAME: {
+                    'Keys': [
+                        {
+                            'bill_id': {'S': str(bid)},
+                            'search_index_sk': {'S': str(bid)}
+                        }
+                        for bid in batch_ids
+                    ]
+                }
+            }
+            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+            batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+            deserializer = TypeDeserializer()
+            
+            for item in batch_items:
+                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                if not is_search_index_item(converted_item):
+                    next_items.append(converted_item)
+        
+        # Apply filters and add to results
+        next_filtered = [item for item in next_items if apply_python_filter(item, remaining_filters)]
+        all_filtered_items.extend(next_filtered)
+        
+        current_date_offset += len(next_dates)
+        
+        # Stop if we've exhausted the date range
+        if next_dates[-1] >= date_to_obj:
+            break
+    
+    # Trim to limit
+    filtered_items = all_filtered_items[:limit]
+    
+    # Calculate the last date we actually queried
+    # current_date_offset is the next offset (after the last queried day)
+    # So the last queried day is at offset current_date_offset - 1
+    if current_date_offset > date_offset + len(dates_to_query):
+        # We queried additional days beyond the initial batch
+        last_queried_date = date_from_obj + timedelta(days=current_date_offset - 1)
+    else:
+        # We only queried the initial batch
+        last_queried_date = dates_to_query[-1] if dates_to_query else date_from_obj
+    
+    logger.info(f"✅ Date range search complete: {len(filtered_items)} items matched all filters (queried up to {last_queried_date}, next offset: {current_date_offset})")
+    
+    # Determine if there are more results
+    has_more = False
+    last_eval_key = None
+    
+    # Check if there are more days to query
+    if last_queried_date < date_to_obj:
+        # More days to query
+        has_more = True
+        last_eval_key = {
+            'query_type': 'date_range',
+            'date_offset': current_date_offset,
+            'introduced_date_from': date_from,
+            'introduced_date_to': date_to,
+        }
+        logger.info(f"📅 More days available: last queried {last_queried_date}, end date {date_to_obj}, next offset {current_date_offset}")
+    elif len(all_filtered_items) > len(filtered_items):
+        # We have more filtered items but hit the limit - shouldn't happen with current logic
+        has_more = True
+        last_eval_key = {
+            'query_type': 'date_range',
+            'date_offset': current_date_offset,
+            'introduced_date_from': date_from,
+            'introduced_date_to': date_to,
+        }
+        logger.info(f"📅 More items available: {len(all_filtered_items)} total, returning {len(filtered_items)}")
+    
+    # Convert and enrich
+    results = [convert_decimal_to_float(item) for item in filtered_items]
+    enriched_results = []
+    for bill in results:
+        if is_search_index_item(bill):
+            continue
+        
+        oversize_s3_key = bill.get('oversize_s3_key')
+        if oversize_s3_key:
+            full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
+            if full_bill:
+                bill = convert_decimal_to_float(full_bill)
+        enriched_results.append(bill)
+    
+    return {
+        'success': True,
+        'results': enriched_results,
+        'count': len(enriched_results),
+        'has_more': has_more,
+        'last_evaluated_key': last_eval_key,
+        'method': 'date_range_query',
+        'index_used': 'IntroducedDateIndex'
+    }
+
+
 def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search bills in DynamoDB using filters with multi-GSI intersection approach
@@ -833,6 +1327,70 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             logger.info(f"Detected union_offset pagination: offset={union_offset}")
             # If we have union_offset, we need to ensure we have query configs
             # The filters should contain the politician_name to reconstruct the query
+    
+    # Check if this is a date-only query (or date + filters that work well with date range query)
+    # For date range queries, use the efficient day-by-day approach
+    has_date_range = filters.get('introduced_date_from') and filters.get('introduced_date_to')
+    has_date_from_only = filters.get('introduced_date_from') and not filters.get('introduced_date_to')
+    
+    # Check if we should use date range query approach
+    # Use it when:
+    # 1. We have a date range (from and to)
+    # 2. The last_evaluated_key indicates we're in a date range query
+    # 3. OR we have date range + other filters that can be applied in Python (like sponsor_party)
+    use_date_range_query = False
+    if last_evaluated_key and isinstance(last_evaluated_key, dict):
+        if last_evaluated_key.get('query_type') == 'date_range':
+            use_date_range_query = True
+            logger.info("✅ Continuing date range query from pagination token")
+    
+    # For new queries, use date range approach if we have date range and it's the most efficient option
+    # This is especially good when combined with filters that can be applied in Python
+    if not use_date_range_query and has_date_range:
+        # Check if we have other GSI-queryable filters
+        query_configs = identify_queryable_filters(filters)
+        
+        # Check if we have search_index queries (cosponsor searches) - these should NOT use date range query
+        # Search index queries can handle date ranges efficiently themselves
+        has_search_index_query = any(
+            config.get('query_type') == 'search_index'
+            for config in query_configs
+        )
+        
+        # Check if we have union queries (politician_name with sponsor/cosponsor) - these should NOT use date range query
+        has_union_query = any(
+            config.get('query_type') in ['union_politician', 'union_all_politicians']
+            for config in query_configs
+        )
+        
+        # If we have IntroducedDateIndex in the configs, it means we're only using the from date
+        # In this case, use date range query for better pagination
+        has_introduced_date_index = any(
+            config.get('index_name') == 'IntroducedDateIndex' 
+            for config in query_configs
+        )
+        
+        # Check if other GSIs can handle the date range efficiently (using BETWEEN)
+        has_date_range_aware_gsi = any(
+            config.get('range_condition') == 'between' and config.get('range_key') == 'introduced_date'
+            for config in query_configs
+        )
+        
+        # Use date range query if:
+        # - We have IntroducedDateIndex (which only uses from date, not range) - this prevents pagination issues
+        # - AND we don't have search_index or union queries (which handle date ranges themselves)
+        # - OR we have date range + no other efficient GSIs (single filter or filters that work well with Python filtering)
+        if has_introduced_date_index and not has_search_index_query and not has_union_query:
+            use_date_range_query = True
+            logger.info("✅ Using date range query approach - IntroducedDateIndex detected (prevents pagination issues)")
+        elif len(query_configs) <= 1 and has_date_range and not has_search_index_query and not has_union_query:
+            use_date_range_query = True
+            logger.info("✅ Using date range query approach for date-only or simple queries")
+        elif has_search_index_query or has_union_query:
+            logger.info("✅ Using search index/union query approach - these handle date ranges efficiently")
+    
+    if use_date_range_query:
+        return search_by_introduced_date_range(filters, limit, last_evaluated_key)
     
     # Identify which filters can use GSIs
     query_configs = identify_queryable_filters(filters)
@@ -1022,13 +1580,34 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         union_configs = politician_config.get('union_configs', [])
                         for union_config in union_configs:
                             if union_config.get('query_type') == 'search_index':
-                                bill_ids, _ = query_cosponsor_search_index(
-                                    cosponsor_name=union_config['search_value'],
-                                    limit=1000,
-                                    date_from=filters.get('introduced_date_from'),
-                                    date_to=filters.get('introduced_date_to')
-                                )
-                                all_bill_ids.update(bill_ids)
+                                # For date ranges, query_cosponsor_search_index will query each day
+                                # and return a pagination token if there are more days
+                                cosponsor_bill_ids = []
+                                cosponsor_last_key = None
+                                max_cosponsor_iterations = 50  # Limit iterations
+                                cosponsor_iteration = 0
+                                
+                                while cosponsor_iteration < max_cosponsor_iterations:
+                                    cosponsor_iteration += 1
+                                    batch_bill_ids, cosponsor_last_key = query_cosponsor_search_index(
+                                        cosponsor_name=union_config['search_value'],
+                                        limit=1000,
+                                        exclusive_start_key=cosponsor_last_key,
+                                        date_from=filters.get('introduced_date_from'),
+                                        date_to=filters.get('introduced_date_to')
+                                    )
+                                    
+                                    if not batch_bill_ids:
+                                        break
+                                    
+                                    cosponsor_bill_ids.extend(batch_bill_ids)
+                                    logger.info(f"Initial union cosponsor query iteration {cosponsor_iteration}: fetched {len(batch_bill_ids)} bill IDs (total: {len(cosponsor_bill_ids)})")
+                                    
+                                    if not cosponsor_last_key:
+                                        break
+                                
+                                all_bill_ids.update(cosponsor_bill_ids)
+                                logger.info(f"Initial union cosponsor query complete: {len(cosponsor_bill_ids)} total bill IDs")
                             elif union_config.get('index_name'):
                                 bill_ids, _ = query_gsi_for_bill_ids(
                                     index_name=union_config['index_name'],
@@ -1043,13 +1622,34 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                                 all_bill_ids.update(bill_ids)
                     elif politician_config.get('query_type') == 'search_index':
                         # Single cosponsor query
-                        bill_ids, _ = query_cosponsor_search_index(
-                            cosponsor_name=politician_config['search_value'],
-                            limit=1000,
-                            date_from=filters.get('introduced_date_from'),
-                            date_to=filters.get('introduced_date_to')
-                        )
-                        all_bill_ids.update(bill_ids)
+                        # For date ranges, query_cosponsor_search_index will query each day
+                        # and return a pagination token if there are more days
+                        cosponsor_bill_ids = []
+                        cosponsor_last_key = None
+                        max_cosponsor_iterations = 50  # Limit iterations
+                        cosponsor_iteration = 0
+                        
+                        while cosponsor_iteration < max_cosponsor_iterations:
+                            cosponsor_iteration += 1
+                            batch_bill_ids, cosponsor_last_key = query_cosponsor_search_index(
+                                cosponsor_name=politician_config['search_value'],
+                                limit=1000,
+                                exclusive_start_key=cosponsor_last_key,
+                                date_from=filters.get('introduced_date_from'),
+                                date_to=filters.get('introduced_date_to')
+                            )
+                            
+                            if not batch_bill_ids:
+                                break
+                            
+                            cosponsor_bill_ids.extend(batch_bill_ids)
+                            logger.info(f"Initial cosponsor query iteration {cosponsor_iteration}: fetched {len(batch_bill_ids)} bill IDs (total: {len(cosponsor_bill_ids)})")
+                            
+                            if not cosponsor_last_key:
+                                break
+                        
+                        all_bill_ids.update(cosponsor_bill_ids)
+                        logger.info(f"Initial cosponsor query complete: {len(cosponsor_bill_ids)} total bill IDs")
                     elif politician_config.get('index_name'):
                         # Single sponsor GSI query
                         bill_ids, _ = query_gsi_for_bill_ids(
@@ -1114,13 +1714,17 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 # Use GSI query
                 index_name = config.get('index_name', 'Unknown')
                 logger.info(f"Querying {index_name} for {config['filter_key']}={config.get('hash_value', 'N/A')}")
+                
+                # Prepare range key value (handles BETWEEN condition)
+                range_key_value, range_key_condition = prepare_range_key_value_for_query(config)
+                
                 bill_ids, _ = query_gsi_for_bill_ids(
                     index_name=index_name,
                     hash_key_name=config['hash_key'],
                     hash_key_value=config['hash_value'],
                     range_key_name=config.get('range_key'),
-                    range_key_value=config.get('range_value'),
-                    range_key_condition=config.get('range_condition'),
+                    range_key_value=range_key_value,
+                    range_key_condition=range_key_condition,
                     limit=1000,  # Get first batch
                     get_all=False
                 )
@@ -1138,12 +1742,56 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             }
             logger.info(f"Found {len(bill_ids)} bill_ids from {index_name} (first batch)")
         
-        # Find the shortest list (most restrictive filter) - this is our source of truth
-        shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['bill_ids']))
+        # Priority-based source selection
+        # Priority order (lower number = higher priority):
+        # 1. Exact matches (bill_number, bill_title) - most specific, should be source
+        # 2. Single-value filters (sponsor_party, sponsor_state, policy_area, bipartisan, bill_type, congress) - moderately specific
+        # 3. Search indices (cosponsor, sponsor via politician_name) - can have many results, need to continue querying
+        # 4. Date ranges (introduced_date, latest_action_date) - least specific, should be applied as filters, not as source
+        
+        def get_query_priority(key, config):
+            """Return priority for source selection (lower number = higher priority)"""
+            filter_key = config.get('filter_key', '')
+            query_type = config.get('query_type', '')
+            index_name = config.get('index_name', '')
+            
+            # Priority 1: Exact matches (most specific)
+            if filter_key in ['bill_number', 'bill_title']:
+                return 1
+            
+            # Priority 2: Single-value filters (moderately specific)
+            # Note: bipartisan moved to priority 3 because it can return many results
+            if filter_key in ['sponsor_party', 'sponsor_state', 'policy_area', 'bill_type', 'congress']:
+                return 2
+            
+            # Priority 3: Search indices (cosponsor, sponsor via politician_name) and bipartisan
+            # bipartisan is here because it can return many results (1000+), similar to search indices
+            if query_type == 'search_index' or filter_key == 'politician_name' or filter_key == 'bipartisan':
+                return 3
+            
+            # Priority 4: Date ranges (least specific, should be filters)
+            if filter_key in ['introduced_date', 'latest_action_date'] or index_name in ['IntroducedDateIndex', 'LatestActionDateIndex']:
+                return 4
+            
+            # Default: medium priority
+            return 5
+        
+        # Select source based on priority (lower priority number = higher priority)
+        # Among same priority, prefer shorter result sets
+        def get_source_score(key):
+            priority = get_query_priority(key, gsi_results[key]['config'])
+            result_count = len(gsi_results[key]['bill_ids'])
+            # Return tuple: (priority, result_count) - lower is better
+            return (priority, result_count)
+        
+        shortest_key = min(gsi_results.keys(), key=get_source_score)
+        source_priority = get_query_priority(shortest_key, gsi_results[shortest_key]['config'])
+        logger.info(f"Using {shortest_key} as source of truth (priority: {source_priority}, {len(gsi_results[shortest_key]['bill_ids'])} bill_ids)")
+        
         source_bill_ids = list(gsi_results[shortest_key]['bill_ids'])
         source_config = gsi_results[shortest_key]['config']
         
-        logger.info(f"Using {shortest_key} as source of truth ({len(source_bill_ids)} bill_ids)")
+        logger.info(f"Source config: index={source_config.get('index_name')}, range_condition={source_config.get('range_condition')}")
         
         # Remove the source filter from filters (we've already applied it via GSI)
         remaining_filters = filters.copy()
@@ -1151,7 +1799,66 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         if 'politician_role' in remaining_filters:
             del remaining_filters['politician_role']
         
-        # Handle politician_name filter removal
+        # Check if we have a cosponsor search index query that we should cross-reference with the source
+        # For high-priority sources (priority 1-2), if we have a cosponsor search index, use intersection
+        cosponsor_search_config = None
+        cosponsor_search_key = None
+        for key, result in gsi_results.items():
+            config = result['config']
+            if config.get('query_type') == 'search_index' and config.get('search_type') == 'COSPONSOR':
+                cosponsor_search_config = config
+                cosponsor_search_key = key
+                break
+        
+        # If we have a high-priority source and a cosponsor search index, use intersection
+        # Store cosponsor search config for use in pagination loop
+        use_cosponsor_intersection = False
+        all_cosponsor_bill_ids = None
+        if source_priority <= 2 and cosponsor_search_config:
+            use_cosponsor_intersection = True
+            logger.info(f"High-priority source ({shortest_key}) detected with cosponsor search index - using intersection approach")
+            # Get all cosponsor bill_ids by querying across all days in date range
+            cosponsor_bill_ids = gsi_results[cosponsor_search_key]['bill_ids']
+            all_cosponsor_bill_ids = set(cosponsor_bill_ids)
+            
+            # Continue querying cosponsor search index across all days in date range
+            # to ensure we get all possible matches
+            cosponsor_last_key = gsi_results[cosponsor_search_key].get('last_eval_key')
+            max_cosponsor_iterations = 50
+            cosponsor_iteration = 0
+            
+            while cosponsor_last_key is not None and cosponsor_iteration < max_cosponsor_iterations:
+                cosponsor_iteration += 1
+                batch_cosponsor_ids, cosponsor_last_key = query_cosponsor_search_index(
+                    cosponsor_name=cosponsor_search_config['search_value'],
+                    limit=1000,
+                    exclusive_start_key=cosponsor_last_key,
+                    date_from=filters.get('introduced_date_from'),
+                    date_to=filters.get('introduced_date_to')
+                )
+                
+                if not batch_cosponsor_ids:
+                    break
+                
+                # Add to all cosponsor bill_ids (union for collecting all, then we'll intersect)
+                all_cosponsor_bill_ids.update(batch_cosponsor_ids)
+                logger.info(f"Cosponsor search iteration {cosponsor_iteration}: collected {len(all_cosponsor_bill_ids)} total cosponsor bill_ids")
+                
+                if not cosponsor_last_key:
+                    break
+            
+            logger.info(f"Collected all cosponsor bill_ids: {len(all_cosponsor_bill_ids)} total")
+            # Get initial intersection with source
+            source_bill_ids = list(set(source_bill_ids) & all_cosponsor_bill_ids)
+            logger.info(f"Initial intersection: {len(source_bill_ids)} bill_ids from {len(gsi_results[shortest_key]['bill_ids'])} source × {len(all_cosponsor_bill_ids)} cosponsor")
+            
+            # Remove politician_name from remaining_filters since we've applied it via intersection
+            if 'politician_name' in remaining_filters:
+                del remaining_filters['politician_name']
+            if 'sponsor_name' in remaining_filters:
+                del remaining_filters['sponsor_name']
+        
+        # Handle politician_name filter removal (if not already removed by intersection logic)
         if source_config.get('query_type') == 'union_all_politicians':
             # All politician names have been applied, remove them all
             if 'politician_name' in remaining_filters:
@@ -1181,13 +1888,45 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
+        # Handle offset-based pagination if last_evaluated_key contains an offset
+        offset = 0
+        initial_source_last_eval_key = None
+        total_matching_items_from_previous = None
+        if last_evaluated_key and isinstance(last_evaluated_key, dict):
+            if last_evaluated_key.get('query_type') == 'multi_gsi_intersection_offset':
+                offset = last_evaluated_key.get('offset', 0)
+                # If the offset token contains a source_last_eval_key, use it to continue querying
+                # This allows us to continue querying the source even when we have items in memory
+                initial_source_last_eval_key = last_evaluated_key.get('source_last_eval_key')
+                # Store total matching items count from previous request
+                total_matching_items_from_previous = last_evaluated_key.get('total_matching_items')
+                logger.info(f"Multi-GSI intersection: applying offset {offset} to skip first {offset} items, source_last_eval_key: {initial_source_last_eval_key is not None}, total_matching_items: {total_matching_items_from_previous}")
+        
+        # If source is exhausted (source_last_eval_key is None) and offset >= total_matching_items, return no more items
+        if initial_source_last_eval_key is None and total_matching_items_from_previous is not None and offset >= total_matching_items_from_previous:
+            logger.info(f"Offset {offset} >= total matching items {total_matching_items_from_previous}, returning no more items")
+            return {
+                'success': True,
+                'results': [],
+                'count': 0,
+                'has_more': False,
+                'last_evaluated_key': None,
+                'method': 'multi_gsi_intersection',
+                'index_used': f"{len(query_configs)}_GSIs"
+            }
+        
         # Paginate through source GSI until we have enough results or it runs out
         all_matching_items = []
-        source_last_eval_key = None
+        # Use initial_source_last_eval_key if provided (from offset token), otherwise start fresh
+        source_last_eval_key = initial_source_last_eval_key
         max_pagination_rounds = 50
         pagination_round = 0
         
-        while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
+        # We need enough items to cover the offset + limit
+        # If we have an offset, we might already have items in memory from a previous request
+        # In that case, we should continue querying the source to get more items
+        # However, if source is exhausted (source_last_eval_key is None), we should only fetch once
+        while len(all_matching_items) < (offset + limit) and pagination_round < max_pagination_rounds:
             pagination_round += 1
             
             # Query source GSI/search index with pagination
@@ -1295,27 +2034,64 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 source_bill_ids_batch = list(all_bill_ids_batch)
             elif source_config.get('query_type') == 'search_index':
                 # Use search index query for cosponsors
-                source_bill_ids_batch, new_last_eval_key = query_cosponsor_search_index(
-                    cosponsor_name=source_config['search_value'],
-                    limit=1000,
-                    exclusive_start_key=source_last_eval_key,
-                    date_from=filters.get('introduced_date_from'),
-                    date_to=filters.get('introduced_date_to')
-                )
+                # For date ranges, we need to continue querying more days until we have enough filtered results
+                # or exhaust the date range. Don't fetch all bill_ids upfront - fetch in batches and filter as we go.
+                all_source_bill_ids = []
+                current_search_key = source_last_eval_key
+                max_search_iterations = 50  # Limit iterations to avoid infinite loops
+                search_iteration = 0
+                
+                # For date ranges, we need to continue querying until we have enough filtered results
+                # For non-date-range queries, fetch up to limit * 10 to account for filtering
+                target_bill_ids = limit * 10 if not (filters.get('introduced_date_from') and filters.get('introduced_date_to')) else limit * 20
+                
+                while len(all_source_bill_ids) < target_bill_ids and search_iteration < max_search_iterations:
+                    search_iteration += 1
+                    batch_limit = min(1000, target_bill_ids - len(all_source_bill_ids))
+                    batch_bill_ids, current_search_key = query_cosponsor_search_index(
+                        cosponsor_name=source_config['search_value'],
+                        limit=batch_limit,
+                        exclusive_start_key=current_search_key,
+                        date_from=filters.get('introduced_date_from'),
+                        date_to=filters.get('introduced_date_to')
+                    )
+                    
+                    if not batch_bill_ids:
+                        break
+                    
+                    all_source_bill_ids.extend(batch_bill_ids)
+                    logger.info(f"Search index pagination iteration {search_iteration}: fetched {len(batch_bill_ids)} bill IDs (total: {len(all_source_bill_ids)})")
+                    
+                    if not current_search_key:
+                        # No more items in search index (or no more days in date range)
+                        break
+                
+                source_bill_ids_batch = all_source_bill_ids
+                new_last_eval_key = current_search_key
+                logger.info(f"Search index pagination complete: {len(source_bill_ids_batch)} total bill IDs, has_more: {new_last_eval_key is not None}")
             else:
                 # Use GSI query
+                # Prepare range key value (handles BETWEEN condition)
+                range_key_value, range_key_condition = prepare_range_key_value_for_query(source_config)
+                
                 source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
                     index_name=source_config['index_name'],
                     hash_key_name=source_config['hash_key'],
                     hash_key_value=source_config['hash_value'],
                     range_key_name=source_config.get('range_key'),
-                    range_key_value=source_config.get('range_value'),
-                    range_key_condition=source_config.get('range_condition'),
+                    range_key_value=range_key_value,
+                    range_key_condition=range_key_condition,
                     limit=1000,
                     exclusive_start_key=source_last_eval_key,
                     get_all=False
                 )
             source_last_eval_key = new_last_eval_key
+            
+            # If we're using cosponsor intersection, intersect the new batch with cosponsor results
+            if use_cosponsor_intersection and all_cosponsor_bill_ids is not None:
+                original_count = len(source_bill_ids_batch)
+                source_bill_ids_batch = list(set(source_bill_ids_batch) & all_cosponsor_bill_ids)
+                logger.info(f"Intersected source batch with cosponsor results: {original_count} → {len(source_bill_ids_batch)} bill_ids")
             
             if not source_bill_ids_batch:
                 # Handle different query types for logging
@@ -1337,6 +2113,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 batch_size = limit  # Use limit (page size) for batch size
                 for i in range(0, len(source_bill_ids_batch), batch_size):
                     batch_ids = source_bill_ids_batch[i:i + batch_size]
+                    # Deduplicate batch_ids to avoid ValidationException for duplicate keys
+                    batch_ids = list(dict.fromkeys(batch_ids))  # Preserves order while removing duplicates
+                    
                     dynamodb_client = boto3.client('dynamodb')
                     # Include both bill_id (hash key) and search_index_sk (range key)
                     # For regular bill items, search_index_sk = bill_id
@@ -1368,11 +2147,27 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
             
             # Stop if source GSI ran out or we have enough results
-            if not source_last_eval_key or len(all_matching_items) >= limit:
+            # For high-priority sources (exact matches like bill_number), continue querying until we find matches
+            # with other filters OR exhaust the source. This ensures we don't miss results when intersections
+            # initially return 0.
+            if not source_last_eval_key:
+                # Source query ran out of items
+                # For high-priority sources (exact matches), if we have 0 matches, this might indicate
+                # the filters are incompatible, but we've exhausted the source so stop
+                if source_priority <= 2 and len(all_matching_items) == 0 and pagination_round == 1:
+                    logger.warning(f"⚠️ High-priority source ({shortest_key}) exhausted with 0 matches. Filters may be incompatible.")
                 break
+            elif len(all_matching_items) >= (offset + limit):
+                # We have enough filtered results (including offset)
+                break
+            elif source_priority <= 2 and len(all_matching_items) == 0:
+                # For high-priority sources (exact matches, single-value filters), continue querying
+                # even if we have 0 matches so far, to ensure we check all possible matches
+                logger.info(f"High-priority source ({shortest_key}) has 0 matches so far, continuing to query...")
+                # Continue to next iteration
         
-        # Use the collected items directly
-        items = all_matching_items[:limit]
+        # Use the collected items directly, applying offset if needed
+        items = all_matching_items[offset:offset + limit]
         
         logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
         method = 'multi_gsi_intersection'
@@ -1407,21 +2202,51 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         if enriched_results:
             logger.info(f"Enriched {len(enriched_results)} bill(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
         
+        # Determine if there are more results
+        # We have more if: (1) there are more items in all_matching_items than returned, OR (2) source query has more items
+        has_more_items = len(all_matching_items) > len(enriched_results)
+        has_more_source = source_last_eval_key is not None
+        has_more = has_more_items or has_more_source
+        
         # Convert last_evaluated_key to JSON-serializable format
         serializable_last_key = None
-        if source_last_eval_key:
-            try:
-                serializable_last_key = convert_decimal_to_float(source_last_eval_key)
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
-                serializable_last_key = None
+        if has_more:
+            # Priority: If source has more items, use that token (allows continuing to query more items)
+            # Otherwise, if we have more items in memory, use offset-based pagination
+            if has_more_source:
+                # Source query has more items - use the source pagination token
+                # This allows continuing to query more items from the source
+                try:
+                    if isinstance(source_last_eval_key, dict):
+                        # Already a dict (e.g., cosponsor_date_range token), use as-is
+                        serializable_last_key = source_last_eval_key
+                    else:
+                        serializable_last_key = convert_decimal_to_float(source_last_eval_key)
+                except Exception as e:
+                    logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+                    serializable_last_key = None
+            elif has_more_items:
+                # We have more items in memory, but source query might still have more items
+                # Store the source_last_eval_key even if it's None, so we know the source status
+                # If source_last_eval_key is not None, we can continue querying on the next request
+                # Also store total_matching_items so we can check if offset exceeds it when source is exhausted
+                serializable_last_key = {
+                    'query_type': 'multi_gsi_intersection_offset',
+                    'offset': offset + len(enriched_results),  # Total offset (previous offset + new items returned)
+                    'source_config': source_config,
+                    'query_configs': query_configs,
+                    'source_last_eval_key': source_last_eval_key,  # Store current source token (may be None if exhausted)
+                    'total_matching_items': len(all_matching_items)  # Store total count for offset validation
+                }
+        
+        logger.info(f"Multi-GSI intersection pagination: {len(enriched_results)} items returned, {len(all_matching_items)} total matching items, has_more_items: {has_more_items}, has_more_source: {has_more_source}, has_more: {has_more}")
         
         # Return results for multi-GSI intersection
         return {
             'success': True,
             'results': enriched_results,
             'count': len(enriched_results),
-            'has_more': source_last_eval_key is not None,
+            'has_more': has_more,
             'last_evaluated_key': serializable_last_key,
             'method': method,
             'index_used': index_name
@@ -1430,13 +2255,37 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # Fall back to single GSI query or scan
     # If no queryable filters, use table scan to return first page
     if not query_configs:
-        logger.info("No queryable filters found, using table scan to return first page")
+        logger.info("No queryable filters found, using table scan to return requested amount")
+        
+        # Build base filter expression
+        filter_expr = Attr('is_search_index').not_exists()  # Exclude search index items
+        
+        # Add date range filters if present
+        if filters.get('introduced_date_from') or filters.get('introduced_date_to'):
+            introduced_date_from = filters.get('introduced_date_from')
+            introduced_date_to = filters.get('introduced_date_to')
+            if introduced_date_from and introduced_date_to:
+                filter_expr = filter_expr & Attr('introduced_date').between(introduced_date_from, introduced_date_to)
+            elif introduced_date_from:
+                filter_expr = filter_expr & Attr('introduced_date').gte(introduced_date_from)
+            elif introduced_date_to:
+                filter_expr = filter_expr & Attr('introduced_date').lte(introduced_date_to)
+        
+        if filters.get('latest_action_date_from') or filters.get('latest_action_date_to'):
+            latest_action_date_from = filters.get('latest_action_date_from')
+            latest_action_date_to = filters.get('latest_action_date_to')
+            if latest_action_date_from and latest_action_date_to:
+                filter_expr = filter_expr & Attr('latest_action_date').between(latest_action_date_from, latest_action_date_to)
+            elif latest_action_date_from:
+                filter_expr = filter_expr & Attr('latest_action_date').gte(latest_action_date_from)
+            elif latest_action_date_to:
+                filter_expr = filter_expr & Attr('latest_action_date').lte(latest_action_date_to)
         
         # Build scan parameters
-        scan_limit = max(limit * 10, 1000)  # Scan more items to account for potential filtering
+        scan_limit = max(limit * 5, 500)  # Scan more items to account for potential filtering
         params = {
             'Limit': scan_limit,
-            'FilterExpression': Attr('is_search_index').not_exists()  # Exclude search index items
+            'FilterExpression': filter_expr
         }
         
         # Only use last_evaluated_key if it's a valid DynamoDB key format (not a custom format like union_offset)
@@ -1450,19 +2299,40 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 # It's a valid DynamoDB key format, use it
                 params['ExclusiveStartKey'] = last_evaluated_key
         
-        logger.info(f"Scanning bills table with Limit={scan_limit} (result limit={limit})")
-        response = bills_table.scan(**params)
+        logger.info(f"Scanning bills table with Limit={scan_limit} (result limit={limit}) to find {limit} filtered items")
         
-        # Extract items from scan
-        scanned_items = response.get('Items', [])
-        last_eval_key = response.get('LastEvaluatedKey')
-        scanned_count = response.get('ScannedCount', 0)
+        # Continue scanning until we have enough filtered items or exhaust the table
+        all_filtered_items = []
+        last_eval_key = None
+        max_scan_iterations = 20  # Limit iterations to avoid infinite loops
+        scan_iteration = 0
         
-        logger.info(f"Scan found {len(scanned_items)} items (scanned {scanned_count} total)")
+        while len(all_filtered_items) < limit and scan_iteration < max_scan_iterations:
+            scan_iteration += 1
+            response = bills_table.scan(**params)
+            
+            # Extract items from scan
+            scanned_items = response.get('Items', [])
+            last_eval_key = response.get('LastEvaluatedKey')
+            scanned_count = response.get('ScannedCount', 0)
+            
+            logger.info(f"Scan iteration {scan_iteration}: found {len(scanned_items)} items (scanned {scanned_count} total), have {len(all_filtered_items)} filtered items so far (need {limit})")
+            
+            # Apply any remaining filters in Python
+            filtered_items = [item for item in scanned_items if apply_python_filter(item, filters)]
+            all_filtered_items.extend(filtered_items)
+            
+            # Stop if we have enough filtered items or no more items to scan
+            if len(all_filtered_items) >= limit or not last_eval_key:
+                break
+            
+            # Continue scanning from where we left off
+            params['ExclusiveStartKey'] = last_eval_key
         
-        # Apply any filters in Python (even if no GSI filters, there might be non-GSI filters)
-        filtered_items = [item for item in scanned_items if apply_python_filter(item, filters)]
-        filtered_items = filtered_items[:limit]
+        # Trim to requested limit
+        filtered_items = all_filtered_items[:limit]
+        
+        logger.info(f"Scan complete: found {len(filtered_items)} filtered items after scanning (iteration {scan_iteration})")
         
         # Convert and enrich
         results = [convert_decimal_to_float(item) for item in filtered_items]
@@ -1678,15 +2548,38 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         last_eval_key = None  # Will be set after fetching items if more are available
     elif config.get('query_type') == 'search_index':
         # Use search index query for cosponsors
+        # Continue querying until we have enough filtered results or exhaust the search index
         logger.info(f"Using single cosponsor search index query: {config['search_value']}")
-        bill_ids, last_eval_key = query_cosponsor_search_index(
-            cosponsor_name=config['search_value'],
-            limit=limit * 5,  # Fetch more to account for filtering
-            exclusive_start_key=last_evaluated_key,
-            date_from=filters.get('introduced_date_from'),
-            date_to=filters.get('introduced_date_to')
-        )
+        all_bill_ids = []
+        current_last_key = last_evaluated_key
+        max_query_iterations = 20  # Limit iterations to avoid infinite loops
+        query_iteration = 0
+        
+        while len(all_bill_ids) < limit * 10 and query_iteration < max_query_iterations:
+            query_iteration += 1
+            batch_limit = min(1000, (limit * 10) - len(all_bill_ids))
+            batch_bill_ids, current_last_key = query_cosponsor_search_index(
+                cosponsor_name=config['search_value'],
+                limit=batch_limit,
+                exclusive_start_key=current_last_key,
+                date_from=filters.get('introduced_date_from'),
+                date_to=filters.get('introduced_date_to')
+            )
+            
+            if not batch_bill_ids:
+                break
+            
+            all_bill_ids.extend(batch_bill_ids)
+            logger.info(f"Search index query iteration {query_iteration}: fetched {len(batch_bill_ids)} bill IDs (total: {len(all_bill_ids)})")
+            
+            if not current_last_key:
+                # No more items in search index
+                break
+        
+        bill_ids = all_bill_ids
+        last_eval_key = current_last_key
         index_name = f"SearchIndex({config['search_type']})"
+        logger.info(f"Search index query complete: {len(bill_ids)} total bill IDs, has_more: {last_eval_key is not None}")
     else:
         # Use GSI query
         logger.info(f"Using single GSI query: {config['index_name']}")
@@ -1730,6 +2623,8 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             filtered_count = 0
             while i < len(bill_ids) and filtered_count < limit:
                 batch_ids = bill_ids[i:i + batch_size]
+                # Deduplicate batch_ids to avoid ValidationException for duplicate keys
+                batch_ids = list(dict.fromkeys(batch_ids))  # Preserves order while removing duplicates
                 
                 dynamodb_client = boto3.client('dynamodb')
                 request_items = {
@@ -1784,6 +2679,8 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             filtered_count = 0
             while i < len(bill_ids) and filtered_count < limit:
                 batch_ids = bill_ids[i:i + batch_size]
+                # Deduplicate batch_ids to avoid ValidationException for duplicate keys
+                batch_ids = list(dict.fromkeys(batch_ids))  # Preserves order while removing duplicates
                 
                 dynamodb_client = boto3.client('dynamodb')
                 # Include both bill_id (hash key) and search_index_sk (range key)
@@ -1828,18 +2725,53 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 
                 logger.info(f"Union pagination: processed {i} IDs, {filtered_count} filtered items (need {limit}), last_processed_index: {last_processed_index}")
         else:
-            # For single queries, fetch all items
-            for i in range(0, len(bill_ids), batch_size):
-                batch_ids = bill_ids[i:i + batch_size]
+            # For single queries (including search_index), fetch items and filter
+            # For search_index queries, we may need to continue querying more bill_ids if we don't have enough filtered results
+            remaining_filters_for_fetch = filters.copy()
+            if config.get('query_type') == 'search_index':
+                # For search_index queries, remove politician_name and politician_role since they're handled by the search index
+                if 'politician_name' in remaining_filters_for_fetch:
+                    del remaining_filters_for_fetch['politician_name']
+                if 'sponsor_name' in remaining_filters_for_fetch:
+                    del remaining_filters_for_fetch['sponsor_name']
+                if 'politician_role' in remaining_filters_for_fetch:
+                    del remaining_filters_for_fetch['politician_role']
+            elif config.get('filter_key') in remaining_filters_for_fetch:
+                # Remove the filter that was used in the query
+                if isinstance(remaining_filters_for_fetch[config['filter_key']], list):
+                    remaining_filters_for_fetch[config['filter_key']] = remaining_filters_for_fetch[config['filter_key']][1:]
+                    if not remaining_filters_for_fetch[config['filter_key']]:
+                        del remaining_filters_for_fetch[config['filter_key']]
+                else:
+                    del remaining_filters_for_fetch[config['filter_key']]
+            
+            # Fetch items in batches and filter as we go
+            filtered_count = 0
+            processed_bill_ids = 0
+            current_bill_ids = bill_ids.copy()
+            # For search_index queries, track the pagination key separately
+            # Initialize with the last_eval_key from the initial query
+            current_search_last_key = last_eval_key if config.get('query_type') == 'search_index' else None
+            if config.get('query_type') == 'search_index':
+                logger.info(f"Search index: starting with {len(current_bill_ids)} bill IDs, last_key: {current_search_last_key is not None}")
+            
+            while filtered_count < limit and processed_bill_ids < len(current_bill_ids):
+                # Fetch next batch of items
+                batch_start = processed_bill_ids
+                batch_end = min(processed_bill_ids + batch_size, len(current_bill_ids))
+                batch_ids = current_bill_ids[batch_start:batch_end]
+                batch_ids = list(dict.fromkeys(batch_ids))  # Deduplicate
+                
+                if not batch_ids:
+                    break
+                
                 dynamodb_client = boto3.client('dynamodb')
-                # Include both bill_id (hash key) and search_index_sk (range key)
-                # For regular bill items, search_index_sk = bill_id
                 request_items = {
                     BILLS_TABLE_NAME: {
                         'Keys': [
                             {
                                 'bill_id': {'S': str(bid)},
-                                'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                                'search_index_sk': {'S': str(bid)}
                             }
                             for bid in batch_ids
                         ]
@@ -1848,11 +2780,57 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
                 batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
                 deserializer = TypeDeserializer()
+                
                 for item in batch_items:
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    # Filter out search index items
                     if not is_search_index_item(converted_item):
-                        items.append(converted_item)
+                        if apply_python_filter(converted_item, remaining_filters_for_fetch):
+                            items.append(converted_item)
+                            filtered_count += 1
+                            if filtered_count >= limit:
+                                break
+                
+                processed_bill_ids = batch_end
+                
+                # If we have enough filtered items, stop
+                if filtered_count >= limit:
+                    break
+                
+                # For search_index queries, if we've processed all current bill_ids and don't have enough results,
+                # continue querying more bill_ids from the search index
+                if config.get('query_type') == 'search_index' and processed_bill_ids >= len(current_bill_ids) and filtered_count < limit:
+                    if current_search_last_key:
+                        # Query more bill_ids from search index
+                        logger.info(f"Search index: need more results ({filtered_count}/{limit}), querying more bill_ids...")
+                        more_bill_ids, current_search_last_key = query_cosponsor_search_index(
+                            cosponsor_name=config['search_value'],
+                            limit=1000,
+                            exclusive_start_key=current_search_last_key,
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        if more_bill_ids:
+                            current_bill_ids.extend(more_bill_ids)
+                            logger.info(f"Search index: fetched {len(more_bill_ids)} more bill IDs (total: {len(current_bill_ids)})")
+                        else:
+                            # No more items in search index
+                            current_search_last_key = None
+                            break
+                    else:
+                        # No more items in search index
+                        break
+            
+            # Update last_eval_key for search_index queries
+            if config.get('query_type') == 'search_index':
+                # We have more if: (1) we haven't processed all bill_ids, OR (2) the search index has more items
+                has_more_bill_ids = processed_bill_ids < len(current_bill_ids)
+                has_more_search_index = current_search_last_key is not None
+                if has_more_bill_ids or has_more_search_index:
+                    # Store the current search index pagination key
+                    last_eval_key = current_search_last_key
+                else:
+                    last_eval_key = None
+                logger.info(f"Search index pagination: processed {processed_bill_ids}/{len(current_bill_ids)} bill IDs, filtered {filtered_count} items, has_more: {has_more_bill_ids or has_more_search_index}")
     
     # Apply remaining filters
     remaining_filters = filters.copy()

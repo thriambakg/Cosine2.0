@@ -102,7 +102,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const formatDate = (dateString?: string): string => {
     if (!dateString) return 'N/A';
     try {
-      return new Date(dateString).toLocaleDateString('en-US', { 
+      // Parse date string directly to avoid timezone conversion issues
+      // Date strings like "2025-01-03" should be treated as local dates, not UTC
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      return date.toLocaleDateString('en-US', { 
         year: 'numeric', 
         month: 'short',
         day: 'numeric',

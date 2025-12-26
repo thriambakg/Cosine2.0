@@ -545,11 +545,21 @@ const CongressBillsSearchPage: React.FC = () => {
 
       if (response.success) {
         const results = response.results || [];
-        setAllSearchResults(results);
+        // Deduplicate results by bill_id to prevent duplicate keys in React
+        const seenBillIds = new Set<string>();
+        const uniqueResults = results.filter(bill => {
+          if (!bill.bill_id) return false; // Skip items without bill_id
+          if (seenBillIds.has(bill.bill_id)) {
+            return false;
+          }
+          seenBillIds.add(bill.bill_id);
+          return true;
+        });
+        setAllSearchResults(uniqueResults);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
         // Compute available filters from results
-        computeFiltersFromResults(results);
+        computeFiltersFromResults(uniqueResults);
         // Only reset client-side filters when new search is performed (not when restoring from sessionStorage)
         // This allows filters to persist when navigating away and back
         if (!savedState?.selectedFilters) {
@@ -609,7 +619,13 @@ const CongressBillsSearchPage: React.FC = () => {
 
       if (response.success) {
         const newResults = response.results || [];
-        const updatedResults = [...allSearchResults, ...newResults];
+        // Deduplicate results by bill_id to prevent duplicate keys in React
+        const existingBillIds = new Set(allSearchResults.map(bill => bill.bill_id).filter(Boolean));
+        const uniqueNewResults = newResults.filter(bill => {
+          if (!bill.bill_id) return false; // Skip items without bill_id
+          return !existingBillIds.has(bill.bill_id);
+        });
+        const updatedResults = [...allSearchResults, ...uniqueNewResults];
         setAllSearchResults(updatedResults);
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(response.last_evaluated_key || null);
@@ -684,7 +700,10 @@ const CongressBillsSearchPage: React.FC = () => {
     const formatDate = (dateString?: string): string => {
       if (!dateString) return '';
       try {
-        return new Date(dateString).toLocaleDateString('en-US', { 
+        // Parse date string directly to avoid timezone conversion issues
+        const [year, month, day] = dateString.split('T')[0].split('-');
+        const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        return date.toLocaleDateString('en-US', { 
           year: 'numeric', 
           month: 'short', 
           day: 'numeric' 
@@ -772,8 +791,75 @@ const CongressBillsSearchPage: React.FC = () => {
         isFiltered,
       };
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
-    } catch (error) {
-      console.error('❌ Error saving congress bills search page state:', error);
+    } catch (error: any) {
+      // Handle quota exceeded errors gracefully
+      if (error.name === 'QuotaExceededError') {
+        console.warn('⚠️ SessionStorage quota exceeded, saving state without full results...');
+        try {
+          // Save state without full results if quota is exceeded
+          // Only save minimal data needed to restore search state
+          const stateWithoutResults = {
+            searchParams,
+            // Save only bill IDs and essential fields instead of full objects to reduce size
+            allSearchResults: allSearchResults.map(bill => ({
+              bill_id: bill.bill_id,
+              bill_number: bill.bill_number,
+              bill_title: bill.bill_title,
+              introduced_date: bill.introduced_date,
+            })),
+            currentPage,
+            pageSize,
+            isSearching,
+            lastEvaluatedKey,
+            hasMore,
+            visibleColumns,
+            searchFormExpanded,
+            advancedSearchExpanded,
+            selectedFilters: {
+              bill_types: Array.from(selectedFilters.bill_types),
+              sponsor_parties: Array.from(selectedFilters.sponsor_parties),
+              sponsor_states: Array.from(selectedFilters.sponsor_states),
+              policy_areas: Array.from(selectedFilters.policy_areas),
+              congresses: Array.from(selectedFilters.congresses),
+              bipartisan: Array.from(selectedFilters.bipartisan),
+            },
+            expandedFilters,
+            // Don't save availableFilters as it can be large
+            isFiltered,
+          };
+          sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateWithoutResults));
+        } catch (retryError) {
+          console.error('❌ Failed to save state to sessionStorage even without full results:', retryError);
+          // Last resort: save only essential state
+          try {
+            const minimalState = {
+              searchParams,
+              currentPage,
+              pageSize,
+              lastEvaluatedKey,
+              hasMore,
+              visibleColumns,
+              searchFormExpanded,
+              advancedSearchExpanded,
+              selectedFilters: {
+                bill_types: Array.from(selectedFilters.bill_types),
+                sponsor_parties: Array.from(selectedFilters.sponsor_parties),
+                sponsor_states: Array.from(selectedFilters.sponsor_states),
+                policy_areas: Array.from(selectedFilters.policy_areas),
+                congresses: Array.from(selectedFilters.congresses),
+                bipartisan: Array.from(selectedFilters.bipartisan),
+              },
+              expandedFilters,
+              isFiltered,
+            };
+            sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(minimalState));
+          } catch (finalError) {
+            console.error('❌ Failed to save minimal state to sessionStorage:', finalError);
+          }
+        }
+      } else {
+        console.error('❌ Error saving congress bills search page state:', error);
+      }
     }
   }, [
     searchParams,
@@ -803,7 +889,10 @@ const CongressBillsSearchPage: React.FC = () => {
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
     try {
-      const date = new Date(dateString);
+      // Parse date string directly to avoid timezone conversion issues
+      // Date strings like "2025-01-03" should be treated as local dates, not UTC
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
       return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     } catch {
       return dateString;
@@ -1530,9 +1619,12 @@ const CongressBillsSearchPage: React.FC = () => {
                     <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Details</TableCell>
                   </TableRow>
                 </TableHead>
-                <TableBody>
-                  {paginatedResults.map((bill) => (
-                    <TableRow key={bill.bill_id} sx={{ '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.05)' } }}>
+                  <TableBody>
+                   {paginatedResults.map((bill, index) => {
+                     // Use bill_id as key, but add index as fallback for uniqueness
+                     const uniqueKey = bill.bill_id ? `${bill.bill_id}-${index}` : `bill-${index}`;
+                     return (
+                     <TableRow key={uniqueKey} sx={{ '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.05)' } }}>
                       <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
                         <Checkbox
                           checked={selectedBills.has(bill.bill_id)}
@@ -1624,7 +1716,8 @@ const CongressBillsSearchPage: React.FC = () => {
                         </Tooltip>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
                   </Table>
                 </TableContainer>

@@ -1089,7 +1089,9 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
     try {
-      const date = new Date(dateString);
+      // Parse date string directly to avoid timezone conversion issues
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
