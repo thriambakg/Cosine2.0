@@ -1580,6 +1580,37 @@ resource "aws_iam_role_policy_attachment" "chat_agent_stock_historical_s3_read_p
   policy_arn = aws_iam_policy.chat_agent_stock_historical_s3_read_policy.arn
 }
 
+# IAM Policy for Chat Agent to read from LDA Disclosures S3 Bucket (READ ONLY)
+resource "aws_iam_policy" "chat_agent_lda_disclosures_s3_read_policy" {
+  name        = "${var.project_name}-chat-agent-lda-disclosures-s3-read-${var.environment}"
+  description = "Allows Chat Agent Lambda to read from LDA disclosures S3 bucket (READ ONLY)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach LDA Disclosures S3 read policy for chat agent
+resource "aws_iam_role_policy_attachment" "chat_agent_lda_disclosures_s3_read_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.chat_agent_lda_disclosures_s3_read_policy.arn
+}
+
 # SQS policy for chat agent - REMOVED
 # SQS queues are no longer used - direct WebSocket delivery is used instead
 # The chat_agent now sends logs and responses directly via WebSocket API Gateway
