@@ -740,7 +740,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "69" # Updated for filesystem endpoint
+  deployment_trigger = "70" # Updated for filesystem endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

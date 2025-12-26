@@ -25,10 +25,24 @@ import {
   InfoOutlined as InfoIcon,
   Refresh as RefreshIcon,
   ArrowBack as ArrowBackIcon,
+  Dashboard as AddToContextIcon,
+  AddComment as NewChatIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
-import { govtContractsEnrichmentAPI, govtContractsSearchAPI } from '@/services/api';
+import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import FileBrowserDialog from './FileBrowserDialog';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
+import {
+  addAwardToContext,
+  addFilingToContext,
+  addArticleToContext,
+  addTradeToContext,
+  addBillToContext,
+  addLDAFilingToContext,
+  addStockToContext,
+} from '../tiles/common/contextManager';
 
 export type ItemType = 
   | 'govt_contract' 
@@ -80,6 +94,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
   const [enrichmentSuccess, setEnrichmentSuccess] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState<boolean>(false);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState<boolean>(false);
+  
+  const { user } = useAuth();
 
   // Utility functions
   const formatDate = (dateString?: string): string => {
@@ -254,6 +271,114 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       setEnrichmentLoading(false);
     }
   }, [data, enrichmentLoading, user_id, onEnrich]);
+
+  // Handle adding item to context (sidebar)
+  const handleAddToContext = useCallback((target: 'new' | 'sidebar') => {
+    const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
+    
+    if (!itemData) return;
+    
+    try {
+      switch (itemType) {
+        case 'govt_contract':
+          addAwardToContext(itemData, target);
+          break;
+        case 'sec_filing':
+          addFilingToContext(itemData, target);
+          break;
+        case 'news_article':
+          addArticleToContext(itemData.id, itemData.title, itemData.source_name || itemData.source_url || 'Unknown', itemData, target);
+          break;
+        case 'politician_trade':
+          addTradeToContext(itemData, target);
+          break;
+        case 'congress_bill':
+          addBillToContext(itemData, target);
+          break;
+        case 'lda_disclosure':
+          addLDAFilingToContext(itemData, target);
+          break;
+        case 'stock_result':
+          addStockToContext(itemData.symbol || 'Unknown', itemData, target);
+          break;
+        default:
+          console.warn(`Unknown item type: ${itemType}`);
+      }
+    } catch (error) {
+      console.error('Error adding item to context:', error);
+    }
+  }, [data, itemType]);
+
+  // Handle adding item to files
+  const handleAddToFiles = useCallback(() => {
+    if (!user) {
+      alert('Please log in to save items to files');
+      return;
+    }
+    setFileBrowserOpen(true);
+  }, [user]);
+
+  // Handle file browser selection
+  const handleFileBrowserSelect = useCallback(async (folderPath: string) => {
+    if (!user) return;
+    
+    const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
+    if (!itemData) return;
+    
+    try {
+      let title = '';
+      let itemTypeForFiles: string = itemType;
+      
+      switch (itemType) {
+        case 'govt_contract':
+          title = `${itemData.awarding_agency_name || 'Unknown Agency'} - ${itemData.recipient_name || 'Unknown Recipient'}`;
+          itemTypeForFiles = 'govt_contract';
+          break;
+        case 'sec_filing':
+          title = `${itemData.form || 'SEC Filing'} - ${itemData.filingEntity || itemData.reportingFor || 'Unknown Entity'}`;
+          itemTypeForFiles = 'sec_filing';
+          break;
+        case 'news_article':
+          title = itemData.title || 'News Article';
+          itemTypeForFiles = 'news_article';
+          break;
+        case 'politician_trade':
+          title = `${itemData.politicianName || 'Unknown'} - ${itemData.securitySymbol || itemData.securityName || 'Trade'}`;
+          itemTypeForFiles = 'politician_trade';
+          break;
+        case 'congress_bill':
+          title = itemData.title || itemData.billNumber || 'Congress Bill';
+          itemTypeForFiles = 'congress_bill';
+          break;
+        case 'lda_disclosure':
+          title = itemData.registrant_name 
+            ? `LDA Filing - ${itemData.registrant_name}${itemData.client_name ? ` / ${itemData.client_name}` : ''}`
+            : 'LDA Filing';
+          itemTypeForFiles = 'lda_disclosure';
+          break;
+        case 'stock_result':
+          title = `${itemData.symbol || 'Stock'} - ${itemData.name || 'Stock Data'}`;
+          itemTypeForFiles = 'stock_result';
+          break;
+        default:
+          title = title || 'Item';
+      }
+      
+      await filesystemAPI.addContextItem({
+        user_id: user.id,
+        folder_path: folderPath,
+        context_data: itemData, // Full item data
+        title: title,
+        item_type: itemTypeForFiles as any,
+      });
+      
+      console.log(`✅ Saved item to filesystem: ${title}`);
+      setFileBrowserOpen(false);
+    } catch (error) {
+      console.error('Error saving item to filesystem:', error);
+      alert('Failed to save item to files. Please try again.');
+    }
+  }, [user, data, itemType]);
 
   // Handle download for SEC filings and politician trades
   const handleDownloadFile = useCallback(async (s3Key: string, filename: string, bucket: string = 'SEC_FILINGS') => {
@@ -1306,14 +1431,10 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       const obligatedAmount = itemData?.combined_obligated_amount || 
                              itemData?.total_obligated_amount || 
                              itemData?.total_obligation || 0;
+      // Check multiple field names for outlayed amount (different API versions use different field names)
       const outlayedAmount = parseFloat(itemData?.total_outlayed_amount_for_overall_award as string) || 
-                            parseFloat(itemData?.total_outlay as string) || 0;
-      const totalOutlay = parseFloat(itemData?.total_outlay as string) || 
-                         parseFloat(itemData?.total_account_outlay as string) || 
-                         outlayedAmount;
-      const totalAccountObligation = parseFloat(itemData?.total_account_obligation as string) || 0;
-      const totalAccountOutlay = parseFloat(itemData?.total_account_outlay as string) || 0;
-      const totalSubawardAmount = parseFloat(itemData?.total_subaward_amount as string) || 0;
+                            parseFloat(itemData?.total_outlay as string) || 
+                            parseFloat(itemData?.total_account_outlay as string) || 0;
       const nonFederalFunding = parseFloat(itemData?.total_non_federal_funding_amount as string) || 0;
       const totalFunding = obligatedAmount;
       
@@ -1393,11 +1514,29 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   const elapsedDays = (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
                   const progressPercent = Math.max(0, Math.min(100, (elapsedDays / totalDays) * 100));
                   
+                  // Calculate years remaining for "In Progress" text
+                  const remainingDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+                  const yearsRemaining = Math.floor(remainingDays / 365);
+                  
                   return (
                     <Box>
-                      <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
-                        Dates
-                      </Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '12px' }}>
+                          Dates
+                        </Typography>
+                        {remainingDays > 0 && (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>
+                              In Progress
+                            </Typography>
+                            {yearsRemaining > 0 && (
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                                ({yearsRemaining} {yearsRemaining === 1 ? 'year' : 'years'} remain)
+                              </Typography>
+                            )}
+                          </Box>
+                        )}
+                      </Box>
                       {/* Progress Bar */}
                       <Box sx={{ mb: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         <svg width="304" height="40">
@@ -1459,22 +1598,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 const barHeight = 50;
                 const barY = 160;
                 
-                const maxAmount = Math.max(obligatedAmount, totalOutlay, totalAccountObligation);
                 const obligatedWidth = chartWidth;
-                const outlayedWidth = maxAmount > 0 ? (outlayedAmount / maxAmount) * chartWidth : 0;
-                const totalOutlayWidth = maxAmount > 0 ? (totalOutlay / maxAmount) * chartWidth : 0;
-                const totalAccountObligationWidth = maxAmount > 0 ? (totalAccountObligation / maxAmount) * chartWidth : 0;
+                const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
                 
                 return (
-                  <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'visible' }}>
+                  <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'hidden' }}>
                     <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth}px` }}>
-                      {/* Background bar */}
                       <rect x="0" y={barY} width={chartWidth} height={barHeight} fill="#dce4ee" rx="5" ry="5" />
-                      
-                      {/* Obligated amount bar */}
                       <rect x="0" y={barY + 5} width={obligatedWidth} height={barHeight - 10} fill="#4773aa" rx="5" ry="5" />
-                      
-                      {/* Outlayed amount bar (overlay) */}
                       {outlayedAmount > 0 && (
                         <rect 
                           x="0" 
@@ -1487,39 +1618,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           opacity="0.8"
                         />
                       )}
-                      
-                      {/* Total Outlay - Green line with flag pointing left */}
-                      {totalOutlay > 0 && totalOutlayWidth > 0 && (
-                        <>
-                          <line 
-                            x1={totalOutlayWidth} 
-                            y1={barY - 20} 
-                            x2={totalOutlayWidth} 
-                            y2={barY + barHeight + 20} 
-                            stroke="#10b981" 
-                            strokeWidth="3"
-                            strokeDasharray="5,5"
-                          />
-                          {/* Flag pointing left */}
-                          <polygon 
-                            points={`${totalOutlayWidth},${barY - 20} ${totalOutlayWidth - 15},${barY - 10} ${totalOutlayWidth},${barY}`}
-                            fill="#10b981"
-                          />
-                          {/* Flag label box */}
-                          {totalOutlayWidth > 100 && (
-                            <foreignObject width="120" height="50" x={totalOutlayWidth - 130} y={barY - 50}>
-                              <Box sx={{ textAlign: 'right', backgroundColor: 'rgba(16, 185, 129, 0.95)', padding: '6px 10px', borderRadius: '4px', border: '1px solid #10b981' }}>
-                                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '14px' }}>
-                                  {formatCurrency(totalOutlay)}
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: '#d1fae5', fontSize: '11px' }}>Total Outlay</Typography>
-                              </Box>
-                            </foreignObject>
-                          )}
-                        </>
-                      )}
-                      
-                      {/* Obligated amount line marker */}
                       <line 
                         x1={obligatedWidth} 
                         y1={90} 
@@ -1528,8 +1626,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         stroke="#4773aa" 
                         strokeWidth="4"
                       />
-                      
-                      {/* Outlayed amount line marker */}
                       {outlayedAmount > 0 && outlayedWidth < obligatedWidth && (
                         <line 
                           x1={outlayedWidth} 
@@ -1540,8 +1636,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           strokeWidth="4"
                         />
                       )}
-                      
-                      {/* Outlayed amount label (inside bar) */}
                       {outlayedAmount > 0 && outlayedWidth > 50 && (
                         <foreignObject width={outlayedWidth} height="70" x="0" y={90}>
                           <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px', maxWidth: `${outlayedWidth}px` }}>
@@ -1552,8 +1646,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           </Box>
                         </foreignObject>
                       )}
-                      
-                      {/* Obligated amount label (right side) */}
                       <foreignObject width={chartWidth} height="70" x="-8" y={90}>
                         <Box sx={{ float: 'right', textAlign: 'right', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
                           <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
@@ -1562,8 +1654,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           <Typography variant="caption" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
                         </Box>
                       </foreignObject>
-                      
-                      {/* Total Funding label (bottom) */}
                       <foreignObject width={chartWidth} height="60" x="0" y={300}>
                         <Box sx={{ float: 'right', textAlign: 'right', padding: '4px 8px' }}>
                           <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
@@ -1612,78 +1702,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   {formatCurrency(obligatedAmount)}
                 </Typography>
               </Box>
-              {totalOutlay > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#10b981', border: '1px dashed #10b981' }} />
-                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Outlay</Typography>
-                    <Tooltip
-                      title="The total amount of money that has been outlayed (paid out) for this award."
-                      arrow
-                      placement="top"
-                    >
-                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
-                    </Tooltip>
-                  </Box>
-                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                    {formatCurrency(totalOutlay)}
-                  </Typography>
-                </Box>
-              )}
-              {totalAccountObligation > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#3b82f6' }} />
-                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Account Obligation</Typography>
-                    <Tooltip
-                      title="The total obligation amount for the account associated with this award."
-                      arrow
-                      placement="top"
-                    >
-                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
-                    </Tooltip>
-                  </Box>
-                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                    {formatCurrency(totalAccountObligation)}
-                  </Typography>
-                </Box>
-              )}
-              {totalAccountOutlay > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#10b981' }} />
-                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Account Outlay</Typography>
-                    <Tooltip
-                      title="The total outlay amount for the account associated with this award."
-                      arrow
-                      placement="top"
-                    >
-                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
-                    </Tooltip>
-                  </Box>
-                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                    {formatCurrency(totalAccountOutlay)}
-                  </Typography>
-                </Box>
-              )}
-              {totalSubawardAmount > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#8b5cf6' }} />
-                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Subaward Amount</Typography>
-                    <Tooltip
-                      title="The total amount of subawards associated with this award."
-                      arrow
-                      placement="top"
-                    >
-                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
-                    </Tooltip>
-                  </Box>
-                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                    {formatCurrency(totalSubawardAmount)}
-                  </Typography>
-                </Box>
-              )}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: 'rgba(71, 115, 170, 0.3)' }} />
@@ -3253,31 +3271,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   </Box>
                 )}
                 
-                {(() => {
-                  const startDate = itemDataForHeader?.period_of_performance_start_date || itemDataForHeader?.period_start_date;
-                  const endDate = itemDataForHeader?.period_of_performance_current_end_date || 
-                                (itemDataForHeader?.award_or_idv_flag === 'IDV' ? itemDataForHeader?.ordering_period_end_date : null) ||
-                                itemDataForHeader?.period_end_date;
-                  if (!startDate || !endDate) return null;
-                  
-                  const end = new Date(endDate);
-                  const now = new Date();
-                  const remainingDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-                  const yearsRemaining = Math.floor(remainingDays / 365);
-                  
-                  return (
-                    <>
-                      <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>
-                        In Progress
-                      </Typography>
-                      {yearsRemaining > 0 && (
-                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                          ({yearsRemaining} {yearsRemaining === 1 ? 'year' : 'years'} remain)
-                        </Typography>
-                      )}
-                    </>
-                  );
-                })()}
               </Box>
             </Box>
           </Box>
@@ -3462,31 +3455,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 </Box>
               )}
               
-              {(() => {
-                const startDate = itemData?.period_of_performance_start_date || itemData?.period_start_date;
-                const endDate = itemData?.period_of_performance_current_end_date || 
-                              (itemData?.award_or_idv_flag === 'IDV' ? itemData?.ordering_period_end_date : null) ||
-                              itemData?.period_end_date;
-                if (!startDate || !endDate) return null;
-                
-                const end = new Date(endDate);
-                const now = new Date();
-                const remainingDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-                const yearsRemaining = Math.floor(remainingDays / 365);
-                
-                return (
-                  <>
-                    <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>
-                      In Progress
-                    </Typography>
-                    {yearsRemaining > 0 && (
-                      <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                        ({yearsRemaining} {yearsRemaining === 1 ? 'year' : 'years'} remain)
-                      </Typography>
-                    )}
-                  </>
-                );
-              })()}
             </Box>
           </Box>
           );
@@ -3510,12 +3478,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
               Filing Details: {data?.form || 'Filing'} - {data?.filingEntity || data?.reportingFor || 'SEC Filing'}
             </Typography>
-            <IconButton
-              onClick={onClose}
-              sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
-            >
-              <CloseIcon />
-            </IconButton>
           </Box>
         )}
         {!['govt_contract', 'congress_bill', 'sec_filing'].includes(itemType) && (
@@ -3523,6 +3485,73 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             {title || 'Item Details'}
           </Typography>
         )}
+        
+        {/* Universal Action Bar - Right side (appears for all item types) */}
+        <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {/* Add to Context (Sidebar) */}
+          <Tooltip title="Add to Context">
+            <IconButton
+              size="small"
+              onClick={() => handleAddToContext('sidebar')}
+              sx={{
+                color: '#9ca3af',
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              <AddToContextIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          
+          {/* Add to New Chat */}
+          <Tooltip title="Add to New Chat">
+            <IconButton
+              size="small"
+              onClick={() => handleAddToContext('new')}
+              sx={{
+                color: '#9ca3af',
+                '&:hover': {
+                  color: '#10b981',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              <NewChatIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          
+          {/* Add to Files */}
+          <Tooltip title="Save to Files">
+            <IconButton
+              size="small"
+              onClick={handleAddToFiles}
+              disabled={!user}
+              sx={{
+                color: '#fbbf24',
+                '&:hover': {
+                  color: '#f59e0b',
+                  backgroundColor: 'rgba(251, 191, 36, 0.1)',
+                },
+                '&:disabled': {
+                  color: '#6b7280',
+                },
+              }}
+            >
+              <FolderIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          
+          {/* Close Button */}
+          <IconButton
+            size="small"
+            onClick={onClose}
+            sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
       </DialogTitle>
       <DialogContent
         sx={{
@@ -3583,6 +3612,15 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           Close
         </Button>
       </DialogActions>
+      
+      {/* File Browser Dialog for saving items to files */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        allowCreateFolder={true}
+        title="Save to Files"
+      />
     </Dialog>
   );
 };

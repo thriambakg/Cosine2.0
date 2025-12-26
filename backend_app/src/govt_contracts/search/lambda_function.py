@@ -11,6 +11,7 @@ import boto3
 import gzip
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
+from datetime import datetime
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
 
@@ -1164,6 +1165,150 @@ def get_single_award(award_id: str) -> Dict[str, Any]:
         }
 
 
+def search_by_obligation_range(table, filters: Dict[str, Any], max_results: int = 1000) -> List[Dict[str, Any]]:
+    """
+    Search for awards by obligation range using GSI queries for multiple fiscal years.
+    This is more efficient than scanning the entire table.
+    
+    For obligation-only searches (without fiscal_year), we query multiple fiscal years
+    using FiscalYearObligationIndex with the obligation range as the range key condition.
+    
+    Args:
+        table: DynamoDB table resource
+        filters: Filters including min_obligation and/or max_obligation
+        max_results: Maximum number of results to return
+    
+    Returns:
+        List of deduplicated award records
+    """
+    all_results = []
+    seen_award_ids = set()
+    
+    min_obligation = filters.get('min_obligation')
+    max_obligation = filters.get('max_obligation')
+    
+    if min_obligation is None and max_obligation is None:
+        logger.warning("⚠️ search_by_obligation_range called without obligation filters")
+        return []
+    
+    # Query recent fiscal years (start with most recent 5 years, expand if needed)
+    # Query in reverse order (most recent first) since recent years are more likely to have larger obligations
+    current_year = datetime.now().year
+    # Start with most recent 5 years, we can expand if needed
+    fiscal_years_to_query = list(range(current_year, current_year - 5, -1))  # Reverse order: 2025, 2024, ..., 2021
+    
+    logger.info(f"💰 Querying {len(fiscal_years_to_query)} fiscal years ({fiscal_years_to_query[-1]}-{fiscal_years_to_query[0]}) for obligation range")
+    
+    # Build range key condition for obligation
+    from decimal import Decimal
+    
+    # Query each fiscal year (stop early if we have enough results)
+    for fiscal_year in fiscal_years_to_query:
+        # Early exit if we already have enough results
+        if len(all_results) >= max_results:
+            logger.info(f"🛑 Stopping fiscal year queries - already have {len(all_results)} results")
+            break
+        try:
+            # Build key condition with obligation range
+            # Note: FiscalYearObligationIndex uses total_obligated_amount as the range key
+            key_condition = Key('fiscal_year').eq(fiscal_year)
+            
+            if min_obligation is not None and max_obligation is not None:
+                key_condition = key_condition & Key('total_obligated_amount').between(
+                    Decimal(str(min_obligation)), 
+                    Decimal(str(max_obligation))
+                )
+            elif min_obligation is not None:
+                key_condition = key_condition & Key('total_obligated_amount').gte(Decimal(str(min_obligation)))
+            elif max_obligation is not None:
+                key_condition = key_condition & Key('total_obligated_amount').lte(Decimal(str(max_obligation)))
+            
+            # Calculate how many more results we need
+            remaining_needed = max_results - len(all_results)
+            if remaining_needed <= 0:
+                break
+            
+            # Query enough items to get good distribution across the obligation range
+            # Since we're querying in descending order, we need to fetch more to get items across the full range
+            # For range queries (min and max), fetch more to ensure we get distribution
+            if min_obligation is not None and max_obligation is not None:
+                # For range queries, fetch more items to get better distribution
+                query_limit = min(remaining_needed + 200, 1000)  # Larger buffer for range queries
+            else:
+                # For single-bound queries, smaller buffer is fine
+                query_limit = min(remaining_needed + 50, 500)
+            
+            query_kwargs = {
+                'IndexName': 'FiscalYearObligationIndex',
+                'KeyConditionExpression': key_condition,
+                'Limit': query_limit,
+                'ScanIndexForward': False  # Descending order (largest obligations first)
+            }
+            
+            response = table.query(**query_kwargs)
+            gsi_items = response.get('Items', [])
+            
+            # Extract award_ids from GSI results (GSI may be KEYS_ONLY)
+            # Only extract as many as we need (recalculate in case we got more items than needed)
+            remaining_needed = max_results - len(all_results)
+            if remaining_needed <= 0:
+                break
+                
+            award_ids_batch = []
+            for item in gsi_items:
+                if len(award_ids_batch) >= remaining_needed:
+                    break
+                award_id = item.get('award_id')
+                if award_id and award_id not in seen_award_ids:
+                    seen_award_ids.add(award_id)
+                    award_ids_batch.append(award_id)
+            
+            # Fetch full items using BatchGetItem if we have award_ids
+            if award_ids_batch:
+                batch_size = 100
+                for i in range(0, len(award_ids_batch), batch_size):
+                    # Check if we still need more results before fetching this batch
+                    if len(all_results) >= max_results:
+                        break
+                        
+                    batch_ids = award_ids_batch[i:i + batch_size]
+                    try:
+                        dynamodb_client = boto3.client('dynamodb')
+                        request_items = {
+                            AWARDS_TABLE_NAME: {
+                                'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                            }
+                        }
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                        
+                        # Convert DynamoDB format to Python dict using TypeDeserializer
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            all_results.append(converted_item)
+                            
+                            # Stop immediately if we've reached max results
+                            if len(all_results) >= max_results:
+                                logger.info(f"🛑 Reached maximum results limit: {max_results}")
+                                break
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error fetching full items for fiscal year {fiscal_year}: {e}")
+                        continue
+            
+            # Check again after fetching items
+            if len(all_results) >= max_results:
+                logger.info(f"🛑 Stopping fiscal year queries - have {len(all_results)} results")
+                break
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error querying fiscal year {fiscal_year}: {e}")
+            continue
+    
+    logger.info(f"✅ Obligation range search complete: {len(all_results)} total deduplicated results")
+    return all_results
+
+
 def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search awards in DynamoDB using filters with multi-GSI intersection approach
@@ -1185,6 +1330,93 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     """
     if not awards_table:
         raise Exception("DynamoDB awards table not initialized")
+    
+    # Check if this is an obligation-only search (no fiscal_year, no other GSI hash keys)
+    has_obligation_filter = filters.get('min_obligation') is not None or filters.get('max_obligation') is not None
+    has_fiscal_year = filters.get('fiscal_year') is not None
+    has_other_gsi_hash_keys = any([
+        filters.get('awarding_agency_code'),
+        filters.get('recipient_location_state'),
+        filters.get('recipient_name_normalized'),
+        filters.get('naics_code'),
+        filters.get('psc_code'),
+    ])
+    
+    # If we have obligation filter but no fiscal_year and no other GSI hash keys, use efficient obligation range query
+    if has_obligation_filter and not has_fiscal_year and not has_other_gsi_hash_keys:
+        logger.info("✅ Obligation-only search detected, using efficient GSI fiscal-year-by-fiscal-year query approach")
+        
+        # Use the obligation range search approach
+        # For range queries (both min and max), fetch more items to get better distribution across the range
+        # When querying in descending order, limiting too much only returns items near the max
+        if filters.get('min_obligation') is not None and filters.get('max_obligation') is not None:
+            # Range query - fetch more to get distribution across the range
+            fetch_limit = max(limit * 20, 1000)  # Fetch 20x the limit or at least 1000 for range queries
+        else:
+            # Single-bound query - smaller fetch is fine
+            fetch_limit = max(limit * 5, 250)
+        all_items = search_by_obligation_range(awards_table, filters, max_results=fetch_limit)
+        
+        # Sort by total_obligation descending (largest first), then by award_id for stability
+        all_items.sort(key=lambda x: (
+            float(x.get('total_obligation', 0) or x.get('total_obligated_amount', 0) or 0),
+            x.get('award_id', '')
+        ), reverse=True)
+        
+        # Apply cursor-based pagination if cursor provided
+        if last_evaluated_key:
+            # Find the position in the sorted list based on the cursor
+            cursor_obligation = float(last_evaluated_key.get('total_obligation', 0) or 0)
+            cursor_award_id = last_evaluated_key.get('award_id', '')
+            
+            # Find the index to start from
+            start_index = 0
+            for idx, item in enumerate(all_items):
+                item_obligation = float(item.get('total_obligation', 0) or item.get('total_obligated_amount', 0) or 0)
+                item_award_id = item.get('award_id', '')
+                
+                if item_obligation < cursor_obligation or (item_obligation == cursor_obligation and item_award_id <= cursor_award_id):
+                    start_index = idx + 1
+                    break
+            
+            all_items = all_items[start_index:]
+        
+        # Apply other filters (date ranges, etc.) in Python
+        if all_items:
+            other_filters = {k: v for k, v in filters.items() if k not in ['min_obligation', 'max_obligation']}
+            if other_filters:
+                filtered_items = [item for item in all_items if apply_python_filter(item, other_filters)]
+                all_items = filtered_items
+        
+        # Limit results
+        items = all_items[:limit]
+        
+        # Determine if there are more results
+        has_more = len(all_items) > limit
+        last_eval_key = None
+        if has_more and items:
+            last_item = items[-1]
+            last_eval_key = {
+                'award_id': last_item.get('award_id'),
+                'total_obligation': last_item.get('total_obligation') or last_item.get('total_obligated_amount', 0)
+            }
+        
+        # Convert Decimal to float and bytes for JSON serialization
+        results = [convert_decimal_to_float(item) for item in items]
+        
+        # Enrich results - reuse the same enrichment logic from the normal flow below
+        # For now, just return the results (enrichment will be handled in the normal flow if needed)
+        # The items from GSI query are already full items (not KEYS_ONLY), so we can use them directly
+        
+        return {
+            'success': True,
+            'results': results,
+            'count': len(results),
+            'has_more': has_more,
+            'last_evaluated_key': convert_decimal_to_float(last_eval_key) if last_eval_key else None,
+            'method': 'obligation_range_query',
+            'index_used': 'FiscalYearObligationIndex'
+        }
     
     # Identify which filters can use GSIs
     query_configs = identify_queryable_filters(filters)
@@ -1766,73 +1998,73 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     if not skip_normal_fetch:
         items = []
         if award_ids:
-        batch_size = 100
-        for i in range(0, len(award_ids), batch_size):
-            batch_ids = award_ids[i:i + batch_size]
-            
-            try:
-                # Use table resource's batch_get_item (simpler than client)
-                # Build keys for batch_get_item
-                keys = [{'award_id': award_id} for award_id in batch_ids]
+            batch_size = 100
+            for i in range(0, len(award_ids), batch_size):
+                batch_ids = award_ids[i:i + batch_size]
                 
-                # Use the table's batch_get_item method
-                # Note: boto3 resource doesn't have a direct batch_get_item, so we use the client
-                # But we can use get_item in a loop or use the client's batch_get_item
-                # For efficiency, we'll use the client's batch_get_item and convert manually
-                dynamodb_client = boto3.client('dynamodb')
-                
-                # Build request items
-                request_items = {
-                    AWARDS_TABLE_NAME: {
-                        'Keys': [{'award_id': {'S': str(award_id)}} for award_id in batch_ids]
+                try:
+                    # Use table resource's batch_get_item (simpler than client)
+                    # Build keys for batch_get_item
+                    keys = [{'award_id': award_id} for award_id in batch_ids]
+                    
+                    # Use the table's batch_get_item method
+                    # Note: boto3 resource doesn't have a direct batch_get_item, so we use the client
+                    # But we can use get_item in a loop or use the client's batch_get_item
+                    # For efficiency, we'll use the client's batch_get_item and convert manually
+                    dynamodb_client = boto3.client('dynamodb')
+                    
+                    # Build request items
+                    request_items = {
+                        AWARDS_TABLE_NAME: {
+                            'Keys': [{'award_id': {'S': str(award_id)}} for award_id in batch_ids]
+                        }
                     }
-                }
-                
-                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                
-                # Extract items from response
-                batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
-                
-                # Convert DynamoDB format to Python dict using TypeDeserializer
-                deserializer = TypeDeserializer()
-                for item in batch_items:
-                    # Convert entire item using deserializer
-                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    items.append(converted_item)
-                
-                # Handle unprocessed keys (throttling) - retry once
-                unprocessed = batch_response.get('UnprocessedKeys', {})
-                if unprocessed:
-                    unprocessed_keys = unprocessed.get(AWARDS_TABLE_NAME, {}).get('Keys', [])
-                    if unprocessed_keys:
-                        logger.warning(f"Unprocessed keys in batch {i//batch_size + 1}: {len(unprocessed_keys)} items, retrying...")
-                        # Extract award_ids from unprocessed keys
-                        retry_ids = []
-                        for key_dict in unprocessed_keys:
-                            if 'award_id' in key_dict and 'S' in key_dict['award_id']:
-                                retry_ids.append(key_dict['award_id']['S'])
-                        
-                        if retry_ids:
-                            # Retry with a small delay
-                            time.sleep(0.1)
-                            retry_request = {
-                                AWARDS_TABLE_NAME: {
-                                    'Keys': [{'award_id': {'S': str(aid)}} for aid in retry_ids]
-                                }
-                            }
-                            retry_response = dynamodb_client.batch_get_item(RequestItems=retry_request)
-                            retry_items = retry_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                    
+                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                    
+                    # Extract items from response
+                    batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                    
+                    # Convert DynamoDB format to Python dict using TypeDeserializer
+                    deserializer = TypeDeserializer()
+                    for item in batch_items:
+                        # Convert entire item using deserializer
+                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                        items.append(converted_item)
+                    
+                    # Handle unprocessed keys (throttling) - retry once
+                    unprocessed = batch_response.get('UnprocessedKeys', {})
+                    if unprocessed:
+                        unprocessed_keys = unprocessed.get(AWARDS_TABLE_NAME, {}).get('Keys', [])
+                        if unprocessed_keys:
+                            logger.warning(f"Unprocessed keys in batch {i//batch_size + 1}: {len(unprocessed_keys)} items, retrying...")
+                            # Extract award_ids from unprocessed keys
+                            retry_ids = []
+                            for key_dict in unprocessed_keys:
+                                if 'award_id' in key_dict and 'S' in key_dict['award_id']:
+                                    retry_ids.append(key_dict['award_id']['S'])
                             
-                            # Convert retry items using deserializer
-                            deserializer = TypeDeserializer()
-                            for item in retry_items:
-                                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                                items.append(converted_item)
-            
-            except Exception as e:
-                logger.error(f"Error in BatchGetItem for batch {i//batch_size + 1}: {str(e)}", exc_info=True)
-                # Continue with other batches even if one fails
-                continue
+                            if retry_ids:
+                                # Retry with a small delay
+                                time.sleep(0.1)
+                                retry_request = {
+                                    AWARDS_TABLE_NAME: {
+                                        'Keys': [{'award_id': {'S': str(aid)}} for aid in retry_ids]
+                                    }
+                                }
+                                retry_response = dynamodb_client.batch_get_item(RequestItems=retry_request)
+                                retry_items = retry_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                                
+                                # Convert retry items using deserializer
+                                deserializer = TypeDeserializer()
+                                for item in retry_items:
+                                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                                    items.append(converted_item)
+                
+                except Exception as e:
+                    logger.error(f"Error in BatchGetItem for batch {i//batch_size + 1}: {str(e)}", exc_info=True)
+                    # Continue with other batches even if one fails
+                    continue
         
         logger.info(f"Fetched {len(items)} full award item(s) from main table using BatchGetItem")
     
