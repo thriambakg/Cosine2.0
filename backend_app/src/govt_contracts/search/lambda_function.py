@@ -1624,34 +1624,124 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     last_eval_key = response.get('LastEvaluatedKey')
     scanned_count = response.get('ScannedCount', 0)
     
-    # For scans, if we didn't find enough results and there are more items, continue scanning
-    if method == 'scan' and scan_limit is not None and len(gsi_items) < limit and last_eval_key and scanned_count > 0:
-        # Continue scanning if we haven't found enough results
-        # Limit the number of continuation scans to avoid infinite loops
-        max_continuation_scans = 10
+    # For scans, we need to continue scanning until we have enough FILTERED results
+    # This is different from queries - we need to fetch, filter, and check filtered count
+    if method == 'scan' and scan_limit is not None:
+        # For scans, we need to fetch items, apply filters, and continue until we have enough filtered results
+        # This requires a different approach: scan -> fetch -> filter -> check -> repeat if needed
+        max_continuation_scans = 20  # Increased limit for scans since filtering may reduce results significantly
         continuation_count = 0
+        all_scanned_items = list(gsi_items)  # Keep track of all scanned items
+        filtered_items_so_far = []  # Track filtered items across batches
         
-        while len(gsi_items) < limit and last_eval_key and continuation_count < max_continuation_scans:
+        # First, fetch and filter the initial batch
+        if gsi_items:
+            # Extract award_ids from initial batch
+            initial_award_ids = [item.get('award_id') for item in gsi_items if item.get('award_id')]
+            
+            # Fetch full items for initial batch
+            if initial_award_ids:
+                batch_size = 100
+                initial_items = []
+                for i in range(0, len(initial_award_ids), batch_size):
+                    batch_ids = initial_award_ids[i:i + batch_size]
+                    try:
+                        dynamodb_client = boto3.client('dynamodb')
+                        request_items = {
+                            AWARDS_TABLE_NAME: {
+                                'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                            }
+                        }
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            initial_items.append(converted_item)
+                    except Exception as e:
+                        logger.error(f"Error fetching initial batch: {str(e)}", exc_info=True)
+                        continue
+                
+                # Apply filters to initial batch
+                if initial_items and filter_filters:
+                    for item in initial_items:
+                        if apply_python_filter(item, filter_filters):
+                            filtered_items_so_far.append(item)
+                elif initial_items:
+                    # No filters, all items pass
+                    filtered_items_so_far.extend(initial_items)
+        
+        # Continue scanning until we have enough filtered results
+        while len(filtered_items_so_far) < limit and last_eval_key and continuation_count < max_continuation_scans:
             continuation_count += 1
-            logger.info(f"Continuing scan (iteration {continuation_count}/{max_continuation_scans}), found {len(gsi_items)} items so far, scanned {scanned_count} total")
+            logger.info(f"Continuing scan (iteration {continuation_count}/{max_continuation_scans}), found {len(filtered_items_so_far)} filtered items so far (need {limit}), scanned {scanned_count} total items")
             
             # Continue scan from last evaluated key
             continuation_params = params.copy()
             continuation_params['ExclusiveStartKey'] = last_eval_key
-            continuation_params['Limit'] = scan_limit  # Use the same scan limit
+            continuation_params['Limit'] = scan_limit
             
             continuation_response = awards_table.scan(**continuation_params)
             continuation_items = continuation_response.get('Items', [])
             last_eval_key = continuation_response.get('LastEvaluatedKey')
             scanned_count += continuation_response.get('ScannedCount', 0)
             
-            gsi_items.extend(continuation_items)
+            all_scanned_items.extend(continuation_items)
             
-            # Stop if we have enough results or no more items
-            if len(gsi_items) >= limit or not last_eval_key:
+            if not continuation_items:
+                logger.info("No more items in scan, stopping")
+                break
+            
+            # Fetch full items for this batch
+            continuation_award_ids = [item.get('award_id') for item in continuation_items if item.get('award_id')]
+            if continuation_award_ids:
+                batch_size = 100
+                continuation_full_items = []
+                for i in range(0, len(continuation_award_ids), batch_size):
+                    batch_ids = continuation_award_ids[i:i + batch_size]
+                    try:
+                        dynamodb_client = boto3.client('dynamodb')
+                        request_items = {
+                            AWARDS_TABLE_NAME: {
+                                'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                            }
+                        }
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            continuation_full_items.append(converted_item)
+                    except Exception as e:
+                        logger.error(f"Error fetching continuation batch: {str(e)}", exc_info=True)
+                        continue
+                
+                # Apply filters to continuation batch
+                if continuation_full_items and filter_filters:
+                    for item in continuation_full_items:
+                        if apply_python_filter(item, filter_filters):
+                            filtered_items_so_far.append(item)
+                            if len(filtered_items_so_far) >= limit:
+                                break
+                elif continuation_full_items:
+                    # No filters, all items pass
+                    filtered_items_so_far.extend(continuation_full_items)
+            
+            # Stop if we have enough filtered results or no more items
+            if len(filtered_items_so_far) >= limit or not last_eval_key:
                 break
         
-        logger.info(f"Scan complete: found {len(gsi_items)} items after scanning {scanned_count} total items")
+        logger.info(f"Scan complete: found {len(filtered_items_so_far)} filtered items after scanning {scanned_count} total items")
+        # Use filtered items directly, skip the normal fetch/filter flow
+        items = filtered_items_so_far[:limit]  # Set items directly, will be used later
+        # Preserve last_eval_key for pagination (from the last scan operation)
+        # This will be used to determine has_more at the end
+        # Skip the normal fetch/filter flow for scans since we already have filtered items
+        skip_normal_fetch = True
+        # Note: last_eval_key is already set from the last scan operation above
+    else:
+        # For queries, use normal flow
+        skip_normal_fetch = False
     
     # Extract award_ids from GSI results (KEYS_ONLY projection only returns keys)
     award_ids = []
@@ -1672,8 +1762,10 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     
     # Phase 2: Fetch full items from main table using BatchGetItem
     # DynamoDB BatchGetItem limit is 100 items per batch
-    items = []
-    if award_ids:
+    # Skip this for scans since we already have filtered items
+    if not skip_normal_fetch:
+        items = []
+        if award_ids:
         batch_size = 100
         for i in range(0, len(award_ids), batch_size):
             batch_ids = award_ids[i:i + batch_size]
@@ -1748,7 +1840,8 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     # This is necessary for:
     # 1. KEYS_ONLY GSI queries (FilterExpression can't be used on non-key attributes)
     # 2. Scans with filters that aren't supported in FilterExpression (like awarding_agency_name)
-    if items and filter_filters:
+    # Skip filtering for scans since items are already filtered
+    if not skip_normal_fetch and items and filter_filters:
         if method == 'query':
             logger.info(f"Applying filters in Python to {len(items)} items (KEYS_ONLY GSI doesn't support FilterExpression)")
         elif method == 'scan':
@@ -1842,8 +1935,10 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     logger.error(f"Error in pagination round {pagination_round}: {str(e)}", exc_info=True)
                     break
         
-        items = filtered_items
-        logger.info(f"Filtered to {len(items)} items matching all criteria")
+        # Only set items from filtered_items if we didn't already set them (for scans, items are already set)
+        if not skip_normal_fetch:
+            items = filtered_items
+            logger.info(f"Filtered to {len(items)} items matching all criteria")
     
     # Limit results to requested limit
     items = items[:limit]

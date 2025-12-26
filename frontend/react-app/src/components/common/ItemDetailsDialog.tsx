@@ -1306,7 +1306,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       const obligatedAmount = itemData?.combined_obligated_amount || 
                              itemData?.total_obligated_amount || 
                              itemData?.total_obligation || 0;
-      const outlayedAmount = parseFloat(itemData?.total_outlayed_amount_for_overall_award as string) || 0;
+      const outlayedAmount = parseFloat(itemData?.total_outlayed_amount_for_overall_award as string) || 
+                            parseFloat(itemData?.total_outlay as string) || 0;
+      const totalOutlay = parseFloat(itemData?.total_outlay as string) || 
+                         parseFloat(itemData?.total_account_outlay as string) || 
+                         outlayedAmount;
+      const totalAccountObligation = parseFloat(itemData?.total_account_obligation as string) || 0;
+      const totalAccountOutlay = parseFloat(itemData?.total_account_outlay as string) || 0;
+      const totalSubawardAmount = parseFloat(itemData?.total_subaward_amount as string) || 0;
       const nonFederalFunding = parseFloat(itemData?.total_non_federal_funding_amount as string) || 0;
       const totalFunding = obligatedAmount;
       
@@ -1452,14 +1459,22 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 const barHeight = 50;
                 const barY = 160;
                 
+                const maxAmount = Math.max(obligatedAmount, totalOutlay, totalAccountObligation);
                 const obligatedWidth = chartWidth;
-                const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
+                const outlayedWidth = maxAmount > 0 ? (outlayedAmount / maxAmount) * chartWidth : 0;
+                const totalOutlayWidth = maxAmount > 0 ? (totalOutlay / maxAmount) * chartWidth : 0;
+                const totalAccountObligationWidth = maxAmount > 0 ? (totalAccountObligation / maxAmount) * chartWidth : 0;
                 
                 return (
-                  <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'hidden' }}>
+                  <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'visible' }}>
                     <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth}px` }}>
+                      {/* Background bar */}
                       <rect x="0" y={barY} width={chartWidth} height={barHeight} fill="#dce4ee" rx="5" ry="5" />
+                      
+                      {/* Obligated amount bar */}
                       <rect x="0" y={barY + 5} width={obligatedWidth} height={barHeight - 10} fill="#4773aa" rx="5" ry="5" />
+                      
+                      {/* Outlayed amount bar (overlay) */}
                       {outlayedAmount > 0 && (
                         <rect 
                           x="0" 
@@ -1472,6 +1487,39 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           opacity="0.8"
                         />
                       )}
+                      
+                      {/* Total Outlay - Green line with flag pointing left */}
+                      {totalOutlay > 0 && totalOutlayWidth > 0 && (
+                        <>
+                          <line 
+                            x1={totalOutlayWidth} 
+                            y1={barY - 20} 
+                            x2={totalOutlayWidth} 
+                            y2={barY + barHeight + 20} 
+                            stroke="#10b981" 
+                            strokeWidth="3"
+                            strokeDasharray="5,5"
+                          />
+                          {/* Flag pointing left */}
+                          <polygon 
+                            points={`${totalOutlayWidth},${barY - 20} ${totalOutlayWidth - 15},${barY - 10} ${totalOutlayWidth},${barY}`}
+                            fill="#10b981"
+                          />
+                          {/* Flag label box */}
+                          {totalOutlayWidth > 100 && (
+                            <foreignObject width="120" height="50" x={totalOutlayWidth - 130} y={barY - 50}>
+                              <Box sx={{ textAlign: 'right', backgroundColor: 'rgba(16, 185, 129, 0.95)', padding: '6px 10px', borderRadius: '4px', border: '1px solid #10b981' }}>
+                                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 600, fontSize: '14px' }}>
+                                  {formatCurrency(totalOutlay)}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: '#d1fae5', fontSize: '11px' }}>Total Outlay</Typography>
+                              </Box>
+                            </foreignObject>
+                          )}
+                        </>
+                      )}
+                      
+                      {/* Obligated amount line marker */}
                       <line 
                         x1={obligatedWidth} 
                         y1={90} 
@@ -1480,6 +1528,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         stroke="#4773aa" 
                         strokeWidth="4"
                       />
+                      
+                      {/* Outlayed amount line marker */}
                       {outlayedAmount > 0 && outlayedWidth < obligatedWidth && (
                         <line 
                           x1={outlayedWidth} 
@@ -1490,6 +1540,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           strokeWidth="4"
                         />
                       )}
+                      
+                      {/* Outlayed amount label (inside bar) */}
                       {outlayedAmount > 0 && outlayedWidth > 50 && (
                         <foreignObject width={outlayedWidth} height="70" x="0" y={90}>
                           <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px', maxWidth: `${outlayedWidth}px` }}>
@@ -1500,6 +1552,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           </Box>
                         </foreignObject>
                       )}
+                      
+                      {/* Obligated amount label (right side) */}
                       <foreignObject width={chartWidth} height="70" x="-8" y={90}>
                         <Box sx={{ float: 'right', textAlign: 'right', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
                           <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
@@ -1508,6 +1562,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                           <Typography variant="caption" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
                         </Box>
                       </foreignObject>
+                      
+                      {/* Total Funding label (bottom) */}
                       <foreignObject width={chartWidth} height="60" x="0" y={300}>
                         <Box sx={{ float: 'right', textAlign: 'right', padding: '4px 8px' }}>
                           <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
@@ -1556,6 +1612,78 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   {formatCurrency(obligatedAmount)}
                 </Typography>
               </Box>
+              {totalOutlay > 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#10b981', border: '1px dashed #10b981' }} />
+                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Outlay</Typography>
+                    <Tooltip
+                      title="The total amount of money that has been outlayed (paid out) for this award."
+                      arrow
+                      placement="top"
+                    >
+                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {formatCurrency(totalOutlay)}
+                  </Typography>
+                </Box>
+              )}
+              {totalAccountObligation > 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#3b82f6' }} />
+                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Account Obligation</Typography>
+                    <Tooltip
+                      title="The total obligation amount for the account associated with this award."
+                      arrow
+                      placement="top"
+                    >
+                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {formatCurrency(totalAccountObligation)}
+                  </Typography>
+                </Box>
+              )}
+              {totalAccountOutlay > 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#10b981' }} />
+                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Account Outlay</Typography>
+                    <Tooltip
+                      title="The total outlay amount for the account associated with this award."
+                      arrow
+                      placement="top"
+                    >
+                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {formatCurrency(totalAccountOutlay)}
+                  </Typography>
+                </Box>
+              )}
+              {totalSubawardAmount > 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#8b5cf6' }} />
+                    <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Subaward Amount</Typography>
+                    <Tooltip
+                      title="The total amount of subawards associated with this award."
+                      arrow
+                      placement="top"
+                    >
+                      <InfoIcon sx={{ fontSize: '14px', color: '#64748b', cursor: 'help', ml: 0.5 }} />
+                    </Tooltip>
+                  </Box>
+                  <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    {formatCurrency(totalSubawardAmount)}
+                  </Typography>
+                </Box>
+              )}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: 'rgba(71, 115, 170, 0.3)' }} />
@@ -3030,6 +3158,25 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600 }}>
                     {itemDataForHeader?.is_assistance ? 'Other Financial Assistance' : 'Contract'}
                   </Typography>
+                  <Tooltip title="View on USAspending.gov">
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        const usaspendingUrl = itemDataForHeader?.usaspending_permalink || 
+                          `https://www.usaspending.gov/award/${itemDataForHeader?.award_id}`;
+                        window.open(usaspendingUrl, '_blank', 'noopener,noreferrer');
+                      }}
+                      sx={{
+                        color: '#9ca3af',
+                        '&:hover': {
+                          color: '#3b82f6',
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        },
+                      }}
+                    >
+                      <OpenInNewIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title="Refresh award data from USAspending API">
                     <span>
                       <IconButton
@@ -3219,6 +3366,25 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600 }}>
                     {itemData?.is_assistance ? 'Other Financial Assistance' : 'Contract'}
                   </Typography>
+                  <Tooltip title="View on USAspending.gov">
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        const usaspendingUrl = itemData?.usaspending_permalink || 
+                          `https://www.usaspending.gov/award/${itemData?.award_id}`;
+                        window.open(usaspendingUrl, '_blank', 'noopener,noreferrer');
+                      }}
+                      sx={{
+                        color: '#9ca3af',
+                        '&:hover': {
+                          color: '#3b82f6',
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        },
+                      }}
+                    >
+                      <OpenInNewIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title="Refresh award data from USAspending API">
                     <span>
                       <IconButton
