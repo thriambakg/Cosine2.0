@@ -1492,7 +1492,93 @@ class S3FileReader:
             bucket_name = self.get_bucket_name(s3_key)
             logger.info(f"Reading file from S3: {bucket_name}/{s3_key}")
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-            content = response['Body'].read()
+            content = response['Body'].read()  # This is bytes, not string
+            
+            # Handle .cosine encrypted files (context items from filesystem)
+            # Check this FIRST before other file type logic
+            s3_key_lower = s3_key.lower()
+            file_type_lower = file_type.lower() if file_type else ''
+            
+            # Check if this is a .cosine file by extension or explicit file_type
+            is_cosine_file = s3_key_lower.endswith('.cosine') or file_type_lower == 'cosine'
+            
+            # Also check if content looks like Fernet-encrypted data (starts with gAAAAAB)
+            content_preview = content[:20] if len(content) >= 20 else content
+            looks_encrypted = isinstance(content_preview, bytes) and content_preview.startswith(b'gAAAAAB')
+            
+            if is_cosine_file or (looks_encrypted and '/filesys/' in s3_key):
+                logger.info(f"🔐 Detected .cosine file or encrypted content, attempting decryption")
+                logger.info(f"🔐 s3_key: {s3_key}, file_type: {file_type}, is_cosine_file: {is_cosine_file}, looks_encrypted: {looks_encrypted}")
+                try:
+                    # Import decryption helper (following pattern used by other tools)
+                    try:
+                        from utils.decryption_helper import decrypt_cosine_file
+                        logger.info(f"✅ Successfully imported decryption_helper from utils")
+                    except ImportError as import_err:
+                        logger.error(f"❌ Failed to import from utils.decryption_helper: {str(import_err)}")
+                        # Try direct import as fallback
+                        try:
+                            from decryption_helper import decrypt_cosine_file
+                            logger.info(f"✅ Successfully imported decryption_helper directly")
+                        except ImportError as import_err2:
+                            logger.error(f"❌ Also failed direct import: {str(import_err2)}")
+                            # Try adding path and importing
+                            try:
+                                import_path = os.path.join(os.path.dirname(__file__), 'utils')
+                                if import_path not in sys.path:
+                                    sys.path.insert(0, import_path)
+                                from decryption_helper import decrypt_cosine_file
+                                logger.info(f"✅ Successfully imported after adding path")
+                            except ImportError as import_err3:
+                                logger.error(f"❌ All import attempts failed: {str(import_err3)}")
+                                return f"Error: Failed to import decryption helper. Tried: utils.decryption_helper, decryption_helper, and path-based import. Last error: {str(import_err3)}"
+                    
+                    # Extract user_id from s3_key (format: users/{user_id}/filesys/...)
+                    s3_key_parts = s3_key.split('/')
+                    user_id = None
+                    
+                    if len(s3_key_parts) >= 2 and s3_key_parts[0] == 'users':
+                        user_id = s3_key_parts[1]
+                        logger.info(f"🔐 Extracted user_id from S3 key: {user_id}")
+                    else:
+                        # Fallback: try to get user_id from environment
+                        user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+                        if user_id:
+                            logger.info(f"🔐 Using user_id from environment: {user_id}")
+                        else:
+                            logger.error(f"❌ Cannot find user_id in S3 key or environment")
+                            logger.error(f"❌ S3 key parts: {s3_key_parts}")
+                            logger.error(f"❌ Environment USER_ID: {os.environ.get('USER_ID')}")
+                            logger.error(f"❌ Environment CURRENT_USER_ID: {os.environ.get('CURRENT_USER_ID')}")
+                            return f"Error: Cannot decrypt .cosine file - user_id not found in S3 key or environment. S3 key: {s3_key}"
+                    
+                    # Ensure content is bytes (not string)
+                    if isinstance(content, str):
+                        logger.warning(f"⚠️ Content is string, converting to bytes")
+                        content = content.encode('utf-8')
+                    
+                    # Attempt decryption
+                    logger.info(f"🔐 Attempting to decrypt .cosine file (size: {len(content)} bytes, type: {type(content).__name__}) for user {user_id}")
+                    logger.info(f"🔐 Content preview (first 50 bytes): {content[:50] if len(content) >= 50 else content}")
+                    try:
+                        decrypted_data = decrypt_cosine_file(user_id, content)
+                        logger.info(f"✅ Successfully decrypted .cosine file, returning JSON data")
+                        logger.info(f"✅ Decrypted data keys: {list(decrypted_data.keys()) if isinstance(decrypted_data, dict) else 'N/A'}")
+                        return json.dumps(decrypted_data, indent=2, default=str)
+                    except ValueError as ve:
+                        logger.error(f"❌ Decryption failed with ValueError: {str(ve)}")
+                        return f"Error decrypting .cosine file: {str(ve)}"
+                    except Exception as decrypt_err:
+                        logger.error(f"❌ Decryption failed with exception: {str(decrypt_err)}")
+                        import traceback
+                        logger.error(f"❌ Decryption traceback: {traceback.format_exc()}")
+                        return f"Error decrypting .cosine file: {str(decrypt_err)}"
+                        
+                except Exception as e:
+                    logger.error(f"❌ Unexpected error in .cosine decryption block: {str(e)}")
+                    import traceback
+                    logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                    return f"Error decrypting .cosine file: {str(e)}"
             
             # Determine content type
             content_type = response.get('ContentType', '')
