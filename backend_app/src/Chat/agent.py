@@ -1124,6 +1124,25 @@ FOR UPLOADED FILE QUESTIONS:
 📁 FILESYSTEM OBJECT HANDLING:
 When you encounter filesystem objects in session context (items with type "context_item" that have S3 keys in the users/{user_id}/filesys/* path):
 
+**CRITICAL: ALWAYS DECRYPT .COSINE FILES FROM CONTEXT ITEMS**
+- When you see a context item with a title ending in ".cosine" or a subtitle indicating it's a filesystem item, you MUST decrypt it
+- Context items from the filesystem will have an "s3_key" field in their data structure
+- To access the S3 key from a context item:
+  - Check the context item's "data" field for "s3_key"
+  - Or check if the context item has an "s3_key" field directly
+  - The S3 key will be in the format: "users/{user_id}/filesys/{folder}/{filename}.cosine"
+- Example context item structure:
+  {
+    "id": "...",
+    "type": "context_item",
+    "title": "Congress Bill.cosine",
+    "subtitle": "...",
+    "data": {
+      "s3_key": "users/123/filesys/folder/Congress Bill.cosine"
+    }
+  }
+- When you see this, IMMEDIATELY call: read_s3_file_tool(context_item["data"]["s3_key"])
+
 **FOR NON-COSINE FILES:**
 - Use read_s3_file_tool(s3_key, file_type) to read the file directly
 - The tool will automatically detect the file type and handle it appropriately
@@ -1134,8 +1153,9 @@ When you encounter filesystem objects in session context (items with type "conte
 - .cosine files are encrypted context items that represent tiles or other context items
 - These files contain metadata and S3 keys that reference underlying data (e.g., HTML files for indexed filings)
 - To access .cosine files:
-  1. Use read_s3_file_tool(s3_key) - it will automatically decrypt the file
-  2. The decrypted content will be a JSON object with structure:
+  1. Get the S3 key from the context item (from context_item["data"]["s3_key"] or context_item["s3_key"])
+  2. Use read_s3_file_tool(s3_key) - it will automatically decrypt the file
+  3. The decrypted content will be a JSON object with structure:
      {
        "type": "context_item_type",
        "title": "...",
@@ -1146,25 +1166,34 @@ When you encounter filesystem objects in session context (items with type "conte
          // ... other metadata
        }
      }
-  3. After decrypting, check the "data.s3_key" field to find the underlying data file
-  4. Use read_s3_file_tool(data.s3_key) to read the actual underlying data (HTML, JSON, etc.)
-  5. For example:
+  4. After decrypting, check the "data.s3_key" field to find the underlying data file
+  5. Use read_s3_file_tool(data.s3_key) to read the actual underlying data (HTML, JSON, etc.)
+  6. For example:
+     - Get S3 key from context: context_item["data"]["s3_key"] = "users/123/filesys/item.cosine"
      - Decrypt: read_s3_file_tool("users/123/filesys/item.cosine")
      - Get underlying data: read_s3_file_tool(decrypted_data["data"]["s3_key"])
 - .cosine files are typically tiles (Congress Bill, SEC Filing, LDA Disclosure, etc.) that have been saved to the filesystem
 - The underlying S3 key in the decrypted data points to the actual indexed filing HTML, JSON data, or other source material
 - Always decrypt .cosine files first, then read the underlying data using the S3 key from the decrypted content
+- NEVER skip decrypting .cosine files - if you see a context item with ".cosine" in the title or a filesystem path, you MUST decrypt it using read_s3_file_tool()
 
 **WORKFLOW FOR FILESYSTEM OBJECTS:**
-1. Identify the file type from the S3 key or context item metadata
-2. If it's a .cosine file:
-   a. Use read_s3_file_tool() to decrypt it
-   b. Extract the underlying S3 key from the decrypted JSON data
-   c. Use read_s3_file_tool() again with the underlying S3 key to read the actual data
-3. If it's a non-cosine file:
-   a. Use read_s3_file_tool() directly to read the file
-   b. Use specialized tools (read_pdf_tool, analyze_pdf_content_tool, etc.) as needed
-4. Analyze and provide insights based on the file content
+1. When you see a context item with ".cosine" in the title or filesystem path:
+   a. Extract the S3 key from context_item["data"]["s3_key"] or context_item["s3_key"]
+   b. IMMEDIATELY call read_s3_file_tool(s3_key) to decrypt it
+   c. Parse the decrypted JSON to extract the underlying S3 key from data.s3_key
+   d. Use read_s3_file_tool() again with the underlying S3 key to read the actual data
+2. If it's a non-cosine file:
+   a. Get the S3 key from the context item
+   b. Use read_s3_file_tool() directly to read the file
+   c. Use specialized tools (read_pdf_tool, analyze_pdf_content_tool, etc.) as needed
+3. Analyze and provide insights based on the file content
+
+**EXAMPLES:**
+- User: "Summarize this Congress Bill" and context has "Congress Bill.cosine"
+  → Extract s3_key from context → read_s3_file_tool(s3_key) → Extract underlying s3_key → read_s3_file_tool(underlying_s3_key) → Summarize
+- User: "What's in this SEC filing?" and context has "SEC Filing.cosine"
+  → Extract s3_key from context → read_s3_file_tool(s3_key) → Extract underlying s3_key → read_s3_file_tool(underlying_s3_key) → Analyze
 
 FOR CRYPTOCURRENCY QUESTIONS:
 1. get_crypto_data_tool(symbol, timeframe) → Get real-time crypto data for a specific cryptocurrency
