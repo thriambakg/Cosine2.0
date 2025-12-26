@@ -1544,7 +1544,7 @@ resource "aws_iam_policy" "chat_agent_stock_historical_s3_read_policy" {
 # IAM Policy for Chat Agent to read from Search Data S3 Buckets (READ ONLY)
 resource "aws_iam_policy" "chat_agent_search_data_s3_read_policy" {
   name        = "${var.project_name}-chat-agent-search-data-s3-read-${var.environment}"
-  description = "Allows Chat Agent Lambda to read from search data S3 buckets (congress bills, usaspending) for oversized items (READ ONLY)"
+  description = "Allows Chat Agent Lambda to read from search data S3 buckets (congress bills, usaspending, LDA disclosures) for oversized items (READ ONLY)"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1559,7 +1559,9 @@ resource "aws_iam_policy" "chat_agent_search_data_s3_read_policy" {
           data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn,
           "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*",
           data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*",
+          data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/*"
         ]
       }
     ]
@@ -1578,37 +1580,6 @@ resource "aws_iam_role_policy_attachment" "chat_agent_search_data_s3_read_policy
 resource "aws_iam_role_policy_attachment" "chat_agent_stock_historical_s3_read_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
   policy_arn = aws_iam_policy.chat_agent_stock_historical_s3_read_policy.arn
-}
-
-# IAM Policy for Chat Agent to read from LDA Disclosures S3 Bucket (READ ONLY)
-resource "aws_iam_policy" "chat_agent_lda_disclosures_s3_read_policy" {
-  name        = "${var.project_name}-chat-agent-lda-disclosures-s3-read-${var.environment}"
-  description = "Allows Chat Agent Lambda to read from LDA disclosures S3 bucket (READ ONLY)"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/*"
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-# Attach LDA Disclosures S3 read policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_lda_disclosures_s3_read_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_lda_disclosures_s3_read_policy.arn
 }
 
 # SQS policy for chat agent - REMOVED
