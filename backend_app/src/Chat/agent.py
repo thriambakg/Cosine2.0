@@ -984,6 +984,33 @@ When users ask about searching for bills, LDA filings, or other data using natur
 - If no good match is found (score < 0.5), inform the user and suggest alternative terms
 - Always verify the list_type matches the search type (Congress Bills vs LDA) before using the matched value
 
+🔍 CONGRESS BILLS AND LDA SEARCH BEST PRACTICES:
+**CRITICAL: Fetch Incrementally and Check Results Early**
+
+When users ask for searches (e.g., "recent bills about renewable energy", "clean energy bills"):
+1. **Use small limits initially (10-20 items)** - Don't fetch hundreds of items at once
+2. **Check the first batch** - Review the first 10 results to see if they match the user's intent
+3. **Only continue if needed** - If the first batch doesn't have what the user wants, use pagination (last_evaluated_key) to fetch more
+4. **Don't dig deep automatically** - Only fetch more results if the user explicitly asks or if the first batch clearly doesn't match
+
+**Workflow Example:**
+- User: "Can you search for any bills passed recently which have to do with renewable energy?"
+- Step 1: Use search_autocomplete("renewable energy", "policy_area") → Get "Energy"
+- Step 2: Call search_congress_bills({"policy_area": ["Energy"], "introduced_date_from": "2025-01-01"}, limit=10)
+- Step 3: Check the 10 results - look for bills with "clean energy", "renewable", "solar", "wind" in titles
+- Step 4: If good matches found, present them. If not, use last_evaluated_key to fetch next 10
+- Step 5: Only continue paginating if user explicitly asks for more or if results are clearly not matching
+
+**Default Limits:**
+- search_congress_bills: Default limit=10 (matches frontend page size)
+- lda_search: Default limit=10 (matches frontend page size)
+- Only increase limit if user explicitly asks for more results or you need to search deeper
+
+**Pagination:**
+- Use last_evaluated_key from previous search to get next batch
+- Don't fetch all results upfront - fetch incrementally as needed
+- The tool will return has_more=true if more results are available
+
 🔥 FILE DISCOVERY IS MANDATORY - READ THIS CAREFULLY:
 When users ask about files (ANY file-related question), you MUST:
 1. FIRST call get_session_files_tool(session_id, user_id, "all") to discover files

@@ -80,6 +80,40 @@ def fetch_oversized_bill_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def is_search_index_item(item: Dict[str, Any]) -> bool:
+    """
+    Check if an item is a search index item (should be filtered out from results).
+    
+    Search index items have:
+    - bill_id starting with "SEARCH#"
+    - is_search_index: True flag
+    - search_type field
+    
+    Args:
+        item: DynamoDB item to check
+    
+    Returns:
+        True if item is a search index item, False otherwise
+    """
+    if not item:
+        return False
+    
+    bill_id = item.get('bill_id', '')
+    if isinstance(bill_id, str) and bill_id.startswith('SEARCH#'):
+        return True
+    
+    if item.get('is_search_index') is True:
+        return True
+    
+    if 'search_type' in item and 'search_index_sk' in item:
+        # Check if search_index_sk follows search index pattern (e.g., "INTRODUCED_DATE#YYYY-MM-DD#bill_id")
+        search_index_sk = item.get('search_index_sk', '')
+        if isinstance(search_index_sk, str) and ('#' in search_index_sk or search_index_sk.startswith('SEARCH#')):
+            return True
+    
+    return False
+
+
 def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     """Apply filters to an item in Python (for post-BatchGetItem filtering)"""
     # Sponsor name filter (OR logic within field)
@@ -430,15 +464,20 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
         # Paginate through source GSI until we have enough results or it runs out
+        # CRITICAL: For agent use, fetch incrementally (10 items at a time) and stop early
+        # Don't fetch all items at once - let the agent check results and paginate if needed
         all_matching_items = []
         source_last_eval_key = None
-        max_pagination_rounds = 50
+        max_pagination_rounds = 5  # Reduced from 50 - only fetch a few batches initially
         pagination_round = 0
         
         while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
             pagination_round += 1
             
             # Query source GSI with pagination
+            # CRITICAL: Only fetch enough bill_ids to meet the limit (don't fetch all 1000)
+            # For agent use, fetch limit * 2 to account for filtering, but cap at reasonable amount
+            query_limit = min(limit * 2, 50)  # Fetch 2x limit or max 50, whichever is smaller
             source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
                 index_name=source_config['index_name'],
                 hash_key_name=source_config['hash_key'],
@@ -446,7 +485,7 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
                 range_key_name=source_config.get('range_key'),
                 range_key_value=source_config.get('range_value'),
                 range_key_condition=source_config.get('range_condition'),
-                limit=1000,
+                limit=query_limit,  # Use smaller limit for agent use
                 exclusive_start_key=source_last_eval_key,
                 get_all=False
             )
@@ -456,17 +495,36 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
                 logger.info(f"Source GSI {source_config['index_name']} ran out of items")
                 break
             
-            logger.info(f"Pagination round {pagination_round}: Got {len(source_bill_ids_batch)} bill_ids from source GSI")
+            logger.info(f"Pagination round {pagination_round}: Got {len(source_bill_ids_batch)} bill_ids from source GSI (query_limit={query_limit})")
             
             # Fetch full items for this batch using BatchGetItem
+            # CRITICAL: Only fetch enough items to meet the limit (default 10 for agent use)
+            # Don't fetch all items at once - fetch incrementally and stop early
             items_batch = []
             if source_bill_ids_batch:
-                batch_size = 100
-                for i in range(0, len(source_bill_ids_batch), batch_size):
-                    batch_ids = source_bill_ids_batch[i:i + batch_size]
+                # Use limit as batch size to fetch incrementally (default 10 for agent)
+                # This prevents fetching all 94 items when we only need 10
+                batch_size = min(limit, 100)  # Cap at 100 for DynamoDB BatchGetItem limit
+                # Only fetch enough bill_ids to potentially meet the limit
+                # Since we filter in Python, we might need more, but don't fetch all at once
+                bill_ids_to_fetch = source_bill_ids_batch[:min(len(source_bill_ids_batch), limit * 2)]
+                
+                for i in range(0, len(bill_ids_to_fetch), batch_size):
+                    batch_ids = bill_ids_to_fetch[i:i + batch_size]
+                    # Deduplicate to avoid ValidationException
+                    batch_ids = list(dict.fromkeys(batch_ids))
+                    
+                    # CRITICAL: Include both bill_id (hash key) and search_index_sk (range key)
+                    # For regular bill items, search_index_sk = bill_id
                     request_items = {
                         BILLS_TABLE_NAME: {
-                            'Keys': [{'bill_id': {'S': str(bid)}} for bid in batch_ids]
+                            'Keys': [
+                                {
+                                    'bill_id': {'S': str(bid)},
+                                    'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                                }
+                                for bid in batch_ids
+                            ]
                         }
                     }
                     batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
@@ -474,7 +532,13 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
                     deserializer = TypeDeserializer()
                     for item in batch_items:
                         converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                        items_batch.append(converted_item)
+                        # Filter out search index items (they have different search_index_sk patterns)
+                        if not is_search_index_item(converted_item):
+                            items_batch.append(converted_item)
+                    
+                    # Stop fetching if we have enough items to potentially meet the limit
+                    if len(items_batch) >= limit * 2:
+                        break
             
             # Apply remaining filters in Python (including substring matching for bill_title)
             for item in items_batch:
@@ -735,7 +799,7 @@ class CongressBillsSearcher:
     @staticmethod
     def search_bills_with_s3_passthrough(
         filters: Dict[str, Any],
-        limit: int = 100,
+        limit: int = 10,
         last_evaluated_key: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
@@ -813,7 +877,7 @@ class CongressBillsSearcher:
 @tool
 def search_congress_bills(
     filters: str,
-    limit: int = 100,
+    limit: int = 10,
     last_evaluated_key: str = None
 ) -> str:
     """
@@ -834,7 +898,8 @@ def search_congress_bills(
             - introduced_date_to: End date in YYYY-MM-DD format
             - latest_action_date_from: Start date in YYYY-MM-DD format
             - latest_action_date_to: End date in YYYY-MM-DD format
-        limit: Maximum number of results to return (default: 100, max: 1000)
+        limit: Maximum number of results to return (default: 10 for agent use, max: 1000). 
+               Use small limits (10-20) initially to check if results match user intent, then paginate if needed.
         last_evaluated_key: JSON string of pagination token from previous request (optional)
     
     Returns:
@@ -879,7 +944,7 @@ def search_congress_bills(
         if limit > 1000:
             limit = 1000
         if limit < 1:
-            limit = 100
+            limit = 10  # Default to 10 for agent use (matches frontend page size)
         
         # Perform search
         result = CongressBillsSearcher.search_bills_with_s3_passthrough(
