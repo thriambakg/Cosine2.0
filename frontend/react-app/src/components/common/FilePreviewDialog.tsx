@@ -117,8 +117,22 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
       setError(null);
       setLoading(false);
 
-      // If item has metadata with data, use it directly
-      if (item.metadata?.data && Object.keys(item.metadata.data).length > 0) {
+      // PRIORITY: If item has s3_key, always fetch from API to get fresh data
+      // This ensures newly added items load previews correctly
+      if (item.s3_key) {
+        console.log('📄 FilePreviewDialog: Item has s3_key, fetching preview from API:', {
+          s3_key: item.s3_key,
+          item_type: item.type,
+          has_metadata_data: !!(item.metadata?.data && Object.keys(item.metadata.data).length > 0),
+        });
+        // For files with s3_key, always fetch from API to ensure we get the latest content
+        fetchPreview();
+      } else if (item.metadata?.data && Object.keys(item.metadata.data).length > 0) {
+        // Fallback: If no s3_key but has metadata.data, use it directly (for tiles, etc.)
+        console.log('📄 FilePreviewDialog: Using metadata.data (no s3_key):', {
+          item_id: item.id,
+          has_data: true,
+        });
         // Check if it's a tile
         const tileType = item.metadata.data.tileType || item.metadata.data.type;
         const isTileData = ['crypto', 'stock', 'stock_screener', 'news', 'portfolio',
@@ -155,6 +169,9 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         }
       } else if (item.metadata && item.type === 'context_item') {
         // For context items with metadata but no data, construct from metadata
+        console.log('📄 FilePreviewDialog: Constructing from metadata (no s3_key, no data):', {
+          item_id: item.id,
+        });
         setPreviewData({
           preview_type: 'context_item',
           content: {
@@ -172,11 +189,14 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             timestamp: item.metadata.timestamp,
           },
         });
-      } else if (item.s3_key) {
-        // For real files, fetch from API
-        fetchPreview();
       } else {
         // No data available
+        console.error('📄 FilePreviewDialog: No preview data available:', {
+          item_id: item.id,
+          has_s3_key: !!item.s3_key,
+          has_metadata: !!item.metadata,
+          has_metadata_data: !!(item.metadata?.data && Object.keys(item.metadata.data).length > 0),
+        });
         setError('No preview data available');
       }
     } else {
@@ -311,7 +331,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     const tileType = content.tileType || content.type;
     const validTileTypes = [
       'crypto', 'stock', 'stock_screener', 'news', 'portfolio',
-      'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures'
+      'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures', 'folder'
     ];
     
     return validTileTypes.includes(tileType);

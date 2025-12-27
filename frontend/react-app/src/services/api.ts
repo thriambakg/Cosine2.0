@@ -535,7 +535,7 @@ export const handleAPIError = (error: any, endpoint: string): never => {
 
 export interface DashboardTile {
   id: string;
-  type: 'crypto' | 'stock' | 'custom' | 'placeholder';
+  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder';
   symbol?: string;
   timeframe?: string;
   title: string;
@@ -547,6 +547,8 @@ export interface DashboardTile {
   gridSize: { width: number; height: number };
   dashboard_id: string;
   created_at: string;
+  folderPath?: string;
+  folderId?: string;
 }
 
 export interface DashboardConfig {

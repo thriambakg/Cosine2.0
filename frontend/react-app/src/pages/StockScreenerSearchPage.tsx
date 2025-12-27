@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Typography,
   Box,
@@ -176,6 +176,8 @@ const StockScreenerSearchPage: React.FC = () => {
   const [isFiltered, setIsFiltered] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 25);
+  // Ref to track if we just set results from API to avoid overwriting with applyFilters
+  const justSetResultsRef = useRef(false);
   // const [criteriaDialogOpen, setCriteriaDialogOpen] = useState<boolean>(false);
   const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
   const [expandedFilters, setExpandedFilters] = useState<{
@@ -211,6 +213,13 @@ const StockScreenerSearchPage: React.FC = () => {
 
   // Run stock screener (initial search)
   const runScreener = useCallback(async () => {
+    // Prevent duplicate calls
+    if (isSearching) {
+      console.log('📊 Stock Screener: Search already in progress, skipping duplicate call');
+      return;
+    }
+    
+    console.log('📊 Stock Screener: Starting new search with criteria:', criteria);
     setIsSearching(true);
     setSearchError(null);
     setLastEvaluatedKey(null);
@@ -218,6 +227,8 @@ const StockScreenerSearchPage: React.FC = () => {
     setAllResults([]);
     setFilteredResults([]);
     setSelectedStocks(new Set());
+    // Reset the ref flag
+    justSetResultsRef.current = false;
     
     try {
       // Format the request properly for the API
@@ -232,11 +243,36 @@ const StockScreenerSearchPage: React.FC = () => {
         maxResults: 100  // Page size
       };
       
+      console.log('📊 Stock Screener: Making API call with payload:', requestPayload);
       // Use the API hook to fetch data with criteria
       const response = await executeScreener(requestPayload);
+      console.log('📊 Stock Screener: API response received:', {
+        hasResults: !!response?.results,
+        resultsCount: response?.results?.length || 0,
+        hasMessage: !!response?.message,
+        responseKeys: response ? Object.keys(response) : [],
+      });
       
       if (response?.results) {
-        setAllResults(response.results);
+        console.log('📊 Stock Screener: Received results from API:', {
+          resultsCount: response.results.length,
+          sampleResult: response.results[0],
+          fullResponse: response,
+        });
+        // Set flag to prevent applyFilters from overwriting
+        justSetResultsRef.current = true;
+        const resultsArray = Array.isArray(response.results) ? response.results : [];
+        console.log('📊 Stock Screener: Setting state with results:', {
+          resultsArrayLength: resultsArray.length,
+          isArray: Array.isArray(resultsArray),
+        });
+        setAllResults(resultsArray);
+        // Immediately set filteredResults to show results (applyFilters will refine if needed)
+        setFilteredResults(resultsArray);
+        console.log('📊 Stock Screener: Set allResults and filteredResults:', {
+          allResultsCount: resultsArray.length,
+          filteredResultsCount: resultsArray.length,
+        });
         setLastEvaluatedKey(response.last_evaluated_key || null);
         setHasMore(response.has_more || false);
         // Clear error if successful
@@ -262,8 +298,12 @@ const StockScreenerSearchPage: React.FC = () => {
       console.error('Stock screener error:', err);
     } finally {
       setIsSearching(false);
+      // Reset the ref flag after a delay to allow applyFilters to run if needed
+      setTimeout(() => {
+        justSetResultsRef.current = false;
+      }, 200);
     }
-  }, [executeScreener, criteria]);
+  }, [executeScreener, criteria, isSearching]);
 
   // Load more results (pagination)
   const handleLoadMore = useCallback(async () => {
@@ -290,7 +330,21 @@ const StockScreenerSearchPage: React.FC = () => {
       const response = await executeScreener(requestPayload);
       
       if (response?.results) {
-        setAllResults(prev => [...prev, ...response.results]);
+        // Check if filters are active before updating state
+        const hasFilters = selectedFilters.industries.size > 0 || 
+                           selectedFilters.marketCapRanges.size > 0 || 
+                           selectedFilters.volatilityRanges.size > 0 ||
+                           selectedFilters.priceChangeRanges.size > 0;
+        
+        setAllResults(prev => {
+          const updatedResults = [...prev, ...response.results];
+          // Update filteredResults with new results if no filters are active
+          if (!hasFilters) {
+            setFilteredResults(updatedResults);
+          }
+          // If filters are active, applyFilters will be called by useEffect
+          return updatedResults;
+        });
         setLastEvaluatedKey(response.last_evaluated_key || null);
         setHasMore(response.has_more || false);
       }
@@ -300,10 +354,22 @@ const StockScreenerSearchPage: React.FC = () => {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [executeScreener, criteria, hasMore, lastEvaluatedKey, isLoadingMore]);
+  }, [executeScreener, criteria, hasMore, lastEvaluatedKey, isLoadingMore, selectedFilters]);
 
   // Client-side filtering function
   const applyFilters = useCallback(() => {
+    console.log('📊 Stock Screener: applyFilters called', {
+      allResultsCount: allResults.length,
+      selectedFilters,
+      justSetResults: justSetResultsRef.current,
+    });
+    
+    // Don't apply filters if we just set results from API
+    if (justSetResultsRef.current) {
+      console.log('📊 Stock Screener: Skipping applyFilters - results just set from API');
+      return;
+    }
+    
     // If no filters are selected, show all results
     const hasFilters = selectedFilters.industries.size > 0 || 
                        selectedFilters.marketCapRanges.size > 0 || 
@@ -311,11 +377,13 @@ const StockScreenerSearchPage: React.FC = () => {
                        selectedFilters.priceChangeRanges.size > 0;
     
     if (!hasFilters) {
+      console.log('📊 Stock Screener: No filters active, setting filteredResults to allResults');
       setFilteredResults([...allResults]);
       setIsFiltered(false);
       return;
     }
     
+    console.log('📊 Stock Screener: Filters active, applying filters');
     setIsFiltered(true);
     let filtered = [...allResults];
     
@@ -368,6 +436,10 @@ const StockScreenerSearchPage: React.FC = () => {
       });
     }
     
+    console.log('📊 Stock Screener: Filtered results:', {
+      beforeFilter: allResults.length,
+      afterFilter: filtered.length,
+    });
     setFilteredResults(filtered);
   }, [allResults, selectedFilters]);
 
@@ -381,11 +453,25 @@ const StockScreenerSearchPage: React.FC = () => {
   }, []); // Only run once on mount
 
   // Apply filters when selectedFilters or allResults change
+  // Use a ref to track if we just set results from API to avoid overwriting
   useEffect(() => {
+    console.log('📊 Stock Screener: applyFilters useEffect triggered', {
+      allResultsLength: allResults.length,
+      justSetResults: justSetResultsRef.current,
+      isSearching,
+    });
+    
+    // Don't apply filters if we're currently searching or just set results
+    if (isSearching || justSetResultsRef.current) {
+      console.log('📊 Stock Screener: Skipping applyFilters - search in progress or results just set');
+      return;
+    }
+    
     if (allResults.length > 0) {
+      console.log('📊 Stock Screener: applyFilters called by useEffect, allResults.length:', allResults.length);
       applyFilters();
     }
-  }, [applyFilters]);
+  }, [applyFilters, isSearching]);
 
   // Generate available filters from all results
   const availableFilters = useMemo(() => {
@@ -495,6 +581,20 @@ const StockScreenerSearchPage: React.FC = () => {
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
   const currentResults = filteredResults.slice(startIndex, endIndex);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('📊 Stock Screener: State update:', {
+      allResultsCount: allResults.length,
+      filteredResultsCount: filteredResults.length,
+      currentResultsCount: currentResults.length,
+      currentPage,
+      pageSize,
+      startIndex,
+      endIndex,
+      totalPages,
+    });
+  }, [allResults.length, filteredResults.length, currentResults.length, currentPage, pageSize, startIndex, endIndex, totalPages]);
 
   // Format helpers
   const formatMarketCap = (marketCap: number | null | undefined) => {
@@ -951,7 +1051,7 @@ const StockScreenerSearchPage: React.FC = () => {
                   </Box>
 
                   {/* Results Table */}
-                  {currentResults.length > 0 ? (
+                  {filteredResults.length > 0 ? (
                     <>
                       <TableContainer sx={{ 
                         backgroundColor: 'transparent',
@@ -1166,6 +1266,12 @@ const StockScreenerSearchPage: React.FC = () => {
                         </Box>
                       )}
                     </>
+                  ) : filteredResults.length > 0 && currentResults.length === 0 ? (
+                    <Box sx={{ textAlign: 'center', py: 6 }}>
+                      <Typography variant="body2" color="#9ca3af">
+                        No results on this page. Try changing the page or adjusting page size.
+                      </Typography>
+                    </Box>
                   ) : (
                     <Box sx={{ textAlign: 'center', py: 6 }}>
                       <Typography variant="body2" color="#9ca3af">

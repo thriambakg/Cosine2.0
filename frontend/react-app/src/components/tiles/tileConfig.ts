@@ -265,6 +265,23 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
     supportsResize: true,
     supportsDrag: true,
   },
+  folder: {
+    sizeConstraints: {
+      minWidth: 3,
+      maxWidth: 8,
+      minHeight: 4,
+      maxHeight: 12,
+      defaultWidth: 4,
+      defaultHeight: 6,
+    },
+    defaultDisplayOptions: {
+      showFolders: true,
+      showFiles: true,
+      showBreadcrumbs: true,
+    },
+    supportsResize: true,
+    supportsDrag: true,
+  },
 };
 
 // Get tile configuration for a specific tile type

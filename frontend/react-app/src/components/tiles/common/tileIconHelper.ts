@@ -33,6 +33,7 @@ export const getDefaultIconForTileType = (tileType: string): keyof typeof Icons 
     sec_search: 'Description',
     govt_contracts: 'Description',
     congress_bills: 'Gavel',
+    folder: 'Folder',
     custom: 'AutoAwesome',
     chat_generated: 'Chat',
   };

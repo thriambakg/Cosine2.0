@@ -23,6 +23,13 @@ interface TileHeaderActionsProps {
   customizeButton?: {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   };
+  // Edit button (optional) - shown next to delete button
+  editButton?: {
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+    disabled?: boolean;
+    tooltip?: string;
+    icon?: React.ReactNode;
+  };
   // Refresh button (optional) - shown when collapsed, replaces customize
   refreshButton?: {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -47,6 +54,7 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
   contextButton,
   deleteButton,
   customizeButton,
+  editButton,
   refreshButton,
   collapsibleActions,
   defaultCollapsed = true,
@@ -167,6 +175,27 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
           >
             <PaletteIcon fontSize="small" />
           </IconButton>
+        </Tooltip>
+      )}
+
+      {/* Edit Button - shown next to delete button */}
+      {editButton && (
+        <Tooltip title={editButton.tooltip || 'Edit'}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={editButton.onClick}
+              disabled={editButton.disabled}
+              onMouseDown={(e) => e.stopPropagation()}
+              sx={{
+                color: editButton.disabled ? '#6b7280' : '#9ca3af',
+                '&:hover': { color: editButton.disabled ? '#6b7280' : '#3b82f6' },
+                '&.Mui-disabled': { color: '#6b7280' },
+              }}
+            >
+              {editButton.icon || <PaletteIcon fontSize="small" />}
+            </IconButton>
+          </span>
         </Tooltip>
       )}
 

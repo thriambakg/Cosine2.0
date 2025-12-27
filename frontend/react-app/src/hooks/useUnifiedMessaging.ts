@@ -204,22 +204,22 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
       
       if (result.success) {
         console.log(`✅ ${source}: Edit message sent successfully:`, messageId);
+        // Reset isProcessing to allow subsequent edits
+        // The loading state is managed separately via broadcastLoadingState
+        setIsProcessing(false);
         return { success: true, sessionId: result.sessionId };
       } else {
         console.error(`❌ ${source}: Failed to send edit message:`, result.error);
         setError(result.error || 'Failed to send edit message');
+        setIsProcessing(false);
         return { success: false, error: result.error };
       }
     } catch (error) {
       console.error(`❌ ${source}: Error sending edit message:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setError(errorMessage);
+      setIsProcessing(false);
       return { success: false, error: errorMessage };
-    } finally {
-      // Note: Don't set isProcessing to false here immediately
-      // The unified handler manages loading state via broadcastLoadingState
-      // and will clear it when AI response arrives or error occurs
-      // For edit messages, we keep loading until AI response
     }
   }, [userId, sessionId, source]);
 

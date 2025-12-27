@@ -57,7 +57,7 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'lda_disclosures';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'lda_disclosures' | 'folder';
   title: string;
   customTitle?: string; // Custom tile name set by user
   customColor?: string; // Custom tile color (for header/icon)
@@ -67,6 +67,8 @@ export interface UnifiedTile {
   name?: string; // For portfolio tiles
   content?: string; // For custom tiles
   prompt?: string; // For chat_generated tiles
+  folderPath?: string; // For folder tiles - path to the folder to display
+  folderId?: string; // For folder tiles - ID of the folder to display
   criteria?: StockScreenerCriteria; // For stock_screener tiles
   results?: StockResult[]; // For stock_screener tiles
   filters?: NewsFilters; // For news tiles

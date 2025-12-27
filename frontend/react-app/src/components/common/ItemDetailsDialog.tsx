@@ -303,7 +303,13 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           addLDAFilingToContext(itemData, target);
           break;
         case 'stock_result':
-          addStockToContext(itemData.symbol || 'Unknown', itemData, target);
+          addStockToContext(
+            itemData.symbol || 'Unknown',
+            itemData.name || itemData.companyName || 'Unknown',
+            itemData.timeframe || '1D',
+            itemData,
+            target
+          );
           break;
         default:
           console.warn(`Unknown item type: ${itemType}`);

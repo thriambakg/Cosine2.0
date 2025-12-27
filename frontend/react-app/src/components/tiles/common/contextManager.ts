@@ -7,7 +7,7 @@
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'lda_filing' | 'custom';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'lda_filing' | 'custom' | 'filesystem';
   title: string;
   subtitle?: string;
   data: any;
@@ -185,6 +185,7 @@ const getTileTypeName = (tileType: string): string => {
     stock_screener: 'Stock Screener',
     chat_generated: 'Chat Generated',
     custom: 'Custom',
+    folder: 'Folder',
   };
   
   return typeMap[tileType] || tileType;

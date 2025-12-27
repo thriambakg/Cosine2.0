@@ -265,6 +265,102 @@ const ChatMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled:
   );
 });
 
+// Memoized edit input component to prevent re-renders on every keystroke
+const MessageEditInput = memo(({ 
+  value, 
+  onChange, 
+  onSave, 
+  onCancel 
+}: { 
+  value: string; 
+  onChange: (value: string) => void; 
+  onSave: () => void; 
+  onCancel: () => void;
+}) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onCancel();
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (value.trim()) {
+        onSave();
+      }
+    }
+  };
+
+  return (
+    <Box sx={{ position: 'relative' }}>
+      <TextField
+        fullWidth
+        multiline
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        variant="outlined"
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            color: 'white',
+            paddingRight: '60px',
+            '& fieldset': {
+              borderColor: '#374151',
+            },
+            '&:hover fieldset': {
+              borderColor: '#3b82f6',
+            },
+            '&.Mui-focused fieldset': {
+              borderColor: '#3b82f6',
+            },
+          },
+        }}
+      />
+      <Box
+        sx={{
+          position: 'absolute',
+          bottom: 8,
+          right: 8,
+          display: 'flex',
+          gap: 0.5,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Tooltip title="Cancel (Esc)">
+          <IconButton
+            size="small"
+            onClick={onCancel}
+            sx={{
+              color: '#9ca3af',
+              '&:hover': { color: '#ef4444' },
+              width: 28,
+              height: 28,
+            }}
+          >
+            <CloseIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Send (Enter)">
+          <IconButton
+            size="small"
+            onClick={onSave}
+            disabled={!value.trim()}
+            sx={{
+              color: value.trim() ? '#22c55e' : '#6b7280',
+              '&:hover': { 
+                color: value.trim() ? '#16a34a' : '#6b7280',
+                backgroundColor: value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
+              },
+              width: 28,
+              height: 28,
+            }}
+          >
+            <SendIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Box>
+  );
+});
+
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
@@ -543,12 +639,21 @@ export default function ChatPage() {
     });
 
     const unsubscribe = unifiedMessageHandler.subscribeToLoadingState((sessionId, isLoading, source) => {
-      // Only update if it's for chatpage source or cross-interface loading
-      if (source === 'chatpage' || (source === 'sidebar' && isLoading)) {
+      // Update for chatpage source OR cross-interface loading (for universal edit updates)
+      // Also update for current session to ensure universal visibility of edits
+      const isCurrentSession = sessionId === currentSession?.session_id;
+      if (source === 'chatpage' || (source === 'sidebar' && isLoading) || (isCurrentSession && isLoading)) {
         console.log(`🔄 ChatPage: Received loading state update - Session: ${sessionId}, Loading: ${isLoading}, Source: ${source}`);
         setSessionLoadingStates(prev => ({
           ...prev,
           [sessionId]: isLoading
+        }));
+      } else if (isCurrentSession && !isLoading) {
+        // Always clear loading state for current session when it's cleared (for universal edit updates)
+        console.log(`🔄 ChatPage: Clearing loading state for current session - Session: ${sessionId}, Source: ${source}`);
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: false
         }));
       }
     });
@@ -1199,10 +1304,14 @@ export default function ChatPage() {
   const isSavingEditRef = useRef(false);
   
   const handleSaveEdit = async () => {
-    if (!editingMessage || editingMessageIndex === null || !editText.trim() || isUnifiedProcessing || isSavingEditRef.current) return;
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || isSavingEditRef.current) return;
     
     // Prevent double-clicks by setting ref immediately
     isSavingEditRef.current = true;
+    
+    // Store the editing message ID before clearing state
+    const editingMessageId = editingMessage.id;
+    const editingMessageText = editText;
     
     try {
       console.log('✏️ ChatPage: Sending edit message via unified system');
@@ -1214,18 +1323,35 @@ export default function ChatPage() {
         console.log('✅ ChatPage: Edit message sent successfully');
 
         // Immediately update the local UI to show the edited message and remove subsequent messages
-        truncateMessagesAfter(editingMessage.id, editText);
+        truncateMessagesAfter(editingMessageId, editingMessageText);
         
-        // Clear editing state
+        // Note: unifiedMessageHandler.applyLocalEditAndTruncate is already called in processMessage
+        // but we need to ensure the UI updates immediately. The truncateMessagesAfter call above
+        // updates the persistence system, and the unified handler should have already updated its cache.
+        // Force a refresh by getting the latest messages from the unified handler
+        if (currentSession?.session_id) {
+          // Small delay to ensure unified handler has processed the edit
+          setTimeout(() => {
+            const latestMessages = unifiedMessageHandler.getMessagesForSession(currentSession.session_id);
+            // Force notification to ensure UI updates
+            unifiedMessageHandler.notifyMessageUpdate(currentSession.session_id, latestMessages);
+            console.log('✏️ ChatPage: Forced message refresh after truncation:', latestMessages.length, 'messages');
+          }, 0);
+        }
+        
+        // Clear editing state AFTER truncation to allow immediate re-editing
         setEditingMessage(null);
         setEditingMessageIndex(null);
         setEditText('');
       } else {
         console.error('❌ ChatPage: Failed to send edit message:', result.error);
+        // Don't clear editing state on error so user can retry
       }
     } catch (error) {
       console.error('❌ ChatPage: Error sending edit message:', error);
+      // Don't clear editing state on error so user can retry
     } finally {
+      // Always reset the ref to allow subsequent edits
       isSavingEditRef.current = false;
     }
   };
@@ -2145,83 +2271,13 @@ export default function ChatPage() {
                 <Box sx={{ flex: 1 }}>
                   <MessageBubble isUser={message.sender === 'user'} status={(message as any).status || 'sent'}>
                     {editingMessage && editingMessage.id === message.id ? (
-                      <Box ref={editContainerRef} sx={{ position: 'relative' }}>
-                        <TextField
-                          fullWidth
-                          multiline
+                      <Box ref={editContainerRef}>
+                        <MessageEditInput
                           value={editText}
-                          onChange={(e) => setEditText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              handleCancelEdit();
-                            } else if (e.key === 'Enter' && e.shiftKey === false) {
-                              e.preventDefault();
-                              if (editText.trim()) {
-                                handleSaveEdit();
-                              }
-                            }
-                          }}
-                          variant="outlined"
-                          sx={{
-                            '& .MuiOutlinedInput-root': {
-                              color: 'white',
-                              paddingRight: '60px', // Space for send button
-                              '& fieldset': {
-                                borderColor: '#374151',
-                              },
-                              '&:hover fieldset': {
-                                borderColor: '#3b82f6',
-                              },
-                              '&.Mui-focused fieldset': {
-                                borderColor: '#3b82f6',
-                              },
-                            },
-                          }}
+                          onChange={setEditText}
+                          onSave={handleSaveEdit}
+                          onCancel={handleCancelEdit}
                         />
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            bottom: 8,
-                            right: 8,
-                            display: 'flex',
-                            gap: 0.5,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <Tooltip title="Cancel (Esc)">
-                            <IconButton
-                              size="small"
-                              onClick={handleCancelEdit}
-                              sx={{
-                                color: '#9ca3af',
-                                '&:hover': { color: '#ef4444' },
-                                width: 28,
-                                height: 28,
-                              }}
-                            >
-                              <CloseIcon sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Send (Enter)">
-                            <IconButton
-                              size="small"
-                              onClick={handleSaveEdit}
-                              disabled={!editText.trim()}
-                              sx={{
-                                color: editText.trim() ? '#22c55e' : '#6b7280',
-                                '&:hover': { 
-                                  color: editText.trim() ? '#16a34a' : '#6b7280',
-                                  backgroundColor: editText.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
-                                },
-                                width: 28,
-                                height: 28,
-                              }}
-                            >
-                              <SendIcon sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
                       </Box>
                     ) : (
                       <>

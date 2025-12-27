@@ -135,6 +135,102 @@ interface ChatSession {
 }
 
 // Hoisted input bar to preserve local state across parent re-renders
+// Memoized edit input component to prevent re-renders on every keystroke
+const MessageEditInput = memo(({ 
+  value, 
+  onChange, 
+  onSave, 
+  onCancel 
+}: { 
+  value: string; 
+  onChange: (value: string) => void; 
+  onSave: () => void; 
+  onCancel: () => void;
+}) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onCancel();
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (value.trim()) {
+        onSave();
+      }
+    }
+  };
+
+  return (
+    <Box sx={{ position: 'relative' }}>
+      <TextField
+        fullWidth
+        multiline
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        variant="outlined"
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            color: 'white',
+            fontSize: '0.875rem',
+            paddingRight: '60px',
+            '& fieldset': {
+              borderColor: 'rgba(59, 130, 246, 0.3)',
+            },
+            '&:hover fieldset': {
+              borderColor: 'rgba(59, 130, 246, 0.5)',
+            },
+            '&.Mui-focused fieldset': {
+              borderColor: 'rgba(59, 130, 246, 0.7)',
+            },
+          },
+        }}
+      />
+      <Box
+        sx={{
+          position: 'absolute',
+          bottom: 8,
+          right: 8,
+          display: 'flex',
+          gap: 0.5,
+          alignItems: 'center',
+        }}
+      >
+        <Tooltip title="Cancel (Esc)">
+          <IconButton
+            size="small"
+            onClick={onCancel}
+            sx={{
+              color: '#9ca3af',
+              '&:hover': { color: '#ef4444' },
+              width: 28,
+              height: 28,
+            }}
+          >
+            <CloseIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Send (Enter)">
+          <IconButton
+            size="small"
+            onClick={onSave}
+            disabled={!value.trim()}
+            sx={{
+              color: value.trim() ? '#22c55e' : '#6b7280',
+              '&:hover': { 
+                color: value.trim() ? '#16a34a' : '#6b7280',
+                backgroundColor: value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
+              },
+              width: 28,
+              height: 28,
+            }}
+          >
+            <SendIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Box>
+  );
+});
+
 const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled: boolean; placeholder: string; onSend: (text: string) => Promise<void> | void }) => {
   const [value, setValue] = useState('');
   const onSendClick = async () => {
@@ -227,7 +323,8 @@ const GlobalChatSidebar: React.FC = () => {
   const { 
     updateSessionAgentFiles, 
     updateSessionVariables,
-    addMessage: addPersistedMessage
+    addMessage: addPersistedMessage,
+    truncateMessagesAfter
   } = useChatPersistence(user?.id || '');
   // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
   // const { connect: connectWebSocket, sendMessage, isConnected } = useWebSocket();
@@ -713,16 +810,25 @@ const GlobalChatSidebar: React.FC = () => {
   // Subscribe to loading state updates from unified messaging system (matching ChatPage pattern)
   useEffect(() => {
     const unsubscribe = unifiedMessageHandler.subscribeToLoadingState((sessionId, isLoading, source) => {
-      // Only update if it's for sidebar source or cross-interface loading
-      if (source === 'sidebar' || (source === 'chatpage' && isLoading)) {
+      // Update for sidebar source OR cross-interface loading (for universal edit updates)
+      // Also update for active session to ensure universal visibility of edits
+      const isActiveSession = sessionId === activeSessionId;
+      if (source === 'sidebar' || (source === 'chatpage' && isLoading) || (isActiveSession && isLoading)) {
         setSessionLoadingStates(prev => ({
           ...prev,
           [sessionId]: isLoading
         }));
         // Also update local loading state for active session
-        if (sessionId === activeSessionId) {
+        if (isActiveSession) {
           setIsLoadingMessage(isLoading);
         }
+      } else if (isActiveSession && !isLoading) {
+        // Always clear loading state for active session when it's cleared (for universal edit updates)
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: false
+        }));
+        setIsLoadingMessage(false);
       }
     });
 
@@ -927,10 +1033,14 @@ const GlobalChatSidebar: React.FC = () => {
   const isSavingEditRef = useRef(false);
   
   const handleSaveEdit = async () => {
-    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId || isLoadingMessage || isSavingEditRef.current) return;
+    if (!editingMessage || editingMessageIndex === null || !editText.trim() || !activeSessionId || isSavingEditRef.current) return;
     
     // Prevent double-clicks by setting ref immediately
     isSavingEditRef.current = true;
+    
+    // Store the editing message ID before clearing state
+    const editingMessageId = editingMessage.id;
+    const editingMessageText = editText;
     
     let result;
     try {
@@ -941,8 +1051,41 @@ const GlobalChatSidebar: React.FC = () => {
       
       if (result.success) {
         console.log('✅ Sidebar: Edit message sent successfully');
+
+        // Immediately update the local UI to show the edited message and remove subsequent messages
+        // This matches ChatPage behavior and ensures real-time truncation
+        truncateMessagesAfter(editingMessageId, editingMessageText);
         
-        // Clear editing state
+        // CRITICAL: Update sidebar's local currentSession to match truncation
+        // The sidebar has its own currentSession state that needs to be synced
+        if (currentSession && currentSession.session_id === activeSessionId) {
+          const messageIndex = currentSession.messages.findIndex(msg => msg.id === editingMessageId);
+          if (messageIndex >= 0) {
+            const truncatedMessages = currentSession.messages.slice(0, messageIndex + 1);
+            truncatedMessages[messageIndex] = {
+              ...truncatedMessages[messageIndex],
+              text: editingMessageText
+            };
+            setCurrentSession({
+              ...currentSession,
+              messages: truncatedMessages,
+              message_count: truncatedMessages.length,
+              last_updated: Date.now()
+            });
+            console.log('✏️ Sidebar: Updated local currentSession with truncation:', truncatedMessages.length, 'messages');
+          }
+        }
+        
+        // CRITICAL: Force unified handler notification to ensure UI updates immediately
+        // The unified handler's applyLocalEditAndTruncate should have already truncated the cache
+        // but we force a notification to ensure the sidebar's merged messages update
+        if (activeSessionId) {
+          const latestMessages = unifiedMessageHandler.getMessagesForSession(activeSessionId);
+          unifiedMessageHandler.notifyMessageUpdate(activeSessionId, latestMessages);
+          console.log('✏️ Sidebar: Forced message refresh after truncation:', latestMessages.length, 'messages');
+        }
+        
+        // Clear editing state AFTER truncation to allow immediate re-editing
         setEditingMessage(null);
         setEditingMessageIndex(null);
         setEditText('');
@@ -950,12 +1093,13 @@ const GlobalChatSidebar: React.FC = () => {
         // Loading state will be managed by the unified handler
       } else {
         console.error('❌ Sidebar: Failed to send edit message:', result.error);
-        setIsLoadingMessage(false);
+        // Don't clear editing state on error so user can retry
       }
     } catch (error) {
       console.error('❌ Sidebar: Error sending edit message:', error);
-      setIsLoadingMessage(false);
+      // Don't clear editing state on error so user can retry
     } finally {
+      // Always reset the ref to allow subsequent edits
       isSavingEditRef.current = false;
     }
   };
@@ -1884,82 +2028,13 @@ const GlobalChatSidebar: React.FC = () => {
               }}
             >
               {editingMessage && editingMessage.id === message.id ? (
-                <Box ref={editContainerRef} sx={{ position: 'relative' }}>
-                  <TextField
-                    fullWidth
-                    multiline
+                <Box ref={editContainerRef}>
+                  <MessageEditInput
                     value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        handleCancelEdit();
-                      } else if (e.key === 'Enter' && e.shiftKey === false) {
-                        e.preventDefault();
-                        if (editText.trim()) {
-                          handleSaveEdit();
-                        }
-                      }
-                    }}
-                    variant="outlined"
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        color: 'white',
-                        fontSize: '0.875rem',
-                        '& fieldset': {
-                          borderColor: 'rgba(59, 130, 246, 0.3)',
-                        },
-                        '&:hover fieldset': {
-                          borderColor: 'rgba(59, 130, 246, 0.5)',
-                        },
-                        '&.Mui-focused fieldset': {
-                          borderColor: 'rgba(59, 130, 246, 0.7)',
-                        },
-                      },
-                    }}
+                    onChange={setEditText}
+                    onSave={handleSaveEdit}
+                    onCancel={handleCancelEdit}
                   />
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      bottom: 8,
-                      right: 8,
-                      display: 'flex',
-                      gap: 0.5,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Tooltip title="Cancel (Esc)">
-                      <IconButton
-                        size="small"
-                        onClick={handleCancelEdit}
-                        sx={{
-                          color: '#9ca3af',
-                          '&:hover': { color: '#ef4444' },
-                          width: 28,
-                          height: 28,
-                        }}
-                      >
-                        <CloseIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Send (Enter)">
-                      <IconButton
-                        size="small"
-                        onClick={handleSaveEdit}
-                        disabled={!editText.trim()}
-                        sx={{
-                          color: editText.trim() ? '#22c55e' : '#6b7280',
-                          '&:hover': { 
-                            color: editText.trim() ? '#16a34a' : '#6b7280',
-                            backgroundColor: editText.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
-                          },
-                          width: 28,
-                          height: 28,
-                        }}
-                      >
-                        <SendIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
                 </Box>
               ) : (
                 <>

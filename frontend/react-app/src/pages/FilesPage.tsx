@@ -1085,23 +1085,11 @@ const FilesPage: React.FC = () => {
         return newSet;
       });
     } else {
-      // Regular click: Clear selection and navigate (for folders) or select single item
-      if (item.type === 'folder') {
-        // Only navigate if no items are selected
-        if (selectedItems.size === 0) {
-          handleFolderClick(item as Folder);
-        } else {
-          // If items are selected, just select this item
-          event.preventDefault();
-          setSelectedItems(new Set([item.id]));
-          setLastSelectedIndex(index);
-        }
-      } else {
-        // For files, just select
-        event.preventDefault();
-        setSelectedItems(new Set([item.id]));
-        setLastSelectedIndex(index);
-      }
+      // Regular click: Select item (for both folders and files)
+      // Folders open on double-click, not single-click
+      event.preventDefault();
+      setSelectedItems(new Set([item.id]));
+      setLastSelectedIndex(index);
     }
   };
 
@@ -1688,6 +1676,10 @@ const FilesPage: React.FC = () => {
                   onDrop={(e) => handleDrop(e, folder)}
                   onDragEnd={handleDragEnd}
                   onClick={(e) => handleItemClick(folder, itemIndex, e)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    handleFolderClick(folder);
+                  }}
                   onContextMenu={(e) => handleContextMenu(e, folder)}
                   onMouseDown={(e) => {
                     // Prevent browser context menu on right click

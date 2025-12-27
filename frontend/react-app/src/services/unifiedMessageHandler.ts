@@ -328,8 +328,9 @@ class UnifiedMessageHandlerService {
         case 'edit_message':
           // Edit flow: update existing user message in-place and truncate UI immediately
           this.applyLocalEditAndTruncate(finalSessionId, messageData);
-          // Start loading while waiting for new AI response
-          this.broadcastLoadingState(finalSessionId, true, messageData.source);
+          // Start loading while waiting for new AI response - broadcast to BOTH interfaces for universal updates
+          this.broadcastLoadingState(finalSessionId, true, 'chatpage');
+          this.broadcastLoadingState(finalSessionId, true, 'sidebar');
           await this.processEditMessage(finalSessionId, messageData);
           break;
       }
@@ -1223,12 +1224,13 @@ class UnifiedMessageHandlerService {
   private handleEditAcknowledged(sessionId: string, data: any): void {
     console.log('✏️ UnifiedMessageHandler: Edit acknowledged for session:', sessionId, 'unchanged:', data.unchanged);
     if (data.unchanged) {
-      // Nothing to wait for
+      // Nothing to wait for - clear loading state for both interfaces
       this.broadcastLoadingState(sessionId, false, 'chatpage');
       this.broadcastLoadingState(sessionId, false, 'sidebar');
     } else {
-      // Keep loading until ai_response arrives
+      // Keep loading until ai_response arrives - broadcast to both interfaces
       this.broadcastLoadingState(sessionId, true, 'chatpage');
+      this.broadcastLoadingState(sessionId, true, 'sidebar');
     }
   }
 

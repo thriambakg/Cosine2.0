@@ -70,6 +70,7 @@ const FileBrowserDialog: React.FC<FileBrowserDialogProps> = ({
   const loadFolderContents = async (folderPath: string = '') => {
     if (!user) return;
     
+    console.log(`📁 FileBrowserDialog: Loading folder contents for folder_path: "${folderPath}"`);
     try {
       const response = await filesystemAPI.listFolder({
         user_id: user.id,
@@ -77,11 +78,16 @@ const FileBrowserDialog: React.FC<FileBrowserDialogProps> = ({
       });
       
       if (response.success && response.result) {
-        setFolders(response.result.subfolders || []);
-        setItems(response.result.items || []);
+        const subfolders = response.result.subfolders || [];
+        const items = response.result.items || [];
+        console.log(`✅ FileBrowserDialog: Loaded ${subfolders.length} folders and ${items.length} items from folder_path: "${folderPath}"`);
+        setFolders(subfolders);
+        setItems(items);
+      } else {
+        console.error(`❌ FileBrowserDialog: Failed to load folder from folder_path: "${folderPath}"`, response.error);
       }
     } catch (error) {
-      console.error('Error loading folder contents:', error);
+      console.error(`❌ FileBrowserDialog: Error loading folder contents for folder_path: "${folderPath}"`, error);
     }
   };
 
@@ -94,9 +100,18 @@ const FileBrowserDialog: React.FC<FileBrowserDialogProps> = ({
   }, [open, user]);
 
   const handleFolderClick = async (folder: Folder) => {
+    console.log(`📁 FileBrowserDialog: Clicked on folder:`, {
+      folderId: folder.id,
+      folderName: folder.name,
+      folderPath: folder.path,
+    });
     setCurrentFolderId(folder.id);
     setBreadcrumbPath(prev => [...prev, { id: folder.id, name: folder.name }]);
-    await loadFolderContents(folder.path);
+    // Use folder.id as folder_path (like FolderTile and FilesPage do)
+    // The API expects folder ID, not folder path
+    const folderPath = folder.id === 'root' ? '' : folder.id;
+    console.log(`📁 FileBrowserDialog: Navigating to folder with folder_path: "${folderPath}"`);
+    await loadFolderContents(folderPath);
   };
 
   const handleBreadcrumbClick = async (folderId: string) => {

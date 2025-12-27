@@ -195,9 +195,9 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
           };
         }
         
-        // CRITICAL: For filesystem items (context_item with filesystem_type), preserve the FULL data field
+        // CRITICAL: For filesystem items (custom type with filesystem_type in data), preserve the FULL data field
         // This includes s3_key which is essential for the agent to decrypt and read .cosine files
-        if (item.type === 'context_item' && item.data?.filesystem_type) {
+        if ((item.type === 'custom' || item.type === 'filesystem') && item.data?.filesystem_type) {
           console.log('🔍 ContextWindow: Preserving full data for filesystem item:', {
             id: item.id,
             filesystem_type: item.data.filesystem_type,

@@ -123,15 +123,29 @@ def query_stocks_by_criteria(
         # Rationale: Price change filters are usually most selective
         
         # STRATEGY 1: Price change range query (most selective for screeners)
+        # BUT: If sector filter is present, we need to query more items to find enough sector matches
+        # Health Care might only be 1-2% of all stocks, so we need to query significantly more
         if criteria.get('priceChangeRange'):
-            logger.info("📊 Using Price Change Range GSI (GSI3)")
+            # If sector filter is present, we need to query more items to find enough sector matches
+            # Rare sectors like Health Care (2% of results) require querying 20-30x more items
+            # to ensure we find enough matches after filtering
+            has_sector_filter = bool(criteria.get('sectors'))
+            if has_sector_filter:
+                # Query 20x more items when sector filtering to ensure we find enough matches
+                # This accounts for sectors that might be <5% of the total stock population
+                query_limit = max_results * 20  # Query 20x more to find rare sectors
+                logger.info(f"📊 Using Price Change Range GSI (GSI3) with sector filter - querying {query_limit} items to find enough sector matches")
+            else:
+                query_limit = max_results * 2  # Normal query limit
+                logger.info("📊 Using Price Change Range GSI (GSI3)")
+            
             change_min, change_max = criteria['priceChangeRange']
             
             query_params = {
                 'IndexName': 'PriceChangeRangeIndex',
                 'KeyConditionExpression': Key('GSI3PK').eq(f'PRICE_CHANGE#{timeframe}') & 
                                          Key('GSI3SK').between(Decimal(str(change_min)), Decimal(str(change_max))),
-                'Limit': max_results * 2  # Get more to filter down
+                'Limit': query_limit
             }
             if last_evaluated_key:
                 query_params['ExclusiveStartKey'] = last_evaluated_key

@@ -14,6 +14,7 @@ import SECSearchTile from '../tiles/SECSearchTile';
 import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
 import LDASearchTile from '../tiles/LDASearchTile';
+import FolderTile from '../tiles/FolderTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
@@ -1213,6 +1214,18 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    const folderProps = {
+      ...commonProps,
+      onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
+      folderPath: (tile as any).folderPath || '',
+      folderId: (tile as any).folderId,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
+      isPinned: tile.isPinned,
+      dashboardContext,
+    };
+
 
     return (
       <Box
@@ -1246,6 +1259,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <CongressBillsSearchTile key={tile.id} {...congressBillsProps} />
         ) : tile.type === 'lda_disclosures' ? (
           <LDASearchTile key={tile.id} {...ldaSearchProps} />
+        ) : tile.type === 'folder' ? (
+          <FolderTile key={tile.id} {...folderProps} />
         ) : (
           <PlaceholderTile
             key={tile.id}

@@ -1650,8 +1650,6 @@ const SECSearchPage: React.FC = () => {
 
       // Save each filing to the filesystem with FULL data
       for (const filing of selectedFilingObjects) {
-        const filingId = filing.accession || filing.adsh || filing.objectAccession || 
-                         `${filing.cik || 'unknown'}_${filing.form || 'filing'}_${filing.filingDate || Date.now()}`;
         const title = `${filing.form || 'SEC Filing'} - ${filing.filingEntity || filing.reportingFor || 'Unknown Entity'}`;
         
         // Use full data mode for filesystem - send complete filing object with all fields

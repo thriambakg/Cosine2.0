@@ -9,3 +9,4 @@ export { default as SECSearchTile } from './SECSearchTile';
 export { default as GovtContractsSearchTile } from './GovtContractsSearchTile';
 export { default as CongressBillsSearchTile } from './CongressBillsSearchTile';
 export { default as LDASearchTile } from './LDASearchTile';
+export { default as FolderTile } from './FolderTile';

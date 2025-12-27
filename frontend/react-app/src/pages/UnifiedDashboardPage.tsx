@@ -24,13 +24,12 @@ import {
   ArrowBack as ArrowBackIcon,
   TrendingUp as TrendingUpIcon,
   AccountBalance as AccountBalanceIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  Chat as ChatIcon,
   Settings as SettingsIcon,
   Article as ArticleIcon,
   Assessment as AssessmentIcon,
   Description as DescriptionIcon,
   Gavel as GavelIcon,
+  Folder as FolderIcon,
   ZoomIn,
   ZoomOut,
   ZoomOutMap
@@ -197,48 +196,28 @@ const tileCategories: TileCategory[] = [
   },
   {
     id: 'custom',
-    name: 'Custom & AI',
-    description: 'Custom tiles and AI-generated content',
-    icon: <AutoAwesomeIcon />,
-    color: '#8b5cf6',
+    name: 'File System',
+    description: 'File system tiles',
+    icon: <FolderIcon />,
+    color: '#fbbf24',
     subcategories: [
       {
-        id: 'content',
-        name: 'Custom Content',
-        description: 'Create your own custom tiles',
-        icon: <AutoAwesomeIcon />,
-        color: '#8b5cf6',
+        id: 'folder',
+        name: 'Folder',
+        description: 'Display and manage files in a folder',
+        icon: <FolderIcon />,
+        color: '#fbbf24',
         tiles: [
           {
-            id: 'custom',
-            name: 'Custom Content',
-            description: 'Create custom tiles with your own content',
+            id: 'folder',
+            name: 'Folder',
+            description: 'Display and manage files in a folder',
             category: 'custom',
-            subcategory: 'content',
-            icon: <AutoAwesomeIcon />,
-            color: '#8b5cf6',
+            subcategory: 'folder',
+            icon: <FolderIcon />,
+            color: '#fbbf24',
             isAvailable: true,
-            placeholder: true
-          }
-        ]
-      },
-      {
-        id: 'ai',
-        name: 'AI Generated',
-        description: 'AI-powered tile generation',
-        icon: <ChatIcon />,
-        color: '#ef4444',
-        tiles: [
-          {
-            id: 'chat_generated',
-            name: 'AI Generated',
-            description: 'Let AI create tiles based on your needs',
-            category: 'custom',
-            subcategory: 'ai',
-            icon: <ChatIcon />,
-            color: '#ef4444',
-            isAvailable: true,
-            placeholder: true
+            placeholder: false
           }
         ]
       }
@@ -871,6 +850,9 @@ const UnifiedDashboardPage: React.FC = () => {
     } else if (tileType.id === 'lda_disclosures') {
       // Handle LDA disclosures tile creation
       handleCreateLDASearchTile();
+    } else if (tileType.id === 'folder') {
+      // Handle folder tile creation
+      handleCreateFolderTile();
     } else if (tileType.placeholder) {
       // For placeholder tiles, show a message
       alert(`${tileType.name} tiles are coming soon!`);
@@ -1256,6 +1238,34 @@ const UnifiedDashboardPage: React.FC = () => {
     setAddTileStep('closed');
   };
 
+  // Folder tile creation handler
+  const handleCreateFolderTile = () => {
+    if (!activeTab) return;
+
+    const newTile: UnifiedTile = {
+      id: `folder_${Date.now()}`,
+      type: 'folder',
+      title: 'Folder',
+      folderPath: '',
+      folderId: undefined,
+      displayOptions: {
+        showFolders: true,
+        showFiles: true,
+        showBreadcrumbs: true,
+      },
+      autoRefresh: false,
+      isPinned: false,
+      size: { width: 400, height: 600 },
+      gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
+      gridSize: { width: 4, height: 6 },
+      dashboard_id: currentDashboardId,
+    };
+
+    const updatedTiles = [...(activeTab.tiles || []), newTile];
+    updateTabTiles(activeTab.id, updatedTiles);
+    setAddTileStep('closed');
+  };
+
   const getDefaultTileConfig = (tileTypeId: string) => {
     switch (tileTypeId) {
       case 'stock':
@@ -1300,6 +1310,16 @@ const UnifiedDashboardPage: React.FC = () => {
             showTimestamp: true,
           }
         };
+      case 'folder':
+        return {
+          folderPath: '',
+          folderId: undefined,
+          displayOptions: {
+            showFolders: true,
+            showFiles: true,
+            showBreadcrumbs: true,
+          }
+        };
       default:
         return {};
     }
@@ -1311,13 +1331,15 @@ const UnifiedDashboardPage: React.FC = () => {
     try {
       // Create tile data for the API
       const tileData = {
-        type: selectedTileType.id as "crypto" | "custom" | "stock" | "placeholder",
+        type: selectedTileType.id as "crypto" | "custom" | "stock" | "placeholder" | "folder",
         title: tileConfig.title || tileConfig.symbol || tileConfig.name || selectedTileType.name,
         symbol: tileConfig.symbol,
         timeframe: tileConfig.timeframe,
         name: tileConfig.name, // For portfolio tiles
         content: tileConfig.content, // For custom tiles
         prompt: tileConfig.prompt, // For chat_generated tiles
+        folderPath: tileConfig.folderPath || '', // For folder tiles
+        folderId: tileConfig.folderId, // For folder tiles
         displayOptions: tileConfig.displayOptions || {},
         autoRefresh: tileConfig.autoRefresh || false,
         gridPosition: findNextAvailablePosition(getDefaultTileSize(selectedTileType.id as any)),
@@ -1972,7 +1994,7 @@ const UnifiedDashboardPage: React.FC = () => {
             {selectedTileType && (
               <Box>
                 {/* Dynamic configuration based on tile type */}
-                {selectedTileType.id === 'stock' && (
+                {selectedTileType?.id === 'stock' && (
                   <Box>
                     <TextField
                       fullWidth
@@ -1998,7 +2020,7 @@ const UnifiedDashboardPage: React.FC = () => {
                   </Box>
                 )}
 
-                {selectedTileType.id === 'portfolio' && (
+                {selectedTileType?.id === 'portfolio' && (
                   <Box>
                     <TextField
                       fullWidth
@@ -2011,7 +2033,7 @@ const UnifiedDashboardPage: React.FC = () => {
                   </Box>
                 )}
 
-                {selectedTileType.id === 'custom' && (
+                {selectedTileType?.id === 'custom' && (
                   <Box>
                     <TextField
                       fullWidth
@@ -2034,7 +2056,7 @@ const UnifiedDashboardPage: React.FC = () => {
                   </Box>
                 )}
 
-                {selectedTileType.id === 'chat_generated' && (
+                {selectedTileType?.id === 'chat_generated' && (
                   <Box>
                     <TextField
                       fullWidth
@@ -2045,6 +2067,20 @@ const UnifiedDashboardPage: React.FC = () => {
                       onChange={(e) => setTileConfig({ ...tileConfig, prompt: e.target.value })}
                       sx={{ mb: 2 }}
                       placeholder="e.g., 'Create a tile showing my top 5 crypto holdings' or 'Show me AAPL stock analysis'"
+                    />
+                  </Box>
+                )}
+
+                {selectedTileType?.id === 'folder' && (
+                  <Box>
+                    <TextField
+                      fullWidth
+                      label="Folder Path (optional)"
+                      value={tileConfig.folderPath || ''}
+                      onChange={(e) => setTileConfig({ ...tileConfig, folderPath: e.target.value })}
+                      sx={{ mb: 2 }}
+                      placeholder="Leave empty for root folder, or enter folder path"
+                      helperText="Leave empty to show root folder, or specify a folder path"
                     />
                   </Box>
                 )}
@@ -2067,7 +2103,7 @@ const UnifiedDashboardPage: React.FC = () => {
                   backgroundColor: selectedTileType?.color || '#d97706',
                 }
               }}
-              disabled={!tileConfig.symbol && !tileConfig.title && !tileConfig.name && !tileConfig.prompt}
+              disabled={!tileConfig.symbol && !tileConfig.title && !tileConfig.name && !tileConfig.prompt && selectedTileType?.id !== 'folder'}
             >
               Add Tile
             </Button>
