@@ -339,6 +339,20 @@ export default function ChatPage() {
     }
     if (currentSession?.session_id && user?.id) {
       try {
+        // Log context items before sending to verify data field is present
+        console.log('📤 ChatPage: Sending context items to backend:', {
+          count: newContext.length,
+          items: newContext.map(item => ({
+            id: item.id,
+            type: item.type,
+            title: item.title,
+            has_data: !!item.data,
+            data_keys: item.data ? Object.keys(item.data) : [],
+            data_s3_key: item.data?.s3_key,
+            full_data: item.data
+          }))
+        });
+        
         await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
           session_variables: {
             context_items: newContext,
@@ -947,8 +961,43 @@ export default function ChatPage() {
   // Load session context when session changes
   useEffect(() => {
     if (currentSession?.session_variables?.context_items) {
-      setSessionContext(currentSession.session_variables.context_items);
-      console.log('✅ ChatPage: Set session context:', currentSession.session_variables.context_items.length, 'items');
+      // CRITICAL: Sanitize context items when loading from session to ensure data field is an object
+      const sanitizedContext = currentSession.session_variables.context_items.map((item: any) => {
+        let dataField = item.data;
+        
+        // If data is a string, parse it back to an object
+        if (typeof dataField === 'string') {
+          try {
+            dataField = JSON.parse(dataField);
+            console.warn(`⚠️ ChatPage: Loaded context item ${item.id} had data as string, parsed it`);
+          } catch (e) {
+            console.error(`❌ ChatPage: Failed to parse data field for loaded item ${item.id}:`, e);
+            dataField = {};
+          }
+        }
+        
+        // Ensure data is an object
+        if (!dataField || typeof dataField !== 'object' || Array.isArray(dataField)) {
+          console.warn(`⚠️ ChatPage: Loaded context item ${item.id} has invalid data field, using empty object`);
+          dataField = {};
+        }
+        
+        return {
+          ...item,
+          data: dataField
+        };
+      });
+      
+      setSessionContext(sanitizedContext);
+      console.log('✅ ChatPage: Set session context:', sanitizedContext.length, 'items');
+      console.log('🔍 ChatPage: Loaded context items:', sanitizedContext.map(item => ({
+        id: item.id,
+        type: item.type,
+        has_data: !!item.data,
+        data_type: typeof item.data,
+        data_keys: item.data ? Object.keys(item.data) : [],
+        data_s3_key: item.data?.s3_key
+      })));
     } else {
       setSessionContext([]);
       console.log('📭 ChatPage: No context items in session');
@@ -960,6 +1009,17 @@ export default function ChatPage() {
     const handleAddToContext = (event: CustomEvent) => {
       console.log('🎯 ChatPage: Received add-to-context event:', event.detail);
       const newItem: ContextItem = event.detail;
+      
+      // Log the item to verify data field is present
+      console.log('🔍 ChatPage: New context item details:', {
+        id: newItem.id,
+        type: newItem.type,
+        title: newItem.title,
+        has_data: !!newItem.data,
+        data_keys: newItem.data ? Object.keys(newItem.data) : [],
+        data_s3_key: newItem.data?.s3_key,
+        full_data: newItem.data
+      });
       
       setSessionContext((prev) => {
         // Adding context item
@@ -974,13 +1034,46 @@ export default function ChatPage() {
         
         console.log('✅ ChatPage: Adding item to context:', newItem);
         
+        // CRITICAL: Ensure data field is preserved as an object, not a string
+        let dataField = newItem.data;
+        
+        // If data is a string, parse it back to an object
+        if (typeof dataField === 'string') {
+          try {
+            dataField = JSON.parse(dataField);
+            console.warn('⚠️ ChatPage: data field was a string, parsed it back to object');
+          } catch (e) {
+            console.error('❌ ChatPage: Failed to parse data field from string:', e);
+            dataField = {};
+          }
+        }
+        
+        // Ensure data is an object, not null/undefined
+        if (!dataField || typeof dataField !== 'object' || Array.isArray(dataField)) {
+          console.warn('⚠️ ChatPage: data field is not a valid object, using empty object');
+          dataField = {};
+        }
+        
+        const itemWithData = {
+          ...newItem,
+          data: dataField // Ensure data field is always an object
+        };
+        
         // Update previous context ref to mark that context has changed
         // This ensures the next message will send context data
         previousContextRef.current = prev; // Keep the old context for change detection
         
-        const newContext = [...prev, newItem];
+        const newContext = [...prev, itemWithData];
         // Context updated
         console.log('🎯 ChatPage: Context change detection scenario completed - context data is ready for next message');
+        console.log('🔍 ChatPage: New context item in state:', {
+          id: itemWithData.id,
+          has_data: !!itemWithData.data,
+          data_type: typeof itemWithData.data,
+          data_keys: itemWithData.data ? Object.keys(itemWithData.data) : [],
+          data_s3_key: itemWithData.data?.s3_key,
+          full_data: itemWithData.data
+        });
         // Context items added
         
         return newContext;
@@ -1423,8 +1516,48 @@ export default function ChatPage() {
       } else if (sessionContext.length > 0 && hasContextChanged()) {
         // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
         console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending context message with tile data`);
-        // Sending context message with context items
-        result = await sendUnifiedContextMessage(text, sessionContext, selectedModel);
+        
+        // CRITICAL: Sanitize context items to ensure data field is always an object, not a string
+        const sanitizedContext = sessionContext.map(item => {
+          let dataField = item.data;
+          
+          // If data is a string, parse it back to an object
+          if (typeof dataField === 'string') {
+            try {
+              dataField = JSON.parse(dataField);
+              console.warn(`⚠️ ChatPage: Context item ${item.id} had data as string, parsed it back to object`);
+            } catch (e) {
+              console.error(`❌ ChatPage: Failed to parse data field for item ${item.id}:`, e);
+              dataField = {};
+            }
+          }
+          
+          // Ensure data is an object (not null, undefined, or array)
+          if (!dataField || typeof dataField !== 'object' || Array.isArray(dataField)) {
+            console.warn(`⚠️ ChatPage: Context item ${item.id} has invalid data field (type: ${typeof dataField}), using empty object`);
+            dataField = {};
+          }
+          
+          return {
+            ...item,
+            data: dataField // Ensure data is always an object
+          };
+        });
+        
+        // Log sanitized context items before sending
+        console.log('🔍 ChatPage: Sanitized context items before sending:', sanitizedContext.map(item => ({
+          id: item.id,
+          type: item.type,
+          title: item.title,
+          has_data: !!item.data,
+          data_type: typeof item.data,
+          data_keys: item.data ? Object.keys(item.data) : [],
+          data_s3_key: item.data?.s3_key,
+          full_data: item.data
+        })));
+        
+        // Sending context message with sanitized context items
+        result = await sendUnifiedContextMessage(text, sanitizedContext, selectedModel);
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
       } else if (currentSession?.session_id) {

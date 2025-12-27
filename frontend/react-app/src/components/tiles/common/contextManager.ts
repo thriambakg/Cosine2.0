@@ -53,8 +53,44 @@ export interface TileContextData {
  */
 export const addToContext = (item: ContextItem): void => {
   console.log('🔥 addToContext called with:', item);
+  
+  // CRITICAL: Ensure data field is an object, not a string, before dispatching
+  let dataField = item.data;
+  
+  // If data is a string, parse it back to an object
+  if (typeof dataField === 'string') {
+    try {
+      dataField = JSON.parse(dataField);
+      console.warn('⚠️ contextManager: data field was a string, parsed it back to object');
+    } catch (e) {
+      console.error('❌ contextManager: Failed to parse data field from string:', e);
+      dataField = {};
+    }
+  }
+  
+  // Ensure data is an object
+  if (!dataField || typeof dataField !== 'object' || Array.isArray(dataField)) {
+    console.warn('⚠️ contextManager: data field is not a valid object, using empty object');
+    dataField = {};
+  }
+  
+  // Create a clean context item with proper data field
+  const cleanItem: ContextItem = {
+    ...item,
+    data: dataField // Ensure data is always an object
+  };
+  
+  console.log('🔥 addToContext - Clean item before dispatch:', {
+    id: cleanItem.id,
+    type: cleanItem.type,
+    has_data: !!cleanItem.data,
+    data_type: typeof cleanItem.data,
+    data_keys: cleanItem.data ? Object.keys(cleanItem.data) : [],
+    data_s3_key: cleanItem.data?.s3_key
+  });
+  
   const event = new CustomEvent('add-to-context', {
-    detail: item
+    detail: cleanItem
   });
   console.log('🔥 Dispatching event:', event);
   window.dispatchEvent(event);

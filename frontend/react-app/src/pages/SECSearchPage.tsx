@@ -48,12 +48,14 @@ import {
   Chat as SidebarChatIcon,
   VerifiedUser as VerifiedUserIcon,
   ViewColumn as ViewColumnIcon,
+  Folder as FolderIcon,
 } from '@mui/icons-material';
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
-import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI } from '../services/api';
+import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI, filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { addFilingToContext, addMultipleFilingsToContext } from '../components/tiles/common';
 import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
+import FileBrowserDialog from '../components/common/FileBrowserDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -848,6 +850,7 @@ const SECSearchPage: React.FC = () => {
   // Selection state for adding to context
   const [selectedFilings, setSelectedFilings] = useState<Set<number>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
 
   // Log state restoration (state is already initialized from sessionStorage above)
   useEffect(() => {
@@ -1633,6 +1636,42 @@ const SECSearchPage: React.FC = () => {
     setContextMenuAnchor(null);
   };
 
+  const handleAddToFiles = () => {
+    if (selectedFilings.size === 0 || !user) return;
+    setFileBrowserOpen(true);
+    handleContextMenuClose();
+  };
+
+  const handleFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedFilings.size === 0) return;
+    
+    try {
+      const selectedFilingObjects = currentResults.filter((_, idx) => selectedFilings.has(idx));
+
+      // Save each filing to the filesystem with FULL data
+      for (const filing of selectedFilingObjects) {
+        const filingId = filing.accession || filing.adsh || filing.objectAccession || 
+                         `${filing.cik || 'unknown'}_${filing.form || 'filing'}_${filing.filingDate || Date.now()}`;
+        const title = `${filing.form || 'SEC Filing'} - ${filing.filingEntity || filing.reportingFor || 'Unknown Entity'}`;
+        
+        // Use full data mode for filesystem - send complete filing object with all fields
+        await filesystemAPI.addContextItem({
+          user_id: user.id,
+          folder_path: folderPath,
+          context_data: filing, // Full filing object with all fields
+          title: title,
+          item_type: 'sec_filing',
+        });
+      }
+      
+      console.log(`✅ Saved ${selectedFilingObjects.length} filing(s) to filesystem`);
+      setSelectedFilings(new Set());
+      setFileBrowserOpen(false);
+    } catch (error) {
+      console.error('Error saving filings to filesystem:', error);
+    }
+  };
+
   const handleAddToContext = (target: 'new' | 'sidebar') => {
     if (selectedFilings.size === 0) return;
     
@@ -2371,9 +2410,9 @@ const SECSearchPage: React.FC = () => {
                     </Typography>
                   </Box>
                   
-                  {/* Status Indicator and Add to Context Button */}
+                  {/* Right side: Context button, Results count, and Results per page - grouped together */}
                   {allSearchResults.length > 0 || searchState.isSearching ? (
-                    <>
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                       {/* Add to Context Button */}
                       {currentResults.length > 0 && (
                         <Tooltip title={`Add ${selectedFilings.size > 0 ? `${selectedFilings.size} filing(s)` : 'selected filings'} to context`}>
@@ -2493,9 +2532,9 @@ const SECSearchPage: React.FC = () => {
                           </Select>
                         </FormControl>
                       )}
-                      </>
-                    ) : null}
-                  </Box>
+                    </Box>
+                  ) : null}
+              </Box>
 
               {/* Column Selection Menu */}
               <Menu
@@ -3477,7 +3516,19 @@ const SECSearchPage: React.FC = () => {
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
           Add to Current Sidebar Chat
         </MenuItem>
+        <MenuItem onClick={handleAddToFiles}>
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files
+        </MenuItem>
       </Menu>
+
+      {/* File Browser Dialog */}
+      <FileBrowserDialog
+        open={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={handleFileBrowserSelect}
+        title="Select folder to save filings"
+      />
 
       {/* Dialog to show all selected form types */}
       <Dialog

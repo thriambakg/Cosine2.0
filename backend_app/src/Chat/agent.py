@@ -168,6 +168,7 @@ from tools.govt_contracts_search import search_govt_contracts
 from tools.politician_trades_search import search_politician_trades
 from tools.lda_autocomplete_tool import lda_autocomplete
 from tools.lda_search_tool import lda_search
+from tools.search_autocomplete_tool import search_autocomplete
 from tools.datetime_tool import get_current_datetime, calculate_date_range
 
 # Financial Analysis Tools
@@ -925,8 +926,63 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 28. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
 29. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
 30. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
+31. search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB with various filters
+32. search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
+33. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
+34. lda_autocomplete(query, field_types, limit) - LDA autocomplete tool for finding registrants, clients, lobbyists, PACs, foreign entities
+35. lda_search(filters, limit, last_evaluated_key) - LDA search tool for searching lobbying disclosures
+36. search_autocomplete(query, list_type, limit) - Search autocomplete tool for matching natural language queries to CSV list values (policy areas, general issues, government entities, legislators)
+37. get_current_datetime() - Get current date/time for exact timeframe calculations
+38. calculate_date_range(period, start_date, end_date) - Calculate date ranges relative to current date
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
+
+🔍 SEARCH AUTocomplete AND NATURAL LANGUAGE MATCHING:
+When users ask about searching for bills, LDA filings, or other data using natural language (e.g., "renewable energy", "healthcare", "environmental protection"), you MUST use search_autocomplete() to match their query to the correct CSV list values.
+
+**CRITICAL RULES:**
+1. **ALWAYS use search_autocomplete() BEFORE performing searches** when users use natural language terms that might match CSV list values
+2. **Use the CORRECT list_type for each search type:**
+   - For Congress Bills searches: Use 'policy_area' or 'congress_legislator'
+   - For LDA searches: Use 'general_issue' or 'government_entity'
+   - NEVER use policy_area for LDA searches or general_issue for Congress Bills searches
+
+**List Type Mapping:**
+- 'policy_area': Used in Congress Bills search (policy_area filter)
+  - Examples: "Energy", "Health", "Education", "Environmental Protection"
+  - Natural language matches: "renewable energy" → "Energy", "healthcare" → "Health", "environment" → "Environmental Protection"
+- 'general_issue': Used in LDA search (general_issue_code filter)
+  - Examples: "ENG" (Energy), "HCR" (Health Care), "EDU" (Education)
+  - Natural language matches: "renewable energy" → "ENG", "healthcare" → "HCR"
+- 'government_entity': Used in LDA search (government_entity filter)
+  - Examples: "Energy, Dept of", "Health & Human Services, Dept of", "Education, Dept of"
+  - Natural language matches: "energy department" → "Energy, Dept of", "HHS" → "Health & Human Services, Dept of"
+- 'congress_legislator': Used in Congress Bills search (sponsor_name, cosponsor_name filters)
+  - Examples: "John Smith", "Jane Doe" (active Congress members)
+  - Natural language matches: "Senator Smith" → "John Smith", "Representative Doe" → "Jane Doe"
+
+**Workflow for Natural Language Queries:**
+1. User asks: "Can you search for any bills passed recently which have to do with renewable energy?"
+2. Recognize this is a Congress Bills search about a policy area
+3. Call: search_autocomplete("renewable energy", "policy_area")
+4. Get best match: "Energy" (score: 0.85)
+5. Use "Energy" in search_congress_bills() with policy_area filter
+
+**Examples:**
+- User: "Search for bills about renewable energy" 
+  → search_autocomplete("renewable energy", "policy_area") → "Energy" → search_congress_bills(policy_area=["Energy"])
+- User: "Find LDA filings related to healthcare"
+  → search_autocomplete("healthcare", "general_issue") → "HCR" → lda_search(general_issue_code=["HCR"])
+- User: "Show me bills sponsored by Senator Smith"
+  → search_autocomplete("Senator Smith", "congress_legislator") → "John Smith" → search_congress_bills(sponsor_name=["John Smith"])
+- User: "Search for lobbying related to the Energy Department"
+  → search_autocomplete("Energy Department", "government_entity") → "Energy, Dept of" → lda_search(government_entity=["Energy, Dept of"])
+
+**IMPORTANT:**
+- The search_autocomplete tool uses fuzzy matching to handle natural language variations
+- It returns a "best_match" with a similarity score - use the best match if score > 0.5
+- If no good match is found (score < 0.5), inform the user and suggest alternative terms
+- Always verify the list_type matches the search type (Congress Bills vs LDA) before using the matched value
 
 🔥 FILE DISCOVERY IS MANDATORY - READ THIS CAREFULLY:
 When users ask about files (ANY file-related question), you MUST:
@@ -2230,6 +2286,7 @@ enhanced_tools = [
     search_politician_trades,  # Search politician stock trades in DynamoDB
     lda_autocomplete,  # LDA autocomplete tool for finding registrants, clients, lobbyists, PACs
     lda_search,  # LDA search tool for searching lobbying disclosures
+    search_autocomplete,  # Search autocomplete tool for matching natural language to CSV list values (policy areas, general issues, government entities, legislators)
     get_current_datetime,  # Get current date/time for exact timeframe calculations
     calculate_date_range,  # Calculate date ranges relative to current date
 ]

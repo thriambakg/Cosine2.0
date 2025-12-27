@@ -59,6 +59,13 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     Returns:
         True if item matches all filters, False otherwise
     """
+    # Skip filtering if filters dict is empty or only contains empty/false values
+    if not filters:
+        return True
+    
+    # Check if filters only contain empty arrays, false values, or 0 values (which mean "no filter")
+    # Skip early return - we need to check each filter individually
+    # Empty arrays, False values, and 0 for amount_max/amount_min mean "no filter"
     # General text search fields (new format - arrays in general_text_search_fields)
     general_text_search_fields = filters.get('general_text_search_fields', {})
     if general_text_search_fields:
@@ -219,17 +226,21 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             # Additional name matching could be added here if foreign_entity_name field exists
     
     # Amount range filter
+    # Only apply if amount_min is provided and > 0 (0 means no minimum)
     if filters.get('amount_min') is not None:
         amount_min = float(filters['amount_min'])
-        item_amount = float(item.get('amount_reported', 0) or 0)
-        if item_amount < amount_min:
-            return False
+        if amount_min > 0:  # Only apply filter if amount_min > 0
+            item_amount = float(item.get('amount_reported', 0) or 0)
+            if item_amount < amount_min:
+                return False
     
+    # Only apply if amount_max is provided and > 0 (0 means no maximum)
     if filters.get('amount_max') is not None:
         amount_max = float(filters['amount_max'])
-        item_amount = float(item.get('amount_reported', 0) or 0)
-        if item_amount > amount_max:
-            return False
+        if amount_max > 0:  # Only apply filter if amount_max > 0
+            item_amount = float(item.get('amount_reported', 0) or 0)
+            if item_amount > amount_max:
+                return False
     
     # General issue code filter (OR logic within field) - now uses parameter-filing mappings
     # This is just a safety check, actual filtering happens via parameter-filing mapping queries
@@ -1285,6 +1296,10 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # Use accumulated results for intersection computation
         gsi_results = accumulated_gsi_results
         
+        # Store the final state of query_pagination_keys for has_more determination
+        # This reflects whether queries are exhausted after all batch iterations
+        final_query_pagination_keys = query_pagination_keys.copy() if 'query_pagination_keys' in locals() else {}
+        
         # Separate filters into three groups:
         # 1. general_text_search_fields (OR logic - union all)
         # 2. advanced_search_fields (AND across categories, OR within each category)
@@ -1535,29 +1550,45 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             else:
                 # Check if we need to fetch more batches from queries to get more items in intersection
                 # If we have more results available from any query, we should continue
+                # CRITICAL: Use final_query_pagination_keys which reflects the current state after all batches
                 has_more = False
-                query_pagination_keys = {}  # Store pagination keys for each query
+                query_pagination_keys_for_token = {}  # Store pagination keys for each query
+                
+                # Check final_query_pagination_keys to see if any query still has more results
                 for key, result in gsi_results.items():
-                    if result.get('last_eval_key'):
+                    # Check if this query has a pagination key in the final state
+                    current_pagination_key = final_query_pagination_keys.get(key) if final_query_pagination_keys else None
+                    
+                    # If not in final_query_pagination_keys, check result.get('last_eval_key') as fallback
+                    # (for cases where query_pagination_keys wasn't used)
+                    if current_pagination_key is None and result.get('last_eval_key'):
+                        current_pagination_key = result['last_eval_key']
+                    
+                    if current_pagination_key:
                         has_more = True
                         # Store the pagination key for this query
                         config = result['config']
                         if result['query_type'] == 'search_index':
-                            query_pagination_keys[key] = {
+                            query_pagination_keys_for_token[key] = {
                                 'type': 'search_index',
-                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'key': convert_decimal_to_float(current_pagination_key),
                                 'search_type': config['search_type'],
                                 'filter_key': config['filter_key']
                             }
                         elif result['query_type'] == 'gsi':
-                            query_pagination_keys[key] = {
+                            query_pagination_keys_for_token[key] = {
                                 'type': 'gsi',
-                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'key': convert_decimal_to_float(current_pagination_key),
                                 'index_name': config['index_name'],
                                 'hash_key': config['hash_key'],
                                 'hash_value': config['hash_value']
                             }
-                if has_more:
+                
+                # CRITICAL FIX: If all queries are exhausted and we have 0 results, set has_more to False
+                if not has_more and len(results) == 0:
+                    has_more = False
+                    logger.info(f"All queries exhausted and 0 results - setting has_more=False")
+                elif has_more:
                     # We have more results from queries, but we've exhausted current intersection
                     # Return union offset with query pagination keys to fetch next batches
                     serializable_last_key = {
@@ -1565,7 +1596,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         'query_type': 'union_offset',
                         'total_ids': len(source_filing_ids),
                         'fetch_next_batches': True,  # Flag to fetch next batches from queries
-                        'query_keys': query_pagination_keys  # Store pagination keys for each query
+                        'query_keys': query_pagination_keys_for_token  # Store pagination keys for each query
                     }
                     logger.info(f"Exhausted current intersection ({len(source_filing_ids)} items), but queries have more - will fetch next batches")
         else:
@@ -1583,29 +1614,45 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs: {len(source_filing_ids)}")
             else:
                 # Check if any queries have more results to fetch
+                # CRITICAL: Use final_query_pagination_keys which reflects the current state after all batches
                 has_more = False
-                query_pagination_keys = {}  # Store pagination keys for each query
+                query_pagination_keys_for_token = {}  # Store pagination keys for each query
+                
+                # Check final_query_pagination_keys to see if any query still has more results
                 for key, result in gsi_results.items():
-                    if result.get('last_eval_key'):
+                    # Check if this query has a pagination key in the final state
+                    current_pagination_key = final_query_pagination_keys.get(key) if final_query_pagination_keys else None
+                    
+                    # If not in final_query_pagination_keys, check result.get('last_eval_key') as fallback
+                    # (for cases where query_pagination_keys wasn't used)
+                    if current_pagination_key is None and result.get('last_eval_key'):
+                        current_pagination_key = result['last_eval_key']
+                    
+                    if current_pagination_key:
                         has_more = True
                         # Store the pagination key for this query
                         config = result['config']
                         if result['query_type'] == 'search_index':
-                            query_pagination_keys[key] = {
+                            query_pagination_keys_for_token[key] = {
                                 'type': 'search_index',
-                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'key': convert_decimal_to_float(current_pagination_key),
                                 'search_type': config['search_type'],
                                 'filter_key': config['filter_key']
                             }
                         elif result['query_type'] == 'gsi':
-                            query_pagination_keys[key] = {
+                            query_pagination_keys_for_token[key] = {
                                 'type': 'gsi',
-                                'key': convert_decimal_to_float(result['last_eval_key']),
+                                'key': convert_decimal_to_float(current_pagination_key),
                                 'index_name': config['index_name'],
                                 'hash_key': config['hash_key'],
                                 'hash_value': config['hash_value']
                             }
-                if has_more:
+                
+                # CRITICAL FIX: If all queries are exhausted and we have 0 results, set has_more to False
+                if not has_more and len(results) == 0:
+                    has_more = False
+                    logger.info(f"All queries exhausted and 0 results - setting has_more=False")
+                elif has_more:
                     # We have more results from queries, but we've exhausted current intersection
                     # Return union offset with query pagination keys to fetch next batches
                     serializable_last_key = {
@@ -1613,7 +1660,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         'query_type': 'union_offset',
                         'total_ids': len(source_filing_ids),
                         'fetch_next_batches': True,  # Flag to fetch next batches from queries
-                        'query_keys': query_pagination_keys  # Store pagination keys for each query
+                        'query_keys': query_pagination_keys_for_token  # Store pagination keys for each query
                     }
                     logger.info(f"Exhausted current intersection ({len(source_filing_ids)} items), but queries have more - will fetch next batches")
                 else:
@@ -1722,26 +1769,60 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 else:
                     del remaining_filters[config['filter_key']]
             
-            # Also remove from general_text_search_fields if present
-            if 'general_text_search_fields' in remaining_filters:
-                gtsf = remaining_filters['general_text_search_fields']
-                if config['filter_key'] in gtsf:
-                    if isinstance(gtsf[config['filter_key']], list):
-                        gtsf[config['filter_key']] = gtsf[config['filter_key']][1:]
-                        if not gtsf[config['filter_key']]:
+            # For search index queries, remove the corresponding filter from general_text_search_fields
+            # since the search index already filtered for us - we should trust the search index results
+            if config.get('query_type') == 'search_index':
+                # Remove the search type from general_text_search_fields
+                if 'general_text_search_fields' in remaining_filters:
+                    gtsf = remaining_filters['general_text_search_fields']
+                    # Map search_type to general_text_search_fields key
+                    search_type_to_key = {
+                        'PAC': 'pac',
+                        'LOBBYIST': 'lobbyist',
+                        'REGISTRANT': 'registrant',
+                        'CLIENT': 'client',
+                        'FOREIGN_COUNTRY': 'foreign'
+                    }
+                    filter_key = search_type_to_key.get(config['search_type'])
+                    if filter_key and filter_key in gtsf:
+                        # Remove this filter since search index already handled it
+                        logger.info(f"Removing {filter_key} filter from general_text_search_fields (search index already filtered)")
+                        if isinstance(gtsf[filter_key], list):
+                            gtsf[filter_key] = gtsf[filter_key][1:]
+                            if not gtsf[filter_key]:
+                                del gtsf[filter_key]
+                        else:
+                            del gtsf[filter_key]
+                    if not gtsf:
+                        del remaining_filters['general_text_search_fields']
+            else:
+                # For GSI queries, also remove from general_text_search_fields if present
+                if 'general_text_search_fields' in remaining_filters:
+                    gtsf = remaining_filters['general_text_search_fields']
+                    if config.get('filter_key') and config['filter_key'] in gtsf:
+                        if isinstance(gtsf[config['filter_key']], list):
+                            gtsf[config['filter_key']] = gtsf[config['filter_key']][1:]
+                            if not gtsf[config['filter_key']]:
+                                del gtsf[config['filter_key']]
+                        else:
                             del gtsf[config['filter_key']]
-                    else:
-                        del gtsf[config['filter_key']]
-                if not gtsf:
-                    del remaining_filters['general_text_search_fields']
+                    if not gtsf:
+                        del remaining_filters['general_text_search_fields']
             
             filtered_items = []
-            for item in items:
-                if apply_python_filter(item, remaining_filters):
+            logger.info(f"Applying Python filters to {len(items)} items. Remaining filters: {remaining_filters}")
+            for idx, item in enumerate(items):
+                passed = apply_python_filter(item, remaining_filters)
+                if passed:
                     filtered_items.append(item)
                     if len(filtered_items) >= limit:
                         break
+                else:
+                    # Log why item was filtered out for debugging (only log first few to avoid spam)
+                    if idx < 3:
+                        logger.info(f"Item {idx+1} filtered out: filing_id={item.get('filing_id', 'N/A')}, client_name={item.get('client_name', 'N/A')}, amount_reported={item.get('amount_reported', 0)}")
             
+            logger.info(f"After Python filtering: {len(filtered_items)} items passed filters out of {len(items)} total")
             results = [convert_decimal_to_float(item) for item in filtered_items[:limit]]
             
             # Prepare pagination token for "load more" functionality

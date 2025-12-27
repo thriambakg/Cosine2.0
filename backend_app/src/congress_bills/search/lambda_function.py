@@ -1892,6 +1892,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         offset = 0
         initial_source_last_eval_key = None
         total_matching_items_from_previous = None
+        # For union_politician queries, we need separate tokens for sponsor and cosponsor
+        initial_sponsor_last_key = None
+        initial_cosponsor_last_key = None
         if last_evaluated_key and isinstance(last_evaluated_key, dict):
             if last_evaluated_key.get('query_type') == 'multi_gsi_intersection_offset':
                 offset = last_evaluated_key.get('offset', 0)
@@ -1900,7 +1903,18 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 initial_source_last_eval_key = last_evaluated_key.get('source_last_eval_key')
                 # Store total matching items count from previous request
                 total_matching_items_from_previous = last_evaluated_key.get('total_matching_items')
+                # For union_politician queries, extract separate tokens
+                initial_sponsor_last_key = last_evaluated_key.get('sponsor_last_key')
+                initial_cosponsor_last_key = last_evaluated_key.get('cosponsor_last_key')
                 logger.info(f"Multi-GSI intersection: applying offset {offset} to skip first {offset} items, source_last_eval_key: {initial_source_last_eval_key is not None}, total_matching_items: {total_matching_items_from_previous}")
+                if initial_sponsor_last_key or initial_cosponsor_last_key:
+                    logger.info(f"Union politician tokens: sponsor={initial_sponsor_last_key is not None}, cosponsor={initial_cosponsor_last_key is not None}")
+            elif last_evaluated_key.get('query_type') == 'union_politician_pagination':
+                # Direct union_politician pagination token (when not using offset)
+                initial_source_last_eval_key = last_evaluated_key  # Store the whole token
+                initial_sponsor_last_key = last_evaluated_key.get('sponsor_last_key')
+                initial_cosponsor_last_key = last_evaluated_key.get('cosponsor_last_key')
+                logger.info(f"Union politician pagination: sponsor={initial_sponsor_last_key is not None}, cosponsor={initial_cosponsor_last_key is not None}")
         
         # If source is exhausted (source_last_eval_key is None) and offset >= total_matching_items, return no more items
         if initial_source_last_eval_key is None and total_matching_items_from_previous is not None and offset >= total_matching_items_from_previous:
@@ -1918,15 +1932,41 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # Paginate through source GSI until we have enough results or it runs out
         all_matching_items = []
         # Use initial_source_last_eval_key if provided (from offset token), otherwise start fresh
+        # For union_politician queries, we may have separate tokens from the offset token or directly
         source_last_eval_key = initial_source_last_eval_key
+        # If initial_source_last_eval_key is a union_politician_pagination token, extract the separate tokens
+        # (This handles the case where the token comes directly, not from an offset token)
+        if isinstance(initial_source_last_eval_key, dict) and initial_source_last_eval_key.get('query_type') == 'union_politician_pagination':
+            # Override the separate tokens if they weren't already set from offset token
+            if initial_sponsor_last_key is None:
+                initial_sponsor_last_key = initial_source_last_eval_key.get('sponsor_last_key')
+            if initial_cosponsor_last_key is None:
+                initial_cosponsor_last_key = initial_source_last_eval_key.get('cosponsor_last_key')
+            logger.info(f"Extracted union politician tokens from source_last_eval_key: sponsor={initial_sponsor_last_key is not None}, cosponsor={initial_cosponsor_last_key is not None}")
         max_pagination_rounds = 50
         pagination_round = 0
+        
+        # CRITICAL FIX: If source is exhausted (initial_source_last_eval_key is None) and we have an offset,
+        # we cannot re-query from the beginning because that would return the same items again.
+        # Instead, we should only query if the source still has more items OR if we don't have an offset yet.
+        # If source is exhausted and we have an offset, we've already collected all items in a previous request,
+        # so we should not re-query. The offset check above (line 1906) should have caught this case.
+        # However, if the source is NOT exhausted, we should continue querying from where we left off.
+        should_query_source = True
+        if initial_source_last_eval_key is None and offset > 0:
+            # Source is exhausted and we have an offset - this means we've already collected all items
+            # in a previous request. We should not re-query because that would return duplicate items.
+            # The offset check above should have returned early, but if we get here, it means
+            # total_matching_items_from_previous was None or offset < total_matching_items_from_previous.
+            # In this case, we should not query - we'll return empty results or use cached items if available.
+            should_query_source = False
+            logger.warning(f"⚠️ Source exhausted with offset {offset} - cannot re-query without returning duplicates. total_matching_items_from_previous: {total_matching_items_from_previous}")
         
         # We need enough items to cover the offset + limit
         # If we have an offset, we might already have items in memory from a previous request
         # In that case, we should continue querying the source to get more items
         # However, if source is exhausted (source_last_eval_key is None), we should only fetch once
-        while len(all_matching_items) < (offset + limit) and pagination_round < max_pagination_rounds:
+        while should_query_source and len(all_matching_items) < (offset + limit) and pagination_round < max_pagination_rounds:
             pagination_round += 1
             
             # Query source GSI/search index with pagination
@@ -1997,41 +2037,136 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 source_bill_ids_batch = list(all_bill_ids_batch)
             elif source_config.get('query_type') == 'union_politician':
                 # Union sponsor and cosponsor queries for pagination (single politician name)
+                # CRITICAL: Maintain separate pagination tokens for each query
                 union_configs = source_config['union_configs']
                 all_bill_ids_batch = set()
-                new_last_eval_key = None
                 
+                # Determine how many bill_ids to fetch from each query
+                # Target: fetch enough to get (offset + limit) filtered items
+                # Strategy: fetch batch_size/2 from each, then fetch more from the one that has more if needed
+                target_bill_ids_per_query = max(limit, (offset + limit) // 2)  # At least limit/2 from each
+                
+                sponsor_bill_ids = []
+                cosponsor_bill_ids = []
+                sponsor_last_key = initial_sponsor_last_key if initial_sponsor_last_key is not None else source_last_eval_key
+                cosponsor_last_key = initial_cosponsor_last_key if initial_cosponsor_last_key is not None else source_last_eval_key
+                
+                # Track which queries are exhausted
+                sponsor_exhausted = False
+                cosponsor_exhausted = False
+                
+                # Fetch from sponsor GSI
+                sponsor_config = None
+                for union_config in union_configs:
+                    if union_config.get('query_type') != 'search_index' and union_config.get('index_name'):
+                        sponsor_config = union_config
+                        break
+                
+                if sponsor_config:
+                    try:
+                        bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                            index_name=sponsor_config['index_name'],
+                            hash_key_name=sponsor_config['hash_key'],
+                            hash_key_value=sponsor_config['hash_value'],
+                            range_key_name=sponsor_config.get('range_key'),
+                            range_key_value=sponsor_config.get('range_value'),
+                            range_key_condition=sponsor_config.get('range_condition'),
+                            limit=target_bill_ids_per_query,
+                            exclusive_start_key=sponsor_last_key,
+                            get_all=False
+                        )
+                        sponsor_bill_ids = bill_ids_batch
+                        if not sponsor_last_key:
+                            sponsor_exhausted = True
+                        logger.info(f"Union politician: fetched {len(sponsor_bill_ids)} bill_ids from sponsor GSI (exhausted: {sponsor_exhausted})")
+                    except Exception as e:
+                        logger.warning(f"Error querying sponsor GSI: {e}")
+                        sponsor_exhausted = True
+                
+                # Fetch from cosponsor search index
+                cosponsor_config = None
                 for union_config in union_configs:
                     if union_config.get('query_type') == 'search_index':
-                        # Cosponsor search index
+                        cosponsor_config = union_config
+                        break
+                
+                if cosponsor_config:
+                    try:
                         bill_ids_batch, cosponsor_last_key = query_cosponsor_search_index(
-                            cosponsor_name=union_config['search_value'],
-                            limit=1000,
-                            exclusive_start_key=source_last_eval_key,  # Note: this may need refinement for union pagination
+                            cosponsor_name=cosponsor_config['search_value'],
+                            limit=target_bill_ids_per_query,
+                            exclusive_start_key=cosponsor_last_key,
                             date_from=filters.get('introduced_date_from'),
                             date_to=filters.get('introduced_date_to')
                         )
-                        all_bill_ids_batch.update(bill_ids_batch)
-                        if cosponsor_last_key:
-                            new_last_eval_key = cosponsor_last_key  # Use last key from any query
-                    else:
-                        # Sponsor GSI
-                        bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
-                            index_name=union_config['index_name'],
-                            hash_key_name=union_config['hash_key'],
-                            hash_key_value=union_config['hash_value'],
-                            range_key_name=union_config.get('range_key'),
-                            range_key_value=union_config.get('range_value'),
-                            range_key_condition=union_config.get('range_condition'),
-                            limit=1000,
-                            exclusive_start_key=source_last_eval_key,  # Note: this may need refinement for union pagination
+                        cosponsor_bill_ids = bill_ids_batch
+                        if not cosponsor_last_key:
+                            cosponsor_exhausted = True
+                        logger.info(f"Union politician: fetched {len(cosponsor_bill_ids)} bill_ids from cosponsor search index (exhausted: {cosponsor_exhausted})")
+                    except Exception as e:
+                        logger.warning(f"Error querying cosponsor search index: {e}")
+                        cosponsor_exhausted = True
+                
+                # Union the results
+                all_bill_ids_batch.update(sponsor_bill_ids)
+                all_bill_ids_batch.update(cosponsor_bill_ids)
+                
+                # If one query is exhausted and we need more results, fetch more from the other
+                total_fetched = len(all_bill_ids_batch)
+                min_needed = offset + limit
+                additional_needed = max(0, min_needed - total_fetched)
+                
+                if additional_needed > 0:
+                    if sponsor_exhausted and not cosponsor_exhausted:
+                        # Fetch more from cosponsor
+                        logger.info(f"Sponsor exhausted, fetching {additional_needed} more from cosponsor")
+                        more_bill_ids, cosponsor_last_key = query_cosponsor_search_index(
+                            cosponsor_name=cosponsor_config['search_value'],
+                            limit=additional_needed,
+                            exclusive_start_key=cosponsor_last_key,
+                            date_from=filters.get('introduced_date_from'),
+                            date_to=filters.get('introduced_date_to')
+                        )
+                        all_bill_ids_batch.update(more_bill_ids)
+                        if not cosponsor_last_key:
+                            cosponsor_exhausted = True
+                        logger.info(f"Fetched {len(more_bill_ids)} additional bill_ids from cosponsor")
+                    elif cosponsor_exhausted and not sponsor_exhausted:
+                        # Fetch more from sponsor
+                        logger.info(f"Cosponsor exhausted, fetching {additional_needed} more from sponsor")
+                        more_bill_ids, sponsor_last_key = query_gsi_for_bill_ids(
+                            index_name=sponsor_config['index_name'],
+                            hash_key_name=sponsor_config['hash_key'],
+                            hash_key_value=sponsor_config['hash_value'],
+                            range_key_name=sponsor_config.get('range_key'),
+                            range_key_value=sponsor_config.get('range_value'),
+                            range_key_condition=sponsor_config.get('range_condition'),
+                            limit=additional_needed,
+                            exclusive_start_key=sponsor_last_key,
                             get_all=False
                         )
-                        all_bill_ids_batch.update(bill_ids_batch)
-                        if sponsor_last_key:
-                            new_last_eval_key = sponsor_last_key  # Use last key from any query
+                        all_bill_ids_batch.update(more_bill_ids)
+                        if not sponsor_last_key:
+                            sponsor_exhausted = True
+                        logger.info(f"Fetched {len(more_bill_ids)} additional bill_ids from sponsor")
                 
                 source_bill_ids_batch = list(all_bill_ids_batch)
+                
+                # Store both tokens separately for next pagination
+                # If both are exhausted, new_last_eval_key is None
+                # Otherwise, we'll create a union_politician_pagination token
+                if sponsor_exhausted and cosponsor_exhausted:
+                    new_last_eval_key = None
+                else:
+                    # Create a composite token that stores both keys
+                    new_last_eval_key = {
+                        'query_type': 'union_politician_pagination',
+                        'sponsor_last_key': sponsor_last_key if not sponsor_exhausted else None,
+                        'cosponsor_last_key': cosponsor_last_key if not cosponsor_exhausted else None,
+                        'politician_name': source_config.get('politician_name'),
+                        'union_configs': union_configs  # Store configs for reconstruction
+                    }
+                logger.info(f"Union politician pagination: {len(source_bill_ids_batch)} total bill_ids, sponsor_exhausted={sponsor_exhausted}, cosponsor_exhausted={cosponsor_exhausted}")
             elif source_config.get('query_type') == 'search_index':
                 # Use search index query for cosponsors
                 # For date ranges, we need to continue querying more days until we have enough filtered results
@@ -2167,7 +2302,23 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 # Continue to next iteration
         
         # Use the collected items directly, applying offset if needed
-        items = all_matching_items[offset:offset + limit]
+        # CRITICAL FIX: When we have an offset and the source is NOT exhausted, we're continuing to query
+        # from where we left off. The new items we collect are items we haven't seen before, so we should
+        # NOT apply the offset to them. The offset was already applied in the previous request.
+        # However, if the source IS exhausted and we have an offset, we can't re-query, so we return empty.
+        if not should_query_source and offset > 0:
+            # Source exhausted with offset - cannot access previously collected items
+            logger.info(f"Source exhausted with offset {offset} - returning empty results (cannot access previously collected items)")
+            items = []
+        elif offset > 0 and initial_source_last_eval_key is not None:
+            # Source is NOT exhausted and we have an offset - we're continuing from where we left off
+            # The new items we collected are items we haven't returned yet, so return them directly (up to limit)
+            # Don't apply offset because these are new items, not items we've already seen
+            items = all_matching_items[:limit]
+            logger.info(f"Continuing query with offset {offset} - returning {len(items)} new items (not applying offset to new batch)")
+        else:
+            # No offset, or first request - apply offset normally
+            items = all_matching_items[offset:offset + limit]
         
         logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
         method = 'multi_gsi_intersection'
@@ -2211,25 +2362,14 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # Convert last_evaluated_key to JSON-serializable format
         serializable_last_key = None
         if has_more:
-            # Priority: If source has more items, use that token (allows continuing to query more items)
-            # Otherwise, if we have more items in memory, use offset-based pagination
-            if has_more_source:
-                # Source query has more items - use the source pagination token
-                # This allows continuing to query more items from the source
-                try:
-                    if isinstance(source_last_eval_key, dict):
-                        # Already a dict (e.g., cosponsor_date_range token), use as-is
-                        serializable_last_key = source_last_eval_key
-                    else:
-                        serializable_last_key = convert_decimal_to_float(source_last_eval_key)
-                except Exception as e:
-                    logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
-                    serializable_last_key = None
-            elif has_more_items:
-                # We have more items in memory, but source query might still have more items
-                # Store the source_last_eval_key even if it's None, so we know the source status
-                # If source_last_eval_key is not None, we can continue querying on the next request
-                # Also store total_matching_items so we can check if offset exceeds it when source is exhausted
+            # CRITICAL FIX: Priority should be:
+            # 1. If we have more items in memory (has_more_items), use offset-based pagination FIRST
+            #    This prevents re-querying and returning duplicate items
+            # 2. If source has more items but we don't have items in memory, continue querying source
+            # This ensures we return all items in memory before querying for more
+            if has_more_items:
+                # We have more items in memory - use offset-based pagination to return them
+                # Store the source_last_eval_key so we can continue querying after exhausting items in memory
                 serializable_last_key = {
                     'query_type': 'multi_gsi_intersection_offset',
                     'offset': offset + len(enriched_results),  # Total offset (previous offset + new items returned)
@@ -2238,6 +2378,22 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     'source_last_eval_key': source_last_eval_key,  # Store current source token (may be None if exhausted)
                     'total_matching_items': len(all_matching_items)  # Store total count for offset validation
                 }
+                logger.info(f"Using offset-based pagination: {len(enriched_results)} items returned, {len(all_matching_items)} total in memory, offset: {offset + len(enriched_results)}")
+            elif has_more_source:
+                # Source query has more items but no items in memory - use the source pagination token
+                # This allows continuing to query more items from the source
+                try:
+                    if isinstance(source_last_eval_key, dict):
+                        # Already a dict (e.g., cosponsor_date_range token, union_politician_pagination token), use as-is
+                        serializable_last_key = source_last_eval_key
+                        if source_last_eval_key.get('query_type') == 'union_politician_pagination':
+                            logger.info(f"Using union politician pagination token: sponsor={source_last_eval_key.get('sponsor_last_key') is not None}, cosponsor={source_last_eval_key.get('cosponsor_last_key') is not None}")
+                    else:
+                        serializable_last_key = convert_decimal_to_float(source_last_eval_key)
+                except Exception as e:
+                    logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+                    serializable_last_key = None
+                logger.info(f"Using source pagination token: continuing to query source GSI")
         
         logger.info(f"Multi-GSI intersection pagination: {len(enriched_results)} items returned, {len(all_matching_items)} total matching items, has_more_items: {has_more_items}, has_more_source: {has_more_source}, has_more: {has_more}")
         
@@ -2525,14 +2681,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     total_fetched += len(batch_ids)
                     if not sponsor_last_key:
                         break
-                # Update has_more flag based on actual query result (OR with preserved value if continuing)
+                # Update has_more flag based on actual query result
+                # CRITICAL: When re-fetching with union_offset, we should use the CURRENT query result,
+                # not preserve the old flag. The old flag might be stale if we're re-fetching from the beginning.
                 current_sponsor_has_more = sponsor_last_key is not None
-                if union_offset_metadata:
-                    # If we had more before and still have more, keep it true
-                    sponsor_has_more = sponsor_has_more or current_sponsor_has_more
-                else:
-                    sponsor_has_more = current_sponsor_has_more
-                logger.info(f"Fetched {len(sponsor_bill_ids)} bill IDs from sponsor GSI (has_more: {sponsor_has_more})")
+                # Always use the current query result when re-fetching
+                sponsor_has_more = current_sponsor_has_more
+                logger.info(f"Fetched {len(sponsor_bill_ids)} bill IDs from sponsor GSI (has_more: {sponsor_has_more}, last_key: {sponsor_last_key is not None})")
         
         # Convert to sorted list for consistent pagination
         bill_ids = sorted(list(all_bill_ids))
@@ -2901,8 +3056,19 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # We have more if: (1) we haven't processed all fetched IDs, OR (2) either query has more
         items_returned = len(filtered_items)
         
-        # Calculate has_more: true if we haven't processed all IDs OR if either source query has more
-        has_more_union = (last_processed_index < original_bill_ids_count) or cosponsor_has_more or sponsor_has_more
+        # CRITICAL FIX: If we've processed all fetched IDs but got fewer items than the limit,
+        # we should still check if either source has more items. However, if both sources are exhausted
+        # AND we've processed all fetched IDs, then there are no more items.
+        # Also, if we got fewer items than the limit AND we've processed all IDs AND both sources are exhausted,
+        # we should return has_more=False to prevent infinite pagination loops.
+        has_more_union = False
+        if last_processed_index < original_bill_ids_count:
+            # We haven't processed all fetched IDs yet
+            has_more_union = True
+        elif cosponsor_has_more or sponsor_has_more:
+            # One or both sources still have more items to fetch
+            has_more_union = True
+        # If we've processed all IDs AND both sources are exhausted, has_more_union stays False
         
         logger.info(f"Union pagination check - last_processed_index: {last_processed_index}, original_bill_ids_count: {original_bill_ids_count}, items_returned: {items_returned}, limit: {limit}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}, has_more_union: {has_more_union}")
         
@@ -2921,7 +3087,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs fetched: {original_bill_ids_count}, processed: {last_processed_index}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}, politician_name: {config.get('politician_name')}")
         else:
             last_eval_key = None
-            logger.info(f"Union pagination complete - processed all {last_processed_index} of {original_bill_ids_count} fetched IDs")
+            logger.info(f"Union pagination complete - processed all {last_processed_index} of {original_bill_ids_count} fetched IDs, both sources exhausted, no more items available")
     # For non-union queries, last_eval_key is already set from the query above
     
     # Convert and enrich

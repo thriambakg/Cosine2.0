@@ -174,6 +174,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
       setSendProgress(`Preparing context metadata for ${contextItems.length} items...`);
       
       // Create lightweight context metadata (no heavy data fetching)
+      // CRITICAL: For filesystem items (context_item with filesystem_type), preserve the full data field including s3_key
       const enrichedContextItems = contextItems.map((item: ContextItem) => {
         // For chat sessions, preserve essential metadata
         if (item.type === 'chat') {
@@ -191,6 +192,26 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
               created_at: item.data?.created_at,
               last_updated: item.data?.last_updated,
             }
+          };
+        }
+        
+        // CRITICAL: For filesystem items (context_item with filesystem_type), preserve the FULL data field
+        // This includes s3_key which is essential for the agent to decrypt and read .cosine files
+        if (item.type === 'context_item' && item.data?.filesystem_type) {
+          console.log('🔍 ContextWindow: Preserving full data for filesystem item:', {
+            id: item.id,
+            filesystem_type: item.data.filesystem_type,
+            has_s3_key: !!item.data.s3_key,
+            s3_key: item.data.s3_key,
+            full_data: item.data
+          });
+          return {
+            id: item.id,
+            type: item.type,
+            title: item.title,
+            subtitle: item.subtitle,
+            timestamp: item.timestamp,
+            data: item.data // Preserve FULL data object for filesystem items
           };
         }
         
