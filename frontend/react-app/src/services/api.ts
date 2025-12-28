@@ -609,6 +609,31 @@ export const dashboardAPI = {
     );
   },
 
+  importDashboard: async (
+    userId: string,
+    importType: 'file' | 'link',
+    fileContent?: string,
+    shareId?: string
+  ): Promise<{ success: boolean; tab?: DashboardTab; message?: string; error?: string }> => {
+    const body: any = {
+      importType,
+    };
+
+    if (importType === 'file' && fileContent) {
+      body.fileContent = fileContent;
+    } else if (importType === 'link' && shareId) {
+      body.shareId = shareId;
+    }
+
+    return apiRequest<{ success: boolean; tab?: DashboardTab; message?: string; error?: string }>(
+      `/dashboard-import?userId=${userId}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+  },
+
   createTab: async (tabData: { name: string; color?: string }, userId: string): Promise<{ tab: DashboardTab; message: string }> => {
     const body: any = {
       type: 'tab',

@@ -1549,13 +1549,13 @@ def search_trades(filters: Dict[str, Any], page: int = 1, page_size: int = 50, l
                 if last_evaluated_key_raw:
                     scan_kwargs['ExclusiveStartKey'] = last_evaluated_key_raw
             
-            # Execute scan
+                # Execute scan
                 logger.info(f"🔍 Executing scan iteration {scan_iteration} with kwargs: {json.dumps({k: str(v) for k, v in scan_kwargs.items() if k not in ['FilterExpression', 'ExclusiveStartKey']}, default=str)}")
-            response = table.scan(**scan_kwargs)
-            items = response.get('Items', [])
-            total_scanned = response.get('ScannedCount', 0)
-            last_evaluated_key_raw = response.get('LastEvaluatedKey')
-            
+                response = table.scan(**scan_kwargs)
+                items = response.get('Items', [])
+                total_scanned = response.get('ScannedCount', 0)
+                last_evaluated_key_raw = response.get('LastEvaluatedKey')
+                
                 logger.info(f"📊 Scan iteration {scan_iteration} - Items found: {len(items)}, Scanned: {total_scanned}, Has more: {last_evaluated_key_raw is not None}")
                 
                 # Add items to results

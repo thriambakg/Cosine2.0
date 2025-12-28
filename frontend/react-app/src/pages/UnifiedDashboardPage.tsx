@@ -611,26 +611,93 @@ const UnifiedDashboardPage: React.FC = () => {
   };
 
   const handleImportTab = async (file: File | null, shareLink: string | null) => {
+    if (!user?.id) {
+      throw new Error('User not authenticated');
+    }
+
     try {
-      // TODO: Implement import functionality
-      // This will call the backend API to import the dashboard
+      let response;
+      
       if (file) {
-        // Handle file upload
-        console.log('Importing dashboard from file:', file.name);
-        // await dashboardAPI.importDashboardFromFile(file, user.id);
+        // Convert file to base64
+        const fileContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (reader.result instanceof ArrayBuffer) {
+              // Convert ArrayBuffer to base64
+              const bytes = new Uint8Array(reader.result);
+              let binary = '';
+              for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+              }
+              const base64String = btoa(binary);
+              resolve(base64String);
+            } else if (typeof reader.result === 'string') {
+              // If it's a data URL, extract the base64 part
+              const base64String = reader.result.split(',')[1] || reader.result;
+              resolve(base64String);
+            } else {
+              reject(new Error('Failed to read file'));
+            }
+          };
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          // Use readAsArrayBuffer for binary files
+          reader.readAsArrayBuffer(file);
+        });
+
+        // Import from file
+        response = await dashboardAPI.importDashboard(user.id, 'file', fileContent);
       } else if (shareLink) {
-        // Handle share link
-        console.log('Importing dashboard from link:', shareLink);
-        // await dashboardAPI.importDashboardFromLink(shareLink, user.id);
+        // Extract share ID from share link
+        // Share links can be in formats:
+        // - /dashboard/shared/{shareId}
+        // - https://domain.com/dashboard/shared/{shareId}
+        // - Just the shareId itself
+        let shareId = shareLink.trim();
+        
+        // Try to extract share ID from URL
+        const urlMatch = shareLink.match(/\/dashboard\/shared\/([a-f0-9-]+)/i);
+        if (urlMatch) {
+          shareId = urlMatch[1];
+        } else {
+          // If it's just a UUID, use it directly
+          const uuidMatch = shareLink.match(/^[a-f0-9-]{36}$/i);
+          if (!uuidMatch) {
+            throw new Error('Invalid share link format. Please provide a valid dashboard share link.');
+          }
+        }
+
+        // Import from share link
+        response = await dashboardAPI.importDashboard(user.id, 'link', undefined, shareId);
+      } else {
+        throw new Error('Please provide either a file or a share link');
       }
-      
-      // After import, reload the dashboard data
-      // await reloadFromDatabase();
-      
-      // For now, just show a message
-      alert('Import functionality will be implemented with backend API');
+
+      if (response.success) {
+        // Reload dashboard to show the imported tab
+        await reloadFromDatabase();
+        
+        // Activate the newly imported tab if available
+        if (response.tab) {
+          activateTab(response.tab.id);
+        }
+        
+        setSnackbar({
+          open: true,
+          message: response.message || 'Dashboard imported successfully!',
+          severity: 'success'
+        });
+      } else {
+        throw new Error(response.error || 'Failed to import dashboard');
+      }
     } catch (error: any) {
-      throw new Error(error.message || 'Failed to import dashboard');
+      console.error('Error importing dashboard:', error);
+      setSnackbar({
+        open: true,
+        message: error.message || 'Failed to import dashboard',
+        severity: 'error'
+      });
+      throw error;
     }
   };
 
