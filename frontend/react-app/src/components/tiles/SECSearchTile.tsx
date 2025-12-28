@@ -127,6 +127,7 @@ const ALL_FORM_TYPES = buildFormTypes();
 interface SECSearchTileProps {
   id: string;
   size?: { width: number; height: number };
+  dashboardContext?: string;
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;

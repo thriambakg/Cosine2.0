@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Button,
   Box,
@@ -29,7 +29,6 @@ import {
 } from '@mui/icons-material';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDualScreenMode } from '@/contexts/DualScreenModeContext';
 import FileBrowserDialog from './FileBrowserDialog';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
@@ -96,7 +95,19 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [fileBrowserOpen, setFileBrowserOpen] = useState<boolean>(false);
   
   const { user } = useAuth();
-  const { isDualScreenMode, sidebarWidth } = useDualScreenMode();
+  // Resizable and movable state
+  const [position, setPosition] = useState({ x: 100, y: 100 });
+  const [size, setSize] = useState({ width: 900, height: 600 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const paperRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const rafIdRef = useRef<number | null>(null);
+  // Preview values stored in refs to avoid re-renders during drag/resize
+  const previewPositionRef = useRef({ x: 100, y: 100 });
+  const previewSizeRef = useRef({ width: 900, height: 600 });
 
   // Utility functions
   const formatDate = (dateString?: string): string => {
@@ -3128,18 +3139,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     );
   };
 
-  // Determine dialog maxWidth based on item type
-  const getDialogMaxWidth = (): 'xs' | 'sm' | 'md' | 'lg' | 'xl' => {
-    switch (itemType) {
-      case 'govt_contract':
-      case 'congress_bill':
-        return 'xl';
-      case 'sec_filing':
-        return 'md';
-      default:
-        return 'md';
-    }
-  };
+  // Removed getDialogMaxWidth - dialogs are now resizable with fixed initial size
 
   // If contentOnly mode, render just the content without Dialog wrapper
   if (contentOnly) {
@@ -3330,54 +3330,251 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  // Drag handlers - use preview outline approach
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (isResizing) return;
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({
+      x: e.clientX - position.x,
+      y: e.clientY - position.y,
+    });
+    // Initialize preview position
+    previewPositionRef.current = { ...position };
+    // Show preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'block';
+      previewRef.current.style.left = `${position.x}px`;
+      previewRef.current.style.top = `${position.y}px`;
+      previewRef.current.style.width = `${size.width}px`;
+      previewRef.current.style.height = `${size.height}px`;
+    }
+  }, [position, size, isResizing]);
 
-  const dialogMaxWidth = getDialogMaxWidth();
-  const maxWidthValue = isDualScreenMode 
-    ? `calc(100% - ${sidebarWidth}px - 32px)`
-    : 'calc(100% - 32px)';
+  const handleDragMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
+    
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
+    
+    // Use requestAnimationFrame for smooth updates
+    rafIdRef.current = requestAnimationFrame(() => {
+      const newX = e.clientX - dragStart.x;
+      const newY = e.clientY - dragStart.y;
+      
+      const maxX = window.innerWidth - size.width;
+      const maxY = window.innerHeight - size.height;
+      
+      const clampedX = Math.max(0, Math.min(maxX, newX));
+      const clampedY = Math.max(64, Math.min(maxY, newY));
+      
+      // Store in ref (no state update = no re-render)
+      previewPositionRef.current = { x: clampedX, y: clampedY };
+      
+      // Update preview outline directly via DOM
+      if (previewRef.current) {
+        previewRef.current.style.left = `${clampedX}px`;
+        previewRef.current.style.top = `${clampedY}px`;
+      }
+    });
+  }, [isDragging, dragStart, size]);
+
+  const handleDragEnd = useCallback(() => {
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    
+    // Apply preview position to actual position when mouse is released
+    setPosition(previewPositionRef.current);
+    
+    // Hide preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'none';
+    }
+    
+    setIsDragging(false);
+  }, []);
+
+  // Resize handlers - use preview outline approach
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    if (isDragging) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    setResizeStart({
+      x: e.clientX,
+      y: e.clientY,
+      width: size.width,
+      height: size.height,
+    });
+    // Initialize preview size
+    previewSizeRef.current = { ...size };
+    // Show preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'block';
+      previewRef.current.style.left = `${position.x}px`;
+      previewRef.current.style.top = `${position.y}px`;
+      previewRef.current.style.width = `${size.width}px`;
+      previewRef.current.style.height = `${size.height}px`;
+    }
+  }, [isDragging, size, position]);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
+    
+    // Use requestAnimationFrame for smooth updates
+    rafIdRef.current = requestAnimationFrame(() => {
+      const deltaX = e.clientX - resizeStart.x;
+      const deltaY = e.clientY - resizeStart.y;
+      
+      const newWidth = Math.max(400, Math.min(window.innerWidth - 100, resizeStart.width + deltaX));
+      const newHeight = Math.max(300, Math.min(window.innerHeight - 100, resizeStart.height + deltaY));
+      
+      // Store in ref (no state update = no re-render)
+      previewSizeRef.current = { width: newWidth, height: newHeight };
+      
+      // Update preview outline directly via DOM
+      if (previewRef.current) {
+        previewRef.current.style.width = `${newWidth}px`;
+        previewRef.current.style.height = `${newHeight}px`;
+      }
+    });
+  }, [isResizing, resizeStart]);
+
+  const handleResizeEnd = useCallback(() => {
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    
+    // Apply preview size to actual size when mouse is released
+    setSize(previewSizeRef.current);
+    
+    // Hide preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'none';
+    }
+    
+    setIsResizing(false);
+  }, []);
+
+  // Global mouse event listeners
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleDragMove);
+      document.addEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = 'move';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging, handleDragMove, handleDragEnd]);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = 'nwse-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  if (!open) return null;
 
   return (
     <Portal>
+      {/* Preview outline - shown during drag/resize */}
+      <Box
+        ref={previewRef}
+        sx={{
+          position: 'fixed',
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          width: `${size.width}px`,
+          height: `${size.height}px`,
+          border: '2px solid #3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          pointerEvents: 'none',
+          zIndex: 1101,
+          display: 'none', // Hidden by default, shown during drag/resize via direct DOM manipulation
+          boxShadow: '0 0 8px rgba(59, 130, 246, 0.6)',
+        }}
+      />
       <Box
         sx={{
           position: 'fixed',
-          top: 64, // Account for app header (64px)
+          top: 0,
           left: 0,
           right: 0,
           bottom: 0,
           zIndex: 1100,
-          pointerEvents: 'none', // CRITICAL: Allow clicks through the container
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'flex-start',
-          padding: '16px',
-          paddingTop: '16px',
+          pointerEvents: 'none',
         }}
       >
         <Paper
+          ref={paperRef}
           elevation={8}
           sx={{
+            position: 'fixed',
+            left: `${position.x}px`,
+            top: `${position.y}px`,
+            width: `${size.width}px`,
+            height: `${size.height}px`,
             backgroundColor: 'rgba(15, 23, 42, 0.98)',
             border: '2px solid #374151',
             color: '#ffffff',
-            maxHeight: 'calc(100vh - 64px - 32px)', // Account for header (64px) + padding (32px)
-            maxWidth: maxWidthValue,
-            width: dialogMaxWidth === 'md' ? '600px' : dialogMaxWidth === 'lg' ? '900px' : dialogMaxWidth === 'xl' ? '1200px' : 'auto',
-            // Position dialog on the left side, leaving space for chat on the right
-            position: 'relative',
-            left: 0,
-            right: isDualScreenMode ? `${sidebarWidth + 16}px` : 'auto',
-            margin: 0,
-            marginTop: 0,
-            transition: 'right 0.3s ease-in-out, max-width 0.3s ease-in-out',
-            pointerEvents: 'auto', // Only the paper itself is interactive
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            pointerEvents: 'auto',
+            cursor: isDragging ? 'move' : 'default',
           }}
         >
-          <Box sx={{ color: '#ffffff', borderBottom: '1px solid #374151', pb: 2, px: 3, pt: 2 }}>
+          {/* Title bar - draggable */}
+          <Box
+            onMouseDown={handleDragStart}
+            sx={{
+              color: '#ffffff',
+              borderBottom: '1px solid #374151',
+              pb: 2,
+              px: 3,
+              pt: 2,
+              cursor: 'move',
+              userSelect: 'none',
+            }}
+          >
         {/* Title content will be rendered per item type */}
         {itemType === 'govt_contract' && (() => {
           const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
@@ -3672,6 +3869,23 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               Close
             </Button>
           </Box>
+
+          {/* Resize handle - bottom right corner */}
+          <Box
+            onMouseDown={handleResizeStart}
+            sx={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
+              width: '20px',
+              height: '20px',
+              cursor: 'nwse-resize',
+              background: 'linear-gradient(135deg, transparent 0%, transparent 40%, #3b82f6 40%, #3b82f6 50%, transparent 50%, transparent 100%)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, transparent 0%, transparent 40%, #2563eb 40%, #2563eb 50%, transparent 50%, transparent 100%)',
+              },
+            }}
+          />
         </Paper>
       </Box>
       

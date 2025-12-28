@@ -1,9 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   Button,
   Box,
   Typography,
@@ -16,6 +12,7 @@ import {
   Grid,
   Link,
   Tooltip,
+  Portal,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -73,6 +70,20 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Resizable and movable state
+  const [position, setPosition] = useState({ x: 100, y: 100 });
+  const [size, setSize] = useState({ width: 900, height: 600 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const paperRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const rafIdRef = useRef<number | null>(null);
+  // Preview values stored in refs to avoid re-renders during drag/resize
+  const previewPositionRef = useRef({ x: 100, y: 100 });
+  const previewSizeRef = useRef({ width: 900, height: 600 });
 
   const fetchPreview = useCallback(async () => {
     if (!item.s3_key) {
@@ -2769,93 +2780,354 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     }
   };
 
+  // Handle Escape key to close
+  useEffect(() => {
+    if (!open) return;
+    
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [open, onClose]);
+
+  // Drag handlers - use preview outline approach
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if (isResizing) return;
+    e.preventDefault();
+    setIsDragging(true);
+    setDragStart({
+      x: e.clientX - position.x,
+      y: e.clientY - position.y,
+    });
+    // Initialize preview position
+    previewPositionRef.current = { ...position };
+    // Show preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'block';
+      previewRef.current.style.left = `${position.x}px`;
+      previewRef.current.style.top = `${position.y}px`;
+      previewRef.current.style.width = `${size.width}px`;
+      previewRef.current.style.height = `${size.height}px`;
+    }
+  }, [position, size, isResizing]);
+
+  const handleDragMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
+    
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
+    
+    // Use requestAnimationFrame for smooth updates
+    rafIdRef.current = requestAnimationFrame(() => {
+      const newX = e.clientX - dragStart.x;
+      const newY = e.clientY - dragStart.y;
+      
+      const maxX = window.innerWidth - size.width;
+      const maxY = window.innerHeight - size.height;
+      
+      const clampedX = Math.max(0, Math.min(maxX, newX));
+      const clampedY = Math.max(64, Math.min(maxY, newY));
+      
+      // Store in ref (no state update = no re-render)
+      previewPositionRef.current = { x: clampedX, y: clampedY };
+      
+      // Update preview outline directly via DOM
+      if (previewRef.current) {
+        previewRef.current.style.left = `${clampedX}px`;
+        previewRef.current.style.top = `${clampedY}px`;
+      }
+    });
+  }, [isDragging, dragStart, size]);
+
+  const handleDragEnd = useCallback(() => {
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    
+    // Apply preview position to actual position when mouse is released
+    setPosition(previewPositionRef.current);
+    
+    // Hide preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'none';
+    }
+    
+    setIsDragging(false);
+  }, []);
+
+  // Resize handlers - use preview outline approach
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    if (isDragging) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    setResizeStart({
+      x: e.clientX,
+      y: e.clientY,
+      width: size.width,
+      height: size.height,
+    });
+    // Initialize preview size
+    previewSizeRef.current = { ...size };
+    // Show preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'block';
+      previewRef.current.style.left = `${position.x}px`;
+      previewRef.current.style.top = `${position.y}px`;
+      previewRef.current.style.width = `${size.width}px`;
+      previewRef.current.style.height = `${size.height}px`;
+    }
+  }, [isDragging, size, position]);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
+    
+    // Use requestAnimationFrame for smooth updates
+    rafIdRef.current = requestAnimationFrame(() => {
+      const deltaX = e.clientX - resizeStart.x;
+      const deltaY = e.clientY - resizeStart.y;
+      
+      const newWidth = Math.max(400, Math.min(window.innerWidth - 100, resizeStart.width + deltaX));
+      const newHeight = Math.max(300, Math.min(window.innerHeight - 100, resizeStart.height + deltaY));
+      
+      // Store in ref (no state update = no re-render)
+      previewSizeRef.current = { width: newWidth, height: newHeight };
+      
+      // Update preview outline directly via DOM
+      if (previewRef.current) {
+        previewRef.current.style.width = `${newWidth}px`;
+        previewRef.current.style.height = `${newHeight}px`;
+      }
+    });
+  }, [isResizing, resizeStart]);
+
+  const handleResizeEnd = useCallback(() => {
+    // Cancel any pending animation frame
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    
+    // Apply preview size to actual size when mouse is released
+    setSize(previewSizeRef.current);
+    
+    // Hide preview outline
+    if (previewRef.current) {
+      previewRef.current.style.display = 'none';
+    }
+    
+    setIsResizing(false);
+  }, []);
+
+  // Global mouse event listeners
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleDragMove);
+      document.addEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = 'move';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging, handleDragMove, handleDragEnd]);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = 'nwse-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  if (!open) return null;
+
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth="lg"
-      fullWidth
-      PaperProps={{
-        sx: {
-          backgroundColor: '#1f2937',
-          border: '1px solid #374151',
-          color: '#ffffff',
-          maxHeight: '90vh',
-        },
-      }}
-    >
-      <DialogTitle
+    <Portal>
+      {/* Preview outline - shown during drag/resize */}
+      <Box
+        ref={previewRef}
         sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '1px solid #374151',
-          pb: 2,
+          position: 'fixed',
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          width: `${size.width}px`,
+          height: `${size.height}px`,
+          border: '2px solid #3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          pointerEvents: 'none',
+          zIndex: 1101,
+          display: 'none', // Hidden by default, shown during drag/resize via direct DOM manipulation
+          boxShadow: '0 0 8px rgba(59, 130, 246, 0.6)',
+        }}
+      />
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 1100,
+          pointerEvents: 'none',
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-          {previewData && getPreviewIcon()}
-          <Typography variant="h6" sx={{ color: '#ffffff' }}>
-            {item.name}
-          </Typography>
-        </Box>
-        <IconButton onClick={onClose} sx={{ color: '#9ca3af' }}>
-          <CloseIcon />
-        </IconButton>
-      </DialogTitle>
-
-      <DialogContent 
-        sx={{ 
-          p: 0, 
-          mt: 2,
-          // Blue scrollbar for dialog content
-          '&::-webkit-scrollbar': {
-            width: '12px',
-          },
-          '&::-webkit-scrollbar-track': {
+        <Paper
+          ref={paperRef}
+          elevation={8}
+          sx={{
+            position: 'fixed',
+            left: `${position.x}px`,
+            top: `${position.y}px`,
+            width: `${size.width}px`,
+            height: `${size.height}px`,
             backgroundColor: '#1f2937',
-          },
-          '&::-webkit-scrollbar-thumb': {
-            backgroundColor: '#3b82f6',
-            borderRadius: '6px',
-            '&:hover': {
-              backgroundColor: '#2563eb',
-            },
-          },
-        }}
-      >
-        {renderPreview()}
-      </DialogContent>
-
-      <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
-        <Button
-          onClick={onClose}
-          sx={{
-            color: '#9ca3af',
-            '&:hover': {
-              backgroundColor: 'rgba(156, 163, 175, 0.1)',
-            },
-          }}
-        >
-          Close
-        </Button>
-        <Button
-          onClick={handleDownload}
-          variant="contained"
-          disabled={downloadLoading}
-          startIcon={downloadLoading ? <CircularProgress size={16} /> : <DownloadIcon />}
-          sx={{
-            backgroundColor: '#3b82f6',
+            border: '2px solid #374151',
             color: '#ffffff',
-            '&:hover': {
-              backgroundColor: '#2563eb',
-            },
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            pointerEvents: 'auto',
+            cursor: isDragging ? 'move' : 'default',
           }}
         >
-          Download
-        </Button>
-      </DialogActions>
-    </Dialog>
+          {/* Title bar - draggable */}
+          <Box
+            onMouseDown={handleDragStart}
+            sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid #374151',
+              pb: 2,
+              pt: 2,
+              px: 3,
+              cursor: 'move',
+              userSelect: 'none',
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+              {previewData && getPreviewIcon()}
+              <Typography variant="h6" sx={{ color: '#ffffff' }}>
+                {item.name}
+              </Typography>
+            </Box>
+            <IconButton onClick={onClose} sx={{ color: '#9ca3af' }}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+
+          {/* Content */}
+          <Box
+            sx={{
+              flex: 1,
+              overflow: 'auto',
+              p: 0,
+              mt: 2,
+              '&::-webkit-scrollbar': {
+                width: '12px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: '#1f2937',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: '#3b82f6',
+                borderRadius: '6px',
+                '&:hover': {
+                  backgroundColor: '#2563eb',
+                },
+              },
+            }}
+          >
+            {renderPreview()}
+          </Box>
+
+          {/* Actions */}
+          <Box sx={{ borderTop: '1px solid #374151', p: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+            <Button
+              onClick={onClose}
+              sx={{
+                color: '#9ca3af',
+                '&:hover': {
+                  backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                },
+              }}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={handleDownload}
+              variant="contained"
+              disabled={downloadLoading}
+              startIcon={downloadLoading ? <CircularProgress size={16} /> : <DownloadIcon />}
+              sx={{
+                backgroundColor: '#3b82f6',
+                color: '#ffffff',
+                '&:hover': {
+                  backgroundColor: '#2563eb',
+                },
+              }}
+            >
+              Download
+            </Button>
+          </Box>
+
+          {/* Resize handle - bottom right corner */}
+          <Box
+            onMouseDown={handleResizeStart}
+            sx={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
+              width: '20px',
+              height: '20px',
+              cursor: 'nwse-resize',
+              background: 'linear-gradient(135deg, transparent 0%, transparent 40%, #3b82f6 40%, #3b82f6 50%, transparent 50%, transparent 100%)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, transparent 0%, transparent 40%, #2563eb 40%, #2563eb 50%, transparent 50%, transparent 100%)',
+              },
+            }}
+          />
+        </Paper>
+      </Box>
+    </Portal>
   );
 };
 
