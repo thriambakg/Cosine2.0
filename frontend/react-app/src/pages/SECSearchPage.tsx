@@ -2531,8 +2531,8 @@ const SECSearchPage: React.FC = () => {
                         </FormControl>
                       )}
                     </Box>
-                  ) : null}
-              </Box>
+                    ) : null}
+                  </Box>
 
               {/* Column Selection Menu */}
               <Menu

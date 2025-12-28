@@ -595,6 +595,21 @@ export const dashboardAPI = {
     });
   },
 
+  shareDashboard: async (
+    tabId: string,
+    userId: string,
+    shareType: 'link' | 'download'
+  ): Promise<{ success: boolean; shareId?: string; shareLink?: string; downloadUrl?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; shareId?: string; shareLink?: string; downloadUrl?: string; error?: string }>(
+      `/dashboard/share`,
+      {
+        method: 'POST',
+        userId,
+        body: JSON.stringify({ tabId, shareType }),
+      }
+    );
+  },
+
   createTab: async (tabData: { name: string; color?: string }, userId: string): Promise<{ tab: DashboardTab; message: string }> => {
     const body: any = {
       type: 'tab',

@@ -15,7 +15,13 @@ import {
   CardActionArea,
   Chip,
   IconButton,
-  Tooltip
+  Tooltip,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -32,7 +38,10 @@ import {
   Folder as FolderIcon,
   ZoomIn,
   ZoomOut,
-  ZoomOutMap
+  ZoomOutMap,
+  Share as ShareIcon,
+  Link as LinkIcon,
+  Download as DownloadIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -339,6 +348,16 @@ const UnifiedDashboardPage: React.FC = () => {
   
   // Initialize zoom level from sessionStorage or default to 1.0
   const [zoomLevel, setZoomLevel] = useState(1.0);
+  
+  // Share menu state
+  const [shareMenuAnchor, setShareMenuAnchor] = useState<null | HTMLElement>(null);
+  const [shareLinkDialogOpen, setShareLinkDialogOpen] = useState(false);
+  const [shareLink, setShareLink] = useState<string>('');
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
 
   // Tab management - only initialize when user is authenticated
   const tabManagement = useTabManagement({ 
@@ -1578,6 +1597,68 @@ const UnifiedDashboardPage: React.FC = () => {
     });
   };
 
+  // Share dashboard handlers (stubs for now)
+  const handleShareLink = async () => {
+    if (!activeTab || !user?.id) {
+      setSnackbar({ open: true, message: 'Unable to share: No active tab or user', severity: 'error' });
+      return;
+    }
+
+    // TODO: Implement actual API call
+    // Stub implementation
+    const stubShareId = `stub-${Date.now()}`;
+    const fullLink = `${window.location.origin}/dashboard/shared/${stubShareId}`;
+    setShareLink(fullLink);
+    setShareLinkDialogOpen(true);
+    setSnackbar({ open: true, message: 'Share link generated (stub)', severity: 'success' });
+    
+    // Uncomment when API is ready:
+    // try {
+    //   const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'link');
+    //   if (response.success && response.shareLink) {
+    //     const fullLink = `${window.location.origin}/dashboard/shared/${response.shareId}`;
+    //     setShareLink(fullLink);
+    //     setShareLinkDialogOpen(true);
+    //   } else {
+    //     setSnackbar({ open: true, message: response.error || 'Failed to generate share link', severity: 'error' });
+    //   }
+    // } catch (error: any) {
+    //   console.error('Error sharing dashboard:', error);
+    //   setSnackbar({ open: true, message: 'Failed to generate share link', severity: 'error' });
+    // }
+  };
+
+  const handleDownloadDashboard = async () => {
+    if (!activeTab || !user?.id) {
+      setSnackbar({ open: true, message: 'Unable to download: No active tab or user', severity: 'error' });
+      return;
+    }
+
+    // TODO: Implement actual API call
+    // Stub implementation
+    setSnackbar({ open: true, message: 'Download functionality coming soon (stub)', severity: 'success' });
+    
+    // Uncomment when API is ready:
+    // try {
+    //   const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'download');
+    //   if (response.success && response.downloadUrl) {
+    //     // Create a temporary link and trigger download
+    //     const link = document.createElement('a');
+    //     link.href = response.downloadUrl;
+    //     link.download = `${activeTab.name || 'dashboard'}.cosine`;
+    //     document.body.appendChild(link);
+    //     link.click();
+    //     document.body.removeChild(link);
+    //     setSnackbar({ open: true, message: 'Dashboard downloaded successfully!', severity: 'success' });
+    //   } else {
+    //     setSnackbar({ open: true, message: response.error || 'Failed to download dashboard', severity: 'error' });
+    //   }
+    // } catch (error: any) {
+    //   console.error('Error downloading dashboard:', error);
+    //   setSnackbar({ open: true, message: 'Failed to download dashboard', severity: 'error' });
+    // }
+  };
+
 
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh' }}>
@@ -1695,7 +1776,158 @@ const UnifiedDashboardPage: React.FC = () => {
                 <ZoomOutMap fontSize="small" />
               </IconButton>
             </Tooltip>
+            
+            {/* Divider */}
+            <Box
+              sx={{
+                width: '1px',
+                height: '24px',
+                backgroundColor: '#374151',
+                mx: 0.5,
+              }}
+            />
+            
+            {/* Share Button */}
+            <Tooltip title="Share Dashboard">
+              <IconButton
+                onClick={(e) => setShareMenuAnchor(e.currentTarget)}
+                size="small"
+                sx={{
+                  color: '#94a3b8',
+                  '&:hover': { color: '#ffffff', backgroundColor: 'rgba(59, 130, 246, 0.2)' },
+                }}
+              >
+                <ShareIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
+          
+          {/* Share Menu */}
+          <Menu
+            anchorEl={shareMenuAnchor}
+            open={Boolean(shareMenuAnchor)}
+            onClose={() => setShareMenuAnchor(null)}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'left',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'left',
+            }}
+            PaperProps={{
+              sx: {
+                backgroundColor: '#1f2937',
+                border: '1px solid #374151',
+                minWidth: 200,
+                mt: 0.5,
+              }
+            }}
+          >
+            <MenuItem
+              onClick={async () => {
+                setShareMenuAnchor(null);
+                await handleShareLink();
+              }}
+              sx={{
+                color: '#e5e7eb',
+                '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+              }}
+            >
+              <ListItemIcon>
+                <LinkIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+              </ListItemIcon>
+              <ListItemText>Share Link</ListItemText>
+            </MenuItem>
+            <MenuItem
+              onClick={async () => {
+                setShareMenuAnchor(null);
+                await handleDownloadDashboard();
+              }}
+              sx={{
+                color: '#e5e7eb',
+                '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+              }}
+            >
+              <ListItemIcon>
+                <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+              </ListItemIcon>
+              <ListItemText>Download as .cosine</ListItemText>
+            </MenuItem>
+          </Menu>
+          
+          {/* Share Link Dialog */}
+          <Dialog
+            open={shareLinkDialogOpen}
+            onClose={() => setShareLinkDialogOpen(false)}
+            PaperProps={{
+              sx: {
+                backgroundColor: '#1f2937',
+                border: '1px solid #374151',
+                minWidth: 400,
+              }
+            }}
+          >
+            <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
+              Share Dashboard
+            </DialogTitle>
+            <DialogContent sx={{ pt: 2 }}>
+              <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
+                Copy this link to share your dashboard:
+              </Typography>
+              <TextField
+                fullWidth
+                value={shareLink}
+                InputProps={{
+                  readOnly: true,
+                  sx: {
+                    color: '#ffffff',
+                    backgroundColor: '#111827',
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#374151',
+                    },
+                  }
+                }}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+            </DialogContent>
+            <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+              <Button
+                onClick={() => {
+                  navigator.clipboard.writeText(shareLink);
+                  setSnackbar({ open: true, message: 'Link copied to clipboard!', severity: 'success' });
+                }}
+                sx={{ color: '#60a5fa' }}
+              >
+                Copy Link
+              </Button>
+              <Button
+                onClick={() => setShareLinkDialogOpen(false)}
+                sx={{ color: '#9ca3af' }}
+              >
+                Close
+              </Button>
+            </DialogActions>
+          </Dialog>
+          
+          {/* Snackbar for notifications */}
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={3000}
+            onClose={() => setSnackbar({ ...snackbar, open: false })}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          >
+            <Alert
+              onClose={() => setSnackbar({ ...snackbar, open: false })}
+              severity={snackbar.severity}
+              sx={{
+                backgroundColor: snackbar.severity === 'success' ? '#10b981' : '#ef4444',
+                color: '#ffffff',
+              }}
+            >
+              {snackbar.message}
+            </Alert>
+          </Snackbar>
 
         {/* Dashboard Grid */}
         {isLoading ? (

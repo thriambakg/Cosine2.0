@@ -858,7 +858,7 @@ const CongressBillsSearchPage: React.FC = () => {
           }
         }
       } else {
-        console.error('❌ Error saving congress bills search page state:', error);
+      console.error('❌ Error saving congress bills search page state:', error);
       }
     }
   }, [
@@ -1619,7 +1619,7 @@ const CongressBillsSearchPage: React.FC = () => {
                     <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Details</TableCell>
                   </TableRow>
                 </TableHead>
-                  <TableBody>
+                <TableBody>
                    {paginatedResults.map((bill, index) => {
                      // Use bill_id as key, but add index as fallback for uniqueness
                      const uniqueKey = bill.bill_id ? `${bill.bill_id}-${index}` : `bill-${index}`;

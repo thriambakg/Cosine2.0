@@ -1532,8 +1532,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                         <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, fontSize: '12px' }}>
-                          Dates
-                        </Typography>
+                        Dates
+                      </Typography>
                         {remainingDays > 0 && (
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <Typography variant="body2" sx={{ color: '#10b981', fontWeight: 600 }}>

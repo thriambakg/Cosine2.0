@@ -121,7 +121,9 @@ def lambda_handler(event, context):
             return create_response(400, {'error': 'User ID is required'})
         
         # Route to appropriate handler based on path and method
-        if path.startswith('/tiles'):
+        if path.startswith('/share'):
+            result = handle_share_dashboard(user_id, http_method, event)
+        elif path.startswith('/tiles'):
             result = handle_tiles_operations(user_id, http_method, path, event)
         elif path.startswith('/reorder'):
             result = handle_reorder_components(user_id, event)
@@ -970,5 +972,76 @@ def create_response(status_code: int, body: Dict) -> Dict:
             'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-User-ID',
             'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
         },
-        'body': json.dumps(body)
+        'body': json.dumps(body, default=str)
     }
+
+def handle_share_dashboard(user_id: str, http_method: str, event: Dict) -> Dict:
+    """Handle dashboard sharing operations"""
+    if http_method != 'POST':
+        return create_response(405, {'error': 'Method not allowed'})
+    
+    try:
+        # Import exporter
+        from exporter import DashboardExporter
+        
+        body = json.loads(event.get('body', '{}'))
+        tab_id = body.get('tabId')
+        share_type = body.get('shareType', 'download')  # 'link' or 'download'
+        
+        if not tab_id:
+            return create_response(400, {'error': 'tabId is required'})
+        
+        # Get dashboard configuration
+        response = table.get_item(Key={'user_id': user_id})
+        if 'Item' not in response:
+            return create_response(404, {'error': 'Dashboard not found'})
+        
+        dashboard_config = convert_decimals(response['Item'].get('dashboard_config', {}))
+        tabs = dashboard_config.get('tabs', [])
+        
+        # Find the specific tab
+        tab = next((t for t in tabs if t.get('id') == tab_id), None)
+        if not tab:
+            return create_response(404, {'error': 'Tab not found'})
+        
+        # Initialize exporter
+        exporter = DashboardExporter()
+        
+        if share_type == 'link':
+            # Export for share link
+            result = exporter.export_for_share_link(tab, user_id)
+            if result.get('success'):
+                return create_response(200, {
+                    'success': True,
+                    'shareId': result.get('share_id'),
+                    'shareLink': f'/dashboard/shared/{result.get("share_id")}',
+                })
+            else:
+                return create_response(500, {
+                    'success': False,
+                    'error': result.get('error', 'Failed to generate share link')
+                })
+        
+        elif share_type == 'download':
+            # Export for download
+            tab_name = tab.get('name', 'dashboard')
+            result = exporter.export_for_download(tab, user_id, tab_name)
+            if result.get('success'):
+                return create_response(200, {
+                    'success': True,
+                    'downloadUrl': result.get('download_url'),
+                    'shareId': result.get('share_id'),
+                    'expiresIn': result.get('expires_in'),
+                })
+            else:
+                return create_response(500, {
+                    'success': False,
+                    'error': result.get('error', 'Failed to export dashboard')
+                })
+        
+        else:
+            return create_response(400, {'error': 'Invalid shareType. Must be "link" or "download"'})
+            
+    except Exception as e:
+        logger.error(f"Error sharing dashboard: {str(e)}", exc_info=True)
+        return create_response(500, {'error': f'Failed to share dashboard: {str(e)}'})

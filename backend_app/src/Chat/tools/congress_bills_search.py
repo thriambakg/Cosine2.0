@@ -534,7 +534,7 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
                         converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                         # Filter out search index items (they have different search_index_sk patterns)
                         if not is_search_index_item(converted_item):
-                            items_batch.append(converted_item)
+                        items_batch.append(converted_item)
                     
                     # Stop fetching if we have enough items to potentially meet the limit
                     if len(items_batch) >= limit * 2:
