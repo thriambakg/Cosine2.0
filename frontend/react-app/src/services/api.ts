@@ -534,21 +534,25 @@ export const handleAPIError = (error: any, endpoint: string): never => {
 // ============================================================================
 
 export interface DashboardTile {
-  id: string;
-  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder';
+  id?: string;
+  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder' | 'stock_screener' | 'news' | 'portfolio' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'lda_disclosures';
   symbol?: string;
   timeframe?: string;
   title: string;
   displayOptions?: any;
   autoRefresh?: boolean;
   isPinned?: boolean;
-  size: { width: number; height: number };
-  gridPosition: { x: number; y: number };
-  gridSize: { width: number; height: number };
-  dashboard_id: string;
-  created_at: string;
+  size?: { width: number; height: number };
+  gridPosition?: { x: number; y: number };
+  gridSize?: { width: number; height: number };
+  dashboard_id?: string;
+  created_at?: string;
   folderPath?: string;
   folderId?: string;
+  criteria?: any;
+  filters?: any;
+  searchParams?: any;
+  portfolioData?: any;
 }
 
 export interface DashboardConfig {

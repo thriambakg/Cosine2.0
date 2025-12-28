@@ -385,7 +385,7 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, til
                     {category.name}
                   </Typography>
                   <Chip 
-                    label={`${category.subcategories.reduce((sum, sub) => sum + sub.tiles.length, 0)} tiles`}
+                    label={`${category.subcategories.reduce((sum: number, sub: any) => sum + sub.tiles.length, 0)} tiles`}
                     size="small"
                     sx={{ 
                       backgroundColor: '#374151', 
@@ -400,13 +400,13 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, til
                   {category.description}
                 </Typography>
                 <Divider sx={{ mb: 2, borderColor: '#374151' }} />
-                {category.subcategories.map((subcategory) => (
+                {category.subcategories.map((subcategory: any) => (
                   <Box key={subcategory.id} sx={{ mb: 2 }}>
                     <Typography variant="subtitle1" sx={{ color: '#ffffff', mb: 1 }}>
                       {subcategory.name}
                     </Typography>
                     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 2 }}>
-                      {subcategory.tiles.map((tile) => (
+                      {subcategory.tiles.map((tile: TileTypeDefinition) => (
                         <Card
                           key={tile.id}
                           sx={{

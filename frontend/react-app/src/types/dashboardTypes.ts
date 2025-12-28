@@ -1,4 +1,5 @@
 // Dashboard and Tab Management Types
+import React from 'react';
 
 // Simplified structure: Tab = Dashboard
 export interface DashboardTab {
@@ -222,20 +223,35 @@ export interface NewTabOptions {
   isPinned?: boolean;
 }
 
-
-export interface NewsArticle {
+// Tile category definitions for AddTileMenu
+export interface TileSubcategory {
   id: string;
-  title: string;
+  name: string;
   description: string;
-  source_url: string;
-  source_name: string;
-  published_date: string;
-  keywords: string;
+  icon: React.ReactNode;
+  color: string;
+  tiles: TileTypeDefinition[];
+}
+
+export interface TileCategory {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+  subcategories: TileSubcategory[];
+}
+
+// Tile type definitions for the selection interface
+export interface TileTypeDefinition {
+  id: string;
+  name: string;
+  description: string;
   category: string;
-  image_url?: string;
-  sentiment: string;
-  ai_tag: string;
-  country: string;
-  language: string;
-  creator: string;
+  subcategory: string;
+  icon: React.ReactNode;
+  color: string;
+  isAvailable: boolean;
+  placeholder?: boolean; // For tiles not yet implemented
+  previewImage?: string; // URL or path to preview image
 }

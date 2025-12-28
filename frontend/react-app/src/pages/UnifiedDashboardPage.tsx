@@ -10,9 +10,6 @@ import {
   DialogActions,
   Button,
   TextField,
-  Grid,
-  Card,
-  CardActionArea,
   Chip,
   IconButton,
   Tooltip,
@@ -26,8 +23,6 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Add as AddIcon, 
-  Close as CloseIcon,
-  ArrowBack as ArrowBackIcon,
   TrendingUp as TrendingUpIcon,
   AccountBalance as AccountBalanceIcon,
   Settings as SettingsIcon,
@@ -58,42 +53,7 @@ import NewGroupDialog from '../components/dialogs/NewGroupDialog';
 
 // Import tab management hook and types
 import { useTabManagement } from '../hooks/useTabManagement';
-import { UnifiedTile, GridPosition } from '../types/dashboardTypes';
-
-
-
-// Tile category definitions
-interface TileCategory {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  color: string;
-  subcategories: TileSubcategory[];
-}
-
-interface TileSubcategory {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  color: string;
-  tiles: TileTypeDefinition[];
-}
-
-// Tile type definitions for the selection interface
-interface TileTypeDefinition {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  subcategory: string;
-  icon: React.ReactNode;
-  color: string;
-  isAvailable: boolean;
-  placeholder?: boolean; // For tiles not yet implemented
-  previewImage?: string; // URL or path to preview image
-}
+import { UnifiedTile, GridPosition, TileCategory } from '../types/dashboardTypes';
 
 // Hierarchical tile categories
 const tileCategories: TileCategory[] = [
@@ -235,21 +195,21 @@ const tileCategories: TileCategory[] = [
   },
   {
     id: 'news',
-    name: 'Financial News',
+    name: 'News',
     description: 'Stay updated with the latest financial news and market insights',
     icon: <ArticleIcon />,
     color: '#dc2626',
     subcategories: [
       {
         id: 'financial',
-        name: 'Financial News',
+        name: 'News',
         description: 'Browse and filter financial news articles',
         icon: <ArticleIcon />,
         color: '#dc2626',
         tiles: [
           {
             id: 'news',
-            name: 'Financial News',
+            name: 'News',
             description: 'Browse and filter financial news articles with keyword search and source filtering',
             category: 'news',
             subcategory: 'financial',
@@ -1110,7 +1070,7 @@ const UnifiedDashboardPage: React.FC = () => {
 
     const newTile = {
       type: 'news' as const,
-      title: 'Financial News',
+      title: 'News',
       displayOptions: {
         showImages: true,
         showSource: true,
@@ -1446,64 +1406,6 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
-  const getDefaultTileConfig = (tileTypeId: string) => {
-    switch (tileTypeId) {
-      case 'stock':
-        return {
-          symbol: '',
-          timeframe: '1d',
-          displayOptions: {
-            showPrice: true,
-            show24hChange: true,
-            showAnnualReturn: true,
-            showVolatility: true,
-            showChart: true,
-          },
-          autoRefresh: false
-        };
-      case 'portfolio':
-        return {
-          name: 'My Portfolio',
-          displayOptions: {
-            showAllocation: true,
-            showPerformance: true,
-            showRisk: true,
-            showChart: true,
-          }
-        };
-      case 'custom':
-        return {
-          title: '',
-          content: '',
-          displayOptions: {
-            showTitle: true,
-            showContent: true,
-            showTimestamp: true,
-          }
-        };
-      case 'chat_generated':
-        return {
-          prompt: '',
-          displayOptions: {
-            showPrompt: true,
-            showResponse: true,
-            showTimestamp: true,
-          }
-        };
-      case 'folder':
-        return {
-          folderPath: '',
-          folderId: undefined,
-          displayOptions: {
-            showFolders: true,
-            showFiles: true,
-            showBreadcrumbs: true,
-          }
-        };
-      default:
-        return {};
-    }
-  };
 
   // OLD SYSTEM - commented out
   /*
@@ -2407,159 +2309,6 @@ const UnifiedDashboardPage: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Step 4: Tile Configuration - OLD SYSTEM (commented out) */}
-        {false && (
-        <Dialog 
-          open={false} 
-          onClose={() => {}}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle sx={{ 
-            backgroundColor: '#1e293b', 
-            color: '#ffffff',
-            borderBottom: '1px solid #374151'
-          }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <IconButton 
-                  onClick={handleBackToTiles}
-                  sx={{ color: '#9ca3af', mr: 1 }}
-                >
-                  <ArrowBackIcon />
-                </IconButton>
-                <Typography variant="h6">
-                  Configure {selectedTileType?.name}
-                </Typography>
-              </Box>
-              <IconButton 
-                onClick={() => setAddTileStep('closed')}
-                sx={{ color: '#9ca3af' }}
-              >
-                <CloseIcon />
-              </IconButton>
-            </Box>
-          </DialogTitle>
-          <DialogContent sx={{ backgroundColor: '#0f172a', p: 3 }}>
-            {selectedTileType && (
-              <Box>
-                {/* Dynamic configuration based on tile type */}
-                {selectedTileType?.id === 'stock' && (
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Stock Symbol"
-                      value={tileConfig.symbol || ''}
-                      onChange={(e) => setTileConfig({ ...tileConfig, symbol: e.target.value.toUpperCase() })}
-                      sx={{ mb: 2 }}
-                      placeholder="e.g., AAPL, GOOGL, MSFT"
-                    />
-                    <TextField
-                      fullWidth
-                      select
-                      label="Timeframe"
-                      value={tileConfig.timeframe || '1d'}
-                      onChange={(e) => setTileConfig({ ...tileConfig, timeframe: e.target.value })}
-                      sx={{ mb: 2 }}
-                    >
-                      <option value="1d">1 Day</option>
-                      <option value="7d">7 Days</option>
-                      <option value="30d">30 Days</option>
-                      <option value="1y">1 Year</option>
-                    </TextField>
-                  </Box>
-                )}
-
-                {selectedTileType?.id === 'portfolio' && (
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Portfolio Name"
-                      value={tileConfig.name || ''}
-                      onChange={(e) => setTileConfig({ ...tileConfig, name: e.target.value })}
-                      sx={{ mb: 2 }}
-                      placeholder="e.g., My Investment Portfolio"
-                    />
-                  </Box>
-                )}
-
-                {selectedTileType?.id === 'custom' && (
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Tile Title"
-                      value={tileConfig.title || ''}
-                      onChange={(e) => setTileConfig({ ...tileConfig, title: e.target.value })}
-                      sx={{ mb: 2 }}
-                      placeholder="Enter a title for your custom tile"
-                    />
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={4}
-                      label="Content"
-                      value={tileConfig.content || ''}
-                      onChange={(e) => setTileConfig({ ...tileConfig, content: e.target.value })}
-                      sx={{ mb: 2 }}
-                      placeholder="Enter your custom content here..."
-                    />
-                  </Box>
-                )}
-
-                {selectedTileType?.id === 'chat_generated' && (
-                  <Box>
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={3}
-                      label="Describe what you want"
-                      value={tileConfig.prompt || ''}
-                      onChange={(e) => setTileConfig({ ...tileConfig, prompt: e.target.value })}
-                      sx={{ mb: 2 }}
-                      placeholder="e.g., 'Create a tile showing my top 5 crypto holdings' or 'Show me AAPL stock analysis'"
-                    />
-                  </Box>
-                )}
-
-                {selectedTileType?.id === 'folder' && (
-                  <Box>
-                    <TextField
-                      fullWidth
-                      label="Folder Path (optional)"
-                      value={tileConfig.folderPath || ''}
-                      onChange={(e) => setTileConfig({ ...tileConfig, folderPath: e.target.value })}
-                      sx={{ mb: 2 }}
-                      placeholder="Leave empty for root folder, or enter folder path"
-                      helperText="Leave empty to show root folder, or specify a folder path"
-                    />
-                  </Box>
-                )}
-              </Box>
-            )}
-          </DialogContent>
-          <DialogActions sx={{ backgroundColor: '#0f172a', p: 3, borderTop: '1px solid #374151' }}>
-            <Button 
-              onClick={handleBackToTiles}
-              sx={{ color: '#9ca3af' }}
-            >
-              Back
-            </Button>
-            <Button 
-              onClick={handleTileConfigSubmit}
-              variant="contained"
-              sx={{ 
-                backgroundColor: selectedTileType?.color || '#f59e0b',
-                '&:hover': {
-                  backgroundColor: selectedTileType?.color || '#d97706',
-                }
-              }}
-              disabled={!tileConfig.symbol && !tileConfig.title && !tileConfig.name && !tileConfig.prompt && selectedTileType?.id !== 'folder'}
-            >
-              Add Tile
-            </Button>
-          </DialogActions>
-        </Dialog>
-        )}
 
         {/* Crypto and Stock Modals */}
         {/* <AddCryptoModal
