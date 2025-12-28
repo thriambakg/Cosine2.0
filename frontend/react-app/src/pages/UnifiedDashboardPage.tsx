@@ -680,8 +680,9 @@ const UnifiedDashboardPage: React.FC = () => {
         // Activate the newly imported tab if available
         // Use setTimeout to ensure state has updated from reloadFromDatabase
         if (response.tab) {
+          const importedTabId = response.tab.id;
           setTimeout(() => {
-            activateTab(response.tab.id);
+            activateTab(importedTabId);
           }, 100);
         }
         
