@@ -643,12 +643,13 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
         
         # Create new tile with clean structure
         now = datetime.utcnow().isoformat()
+        tile_type = tile_config.get('type', 'crypto')
+        
+        # Base tile structure
         new_tile = {
             'id': str(uuid.uuid4()),
-            'type': tile_config.get('type', 'crypto'),
-            'symbol': tile_config.get('symbol'),
-            'timeframe': tile_config.get('timeframe', '1d'),
-            'title': tile_config.get('title', tile_config.get('symbol', 'Untitled')),
+            'type': tile_type,
+            'title': tile_config.get('title', 'Untitled'),
             'displayOptions': tile_config.get('displayOptions', {}),
             'autoRefresh': tile_config.get('autoRefresh', False),
             'isPinned': tile_config.get('isPinned', False),
@@ -658,6 +659,28 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
             'created_at': now,
             'updated_at': now
         }
+        
+        # Add type-specific fields
+        if tile_type in ['crypto', 'stock']:
+            new_tile['symbol'] = tile_config.get('symbol')
+            new_tile['timeframe'] = tile_config.get('timeframe', '1d')
+        elif tile_type == 'folder':
+            new_tile['folderPath'] = tile_config.get('folderPath', '')
+            if tile_config.get('folderId') is not None:
+                new_tile['folderId'] = tile_config.get('folderId')
+        elif tile_type == 'portfolio':
+            new_tile['portfolioData'] = tile_config.get('portfolioData', {'entries': [], 'timeframe': '1y'})
+        elif tile_type in ['news', 'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures']:
+            # Search tiles may have searchParams, filterSettings, etc.
+            if 'searchParams' in tile_config:
+                new_tile['searchParams'] = tile_config.get('searchParams')
+            if 'filterSettings' in tile_config:
+                new_tile['filterSettings'] = tile_config.get('filterSettings')
+            if 'filters' in tile_config:
+                new_tile['filters'] = tile_config.get('filters')
+        elif tile_type == 'stock_screener':
+            if 'criteria' in tile_config:
+                new_tile['criteria'] = tile_config.get('criteria')
         
         # Add tile to tab
         if 'tiles' not in target_tab:
@@ -978,20 +1001,36 @@ def validate_dashboard_structure(config: Dict) -> bool:
 
 def validate_tile_config(tile: Dict) -> bool:
     """Validate tile configuration"""
-    required_fields = ['symbol', 'timeframe']
+    tile_type = tile.get('type', '')
     
-    for field in required_fields:
-        if field not in tile:
+    # Validate tile type exists
+    if not tile_type:
+        logger.warning(f"Tile validation failed: missing type")
+        return False
+    
+    # Different tile types have different required fields
+    if tile_type in ['crypto', 'stock']:
+        # Crypto and stock tiles require symbol and timeframe
+        if 'symbol' not in tile:
+            logger.warning(f"Tile validation failed: crypto/stock tile missing symbol")
+            return False
+        if 'timeframe' not in tile:
+            logger.warning(f"Tile validation failed: crypto/stock tile missing timeframe")
+            return False
+        
+        # Validate symbol (allow any string for flexibility)
+        if not isinstance(tile['symbol'], str) or not tile['symbol'].strip():
+            logger.warning(f"Tile validation failed: invalid symbol")
+            return False
+        
+        # Validate timeframe
+        valid_timeframes = ['1d', '7d', '30d', '1y', '1h', '4h']
+        if tile['timeframe'] not in valid_timeframes:
+            logger.warning(f"Tile validation failed: invalid timeframe {tile.get('timeframe')}")
             return False
     
-    # Validate symbol (allow any string for flexibility)
-    if not isinstance(tile['symbol'], str) or not tile['symbol'].strip():
-        return False
-    
-    # Validate timeframe
-    valid_timeframes = ['1d', '7d', '30d', '1y', '1h', '4h']
-    if tile['timeframe'] not in valid_timeframes:
-        return False
+    # Other tile types (folder, news, portfolio, etc.) don't require symbol/timeframe
+    # Title is optional (has default in backend), so we don't validate it here
     
     # Validate grid position if provided
     if 'gridPosition' in tile:

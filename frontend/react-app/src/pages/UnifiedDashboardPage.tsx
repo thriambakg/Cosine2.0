@@ -47,6 +47,7 @@ import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import GridDashboard from '../components/dashboard/GridDashboard';
 import { getDefaultTileSize } from '../components/tiles/tileConfig';
+import AddTileMenu from '../components/dialogs/AddTileMenu';
 // import { safeLoadDashboard } from '../utils/dashboardMigration';
 import AddCryptoModal from '../components/tiles/AddCryptoModal';
 import AddStockModal from '../components/tiles/AddStockModal';
@@ -467,11 +468,7 @@ const UnifiedDashboardPage: React.FC = () => {
   }, []);
 
   // Multi-step tile addition state
-  const [addTileStep, setAddTileStep] = useState<'closed' | 'category-selection' | 'subcategory-selection' | 'tile-selection' | 'configuration'>('closed');
-  const [selectedCategory, setSelectedCategory] = useState<TileCategory | null>(null);
-  const [selectedSubcategory, setSelectedSubcategory] = useState<TileSubcategory | null>(null);
-  const [selectedTileType, setSelectedTileType] = useState<TileTypeDefinition | null>(null);
-  const [tileConfig, setTileConfig] = useState<any>({});
+  const [addTileMenuOpen, setAddTileMenuOpen] = useState(false);
 
   // Dialog states
   const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
@@ -920,14 +917,60 @@ const UnifiedDashboardPage: React.FC = () => {
       document.activeElement.blur();
     }
     
-    setAddTileStep('category-selection');
-    setSelectedCategory(null);
-    setSelectedSubcategory(null);
-    setSelectedTileType(null);
-    setTileConfig({});
+    setAddTileMenuOpen(true);
   };
 
-  // Navigation handlers for hierarchical tile selection
+  // Handle adding a single tile
+  const handleAddTile = async (tileId: string) => {
+    if (!activeTab || !user?.id) {
+      console.warn('No active tab or user ID found, cannot add tile');
+      return;
+    }
+
+    try {
+      // Handle special tiles that need modals
+      if (tileId === 'crypto') {
+        setCryptoModalOpen(true);
+        setAddTileMenuOpen(false);
+        return;
+      } else if (tileId === 'stock') {
+        setStockModalOpen(true);
+        setAddTileMenuOpen(false);
+        return;
+      }
+
+      // Use existing tile creation handlers
+      if (tileId === 'stock_screener') {
+        await handleCreateStockScreenerTile();
+      } else if (tileId === 'news') {
+        await handleCreateNewsTile();
+      } else if (tileId === 'portfolio') {
+        await handleCreatePortfolioTile();
+      } else if (tileId === 'politician_trades') {
+        await handleCreatePoliticianTradesTile();
+      } else if (tileId === 'sec_search') {
+        await handleCreateSECSearchTile();
+      } else if (tileId === 'govt_contracts') {
+        await handleCreateGovtContractsTile();
+      } else if (tileId === 'congress_bills') {
+        await handleCreateCongressBillsTile();
+      } else if (tileId === 'lda_disclosures') {
+        await handleCreateLDASearchTile();
+      } else if (tileId === 'folder') {
+        await handleCreateFolderTile();
+      }
+
+      // Reload data from database after tile is created
+      await reloadFromDatabase();
+      setAddTileMenuOpen(false);
+    } catch (error) {
+      console.error(`Failed to create tile ${tileId}:`, error);
+    }
+  };
+
+  // Navigation handlers for hierarchical tile selection - OLD SYSTEM (commented out)
+  // These are kept for reference but not used with the new AddTileMenu component
+  /*
   const handleCategorySelect = (category: TileCategory) => {
     setSelectedCategory(category);
     if (category.subcategories.length === 1) {
@@ -999,8 +1042,10 @@ const UnifiedDashboardPage: React.FC = () => {
       setAddTileStep('configuration');
     }
   };
+  */
 
-  // Navigation back handlers
+  // Navigation back handlers - OLD SYSTEM (commented out)
+  /*
   const handleBackToCategories = () => {
     setSelectedCategory(null);
     setSelectedSubcategory(null);
@@ -1015,14 +1060,14 @@ const UnifiedDashboardPage: React.FC = () => {
   const handleBackToTiles = () => {
     setAddTileStep('tile-selection');
   };
+  */
 
   // Stock screener tile creation handler
-  const handleCreateStockScreenerTile = () => {
-    if (!activeTab) return;
+  const handleCreateStockScreenerTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `stock_screener_${Date.now()}`,
-      type: 'stock_screener',
+    const newTile = {
+      type: 'stock_screener' as const,
       title: 'Stock Screener',
       displayOptions: {
         showIndustry: true,
@@ -1037,10 +1082,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 400, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
       gridSize: { width: 4, height: 6 },
-      dashboard_id: currentDashboardId,
       criteria: {
         industries: [],
         volatilityRange: [0, 100],
@@ -1051,21 +1094,22 @@ const UnifiedDashboardPage: React.FC = () => {
         dividendYieldRange: [0, 20],
         timeframe: '1d',
       },
-      results: [],
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create stock screener tile:', error);
+    }
   };
 
   // News tile creation handler
-  const handleCreateNewsTile = () => {
-    if (!activeTab) return;
+  const handleCreateNewsTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `news_${Date.now()}`,
-      type: 'news',
+    const newTile = {
+      type: 'news' as const,
       title: 'Financial News',
       displayOptions: {
         showImages: true,
@@ -1077,10 +1121,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 400, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
       gridSize: { width: 4, height: 6 },
-      dashboard_id: currentDashboardId,
       filters: {
         keywords: [],
         sources: [],
@@ -1096,21 +1138,22 @@ const UnifiedDashboardPage: React.FC = () => {
         categoryExpression: [],
         countryExpression: [],
       },
-      articles: [],
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create news tile:', error);
+    }
   };
 
   // Portfolio tile creation handler
-  const handleCreatePortfolioTile = () => {
-    if (!activeTab) return;
+  const handleCreatePortfolioTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `portfolio_${Date.now()}`,
-      type: 'portfolio',
+    const newTile = {
+      type: 'portfolio' as const,
       title: 'Portfolio Analysis',
       displayOptions: {
         showHoldings: true,
@@ -1121,24 +1164,28 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 600, height: 800 },
       gridPosition: findNextAvailablePosition({ width: 6, height: 8 }),
       gridSize: { width: 6, height: 8 },
-      dashboard_id: currentDashboardId,
+      portfolioData: {
+        entries: [{ stock: '', shares: 0 }],
+        timeframe: '1y',
+      },
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create portfolio tile:', error);
+    }
   };
 
   // Politician trades tile creation handler
-  const handleCreatePoliticianTradesTile = () => {
-    if (!activeTab) return;
+  const handleCreatePoliticianTradesTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `politician_trades_${Date.now()}`,
-      type: 'politician_trades',
+    const newTile = {
+      type: 'politician_trades' as const,
       title: 'Politician Trades',
       displayOptions: {
         showPolitician: true,
@@ -1153,10 +1200,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 600, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
       gridSize: { width: 6, height: 6 },
-      dashboard_id: currentDashboardId,
       searchParams: {
         dateFrom: '2020-01-01',
         dateTo: new Date().toISOString().split('T')[0],
@@ -1166,21 +1211,22 @@ const UnifiedDashboardPage: React.FC = () => {
         security: [],
         transactionType: [],
       },
-      trades: [],
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create politician trades tile:', error);
+    }
   };
 
   // SEC search tile creation handler
-  const handleCreateSECSearchTile = () => {
-    if (!activeTab) return;
+  const handleCreateSECSearchTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `sec_search_${Date.now()}`,
-      type: 'sec_search',
+    const newTile = {
+      type: 'sec_search' as const,
       title: 'SEC Filings Search',
       displayOptions: {
         showEntity: true,
@@ -1196,10 +1242,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 600, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
       gridSize: { width: 6, height: 6 },
-      dashboard_id: currentDashboardId,
       searchParams: {
         entityName: [],
         formTypes: [],
@@ -1209,18 +1253,20 @@ const UnifiedDashboardPage: React.FC = () => {
       },
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create SEC search tile:', error);
+    }
   };
 
   // Government contracts tile creation handler
-  const handleCreateGovtContractsTile = () => {
-    if (!activeTab) return;
+  const handleCreateGovtContractsTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `govt_contracts_${Date.now()}`,
-      type: 'govt_contracts',
+    const newTile = {
+      type: 'govt_contracts' as const,
       title: 'Government Contracts',
       displayOptions: {
         showRecipient: true,
@@ -1238,10 +1284,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 600, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
       gridSize: { width: 6, height: 6 },
-      dashboard_id: currentDashboardId,
       searchParams: {
         keywords: [],
         award_type: [],
@@ -1255,21 +1299,22 @@ const UnifiedDashboardPage: React.FC = () => {
         date_from: '',
         date_to: '',
       },
-      results: [],
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create government contracts tile:', error);
+    }
   };
 
   // Congress bills tile creation handler
-  const handleCreateCongressBillsTile = () => {
-    if (!activeTab) return;
+  const handleCreateCongressBillsTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `congress_bills_${Date.now()}`,
-      type: 'congress_bills',
+    const newTile = {
+      type: 'congress_bills' as const,
       title: 'Congress Bills',
       displayOptions: {
         showBillTitle: true,
@@ -1289,10 +1334,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 600, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
       gridSize: { width: 6, height: 6 },
-      dashboard_id: currentDashboardId,
       searchParams: {
         bill_title: [],
         bill_type: [],
@@ -1308,21 +1351,22 @@ const UnifiedDashboardPage: React.FC = () => {
         bipartisan: undefined,
         bill_number: undefined,
       },
-      results: [],
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create congress bills tile:', error);
+    }
   };
 
   // LDA disclosures tile creation handler
-  const handleCreateLDASearchTile = () => {
-    if (!activeTab) return;
+  const handleCreateLDASearchTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `lda_disclosures_${Date.now()}`,
-      type: 'lda_disclosures',
+    const newTile = {
+      type: 'lda_disclosures' as const,
       title: 'LDA Disclosures',
       displayOptions: {
         showFilingType: true,
@@ -1339,10 +1383,8 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 600, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
       gridSize: { width: 6, height: 6 },
-      dashboard_id: currentDashboardId,
       searchParams: {
         general_text_search_fields: {
           registrant: false,
@@ -1365,24 +1407,24 @@ const UnifiedDashboardPage: React.FC = () => {
         filing_period: [],
         item_type: [],
       },
-      results: [],
     };
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create LDA search tile:', error);
+    }
   };
 
   // Folder tile creation handler
-  const handleCreateFolderTile = () => {
-    if (!activeTab) return;
+  const handleCreateFolderTile = async () => {
+    if (!activeTab || !user?.id) return;
 
-    const newTile: UnifiedTile = {
-      id: `folder_${Date.now()}`,
-      type: 'folder',
+    const newTile: any = {
+      type: 'folder' as const,
       title: 'Folder',
       folderPath: '',
-      folderId: undefined,
       displayOptions: {
         showFolders: true,
         showFiles: true,
@@ -1390,15 +1432,18 @@ const UnifiedDashboardPage: React.FC = () => {
       },
       autoRefresh: false,
       isPinned: false,
-      size: { width: 400, height: 600 },
       gridPosition: findNextAvailablePosition({ width: 4, height: 6 }),
       gridSize: { width: 4, height: 6 },
-      dashboard_id: currentDashboardId,
     };
+    
+    // folderId is optional, so we don't include it if undefined
 
-    const updatedTiles = [...(activeTab.tiles || []), newTile];
-    updateTabTiles(activeTab.id, updatedTiles);
-    setAddTileStep('closed');
+    try {
+      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      await reloadFromDatabase();
+    } catch (error) {
+      console.error('Failed to create folder tile:', error);
+    }
   };
 
   const getDefaultTileConfig = (tileTypeId: string) => {
@@ -1460,6 +1505,8 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
+  // OLD SYSTEM - commented out
+  /*
   const handleTileConfigSubmit = async () => {
     if (!selectedTileType || !activeTab) return;
 
@@ -1498,6 +1545,7 @@ const UnifiedDashboardPage: React.FC = () => {
       console.error('Failed to create tile:', error);
     }
   };
+  */
 
   // TODO: Handle crypto tile addition using the existing AddCryptoModal
   const handleAddCryptoTile = async (cryptoData: any) => {
@@ -2111,10 +2159,17 @@ const UnifiedDashboardPage: React.FC = () => {
           />
         )}
 
-        {/* Multi-Step Add Tile Flow */}
-        
+        {/* New Add Tile Menu */}
+        <AddTileMenu
+          open={addTileMenuOpen}
+          onClose={() => setAddTileMenuOpen(false)}
+          onAddTile={handleAddTile}
+          tileCategories={tileCategories}
+        />
+
+        {/* Old Multi-Step Add Tile Flow - Keeping for reference, can be removed */}
         {/* Step 1: Category Selection */}
-        <Dialog 
+        {/* <Dialog 
           open={addTileStep === 'category-selection'} 
           onClose={() => setAddTileStep('closed')}
           maxWidth="md"
@@ -2181,10 +2236,10 @@ const UnifiedDashboardPage: React.FC = () => {
               ))}
             </Grid>
           </DialogContent>
-        </Dialog>
+        </Dialog> */}
 
         {/* Step 2: Subcategory Selection */}
-        <Dialog 
+        {/* <Dialog 
           open={addTileStep === 'subcategory-selection'} 
           onClose={handleBackToCategories}
           maxWidth="md"
@@ -2259,10 +2314,10 @@ const UnifiedDashboardPage: React.FC = () => {
               ))}
             </Grid>
           </DialogContent>
-        </Dialog>
+        </Dialog> */}
 
         {/* Step 3: Tile Selection */}
-        <Dialog 
+        {/* <Dialog 
           open={addTileStep === 'tile-selection'} 
           onClose={handleBackToCategories}
           maxWidth="md"
@@ -2352,10 +2407,11 @@ const UnifiedDashboardPage: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Step 4: Tile Configuration */}
+        {/* Step 4: Tile Configuration - OLD SYSTEM (commented out) */}
+        {false && (
         <Dialog 
-          open={addTileStep === 'configuration'} 
-          onClose={handleBackToTiles}
+          open={false} 
+          onClose={() => {}}
           maxWidth="sm"
           fullWidth
         >
@@ -2503,8 +2559,9 @@ const UnifiedDashboardPage: React.FC = () => {
             </Button>
           </DialogActions>
         </Dialog>
+        )}
 
-        {/* TODO: AddCryptoModal and AddStockModal components need to be created */}
+        {/* Crypto and Stock Modals */}
         {/* <AddCryptoModal
           open={cryptoModalOpen}
           onClose={() => setCryptoModalOpen(false)}
