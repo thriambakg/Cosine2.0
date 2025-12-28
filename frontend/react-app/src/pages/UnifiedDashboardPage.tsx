@@ -1597,35 +1597,28 @@ const UnifiedDashboardPage: React.FC = () => {
     });
   };
 
-  // Share dashboard handlers (stubs for now)
+  // Share dashboard handlers
   const handleShareLink = async () => {
     if (!activeTab || !user?.id) {
       setSnackbar({ open: true, message: 'Unable to share: No active tab or user', severity: 'error' });
       return;
     }
 
-    // TODO: Implement actual API call
-    // Stub implementation
-    const stubShareId = `stub-${Date.now()}`;
-    const fullLink = `${window.location.origin}/dashboard/shared/${stubShareId}`;
-    setShareLink(fullLink);
-    setShareLinkDialogOpen(true);
-    setSnackbar({ open: true, message: 'Share link generated (stub)', severity: 'success' });
-    
-    // Uncomment when API is ready:
-    // try {
-    //   const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'link');
-    //   if (response.success && response.shareLink) {
-    //     const fullLink = `${window.location.origin}/dashboard/shared/${response.shareId}`;
-    //     setShareLink(fullLink);
-    //     setShareLinkDialogOpen(true);
-    //   } else {
-    //     setSnackbar({ open: true, message: response.error || 'Failed to generate share link', severity: 'error' });
-    //   }
-    // } catch (error: any) {
-    //   console.error('Error sharing dashboard:', error);
-    //   setSnackbar({ open: true, message: 'Failed to generate share link', severity: 'error' });
-    // }
+    try {
+      const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'link');
+      if (response.success && response.shareId) {
+        // Construct full share link URL
+        const fullLink = `${window.location.origin}${response.shareLink || `/dashboard/shared/${response.shareId}`}`;
+        setShareLink(fullLink);
+        setShareLinkDialogOpen(true);
+        setSnackbar({ open: true, message: 'Share link generated successfully!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: response.error || 'Failed to generate share link', severity: 'error' });
+      }
+    } catch (error: any) {
+      console.error('Error sharing dashboard:', error);
+      setSnackbar({ open: true, message: 'Failed to generate share link', severity: 'error' });
+    }
   };
 
   const handleDownloadDashboard = async () => {
@@ -1634,29 +1627,24 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
 
-    // TODO: Implement actual API call
-    // Stub implementation
-    setSnackbar({ open: true, message: 'Download functionality coming soon (stub)', severity: 'success' });
-    
-    // Uncomment when API is ready:
-    // try {
-    //   const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'download');
-    //   if (response.success && response.downloadUrl) {
-    //     // Create a temporary link and trigger download
-    //     const link = document.createElement('a');
-    //     link.href = response.downloadUrl;
-    //     link.download = `${activeTab.name || 'dashboard'}.cosine`;
-    //     document.body.appendChild(link);
-    //     link.click();
-    //     document.body.removeChild(link);
-    //     setSnackbar({ open: true, message: 'Dashboard downloaded successfully!', severity: 'success' });
-    //   } else {
-    //     setSnackbar({ open: true, message: response.error || 'Failed to download dashboard', severity: 'error' });
-    //   }
-    // } catch (error: any) {
-    //   console.error('Error downloading dashboard:', error);
-    //   setSnackbar({ open: true, message: 'Failed to download dashboard', severity: 'error' });
-    // }
+    try {
+      const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'download');
+      if (response.success && response.downloadUrl) {
+        // Create a temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = response.downloadUrl;
+        link.download = `${activeTab.name || 'dashboard'}.cosine`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setSnackbar({ open: true, message: 'Dashboard downloaded successfully!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: response.error || 'Failed to download dashboard', severity: 'error' });
+      }
+    } catch (error: any) {
+      console.error('Error downloading dashboard:', error);
+      setSnackbar({ open: true, message: 'Failed to download dashboard', severity: 'error' });
+    }
   };
 
 

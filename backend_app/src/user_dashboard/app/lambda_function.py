@@ -121,7 +121,7 @@ def lambda_handler(event, context):
             return create_response(400, {'error': 'User ID is required'})
         
         # Route to appropriate handler based on path and method
-        if path.startswith('/share'):
+        if path.startswith('/share') or '/dashboard-share' in path or path.endswith('/share'):
             result = handle_share_dashboard(user_id, http_method, event)
         elif path.startswith('/tiles'):
             result = handle_tiles_operations(user_id, http_method, path, event)

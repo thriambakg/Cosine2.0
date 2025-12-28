@@ -140,6 +140,9 @@ module "api_gateway" {
     dashboard_tiles = {
       path_part = "dashboard-tiles"
     }
+    dashboard_share = {
+      path_part = "dashboard-share"
+    }
     alerts = {
       path_part = "alerts"
     }
@@ -343,6 +346,16 @@ module "api_gateway" {
     tiles_put = {
       resource_key            = "dashboard_tiles"
       http_method             = "PUT"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    # Dashboard Share method
+    dashboard_share_post = {
+      resource_key            = "dashboard_share"
+      http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
       lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
@@ -613,6 +626,11 @@ module "api_gateway" {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "PUT"
       resource_path = "dashboard-tiles"
+    }
+    dashboard_share_post = {
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "dashboard-share"
     }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
@@ -1208,6 +1226,8 @@ module "user_dashboard_lambda" {
   # Environment variables
   environment_variables = {
     USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
+    CHAT_FILES_BUCKET_NAME   = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    ENCRYPTION_SECRET        = aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
 
   # Attach core layer
@@ -1217,7 +1237,8 @@ module "user_dashboard_lambda" {
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.lambda_dynamodb_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn
+    aws_iam_policy.lambda_kms_policy.arn,
+    data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
