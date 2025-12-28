@@ -123,6 +123,8 @@ def lambda_handler(event, context):
         # Route to appropriate handler based on path and method
         if path.startswith('/share') or '/dashboard-share' in path or path.endswith('/share'):
             result = handle_share_dashboard(user_id, http_method, event)
+        elif path.startswith('/import') or '/dashboard-import' in path or path.endswith('/import'):
+            result = handle_import_dashboard(user_id, http_method, event)
         elif path.startswith('/tiles'):
             result = handle_tiles_operations(user_id, http_method, path, event)
         elif path.startswith('/reorder'):
@@ -1045,3 +1047,105 @@ def handle_share_dashboard(user_id: str, http_method: str, event: Dict) -> Dict:
     except Exception as e:
         logger.error(f"Error sharing dashboard: {str(e)}", exc_info=True)
         return create_response(500, {'error': f'Failed to share dashboard: {str(e)}'})
+
+
+def handle_import_dashboard(user_id: str, http_method: str, event: Dict) -> Dict:
+    """Handle dashboard import operations"""
+    if http_method != 'POST':
+        return create_response(405, {'error': 'Method not allowed'})
+    
+    try:
+        # Import importer
+        from importer import DashboardImporter
+        from datetime import datetime
+        import uuid
+        
+        body = json.loads(event.get('body', '{}'))
+        import_type = body.get('importType')  # 'file' or 'link'
+        share_id = body.get('shareId')  # For link imports
+        file_content = body.get('fileContent')  # Base64 encoded file content for file imports
+        
+        if not import_type:
+            return create_response(400, {'error': 'importType is required (file or link)'})
+        
+        importer = DashboardImporter()
+        
+        if import_type == 'link':
+            if not share_id:
+                return create_response(400, {'error': 'shareId is required for link imports'})
+            
+            # Import from share link
+            result = importer.import_from_share_link(share_id, user_id)
+            
+            if not result.get('success'):
+                return create_response(400, {
+                    'success': False,
+                    'error': result.get('error', 'Failed to import dashboard from link')
+                })
+            
+            dashboard_data = result.get('dashboard_data')
+            
+        elif import_type == 'file':
+            if not file_content:
+                return create_response(400, {'error': 'fileContent is required for file imports'})
+            
+            # Decode base64 file content
+            try:
+                import base64
+                file_bytes = base64.b64decode(file_content)
+            except Exception as e:
+                return create_response(400, {'error': f'Invalid file content encoding: {str(e)}'})
+            
+            # Import from file
+            result = importer.import_from_file(file_bytes, user_id)
+            
+            if not result.get('success'):
+                return create_response(400, {
+                    'success': False,
+                    'error': result.get('error', 'Failed to import dashboard from file')
+                })
+            
+            dashboard_data = result.get('dashboard_data')
+        else:
+            return create_response(400, {'error': 'importType must be "file" or "link"'})
+        
+        # Prepare imported tab
+        imported_tab = importer.prepare_imported_tab(dashboard_data, user_id)
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {'error': 'User not found'})
+        
+        # Ensure tabs array exists
+        if 'tabs' not in dashboard_config:
+            dashboard_config['tabs'] = []
+        
+        # Add imported tab
+        dashboard_config['tabs'].append(imported_tab)
+        
+        # Add new tab to the end of tabOrder
+        if 'tabOrder' not in dashboard_config:
+            dashboard_config['tabOrder'] = []
+        dashboard_config['tabOrder'].append(imported_tab['id'])
+        
+        dashboard_config['last_updated'] = datetime.utcnow().isoformat()
+        
+        # Save to database
+        if not save_user_dashboard(user_id, dashboard_config):
+            return create_response(500, {'error': 'Failed to save imported dashboard'})
+        
+        logger.info(f"✅ Successfully imported dashboard for user {user_id}: {imported_tab['name']}")
+        
+        return create_response(200, {
+            'success': True,
+            'tab': imported_tab,
+            'message': 'Dashboard imported successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error importing dashboard: {str(e)}", exc_info=True)
+        return create_response(500, {
+            'success': False,
+            'error': f'Failed to import dashboard: {str(e)}'
+        })

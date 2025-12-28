@@ -143,6 +143,9 @@ module "api_gateway" {
     dashboard_share = {
       path_part = "dashboard-share"
     }
+    dashboard_import = {
+      path_part = "dashboard-import"
+    }
     alerts = {
       path_part = "alerts"
     }
@@ -355,6 +358,15 @@ module "api_gateway" {
     # Dashboard Share method
     dashboard_share_post = {
       resource_key            = "dashboard_share"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    dashboard_import_post = {
+      resource_key            = "dashboard_import"
       http_method             = "POST"
       integration_type        = "AWS_PROXY"
       integration_http_method = "POST"
@@ -632,6 +644,11 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "dashboard-share"
     }
+    dashboard_import_post = {
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "dashboard-import"
+    }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       http_method   = "GET"
@@ -758,7 +775,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "71" # Updated for filesystem endpoint
+  deployment_trigger = "72" # Updated for dashboard import endpoint
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

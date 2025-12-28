@@ -610,6 +610,30 @@ const UnifiedDashboardPage: React.FC = () => {
     setNewTabDialogOpen(false);
   };
 
+  const handleImportTab = async (file: File | null, shareLink: string | null) => {
+    try {
+      // TODO: Implement import functionality
+      // This will call the backend API to import the dashboard
+      if (file) {
+        // Handle file upload
+        console.log('Importing dashboard from file:', file.name);
+        // await dashboardAPI.importDashboardFromFile(file, user.id);
+      } else if (shareLink) {
+        // Handle share link
+        console.log('Importing dashboard from link:', shareLink);
+        // await dashboardAPI.importDashboardFromLink(shareLink, user.id);
+      }
+      
+      // After import, reload the dashboard data
+      // await reloadFromDatabase();
+      
+      // For now, just show a message
+      alert('Import functionality will be implemented with backend API');
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to import dashboard');
+    }
+  };
+
   const handleCreateGroup = () => {
     setNewGroupDialogOpen(true);
   };
@@ -2350,6 +2374,7 @@ const UnifiedDashboardPage: React.FC = () => {
           open={newTabDialogOpen}
           onClose={() => setNewTabDialogOpen(false)}
           onCreateTab={handleCreateNewTab}
+          onImportTab={handleImportTab}
           tabGroups={tabGroups}
         />
 
