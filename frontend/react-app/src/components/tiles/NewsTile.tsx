@@ -111,6 +111,7 @@ interface NewsTileProps {
 const NewsTile: React.FC<NewsTileProps> = ({
   id,
   size,
+  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -788,6 +789,24 @@ const NewsTile: React.FC<NewsTileProps> = ({
       };
     }
   }, [autoRefresh, performSearch, isDragging, isResizing]);
+
+  // Preview mode: Always run fresh query when opened in preview
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      const hasSearchCriteria = 
+        (currentSearchParams.keywords && currentSearchParams.keywords.length > 0) ||
+        (currentSearchParams.sources && currentSearchParams.sources.length > 0) ||
+        (currentSearchParams.categories && currentSearchParams.categories.length > 0) ||
+        (currentSearchParams.countries && currentSearchParams.countries.length > 0);
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 NewsTile: Preview mode - running fresh query');
+        setHasPerformedInitialSearch(false); // Reset to allow fresh search
+        performSearch();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
 
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {

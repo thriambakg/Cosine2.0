@@ -18,6 +18,7 @@ import {
   AccessTime as ClockIcon,
   Dashboard as ContextIcon,
   Chat as ChatIcon,
+  ViewColumn as DualScreenIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -25,6 +26,7 @@ import { toggleSidebar } from '../../store/slices/navigationSlice';
 import { useAuth } from '../../contexts/AuthContext';
 import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
+import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 
 export default function AppHeader() {
   const theme = useTheme();
@@ -34,6 +36,7 @@ export default function AppHeader() {
   const { user, logout } = useAuth();
   const { isVisible: isContextVisible, setIsVisible: setContextVisible } = useContextWindow();
   const { isVisible: isGlobalChatVisible, toggle: toggleGlobalChat } = useGlobalChat();
+  const { isDualScreenMode, toggleDualScreenMode } = useDualScreenMode();
   
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [isClockVisible, setIsClockVisible] = useState<boolean>(() => {
@@ -284,6 +287,30 @@ export default function AppHeader() {
               }}
             >
               <ClockIcon />
+            </IconButton>
+            
+            <IconButton
+              color="inherit"
+              onClick={toggleDualScreenMode}
+              sx={{
+                color: isDualScreenMode ? '#8b5cf6' : '#8b8b8b',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                width: 44,
+                height: 44,
+                borderRadius: '8px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: isDualScreenMode ? '#a78bfa' : '#ffffff',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                },
+              }}
+              title={isDualScreenMode ? 'Exit Dual Screen Mode' : 'Enter Dual Screen Mode'}
+            >
+              <DualScreenIcon />
             </IconButton>
             
             <IconButton 

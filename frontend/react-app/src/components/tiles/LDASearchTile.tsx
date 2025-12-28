@@ -122,6 +122,7 @@ interface LDASearchTileProps {
 const LDASearchTile: React.FC<LDASearchTileProps> = ({
   id,
   size,
+  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -984,6 +985,39 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     }
   }, [paginationState, allResults.length, isRestoringPagination]);
 
+  // Preview mode: Always run fresh query when opened in preview
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      const hasSearchCriteria = 
+        (currentSearchParams.general_text_search && currentSearchParams.general_text_search.length > 0) ||
+        (currentSearchParams.general_text_search_fields && (
+          (currentSearchParams.general_text_search_fields.registrant && Array.isArray(currentSearchParams.general_text_search_fields.registrant) && currentSearchParams.general_text_search_fields.registrant.length > 0) ||
+          (currentSearchParams.general_text_search_fields.client && Array.isArray(currentSearchParams.general_text_search_fields.client) && currentSearchParams.general_text_search_fields.client.length > 0) ||
+          (currentSearchParams.general_text_search_fields.lobbyist && Array.isArray(currentSearchParams.general_text_search_fields.lobbyist) && currentSearchParams.general_text_search_fields.lobbyist.length > 0) ||
+          (currentSearchParams.general_text_search_fields.pac && Array.isArray(currentSearchParams.general_text_search_fields.pac) && currentSearchParams.general_text_search_fields.pac.length > 0) ||
+          (currentSearchParams.general_text_search_fields.foreign && Array.isArray(currentSearchParams.general_text_search_fields.foreign) && currentSearchParams.general_text_search_fields.foreign.length > 0)
+        )) ||
+        (currentSearchParams.registrant_name && currentSearchParams.registrant_name.length > 0) ||
+        (currentSearchParams.client_name && currentSearchParams.client_name.length > 0) ||
+        (currentSearchParams.lobbyist_name && currentSearchParams.lobbyist_name.length > 0) ||
+        (currentSearchParams.foreign_entity_name && currentSearchParams.foreign_entity_name.length > 0) ||
+        (currentSearchParams.general_issue_code && currentSearchParams.general_issue_code.length > 0) ||
+        (currentSearchParams.government_entity && currentSearchParams.government_entity.length > 0) ||
+        (currentSearchParams.filing_period && currentSearchParams.filing_period.length > 0) ||
+        currentSearchParams.date_from ||
+        currentSearchParams.date_to ||
+        currentSearchParams.amount_min !== undefined ||
+        currentSearchParams.amount_max !== undefined;
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 LDASearchTile: Preview mode - running fresh query');
+        setHasPerformedInitialSearch(false); // Reset to allow fresh search
+        performSearch();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
+
   // Initial load: Fetch fresh results if none exist and we have search criteria
   // Results are NOT saved - always fetch fresh using searchParams
   useEffect(() => {
@@ -1169,10 +1203,21 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     onSettingsChange(id, { filterSettings });
   }, [selectedFilters, id, onSettingsChange]);
 
-  // Persist searchParams when they change
+  // Note: searchParams are persisted when user clicks "Search" button or when performSearch/handleLoadMore is called
+  // This matches the NewsTile pattern - no auto-persistence on every change
+
+  // Persist displayOptions when they change (maxResults, compactView, showResultsTable, etc.)
+  // Use ref to track previous value and only persist when it actually changes (not from prop updates)
+  const prevDisplayOptionsRef = useRef(localDisplayOptions);
   useEffect(() => {
-    onSettingsChange(id, { searchParams: currentSearchParams });
-  }, [currentSearchParams, id, onSettingsChange]);
+    // Only persist if displayOptions actually changed (deep comparison)
+    const prev = prevDisplayOptionsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(localDisplayOptions);
+    if (hasChanged) {
+      prevDisplayOptionsRef.current = localDisplayOptions;
+      onSettingsChange(id, { displayOptions: localDisplayOptions });
+    }
+  }, [localDisplayOptions, id, onSettingsChange]);
 
   // Sync visible columns with display options
   useEffect(() => {

@@ -32,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
 // import { useWebSocket } from '../../contexts/WebSocketContext';
 import { ContextItem } from '../tiles/common/contextManager';
@@ -318,6 +319,7 @@ const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabl
 const GlobalChatSidebar: React.FC = () => {
   const { isVisible, setIsVisible, activeSessionId, setActiveSessionId, close } = useGlobalChat();
   const { user } = useAuth();
+  const { isDualScreenMode, sidebarWidth: dualScreenSidebarWidth, setSidebarWidth: setDualScreenSidebarWidth } = useDualScreenMode();
   
   // Get updateSessionVariables and addPersistedMessage from useChatPersistence
   const { 
@@ -430,7 +432,19 @@ const GlobalChatSidebar: React.FC = () => {
   const userNearBottomRef = useRef<boolean>(true);
   const editContainerRef = useRef<HTMLDivElement>(null);
   // Note: Message deduplication is now handled by unified messaging system
-  const [sidebarWidth, setSidebarWidth] = useState(400);
+  // Use dual screen mode width if enabled, otherwise use local state
+  const [localSidebarWidth, setLocalSidebarWidth] = useState(400);
+  const sidebarWidth = isDualScreenMode ? dualScreenSidebarWidth : localSidebarWidth;
+  
+  // Create a stable setter function that always uses the correct setter based on mode
+  const setSidebarWidth = useCallback((width: number) => {
+    if (isDualScreenMode) {
+      setDualScreenSidebarWidth(width);
+    } else {
+      setLocalSidebarWidth(width);
+    }
+  }, [isDualScreenMode, setDualScreenSidebarWidth]);
+  
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -1702,9 +1716,9 @@ const GlobalChatSidebar: React.FC = () => {
       const windowWidth = window.innerWidth;
       const newWidth = windowWidth - e.clientX;
       
-      // Calculate percentage limits
-      const minWidth = windowWidth * 0.1; // 10% of screen width
-      const maxWidth = windowWidth * 0.75; // 75% of screen width
+      // Calculate percentage limits - different for dual screen mode
+      const minWidth = isDualScreenMode ? 300 : windowWidth * 0.1; // 300px min in dual screen, 10% otherwise
+      const maxWidth = isDualScreenMode ? windowWidth * 0.7 : windowWidth * 0.75; // 70% max in dual screen, 75% otherwise
       
       // Clamp the width within limits
       const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
@@ -1718,7 +1732,7 @@ const GlobalChatSidebar: React.FC = () => {
         previewRef.current.style.right = `${clampedWidth}px`;
       }
     });
-  }, [isResizing]);
+  }, [isResizing, isDualScreenMode]);
 
   const handleMouseUp = useCallback(() => {
     // Cancel any pending animation frame
@@ -1738,7 +1752,7 @@ const GlobalChatSidebar: React.FC = () => {
     }
     
     setIsResizing(false);
-  }, []);
+  }, [setSidebarWidth]);
 
   // Add global mouse event listeners for resizing
   useEffect(() => {
@@ -1783,7 +1797,16 @@ const GlobalChatSidebar: React.FC = () => {
     return () => window.removeEventListener('resize', measure);
   }, []);
 
-  if (!isVisible) {
+  // In dual screen mode, ensure chat is visible
+  useEffect(() => {
+    if (isDualScreenMode && !isVisible) {
+      setIsVisible(true);
+    }
+  }, [isDualScreenMode, isVisible, setIsVisible]);
+
+  // In dual screen mode, always render the sidebar (it's part of the layout)
+  // In normal mode, only render when visible
+  if (!isDualScreenMode && !isVisible) {
     return null;
   }
 
@@ -1811,7 +1834,7 @@ const GlobalChatSidebar: React.FC = () => {
       ref={sidebarRef}
       sx={{
         position: 'fixed',
-        right: 0,
+        right: isDualScreenMode ? 0 : 0,
         top: 64,
         bottom: 0,
         width: sidebarWidth,
@@ -1822,32 +1845,36 @@ const GlobalChatSidebar: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         boxShadow: '-4px 0 16px rgba(0, 0, 0, 0.3)',
-        animation: 'slideInFromRight 0.3s ease-out',
+        animation: isDualScreenMode ? 'none' : 'slideInFromRight 0.3s ease-out',
         '@keyframes slideInFromRight': {
           from: { transform: 'translateX(100%)' },
           to: { transform: 'translateX(0)' },
         },
+        // In dual screen mode, ensure sidebar is always visible when chat is open
+        transform: isDualScreenMode && isVisible ? 'translateX(0)' : undefined,
       }}
     >
-      {/* Resize Handle */}
-      <Box
-        onMouseDown={handleMouseDown}
-        sx={{
-          position: 'absolute',
-          left: -4,
-          top: 0,
-          bottom: 0,
-          width: 8,
-          cursor: 'col-resize',
-          zIndex: 1201,
-          '&:hover': {
-            backgroundColor: 'rgba(59, 130, 246, 0.3)',
-          },
-          '&:active': {
-            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-          },
-        }}
-      />
+      {/* Resize Handle - always visible in dual screen mode */}
+      {(isDualScreenMode || isVisible) && (
+        <Box
+          onMouseDown={handleMouseDown}
+          sx={{
+            position: 'absolute',
+            left: -4,
+            top: 0,
+            bottom: 0,
+            width: 8,
+            cursor: 'col-resize',
+            zIndex: 1201,
+            '&:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.3)',
+            },
+            '&:active': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+            },
+          }}
+        />
+      )}
       {/* Header */}
       <Box
         ref={headerRef}

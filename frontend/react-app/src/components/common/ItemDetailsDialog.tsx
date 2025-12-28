@@ -1,9 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   Button,
   Box,
   Typography,
@@ -14,6 +10,8 @@ import {
   Grid,
   Link,
   Tooltip,
+  Paper,
+  Portal,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -31,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDualScreenMode } from '@/contexts/DualScreenModeContext';
 import FileBrowserDialog from './FileBrowserDialog';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
@@ -97,6 +96,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [fileBrowserOpen, setFileBrowserOpen] = useState<boolean>(false);
   
   const { user } = useAuth();
+  const { isDualScreenMode, sidebarWidth } = useDualScreenMode();
 
   // Utility functions
   const formatDate = (dateString?: string): string => {
@@ -3314,22 +3314,70 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     );
   }
 
+  // Handle Escape key to close
+  useEffect(() => {
+    if (!open) return;
+    
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const dialogMaxWidth = getDialogMaxWidth();
+  const maxWidthValue = isDualScreenMode 
+    ? `calc(100% - ${sidebarWidth}px - 32px)`
+    : 'calc(100% - 32px)';
+
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth={getDialogMaxWidth()}
-      fullWidth
-      PaperProps={{
-        sx: {
-          backgroundColor: 'rgba(15, 23, 42, 0.98)',
-          border: '2px solid #374151',
-          color: '#ffffff',
-          maxHeight: '90vh',
-        },
-      }}
-    >
-      <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151', pb: 2 }}>
+    <Portal>
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 64, // Account for app header (64px)
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 1100,
+          pointerEvents: 'none', // CRITICAL: Allow clicks through the container
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'flex-start',
+          padding: '16px',
+          paddingTop: '16px',
+        }}
+      >
+        <Paper
+          elevation={8}
+          sx={{
+            backgroundColor: 'rgba(15, 23, 42, 0.98)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+            maxHeight: 'calc(100vh - 64px - 32px)', // Account for header (64px) + padding (32px)
+            maxWidth: maxWidthValue,
+            width: dialogMaxWidth === 'md' ? '600px' : dialogMaxWidth === 'lg' ? '900px' : dialogMaxWidth === 'xl' ? '1200px' : 'auto',
+            // Position dialog on the left side, leaving space for chat on the right
+            position: 'relative',
+            left: 0,
+            right: isDualScreenMode ? `${sidebarWidth + 16}px` : 'auto',
+            margin: 0,
+            marginTop: 0,
+            transition: 'right 0.3s ease-in-out, max-width 0.3s ease-in-out',
+            pointerEvents: 'auto', // Only the paper itself is interactive
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <Box sx={{ color: '#ffffff', borderBottom: '1px solid #374151', pb: 2, px: 3, pt: 2 }}>
         {/* Title content will be rendered per item type */}
         {itemType === 'govt_contract' && (() => {
           const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
@@ -3562,27 +3610,29 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             <CloseIcon fontSize="small" />
           </IconButton>
         </Box>
-      </DialogTitle>
-      <DialogContent
-        sx={{
-          mt: 2,
-          p: 2.5,
-          '&::-webkit-scrollbar': {
-            width: '8px',
-          },
-          '&::-webkit-scrollbar-track': {
-            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-            borderRadius: '4px',
-          },
-          '&::-webkit-scrollbar-thumb': {
-            backgroundColor: '#3b82f6',
-            borderRadius: '4px',
-          },
-          '&::-webkit-scrollbar-thumb:hover': {
-            backgroundColor: '#2563eb',
-          },
-        }}
-      >
+          </Box>
+          <Box
+            sx={{
+              mt: 2,
+              p: 2.5,
+              flex: 1,
+              overflow: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: '#3b82f6',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: '#2563eb',
+              },
+            }}
+          >
         {/* Enrichment status messages (for Government Contracts) */}
         {itemType === 'govt_contract' && (
           <>
@@ -3607,21 +3657,23 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           </>
         )}
 
-        {renderContent()}
-      </DialogContent>
-      <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
-        <Button
-          onClick={onClose}
-          sx={{
-            color: '#94a3b8',
-            '&:hover': {
-              backgroundColor: 'rgba(71, 85, 105, 0.1)',
-            },
-          }}
-        >
-          Close
-        </Button>
-      </DialogActions>
+            {renderContent()}
+          </Box>
+          <Box sx={{ borderTop: '1px solid #374151', p: 2, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              onClick={onClose}
+              sx={{
+                color: '#94a3b8',
+                '&:hover': {
+                  backgroundColor: 'rgba(71, 85, 105, 0.1)',
+                },
+              }}
+            >
+              Close
+            </Button>
+          </Box>
+        </Paper>
+      </Box>
       
       {/* File Browser Dialog for saving items to files */}
       <FileBrowserDialog
@@ -3631,7 +3683,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         allowCreateFolder={true}
         title="Save to Files"
       />
-    </Dialog>
+    </Portal>
   );
 };
 

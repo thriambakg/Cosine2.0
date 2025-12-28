@@ -136,6 +136,7 @@ interface CongressBillsSearchTileProps {
 const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   id,
   size,
+  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -830,6 +831,33 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
+  // Preview mode: Always run fresh query when opened in preview
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      const hasSearchCriteria = 
+        (currentSearchParams.bill_title && currentSearchParams.bill_title.length > 0) ||
+        (currentSearchParams.bill_type && currentSearchParams.bill_type.length > 0) ||
+        (currentSearchParams.sponsor_name && currentSearchParams.sponsor_name.length > 0) ||
+        (currentSearchParams.policy_area && currentSearchParams.policy_area.length > 0) ||
+        (currentSearchParams.sponsor_party && currentSearchParams.sponsor_party.length > 0) ||
+        (currentSearchParams.sponsor_state && currentSearchParams.sponsor_state.length > 0) ||
+        (currentSearchParams.congress && currentSearchParams.congress.length > 0) ||
+        currentSearchParams.introduced_date_from ||
+        currentSearchParams.introduced_date_to ||
+        currentSearchParams.latest_action_date_from ||
+        currentSearchParams.latest_action_date_to ||
+        currentSearchParams.bipartisan !== undefined ||
+        currentSearchParams.bill_number !== undefined;
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 CongressBillsSearchTile: Preview mode - running fresh query');
+        setHasPerformedInitialSearch(false); // Reset to allow fresh search
+        performSearch();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
+
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {
     if (!hasPerformedInitialSearch && filteredResults.length === 0 && !isLoading && !isRestoringPagination) {
@@ -1021,6 +1049,37 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       setVisibleColumns(cols);
     }
   }, [localDisplayOptions]);
+
+  // Persist filterSettings when selectedFilters change
+  useEffect(() => {
+    const filterSettings = {
+      billTypes: Array.from(selectedFilters.billTypes),
+      sponsorParties: Array.from(selectedFilters.sponsorParties),
+      sponsorStates: Array.from(selectedFilters.sponsorStates),
+      policyAreas: Array.from(selectedFilters.policyAreas),
+      congresses: Array.from(selectedFilters.congresses),
+      bipartisan: Array.from(selectedFilters.bipartisan),
+    };
+    onSettingsChange(id, { filterSettings });
+  }, [selectedFilters, id, onSettingsChange]);
+
+  // Persist searchParams when they change
+  useEffect(() => {
+    onSettingsChange(id, { searchParams: currentSearchParams });
+  }, [currentSearchParams, id, onSettingsChange]);
+
+  // Persist displayOptions when they change (maxResults, compactView, showResultsTable, etc.)
+  // Use ref to track previous value and only persist when it actually changes (not from prop updates)
+  const prevDisplayOptionsRef = useRef(localDisplayOptions);
+  useEffect(() => {
+    // Only persist if displayOptions actually changed (deep comparison)
+    const prev = prevDisplayOptionsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(localDisplayOptions);
+    if (hasChanged) {
+      prevDisplayOptionsRef.current = localDisplayOptions;
+      onSettingsChange(id, { displayOptions: localDisplayOptions });
+    }
+  }, [localDisplayOptions, id, onSettingsChange]);
   
   // Generate available filters from all results
   const availableFilters = useMemo(() => {

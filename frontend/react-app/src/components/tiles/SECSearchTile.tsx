@@ -173,6 +173,7 @@ interface SECSearchTileProps {
 const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   id,
   size,
+  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -410,6 +411,19 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       
       return newColumns;
     });
+  }, [localDisplayOptions, id, onSettingsChange]);
+
+  // Persist displayOptions when they change (maxResults, compactView, showResultsTable, etc.)
+  // Use ref to track previous value and only persist when it actually changes (not from prop updates)
+  const prevDisplayOptionsRef = useRef(localDisplayOptions);
+  useEffect(() => {
+    // Only persist if displayOptions actually changed (deep comparison)
+    const prev = prevDisplayOptionsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(localDisplayOptions);
+    if (hasChanged) {
+      prevDisplayOptionsRef.current = localDisplayOptions;
+      onSettingsChange(id, { displayOptions: localDisplayOptions });
+    }
   }, [localDisplayOptions, id, onSettingsChange]);
 
   // Column width state for dynamic sizing
@@ -859,6 +873,30 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       return allResults;
     }
   }, [allResults, selectedFilters, filterResults]);
+
+  // Preview mode: Always run fresh query when opened in preview
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      // Only auto-search if we have meaningful search params (not just defaults)
+      // Check for actual values, not just empty arrays or default dates
+      const hasSearchCriteria = 
+        (currentSearchParams.cik && (Array.isArray(currentSearchParams.cik) ? currentSearchParams.cik.length > 0 : currentSearchParams.cik.trim() !== '')) ||
+        (Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName.length > 0 && currentSearchParams.entityName.some(name => name && name.trim() !== '')) ||
+        (!Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName && currentSearchParams.entityName.trim() !== '') ||
+        (Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords.length > 0 && currentSearchParams.keywords.some(kw => kw && kw.trim() !== '')) ||
+        (!Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords && currentSearchParams.keywords.trim() !== '') ||
+        (currentSearchParams.formTypes && currentSearchParams.formTypes.length > 0) ||
+        (Array.isArray(currentSearchParams.located) && currentSearchParams.located.length > 0 && currentSearchParams.located.some(loc => loc && loc.trim() !== '')) ||
+        (!Array.isArray(currentSearchParams.located) && currentSearchParams.located && currentSearchParams.located.trim() !== '');
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 SECSearchTile: Preview mode - running fresh query');
+        setHasPerformedInitialSearch(false); // Reset to allow fresh search
+        performSearch();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
 
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {

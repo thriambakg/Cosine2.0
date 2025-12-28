@@ -116,6 +116,7 @@ interface PoliticianTradesSearchTileProps {
 const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   id,
   size,
+  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -617,6 +618,25 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     loadSecuritySuggestions();
   }, [loadPoliticianSuggestions, loadSecuritySuggestions]);
 
+  // Preview mode: Always run fresh query when opened in preview
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      const hasSearchCriteria = 
+        (currentSearchParams.politicianName && currentSearchParams.politicianName.length > 0) ||
+        (currentSearchParams.security && currentSearchParams.security.length > 0) ||
+        (currentSearchParams.party && currentSearchParams.party.length > 0) ||
+        (currentSearchParams.position && currentSearchParams.position.length > 0) ||
+        (currentSearchParams.transactionType && currentSearchParams.transactionType.length > 0);
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 PoliticianTradesSearchTile: Preview mode - running fresh query');
+        setHasPerformedInitialSearch(false); // Reset to allow fresh search
+        performSearch();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
+
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {
     if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
@@ -728,6 +748,34 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     setLocalDisplayOptions(newOptions);
     onSettingsChange(id, { displayOptions: newOptions });
   };
+
+  // Sync localDisplayOptions with displayOptions prop when it changes
+  useEffect(() => {
+    if (displayOptions) {
+      setLocalDisplayOptions(prev => ({
+        ...prev,
+        ...displayOptions
+      }));
+    }
+  }, [displayOptions]);
+
+  // Persist displayOptions when localDisplayOptions changes (maxResults, compactView, showResultsTable, etc.)
+  // Use ref to track previous value and only persist when it actually changes (not from prop updates)
+  const prevDisplayOptionsRef = useRef(localDisplayOptions);
+  useEffect(() => {
+    // Only persist if displayOptions actually changed (deep comparison)
+    const prev = prevDisplayOptionsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(localDisplayOptions);
+    if (hasChanged) {
+      prevDisplayOptionsRef.current = localDisplayOptions;
+      onSettingsChange(id, { displayOptions: localDisplayOptions });
+    }
+  }, [localDisplayOptions, id, onSettingsChange]);
+
+  // Persist searchParams when they change
+  useEffect(() => {
+    onSettingsChange(id, { searchParams: currentSearchParams });
+  }, [currentSearchParams, id, onSettingsChange]);
 
   const handleRefresh = () => {
     performSearch();

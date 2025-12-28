@@ -133,3 +133,4 @@ def decrypt_cosine_file(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
     """
     return decrypt_context_data(user_id, encrypted_data)
 
+

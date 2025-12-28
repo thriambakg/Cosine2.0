@@ -125,6 +125,7 @@ interface GovtContractsSearchTileProps {
 const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   id,
   size,
+  dashboardContext,
   onRemove,
   onUpdate,
   onSettingsChange,
@@ -608,7 +609,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
         setLastEvaluatedKeys(newLastEvaluatedKeys);
         
-        // Persist pagination state
+        // Persist searchParams and pagination state (matching NewsTile pattern)
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
@@ -635,7 +636,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         setHasMore(false);
         setHasPerformedInitialSearch(true);
         setLastEvaluatedKeys([]);
-        // Clear pagination state
+        // Clear pagination state (matching NewsTile pattern)
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
@@ -652,7 +653,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       setHasPerformedInitialSearch(true);
       setHasMore(false);
       setLastEvaluatedKeys([]);
-      // Clear pagination state on error
+      // Clear pagination state on error (matching NewsTile pattern)
       onSettingsChange(id, {
         searchParams: currentSearchParams,
         paginationState: {
@@ -929,6 +930,29 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
+  // Preview mode: Always run fresh query when opened in preview
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      const hasSearchCriteria = 
+        (currentSearchParams.awarding_agency_name && currentSearchParams.awarding_agency_name.length > 0) ||
+        (currentSearchParams.funding_agency_name && currentSearchParams.funding_agency_name.length > 0) ||
+        (currentSearchParams.recipient_name && currentSearchParams.recipient_name.length > 0) ||
+        (currentSearchParams.award_type && currentSearchParams.award_type.length > 0) ||
+        (currentSearchParams.naics_code && currentSearchParams.naics_code.length > 0) ||
+        (currentSearchParams.psc_code && currentSearchParams.psc_code.length > 0) ||
+        (currentSearchParams.cfda_number && currentSearchParams.cfda_number.length > 0) ||
+        currentSearchParams.date_from ||
+        currentSearchParams.date_to;
+      
+      if (hasSearchCriteria) {
+        console.log('🔄 GovtContractsSearchTile: Preview mode - running fresh query');
+        setHasPerformedInitialSearch(false); // Reset to allow fresh search
+        performSearch();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
+
   // Initial load: Fetch fresh results if none exist
   useEffect(() => {
     if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
@@ -1108,6 +1132,17 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   }, [applyFilters]);
 
   // Persist filterSettings when selectedFilters change
+  // Use ref to track previous value and only persist when it actually changes
+  const prevFilterSettingsRef = useRef({
+    awardTypes: Array.from(selectedFilters.awardTypes),
+    agencies: Array.from(selectedFilters.agencies),
+    recipients: Array.from(selectedFilters.recipients),
+    states: Array.from(selectedFilters.states),
+    countries: Array.from(selectedFilters.countries),
+    naics: Array.from(selectedFilters.naics),
+    psc: Array.from(selectedFilters.psc),
+    cfda: Array.from(selectedFilters.cfda),
+  });
   useEffect(() => {
     const filterSettings = {
       awardTypes: Array.from(selectedFilters.awardTypes),
@@ -1119,13 +1154,30 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       psc: Array.from(selectedFilters.psc),
       cfda: Array.from(selectedFilters.cfda),
     };
-    onSettingsChange(id, { filterSettings });
+    // Only persist if filterSettings actually changed (deep comparison)
+    const prev = prevFilterSettingsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(filterSettings);
+    if (hasChanged) {
+      prevFilterSettingsRef.current = filterSettings;
+      onSettingsChange(id, { filterSettings });
+    }
   }, [selectedFilters, id, onSettingsChange]);
 
-  // Persist searchParams when they change
+  // Note: searchParams are persisted when user clicks "Search" button or when performSearch/handleLoadMore is called
+  // This matches the NewsTile pattern - no auto-persistence on every change
+
+  // Persist displayOptions when they change (maxResults, compactView, showResultsTable, etc.)
+  // Use ref to track previous value and only persist when it actually changes (not from prop updates)
+  const prevDisplayOptionsRef = useRef(localDisplayOptions);
   useEffect(() => {
-    onSettingsChange(id, { searchParams: currentSearchParams });
-  }, [currentSearchParams, id, onSettingsChange]);
+    // Only persist if displayOptions actually changed (deep comparison)
+    const prev = prevDisplayOptionsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(localDisplayOptions);
+    if (hasChanged) {
+      prevDisplayOptionsRef.current = localDisplayOptions;
+      onSettingsChange(id, { displayOptions: localDisplayOptions });
+    }
+  }, [localDisplayOptions, id, onSettingsChange]);
 
   // Sync visible columns with display options
   useEffect(() => {
@@ -1808,7 +1860,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       {/* Search Dialog */}
       <Dialog
         open={searchDialogOpen}
-        onClose={() => setSearchDialogOpen(false)}
+        onClose={() => {
+          // Don't persist on close - only persist when user clicks "Search" (matching NewsTile pattern)
+          setSearchDialogOpen(false);
+        }}
         maxWidth="md"
         fullWidth
         PaperProps={{
@@ -2095,6 +2150,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           </Button>
           <Button
             onClick={() => {
+              // Persist search params before performing search (matching NewsTile pattern)
               onSettingsChange(id, { searchParams: currentSearchParams });
               performSearch();
               setSearchDialogOpen(false);
@@ -2114,7 +2170,21 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       {/* Filter Dialog */}
       <Dialog
         open={filterDialogOpen}
-        onClose={() => setFilterDialogOpen(false)}
+        onClose={() => {
+          // Persist filter settings when dialog is closed
+          const filterSettings = {
+            awardTypes: Array.from(selectedFilters.awardTypes),
+            agencies: Array.from(selectedFilters.agencies),
+            recipients: Array.from(selectedFilters.recipients),
+            states: Array.from(selectedFilters.states),
+            countries: Array.from(selectedFilters.countries),
+            naics: Array.from(selectedFilters.naics),
+            psc: Array.from(selectedFilters.psc),
+            cfda: Array.from(selectedFilters.cfda),
+          };
+          onSettingsChange(id, { filterSettings });
+          setFilterDialogOpen(false);
+        }}
         maxWidth="md"
         fullWidth
         PaperProps={{
