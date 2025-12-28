@@ -440,6 +440,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
         });
         
         // Update parent component - persist results in session only (not database)
+        // Set flag to prevent articles prop sync from overriding our fresh results
+        articlesUpdateRef.current = true;
         onUpdate(id, {
           articles: processedResults,
           lastUpdated: Date.now(),
@@ -636,7 +638,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
 
   // Sync props to state when they change (for state persistence)
   // Only sync articles - filtering will be handled by applyFilters useEffect
+  // Use ref to prevent syncing when we just updated articles ourselves
+  const articlesUpdateRef = useRef<boolean>(false);
   useEffect(() => {
+    // Skip sync if we just updated articles ourselves (to avoid overriding fresh search results)
+    if (articlesUpdateRef.current) {
+      articlesUpdateRef.current = false;
+      return;
+    }
+    
     // Only update if articles prop actually changed
     if (articles) {
       if (articles.length > 0) {
@@ -661,10 +671,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
         });
         setHasPerformedInitialSearch(true);
       } else if (articles.length === 0) {
-        // Clear results if empty array is passed
+        // Only clear if we don't have any current results (to avoid clearing fresh search results)
         setAllResults(prev => {
           if (prev.length === 0) return prev; // Already empty
-          return [];
+          // Don't clear if we have results - might be a stale prop update
+          return prev.length > 0 ? prev : [];
         });
       }
     }
@@ -691,6 +702,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
     if (pendingUpdateRef.current) {
       const { articles, paginationState: pendingPaginationState } = pendingUpdateRef.current;
       pendingUpdateRef.current = null;
+      // Set flag to prevent articles prop sync from overriding our fresh results
+      articlesUpdateRef.current = true;
       onUpdate(id, {
         articles,
         paginationState: pendingPaginationState || {

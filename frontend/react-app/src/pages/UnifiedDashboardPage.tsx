@@ -410,7 +410,28 @@ const UnifiedDashboardPage: React.FC = () => {
   // Persist zoom level to sessionStorage whenever it changes (per tab)
   useEffect(() => {
     if (activeTabId && typeof window !== 'undefined') {
-      sessionStorage.setItem(`dashboard-zoom-level-${activeTabId}`, zoomLevel.toString());
+      try {
+        sessionStorage.setItem(`dashboard-zoom-level-${activeTabId}`, zoomLevel.toString());
+      } catch (error: any) {
+        // If quota exceeded, try cleaning up old zoom levels
+        if (error.name === 'QuotaExceededError') {
+          try {
+            // Remove zoom levels for inactive tabs
+            const keysToRemove: string[] = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+              const key = sessionStorage.key(i);
+              if (key && key.startsWith('dashboard-zoom-level-') && key !== `dashboard-zoom-level-${activeTabId}`) {
+                keysToRemove.push(key);
+              }
+            }
+            keysToRemove.forEach(key => sessionStorage.removeItem(key));
+            // Retry saving current zoom level
+            sessionStorage.setItem(`dashboard-zoom-level-${activeTabId}`, zoomLevel.toString());
+          } catch (retryError) {
+            console.warn('Failed to save zoom level to sessionStorage:', retryError);
+          }
+        }
+      }
     }
   }, [zoomLevel, activeTabId]);
 
@@ -1579,6 +1600,29 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
+  // Helper function to clean up old tile results from sessionStorage
+  const cleanupOldTileResults = useCallback((keepTileIds: Set<string>) => {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && key.startsWith('tile_results_')) {
+          const tileId = key.replace('tile_results_', '');
+          if (!keepTileIds.has(tileId)) {
+            keysToRemove.push(key);
+          }
+        }
+      }
+      // Remove old entries
+      keysToRemove.forEach(key => sessionStorage.removeItem(key));
+      if (keysToRemove.length > 0) {
+        console.log(`🧹 Cleaned up ${keysToRemove.length} old tile results from sessionStorage`);
+      }
+    } catch (error) {
+      console.warn('Failed to cleanup old tile results:', error);
+    }
+  }, []);
+
   const handleUpdateTile = (id: string, data: any) => {
     if (!activeTabId) {
       console.warn('No active tab ID found, cannot update tile');
@@ -1597,8 +1641,43 @@ const UnifiedDashboardPage: React.FC = () => {
         if (paginationState !== undefined) sessionData.paginationState = paginationState;
         if (lastUpdated !== undefined) sessionData.lastUpdated = lastUpdated;
         sessionStorage.setItem(`tile_results_${id}`, JSON.stringify(sessionData));
-      } catch (error) {
-        console.error('Failed to store results in sessionStorage:', error);
+      } catch (error: any) {
+        // Handle quota exceeded errors gracefully
+        if (error.name === 'QuotaExceededError') {
+          console.warn(`⚠️ SessionStorage quota exceeded for tile ${id}, cleaning up and saving minimal data...`);
+          try {
+            // Clean up old tile results first (keep only current tab's tiles)
+            const currentTiles = activeTab?.tiles || [];
+            const currentTileIds = new Set(currentTiles.map((t: any) => t.id));
+            cleanupOldTileResults(currentTileIds);
+            
+            // Try saving only pagination state and metadata, not full results
+            const minimalData: any = {};
+            if (paginationState !== undefined) minimalData.paginationState = paginationState;
+            if (lastUpdated !== undefined) minimalData.lastUpdated = lastUpdated;
+            // Don't save results at all if quota is exceeded - just metadata
+            minimalData.totalResults = results !== undefined && Array.isArray(results) ? results.length : 0;
+            minimalData.hasMore = results !== undefined && Array.isArray(results) && paginationState?.hasMore === true;
+            
+            sessionStorage.setItem(`tile_results_${id}`, JSON.stringify(minimalData));
+            console.log(`✅ Saved minimal data for tile ${id} (pagination only, no results)`);
+          } catch (retryError: any) {
+            // If still failing, try removing this specific tile's old data and retry
+            try {
+              sessionStorage.removeItem(`tile_results_${id}`);
+              const minimalData: any = {};
+              if (paginationState !== undefined) minimalData.paginationState = paginationState;
+              if (lastUpdated !== undefined) minimalData.lastUpdated = lastUpdated;
+              sessionStorage.setItem(`tile_results_${id}`, JSON.stringify(minimalData));
+              console.log(`✅ Saved minimal data for tile ${id} after cleanup`);
+            } catch (finalError) {
+              console.error('Failed to save even minimal data to sessionStorage after cleanup:', finalError);
+              // At this point, we just skip storing in sessionStorage - the tile will work without cached results
+            }
+          }
+        } else {
+          console.error('Failed to store results in sessionStorage:', error);
+        }
       }
     }
 

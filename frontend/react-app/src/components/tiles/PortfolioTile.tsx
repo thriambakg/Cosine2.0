@@ -357,6 +357,23 @@ const PortfolioTile = ({
     }
   }, [entries, timeframe, analyzePortfolio, apiError]);
 
+  // Trigger analysis when portfolioData is restored from import/load
+  // This must be after calculateRisk is defined
+  useEffect(() => {
+    if (portfolioData && portfolioData.entries !== undefined) {
+      const portfolioHasValidEntries = portfolioData.entries.some((e: any) => e.stock && e.shares > 0);
+      
+      // If portfolioData has valid entries but we haven't performed analysis yet, trigger it
+      if (portfolioHasValidEntries && !hasPerformedInitialAnalysis && !isLoading) {
+        setHasPerformedInitialAnalysis(true);
+        // Trigger analysis after a short delay to ensure state is updated
+        setTimeout(() => {
+          calculateRisk();
+        }, 100);
+      }
+    }
+  }, [portfolioData, isLoading, hasPerformedInitialAnalysis, calculateRisk]);
+
   // Run fresh analysis when opened in preview mode (like other tiles)
   // This must be after calculateRisk is defined
   useEffect(() => {
@@ -870,30 +887,64 @@ const PortfolioTile = ({
                 const currentSecurity = isSecurityDataLoaded && entry.stock
                   ? securitySuggestionsServiceV2.findBySymbol(entry.stock)
                   : null;
+                
+                // For freeSolo, use the string value if no security object is found
+                // This allows manually typed symbols (like ETFs) to display correctly
+                const autocompleteValue = currentSecurity ?? (entry.stock || null);
 
                 return (
                   <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
                     <Autocomplete
-                      value={currentSecurity ?? null}
+                      value={autocompleteValue}
                       onChange={(_, newValue) => handleStockChange(index, newValue)}
-                      onInputChange={(_, newInputValue) => {
+                      onInputChange={(_, newInputValue, reason) => {
                         handleStockInputChange(index, newInputValue);
-                        // If user types and no match, extract symbol from display text format if present
-                        if (newInputValue && !currentSecurity) {
+                        // Only update entry on user input, not when autocomplete selects or clears
+                        // This prevents auto-selection from overwriting manual typing
+                        if (reason === 'input' && newInputValue) {
                           // Extract symbol if it's in display format: "SYMBOL - Name (Cap)" or just "SYMBOL"
                           const symbolMatch = newInputValue.match(/^([A-Z.]+)(?:\s*-|$)/);
                           const symbol = symbolMatch ? symbolMatch[1].trim() : newInputValue.trim();
-                          updateEntry(index, 'stock', symbol.toUpperCase());
+                          // Only update if it's a valid symbol (not empty, not just whitespace)
+                          if (symbol && symbol.length > 0) {
+                            updateEntry(index, 'stock', symbol.toUpperCase());
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // On blur, ensure the current input value is saved (for freeSolo entries not in autocomplete)
+                        const inputValue = (e.target as HTMLInputElement).value;
+                        if (inputValue && !currentSecurity) {
+                          // Extract symbol if it's in display format or use as-is
+                          const symbolMatch = inputValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                          const symbol = symbolMatch ? symbolMatch[1].trim() : inputValue.trim();
+                          if (symbol && symbol.length > 0) {
+                            updateEntry(index, 'stock', symbol.toUpperCase());
+                          }
                         }
                       }}
                       options={securitySuggestions}
-                      getOptionLabel={(option) => typeof option === 'string' ? option : option.displayText}
-                      isOptionEqualToValue={(option, value) => {
-                        // Compare by symbol to handle selection
-                        if (typeof option === 'string' || typeof value === 'string') {
-                          return option === value;
+                      getOptionLabel={(option) => {
+                        if (typeof option === 'string') return option;
+                        return option.displayText || option.symbol || '';
+                      }}
+                      isOptionEqualToValue={(option: Security | string, value: Security | string | null) => {
+                        // Compare by symbol to handle selection, including string values for freeSolo
+                        if (!value) return false;
+                        
+                        if (typeof option === 'string' && typeof value === 'string') {
+                          return option.toUpperCase() === value.toUpperCase();
                         }
-                        return option.symbol === value.symbol;
+                        if (typeof option === 'string' && typeof value === 'object' && 'symbol' in value) {
+                          return option.toUpperCase() === (value.symbol?.toUpperCase() || '');
+                        }
+                        if (typeof value === 'string' && typeof option === 'object' && 'symbol' in option) {
+                          return value.toUpperCase() === (option.symbol?.toUpperCase() || '');
+                        }
+                        if (typeof option === 'object' && typeof value === 'object' && 'symbol' in option && 'symbol' in value) {
+                          return option.symbol === value.symbol;
+                        }
+                        return false;
                       }}
                       loading={!isSecurityDataLoaded}
                       renderInput={(params) => (
@@ -931,15 +982,28 @@ const PortfolioTile = ({
                         />
                       )}
                       renderOption={(props, option) => {
-                        const capColor = option.marketCap === 'high' ? '#10b981' : option.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
-                        const capLabel = option.marketCap === 'high' ? 'High Cap' : option.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
-                        const uniqueKey = `${option.symbol}-${option.marketCap}-${option.name}`;
+                        // Handle both Security objects and strings (for freeSolo)
+                        if (typeof option === 'string') {
+                          return (
+                            <Box component="li" {...props} key={option} sx={{ py: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                                {option}
+                              </Typography>
+                            </Box>
+                          );
+                        }
+                        
+                        // Type guard: option is a Security object
+                        const security = option as Security;
+                        const capColor = security.marketCap === 'high' ? '#10b981' : security.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
+                        const capLabel = security.marketCap === 'high' ? 'High Cap' : security.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
+                        const uniqueKey = `${security.symbol}-${security.marketCap}-${security.name}`;
                         return (
                           <Box component="li" {...props} key={uniqueKey} sx={{ py: 1 }}>
                             <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
-                                  {option.symbol}
+                                  {security.symbol}
                                 </Typography>
                                 <Chip 
                                   label={capLabel} 
@@ -953,7 +1017,7 @@ const PortfolioTile = ({
                                 />
                               </Box>
                               <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                                {option.name}
+                                {security.name}
                               </Typography>
                             </Box>
                           </Box>
@@ -1003,7 +1067,9 @@ const PortfolioTile = ({
                         },
                       }}
                       freeSolo
-                      autoSelect
+                      autoSelect={false}
+                      selectOnFocus={false}
+                      clearOnBlur={false}
                     />
                     <TextField
                       size="small"
