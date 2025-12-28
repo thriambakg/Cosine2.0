@@ -86,10 +86,25 @@ class DashboardExporter:
         Extracts only the necessary tab data, excluding runtime state
         """
         # Clean up tab data - remove pagination state, results, etc.
+        # Note: portfolioData entries and timeframe should be preserved, but results should be excluded
         clean_tiles = []
         for tile in tab.get('tiles', []):
             clean_tile = {k: v for k, v in tile.items() 
-                         if k not in ['paginationState', 'articles', 'trades', 'portfolioData', 'filers']}
+                         if k not in ['paginationState', 'articles', 'trades', 'filers']}
+            
+            # For portfolio tiles, preserve portfolioData but exclude results (runtime data)
+            if 'portfolioData' in tile and isinstance(tile['portfolioData'], dict):
+                portfolio_data = tile['portfolioData'].copy()
+                # Remove results (computed data) but keep entries and timeframe
+                if 'results' in portfolio_data:
+                    del portfolio_data['results']
+                # Log portfolio data for debugging
+                logger.info(f"📊 Exporting portfolio tile {tile.get('id', 'unknown')}: entries={len(portfolio_data.get('entries', []))}, timeframe={portfolio_data.get('timeframe')}")
+                clean_tile['portfolioData'] = portfolio_data
+            elif tile.get('type') == 'portfolio':
+                # Log if portfolio tile is missing portfolioData
+                logger.warning(f"⚠️ Portfolio tile {tile.get('id', 'unknown')} is missing portfolioData!")
+            
             clean_tiles.append(clean_tile)
         
         dashboard_data = {

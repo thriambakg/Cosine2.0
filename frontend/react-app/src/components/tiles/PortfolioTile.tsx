@@ -134,6 +134,7 @@ const PortfolioTile = ({
   const [timeframe, setTimeframe] = useState<string>(
     portfolioData?.timeframe || '1y'
   );
+  const [hasPerformedInitialAnalysis, setHasPerformedInitialAnalysis] = useState(false);
   const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
   const [displayOptionsDialogOpen, setDisplayOptionsDialogOpen] = useState(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
@@ -198,10 +199,55 @@ const PortfolioTile = ({
     }
   );
 
+  // Sync portfolioData prop to state when it changes (e.g., on refresh when parent loads saved state)
+  const prevPortfolioDataRef = useRef<string>('');
+  useEffect(() => {
+    if (portfolioData) {
+      const portfolioDataStr = JSON.stringify(portfolioData);
+      // Only update if the prop actually changed
+      if (prevPortfolioDataRef.current !== portfolioDataStr) {
+        prevPortfolioDataRef.current = portfolioDataStr;
+        // Always sync entries if they exist in portfolioData (even if empty array)
+        // This ensures imported tiles with empty entries are properly initialized
+        if (portfolioData.entries !== undefined) {
+          // If entries is an empty array, use default, otherwise use the provided entries
+          setEntries(portfolioData.entries.length > 0 ? portfolioData.entries : [{ stock: '', shares: 0 }]);
+        }
+        if (portfolioData.timeframe) {
+          setTimeframe(portfolioData.timeframe);
+        }
+      }
+    }
+  }, [portfolioData]);
+
   // Use ref to track previous data and prevent unnecessary updates
   const prevDataRef = useRef<any>(null);
 
   // Update tile data when portfolio data changes
+  // Persist entries and timeframe (but not results, which are computed)
+  useEffect(() => {
+    if (!onSettingsChange) return;
+
+    // Only persist entries and timeframe - results are computed and shouldn't be persisted
+    const dataToPersist = {
+      entries: entries.filter(e => e.stock && e.shares > 0),
+      timeframe,
+    };
+
+    // Only update if data has actually changed
+    const hasChanged = !prevDataRef.current || 
+      JSON.stringify(prevDataRef.current) !== JSON.stringify(dataToPersist);
+
+    if (hasChanged) {
+      prevDataRef.current = dataToPersist;
+      // Use onSettingsChange to persist portfolio configuration (entries and timeframe)
+      onSettingsChange(id, {
+        portfolioData: dataToPersist
+      });
+    }
+  }, [entries, timeframe, id, onSettingsChange]);
+
+  // Also update local state via onUpdate for runtime state (including results)
   useEffect(() => {
     if (!onUpdate) return;
 
@@ -211,16 +257,9 @@ const PortfolioTile = ({
       timeframe,
     };
 
-    // Only update if data has actually changed
-    const hasChanged = !prevDataRef.current || 
-      JSON.stringify(prevDataRef.current) !== JSON.stringify(currentData);
-
-    if (hasChanged) {
-      prevDataRef.current = currentData;
-      onUpdate(id, {
-        portfolioData: currentData
-      });
-    }
+    onUpdate(id, {
+      portfolioData: currentData
+    });
   }, [entries, results, timeframe, id, onUpdate]);
 
   const addEntry = useCallback(() => {
@@ -282,6 +321,7 @@ const PortfolioTile = ({
   }, [updateEntry]);
 
   const calculateRisk = useCallback(async () => {
+    setHasPerformedInitialAnalysis(true);
     setError(null);
     
     try {
@@ -316,6 +356,18 @@ const PortfolioTile = ({
       setError(apiError || 'An error occurred while analyzing your portfolio.');
     }
   }, [entries, timeframe, analyzePortfolio, apiError]);
+
+  // Run fresh analysis when opened in preview mode (like other tiles)
+  // This must be after calculateRisk is defined
+  useEffect(() => {
+    if (dashboardContext === 'filesystem_preview' && !isLoading && !hasPerformedInitialAnalysis) {
+      const hasValidEntries = entries.some(e => e.stock && e.shares > 0);
+      if (hasValidEntries) {
+        setHasPerformedInitialAnalysis(true);
+        calculateRisk();
+      }
+    }
+  }, [dashboardContext, isLoading, entries, hasPerformedInitialAnalysis, calculateRisk]);
 
   const getRiskLevel = (volatility: number) => {
     if (volatility < 10) return { level: 'Low', color: '#22c55e' };
@@ -1131,6 +1183,24 @@ const PortfolioTileMemo = memo(PortfolioTile, (prevProps, nextProps) => {
         prevDisplay.showRiskMetrics !== nextDisplay.showRiskMetrics ||
         prevDisplay.showStockDetails !== nextDisplay.showStockDetails) {
       return false; // Re-render
+    }
+  }
+  
+  // Check if portfolioData changed (entries and timeframe)
+  const prevPortfolioData = prevProps.portfolioData;
+  const nextPortfolioData = nextProps.portfolioData;
+  if (prevPortfolioData !== nextPortfolioData) {
+    // Deep compare portfolioData entries and timeframe
+    if (prevPortfolioData && nextPortfolioData) {
+      const prevEntriesStr = JSON.stringify(prevPortfolioData.entries || []);
+      const nextEntriesStr = JSON.stringify(nextPortfolioData.entries || []);
+      const prevTimeframe = prevPortfolioData.timeframe || '1y';
+      const nextTimeframe = nextPortfolioData.timeframe || '1y';
+      if (prevEntriesStr !== nextEntriesStr || prevTimeframe !== nextTimeframe) {
+        return false; // Re-render
+      }
+    } else {
+      return false; // Re-render if one is null/undefined
     }
   }
   

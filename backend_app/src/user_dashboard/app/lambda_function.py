@@ -1057,6 +1057,16 @@ def handle_share_dashboard(user_id: str, http_method: str, event: Dict) -> Dict:
         if not tab:
             return create_response(404, {'error': 'Tab not found'})
         
+        # Log portfolio tiles in the tab for debugging
+        for tile in tab.get('tiles', []):
+            if tile.get('type') == 'portfolio':
+                portfolio_data = tile.get('portfolioData', {})
+                entries = portfolio_data.get('entries', [])
+                entries_count = len(entries) if isinstance(entries, list) else 0
+                logger.info(f"📊 Tab {tab_id} portfolio tile {tile.get('id', 'unknown')}: entries={entries_count}, timeframe={portfolio_data.get('timeframe')}")
+                if entries_count == 0:
+                    logger.warning(f"⚠️ Portfolio tile {tile.get('id', 'unknown')} has empty entries before export!")
+        
         # Initialize exporter
         exporter = DashboardExporter()
         

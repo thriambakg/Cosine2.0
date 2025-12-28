@@ -90,6 +90,13 @@ export const useTabManagement = ({
             // These are session-only and should not be persisted to database
             // Note: paginationState is preserved and will be saved to database for permanent persistence
             const { results, lastUpdated, ...tileConfig } = tile;
+            
+            // For portfolio tiles, also remove results from nested portfolioData
+            if (tileConfig.portfolioData && typeof tileConfig.portfolioData === 'object') {
+              const { results: portfolioResults, ...portfolioDataWithoutResults } = tileConfig.portfolioData;
+              tileConfig.portfolioData = portfolioDataWithoutResults;
+            }
+            
             return tileConfig;
           }),
           layout: tab.layout || 'grid',

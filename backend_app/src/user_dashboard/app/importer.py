@@ -322,8 +322,24 @@ class DashboardImporter:
                 tile['id'] = str(uuid.uuid4())
             
             # Remove any runtime state that shouldn't be persisted
+            # Note: portfolioData entries and timeframe should be preserved, but results should be excluded
             clean_tile = {k: v for k, v in tile.items() 
-                         if k not in ['articles', 'trades', 'portfolioData']}  # Keep paginationState, searchParams, etc.
+                         if k not in ['articles', 'trades']}  # Keep paginationState, searchParams, portfolioData, etc.
+            
+            # For portfolio tiles, preserve portfolioData but exclude results (runtime data)
+            if 'portfolioData' in tile and isinstance(tile['portfolioData'], dict):
+                portfolio_data = tile['portfolioData'].copy()
+                # Remove results (computed data) but keep entries and timeframe
+                if 'results' in portfolio_data:
+                    del portfolio_data['results']
+                # Log portfolio data for debugging
+                entries_count = len(portfolio_data.get('entries', [])) if isinstance(portfolio_data.get('entries'), list) else 0
+                logger.info(f"📦 Importing portfolio tile {tile.get('id', 'unknown')}: entries={entries_count}, timeframe={portfolio_data.get('timeframe')}")
+                clean_tile['portfolioData'] = portfolio_data
+            elif tile.get('type') == 'portfolio':
+                # Log if portfolio tile is missing portfolioData
+                logger.warning(f"⚠️ Imported portfolio tile {tile.get('id', 'unknown')} is missing portfolioData!")
+            
             cleaned_tiles.append(clean_tile)
         
         imported_tab['tiles'] = cleaned_tiles

@@ -704,35 +704,18 @@ const NewsTile: React.FC<NewsTileProps> = ({
   }, [allResults, id, onUpdate, lastEvaluatedKeys, hasMore]);
 
   // Sync searchParams prop to state when it changes (e.g., on refresh when parent loads saved state)
-  // Only sync if prop has meaningful data and current state is empty/defaults
+  // Use deep comparison to avoid unnecessary updates
+  const prevSearchParamsRef = useRef<string>('');
   useEffect(() => {
     if (searchParams) {
-      const propHasData = (searchParams.keywords && searchParams.keywords.length > 0) ||
-                         (searchParams.sources && searchParams.sources.length > 0) ||
-                         (searchParams.categories && searchParams.categories.length > 0) ||
-                         (searchParams.countries && searchParams.countries.length > 0);
-      
-      if (propHasData) {
-        setCurrentSearchParams(prev => {
-          const prevHasData = (prev.keywords && prev.keywords.length > 0) ||
-                             (prev.sources && prev.sources.length > 0) ||
-                             (prev.categories && prev.categories.length > 0) ||
-                             (prev.countries && prev.countries.length > 0);
-          
-          // Only sync if current state is empty (user hasn't started editing)
-          if (!prevHasData) {
-            return searchParams;
-          }
-          
-          // If both have data, check if they're different - if so, prefer prop (saved state)
-          const prevStr = JSON.stringify(prev);
-          const propStr = JSON.stringify(searchParams);
-          if (prevStr !== propStr) {
-            return searchParams; // Prop has saved state, use it
-          }
-          
-          return prev; // Keep current state
-        });
+      const searchParamsStr = JSON.stringify(searchParams);
+      // Only update if the prop actually changed
+      if (prevSearchParamsRef.current !== searchParamsStr) {
+        prevSearchParamsRef.current = searchParamsStr;
+        setCurrentSearchParams(searchParams);
+        // Reset hasPerformedInitialSearch if searchParams changed (e.g., after dashboard load)
+        // This ensures a fresh search is performed with the new params
+        setHasPerformedInitialSearch(false);
       }
     }
   }, [searchParams]);
