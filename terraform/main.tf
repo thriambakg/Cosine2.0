@@ -1230,8 +1230,11 @@ module "user_dashboard_lambda" {
     ENCRYPTION_SECRET        = aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
 
-  # Attach core layer
-  layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  # Attach core and utility layers (utility layer includes cryptography for encryption)
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
+  ]
 
   # Additional IAM policies
   additional_policy_arns = [
@@ -1249,9 +1252,10 @@ module "user_dashboard_lambda" {
   response_table_name = null # Not needed for synchronous responses
   # Environment variable name for completion SNS topic in worker Lambda
   completion_sns_env_var_name = "USER_DASHBOARD_COMPLETION_SNS_TOPIC_ARN"
-  # Attach core layer to wrapper Lambda (boto3 and standard library)
+  # Attach core and utility layers to wrapper Lambda (utility layer includes cryptography)
   wrapper_layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
   # SQS configuration

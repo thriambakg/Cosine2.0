@@ -601,10 +601,9 @@ export const dashboardAPI = {
     shareType: 'link' | 'download'
   ): Promise<{ success: boolean; shareId?: string; shareLink?: string; downloadUrl?: string; error?: string }> => {
     return apiRequest<{ success: boolean; shareId?: string; shareLink?: string; downloadUrl?: string; error?: string }>(
-      `/dashboard-share`,
+      `/dashboard-share?userId=${userId}`,
       {
         method: 'POST',
-        userId,
         body: JSON.stringify({ tabId, shareType }),
       }
     );
