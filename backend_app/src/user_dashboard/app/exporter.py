@@ -40,8 +40,22 @@ class DashboardExporter:
         self.bucket_name = CHAT_FILES_BUCKET_NAME
         self.encryption_secret = ENCRYPTION_SECRET
     
+    def derive_platform_key(self) -> bytes:
+        """Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
+        This allows dashboards to be shared across all users in the platform"""
+        # Use a fixed salt for platform-wide encryption
+        salt = hashlib.sha256(f"{self.encryption_secret}platform-wide".encode()).digest()[:16]
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(f"platform-wide{self.encryption_secret}".encode()))
+        return key
+    
     def derive_key_from_user_id(self, user_id: str) -> bytes:
-        """Derive encryption key from user ID using PBKDF2"""
+        """Derive encryption key from user ID using PBKDF2 (legacy - kept for backward compatibility)"""
         salt = hashlib.sha256(f"{self.encryption_secret}{user_id}".encode()).digest()[:16]
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
@@ -53,13 +67,14 @@ class DashboardExporter:
         return key
     
     def encrypt_dashboard_data(self, user_id: str, dashboard_data: Dict[str, Any]) -> bytes:
-        """Encrypt dashboard data using Fernet"""
+        """Encrypt dashboard data using Fernet with platform-wide key (shareable across all users)"""
         try:
-            key = self.derive_key_from_user_id(user_id)
+            # Use platform-wide key for shareable dashboards
+            key = self.derive_platform_key()
             fernet = Fernet(key)
             json_data = json.dumps(dashboard_data, default=str)
             encrypted_data = fernet.encrypt(json_data.encode('utf-8'))
-            logger.info(f"✅ Encrypted dashboard data: {len(encrypted_data)} bytes")
+            logger.info(f"✅ Encrypted dashboard data with platform-wide key: {len(encrypted_data)} bytes")
             return encrypted_data
         except Exception as e:
             logger.error(f"❌ Error encrypting dashboard data: {str(e)}")
@@ -252,13 +267,13 @@ class DashboardExporter:
                     'error': 'Cannot decrypt: Missing user_id in metadata'
                 }
             
-            # Decrypt using original user's key
-            key = self.derive_key_from_user_id(original_user_id)
+            # Decrypt using platform-wide key (dashboards are shareable across all users)
+            key = self.derive_platform_key()
             fernet = Fernet(key)
             decrypted_data = fernet.decrypt(encrypted_data)
             dashboard_data = json.loads(decrypted_data.decode('utf-8'))
             
-            logger.info(f"✅ Retrieved and decrypted shared dashboard: {share_id}")
+            logger.info(f"✅ Retrieved and decrypted shared dashboard with platform-wide key: {share_id}")
             
             return {
                 'success': True,

@@ -37,8 +37,21 @@ CONTEXT_ITEM_EXTENSION = '.cosine'
 CONTEXT_ITEM_MIME_TYPE = 'application/octet-stream'
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')  # Should be set via environment variable
 
+def derive_platform_key() -> bytes:
+    """Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
+    This allows .cosine files to be shared across all users in the platform"""
+    salt = hashlib.sha256(f"{ENCRYPTION_SECRET}platform-wide".encode()).digest()[:16]
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(f"platform-wide{ENCRYPTION_SECRET}".encode()))
+    return key
+
 def derive_key_from_user_id(user_id: str) -> bytes:
-    """Derive encryption key from user ID using PBKDF2"""
+    """Derive encryption key from user ID using PBKDF2 (legacy - kept for backward compatibility)"""
     salt = hashlib.sha256(f"{ENCRYPTION_SECRET}{user_id}".encode()).digest()[:16]
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -50,11 +63,12 @@ def derive_key_from_user_id(user_id: str) -> bytes:
     return key
 
 def encrypt_context_data(user_id: str, data: Dict[str, Any]) -> bytes:
-    """Encrypt context data using Fernet (AES-128 in CBC mode with HMAC)"""
+    """Encrypt context data using Fernet with platform-wide key (shareable across all users)"""
     try:
-        logger.debug(f"🔐 Starting encryption for user {user_id}")
-        key = derive_key_from_user_id(user_id)
-        logger.debug(f"🔐 Derived encryption key (length: {len(key)})")
+        logger.debug(f"🔐 Starting encryption with platform-wide key")
+        # Use platform-wide key for shareable .cosine files
+        key = derive_platform_key()
+        logger.debug(f"🔐 Derived platform encryption key (length: {len(key)})")
         fernet = Fernet(key)
         json_data = json.dumps(data, default=str)
         logger.debug(f"🔐 JSON data size: {len(json_data)} bytes")
@@ -68,16 +82,32 @@ def encrypt_context_data(user_id: str, data: Dict[str, Any]) -> bytes:
         raise
 
 def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
-    """Decrypt context data using Fernet"""
+    """Decrypt context data using Fernet with platform-wide key (shareable across all users)
+    Falls back to user-specific keys for backward compatibility with old files"""
+    from cryptography.fernet import InvalidToken
+    
+    # Try platform-wide key first (new format - shareable)
     try:
-        key = derive_key_from_user_id(user_id)
+        logger.debug(f"🔐 Starting decryption with platform-wide key, data length: {len(encrypted_data)} bytes")
+        key = derive_platform_key()
         fernet = Fernet(key)
         decrypted_data = fernet.decrypt(encrypted_data)
         json_data = json.loads(decrypted_data.decode('utf-8'))
+        logger.debug(f"🔐 Successfully decrypted with platform-wide key")
         return json_data
-    except Exception as e:
-        logger.error(f"Error decrypting context data: {str(e)}")
-        raise
+    except InvalidToken:
+        logger.debug(f"⚠️ Platform-wide key failed, trying user-specific key for backward compatibility...")
+        # Fallback: Try with user-specific key (for backward compatibility with old files)
+        try:
+            key = derive_key_from_user_id(user_id)
+            fernet = Fernet(key)
+            decrypted_data = fernet.decrypt(encrypted_data)
+            json_data = json.loads(decrypted_data.decode('utf-8'))
+            logger.debug(f"🔐 Successfully decrypted with user-specific key (backward compatibility)")
+            return json_data
+        except Exception as e:
+            logger.error(f"❌ Error decrypting context data with all methods: {str(e)}")
+            raise
 
 def get_cors_headers():
     """Get CORS headers for API responses"""

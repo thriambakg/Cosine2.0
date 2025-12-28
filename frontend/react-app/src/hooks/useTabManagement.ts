@@ -472,13 +472,22 @@ export const useTabManagement = ({
   }, [state, updateState, userId]);
 
   const activateTab = useCallback((tabId: string) => {
-    const updatedTabs = state.tabs;
-
-    updateState({
-      tabs: updatedTabs,
-      activeTabId: tabId
+    // Use functional update to get the latest state
+    setState(prevState => {
+      // Only update activeTabId, don't change tabs
+      // This prevents overwriting tabs that were just loaded from database
+      const newState = {
+        ...prevState,
+        activeTabId: tabId
+      };
+      
+      // Save to storage but don't trigger database save for just changing active tab
+      // Database save will happen when tabs actually change
+      saveToStorage(newState);
+      
+      return newState;
     });
-  }, [state, updateState]);
+  }, [saveToStorage]);
 
   const renameTab = useCallback((tabId: string, newName: string) => {
     const updatedTabs = state.tabs.map(tab => 

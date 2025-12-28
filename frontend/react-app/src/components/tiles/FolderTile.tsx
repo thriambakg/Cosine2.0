@@ -707,6 +707,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
               <IconButton
                 size="small"
                 component="label"
+                onClick={(e) => e.stopPropagation()}
                 sx={{ color: '#9ca3af', '&:hover': { color: customColor } }}
               >
                 <UploadFileIcon fontSize="small" />
@@ -714,7 +715,6 @@ const FolderTile: React.FC<FolderTileProps> = ({
                   type="file"
                   hidden
                   onChange={handleFileSelect}
-                  onClick={(e) => e.stopPropagation()}
                 />
               </IconButton>
             </Tooltip>

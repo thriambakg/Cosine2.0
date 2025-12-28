@@ -767,18 +767,29 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
     Note: This function only removes the old 'dashboards' field and ensures structure.
     All tile properties (including paginationState, searchParams, filterSettings, etc.) 
     are preserved and not filtered out.
+    IMPORTANT: This function preserves ALL existing tabs - it does NOT remove or modify them.
     """
     cleaned_config = config.copy()
+    
+    # Log tabs count before cleanup
+    original_tabs_count = len(cleaned_config.get('tabs', []))
+    if original_tabs_count > 0:
+        logger.info(f"🧹 cleanup_old_data_structure: Found {original_tabs_count} existing tabs to preserve")
     
     # Remove old dashboards field if it exists
     if 'dashboards' in cleaned_config:
         logger.info("Removing old dashboards field from data structure")
         del cleaned_config['dashboards']
     
-    # Ensure tabs key exists
+    # Ensure tabs key exists (preserve existing tabs if they exist)
     if 'tabs' not in cleaned_config:
         logger.warning("Missing 'tabs' key in dashboard config, initializing with empty array")
         cleaned_config['tabs'] = []
+    else:
+        # Verify we're preserving all tabs
+        preserved_tabs_count = len(cleaned_config['tabs'])
+        if preserved_tabs_count != original_tabs_count:
+            logger.error(f"❌ CRITICAL: Tab count mismatch! Original: {original_tabs_count}, Preserved: {preserved_tabs_count}")
     
     # Ensure all tabs have tiles array
     # Note: All tile properties are preserved - we only ensure the array exists
@@ -788,7 +799,7 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
         if 'layout' not in tab:
             tab['layout'] = 'grid'
     
-    # Ensure required fields exist
+    # Ensure required fields exist (preserve existing values, don't overwrite)
     if 'tabGroups' not in cleaned_config:
         cleaned_config['tabGroups'] = []
     
@@ -842,30 +853,70 @@ def get_user_dashboard(user_id: str) -> Optional[Dict]:
         user_data = response['Item']
         raw_dashboard_config = user_data.get('dashboard_config', create_default_dashboard_clean())
         
+        # Log raw config tabs count before conversion
+        raw_tabs_count = len(raw_dashboard_config.get('tabs', []))
+        if raw_tabs_count > 0:
+            raw_tab_ids = [tab.get('id') for tab in raw_dashboard_config.get('tabs', []) if tab.get('id')]
+            logger.info(f"📥 Retrieved from DB: {raw_tabs_count} tabs with IDs: {raw_tab_ids}")
+        
+        # Convert Decimals to regular numbers for easier manipulation
+        raw_dashboard_config = convert_decimals(raw_dashboard_config)
+        
+        # Verify tabs are still present after conversion
+        after_convert_tabs_count = len(raw_dashboard_config.get('tabs', []))
+        if after_convert_tabs_count != raw_tabs_count:
+            logger.error(f"❌ CRITICAL: Tab count changed during Decimal conversion! Before: {raw_tabs_count}, After: {after_convert_tabs_count}")
+        
         # Clean up any old data structure
         dashboard_config = cleanup_old_data_structure(raw_dashboard_config)
+        
+        # Verify tabs are still present after cleanup
+        final_tabs_count = len(dashboard_config.get('tabs', []))
+        if final_tabs_count != raw_tabs_count:
+            logger.error(f"❌ CRITICAL: Tab count changed during cleanup! Original: {raw_tabs_count}, Final: {final_tabs_count}")
+        else:
+            logger.info(f"✅ All {final_tabs_count} tabs preserved through get_user_dashboard")
         
         return dashboard_config
         
     except Exception as e:
         logger.error(f"Error getting user dashboard: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 def save_user_dashboard(user_id: str, dashboard_config: Dict) -> bool:
     """Save user's dashboard configuration to database"""
     try:
+        # Log what we're about to save
+        tabs_to_save = dashboard_config.get('tabs', [])
+        tab_ids_to_save = [tab.get('id') for tab in tabs_to_save if tab.get('id')]
+        logger.info(f"💾 Saving dashboard with {len(tabs_to_save)} tabs, IDs: {tab_ids_to_save}")
+        
+        # Convert floats to Decimals for DynamoDB
+        config_to_save = convert_floats_to_decimals(dashboard_config)
+        
+        # Verify tabs are still present after conversion
+        tabs_after_convert = config_to_save.get('tabs', [])
+        if len(tabs_after_convert) != len(tabs_to_save):
+            logger.error(f"❌ CRITICAL: Tab count changed during Decimal conversion before save! Before: {len(tabs_to_save)}, After: {len(tabs_after_convert)}")
+        
         table.update_item(
             Key={'user_id': user_id},
             UpdateExpression='SET dashboard_config = :config, updated_at = :updated',
             ExpressionAttributeValues={
-                ':config': convert_floats_to_decimals(dashboard_config),
+                ':config': config_to_save,
                 ':updated': datetime.utcnow().isoformat()
             }
         )
+        
+        logger.info(f"✅ Successfully saved dashboard with {len(tabs_to_save)} tabs to database")
         return True
         
     except Exception as e:
         logger.error(f"Error saving user dashboard: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return False
 
 def create_default_dashboard_clean() -> Dict:
@@ -1111,25 +1162,84 @@ def handle_import_dashboard(user_id: str, http_method: str, event: Dict) -> Dict
         
         # Prepare imported tab
         imported_tab = importer.prepare_imported_tab(dashboard_data, user_id)
+        logger.info(f"📦 Prepared imported tab: {imported_tab.get('name')} (id: {imported_tab.get('id')})")
         
-        # Get current dashboard
-        dashboard_config = get_user_dashboard(user_id)
-        if not dashboard_config:
-            return create_response(404, {'error': 'User not found'})
+        # Get current dashboard - get it directly from DynamoDB to ensure we have the latest
+        try:
+            response = table.get_item(Key={'user_id': user_id})
+            if 'Item' not in response:
+                return create_response(404, {'error': 'User not found'})
+            
+            user_data = response['Item']
+            raw_dashboard_config = user_data.get('dashboard_config', {})
+            
+            # Convert Decimals to regular numbers
+            dashboard_config = convert_decimals(raw_dashboard_config)
+            
+            # Clean up any old data structure (preserves all tabs)
+            dashboard_config = cleanup_old_data_structure(dashboard_config)
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting dashboard for import: {str(e)}")
+            return create_response(500, {'error': f'Failed to retrieve dashboard: {str(e)}'})
         
-        # Ensure tabs array exists
+        # Log existing tabs before import
+        existing_tabs = dashboard_config.get('tabs', [])
+        existing_tab_ids = [tab.get('id') for tab in existing_tabs if tab.get('id')]
+        logger.info(f"📋 Existing tabs before import: {len(existing_tabs)} tabs with IDs: {existing_tab_ids}")
+        
+        # CRITICAL: Verify we have tabs - if we don't, something is wrong
+        if not isinstance(existing_tabs, list):
+            logger.error(f"❌ CRITICAL: tabs is not a list! Type: {type(existing_tabs)}, Value: {existing_tabs}")
+            dashboard_config['tabs'] = []
+            existing_tabs = []
+        
+        # Ensure tabs array exists (don't overwrite if it already exists)
         if 'tabs' not in dashboard_config:
             dashboard_config['tabs'] = []
+            logger.warning("⚠️ tabs array was missing, initialized empty array")
+        else:
+            logger.info(f"✅ tabs array exists with {len(dashboard_config['tabs'])} items")
         
-        # Add imported tab
-        dashboard_config['tabs'].append(imported_tab)
-        
-        # Add new tab to the end of tabOrder
+        # Ensure tabOrder exists (don't overwrite if it already exists)
         if 'tabOrder' not in dashboard_config:
             dashboard_config['tabOrder'] = []
+            logger.warning("⚠️ tabOrder was missing, initialized empty array")
+        else:
+            logger.info(f"✅ tabOrder exists with {len(dashboard_config['tabOrder'])} items: {dashboard_config['tabOrder']}")
+        
+        # Ensure other required fields exist (preserve existing values)
+        if 'tabGroups' not in dashboard_config:
+            dashboard_config['tabGroups'] = []
+        if 'groupOrder' not in dashboard_config:
+            dashboard_config['groupOrder'] = []
+        if 'nextTabId' not in dashboard_config:
+            dashboard_config['nextTabId'] = 1
+        if 'nextGroupId' not in dashboard_config:
+            dashboard_config['nextGroupId'] = 1
+        
+        # IMPORTANT: Append imported tab to existing tabs (don't replace)
+        # Make a copy of the tabs list to ensure we're appending correctly
+        tabs_before_append = list(dashboard_config['tabs'])
+        logger.info(f"➕ Appending imported tab '{imported_tab.get('name')}' to existing {len(tabs_before_append)} tabs")
+        dashboard_config['tabs'].append(imported_tab)
+        
+        # Verify append worked
+        if len(dashboard_config['tabs']) != len(tabs_before_append) + 1:
+            logger.error(f"❌ CRITICAL: Append failed! Before: {len(tabs_before_append)}, After: {len(dashboard_config['tabs'])}")
+            return create_response(500, {'error': 'Failed to append imported tab'})
+        
+        # Add new tab to the end of tabOrder
+        logger.info(f"➕ Appending imported tab ID to tabOrder: {imported_tab['id']}")
         dashboard_config['tabOrder'].append(imported_tab['id'])
         
         dashboard_config['last_updated'] = datetime.utcnow().isoformat()
+        
+        # Log final state
+        final_tabs = dashboard_config.get('tabs', [])
+        final_tab_ids = [tab.get('id') for tab in final_tabs if tab.get('id')]
+        logger.info(f"📊 Dashboard config after import - tabs count: {len(final_tabs)}, tab IDs: {final_tab_ids}")
+        logger.info(f"📊 tabOrder after import: {dashboard_config.get('tabOrder', [])}")
         
         # Save to database
         if not save_user_dashboard(user_id, dashboard_config):

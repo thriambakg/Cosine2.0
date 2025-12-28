@@ -38,8 +38,22 @@ class DashboardImporter:
         self.bucket_name = CHAT_FILES_BUCKET_NAME
         self.encryption_secret = ENCRYPTION_SECRET
     
+    def derive_platform_key(self) -> bytes:
+        """Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
+        This allows dashboards to be shared across all users in the platform"""
+        # Use a fixed salt for platform-wide encryption
+        salt = hashlib.sha256(f"{self.encryption_secret}platform-wide".encode()).digest()[:16]
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(f"platform-wide{self.encryption_secret}".encode()))
+        return key
+    
     def derive_key_from_user_id(self, user_id: str) -> bytes:
-        """Derive encryption key from user ID using PBKDF2"""
+        """Derive encryption key from user ID using PBKDF2 (legacy - kept for backward compatibility)"""
         salt = hashlib.sha256(f"{self.encryption_secret}{user_id}".encode()).digest()[:16]
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
@@ -50,20 +64,23 @@ class DashboardImporter:
         key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{self.encryption_secret}".encode()))
         return key
     
-    def decrypt_dashboard_data(self, user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
-        """Decrypt dashboard data using Fernet"""
+    def decrypt_dashboard_data(self, encrypted_data: bytes) -> Dict[str, Any]:
+        """Decrypt dashboard data using Fernet with platform-wide key (shareable across all users)"""
         try:
-            key = self.derive_key_from_user_id(user_id)
+            # Use platform-wide key for shareable dashboards
+            key = self.derive_platform_key()
             fernet = Fernet(key)
             decrypted_data = fernet.decrypt(encrypted_data)
             dashboard_data = json.loads(decrypted_data.decode('utf-8'))
-            logger.info(f"✅ Decrypted dashboard data: {len(encrypted_data)} bytes")
+            logger.info(f"✅ Decrypted dashboard data with platform-wide key: {len(encrypted_data)} bytes")
             return dashboard_data
         except Exception as e:
             logger.error(f"❌ Error decrypting dashboard data: {str(e)}")
             raise
     
     def import_from_file(self, file_content: bytes, importing_user_id: str, original_user_id: Optional[str] = None) -> Dict[str, Any]:
+        # Note: importing_user_id and original_user_id are kept for backward compatibility
+        # but are no longer used for decryption (we use platform-wide key)
         """
         Import dashboard from file content
         
@@ -76,32 +93,43 @@ class DashboardImporter:
             Dict with 'success', 'dashboard_data' or 'error'
         """
         try:
-            # Try to decrypt with importing user's key first (in case it was exported by them)
+            # Decrypt using platform-wide key (dashboards are shareable across all users)
+            # Try platform-wide key first (new format)
             try:
-                dashboard_data = self.decrypt_dashboard_data(importing_user_id, file_content)
-                logger.info(f"✅ Decrypted with importing user's key")
+                dashboard_data = self.decrypt_dashboard_data(file_content)
+                logger.info(f"✅ Decrypted with platform-wide key")
             except Exception as e1:
-                logger.info(f"Failed to decrypt with importing user's key: {str(e1)}")
+                logger.info(f"Failed to decrypt with platform-wide key: {str(e1)}")
                 
-                # If original_user_id is provided, try with that
-                if original_user_id and original_user_id != importing_user_id:
-                    try:
-                        key = self.derive_key_from_user_id(original_user_id)
-                        fernet = Fernet(key)
-                        decrypted_data = fernet.decrypt(file_content)
-                        dashboard_data = json.loads(decrypted_data.decode('utf-8'))
-                        logger.info(f"✅ Decrypted with original user's key")
-                    except Exception as e2:
-                        logger.error(f"❌ Failed to decrypt with original user's key: {str(e2)}")
+                # Fallback: Try with importing user's key (for backward compatibility with old files)
+                try:
+                    key = self.derive_key_from_user_id(importing_user_id)
+                    fernet = Fernet(key)
+                    decrypted_data = fernet.decrypt(file_content)
+                    dashboard_data = json.loads(decrypted_data.decode('utf-8'))
+                    logger.info(f"✅ Decrypted with importing user's key (backward compatibility)")
+                except Exception as e2:
+                    logger.info(f"Failed to decrypt with importing user's key: {str(e2)}")
+                    
+                    # Fallback: Try with original user's key if provided (for backward compatibility)
+                    if original_user_id and original_user_id != importing_user_id:
+                        try:
+                            key = self.derive_key_from_user_id(original_user_id)
+                            fernet = Fernet(key)
+                            decrypted_data = fernet.decrypt(file_content)
+                            dashboard_data = json.loads(decrypted_data.decode('utf-8'))
+                            logger.info(f"✅ Decrypted with original user's key (backward compatibility)")
+                        except Exception as e3:
+                            logger.error(f"❌ Failed to decrypt with all methods: {str(e3)}")
+                            return {
+                                'success': False,
+                                'error': 'Failed to decrypt dashboard file. The file may be corrupted or encrypted with an unsupported key.'
+                            }
+                    else:
                         return {
                             'success': False,
-                            'error': 'Failed to decrypt dashboard file. The file may be corrupted or encrypted with a different key.'
+                            'error': 'Failed to decrypt dashboard file. The file may be corrupted or encrypted with an unsupported key.'
                         }
-                else:
-                    return {
-                        'success': False,
-                        'error': 'Failed to decrypt dashboard file. The file may be corrupted or encrypted with a different key.'
-                    }
             
             # Validate dashboard data structure
             if not self.validate_dashboard_data(dashboard_data):
@@ -158,19 +186,37 @@ class DashboardImporter:
                     'error': 'Cannot decrypt: Missing user_id in metadata'
                 }
             
-            # Decrypt using original user's key
+            # Decrypt using platform-wide key (dashboards are shareable across all users)
+            # Try platform-wide key first (new format)
             try:
-                key = self.derive_key_from_user_id(original_user_id)
+                key = self.derive_platform_key()
                 fernet = Fernet(key)
                 decrypted_data = fernet.decrypt(encrypted_data)
                 dashboard_data = json.loads(decrypted_data.decode('utf-8'))
-                logger.info(f"✅ Retrieved and decrypted shared dashboard: {share_id}")
-            except Exception as e:
-                logger.error(f"❌ Error decrypting shared dashboard: {str(e)}")
-                return {
-                    'success': False,
-                    'error': 'Failed to decrypt shared dashboard'
-                }
+                logger.info(f"✅ Retrieved and decrypted shared dashboard with platform-wide key: {share_id}")
+            except Exception as e1:
+                logger.info(f"Failed to decrypt with platform-wide key: {str(e1)}")
+                
+                # Fallback: Try with original user's key (for backward compatibility with old shared dashboards)
+                if original_user_id:
+                    try:
+                        key = self.derive_key_from_user_id(original_user_id)
+                        fernet = Fernet(key)
+                        decrypted_data = fernet.decrypt(encrypted_data)
+                        dashboard_data = json.loads(decrypted_data.decode('utf-8'))
+                        logger.info(f"✅ Retrieved and decrypted shared dashboard with original user's key (backward compatibility): {share_id}")
+                    except Exception as e2:
+                        logger.error(f"❌ Error decrypting shared dashboard: {str(e2)}")
+                        return {
+                            'success': False,
+                            'error': 'Failed to decrypt shared dashboard'
+                        }
+                else:
+                    logger.error(f"❌ Error decrypting shared dashboard: {str(e1)}")
+                    return {
+                        'success': False,
+                        'error': 'Failed to decrypt shared dashboard'
+                    }
             
             # Validate dashboard data structure
             if not self.validate_dashboard_data(dashboard_data):

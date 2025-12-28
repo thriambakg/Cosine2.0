@@ -21,9 +21,27 @@ logger = logging.getLogger(__name__)
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')
 
 
+def derive_platform_key() -> bytes:
+    """
+    Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
+    This allows .cosine files to be shared across all users in the platform
+    
+    Returns:
+        bytes: The derived platform-wide encryption key (base64-encoded)
+    """
+    salt = hashlib.sha256(f"{ENCRYPTION_SECRET}platform-wide".encode()).digest()[:16]
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(f"platform-wide{ENCRYPTION_SECRET}".encode()))
+    return key
+
 def derive_key_from_user_id(user_id: str) -> bytes:
     """
-    Derive encryption key from user ID using PBKDF2.
+    Derive encryption key from user ID using PBKDF2 (legacy - kept for backward compatibility).
     Matches the implementation in file_return lambda.
     
     Args:
@@ -45,7 +63,7 @@ def derive_key_from_user_id(user_id: str) -> bytes:
 
 def derive_key_from_user_id_with_secret(user_id: str, encryption_secret: str) -> bytes:
     """
-    Derive encryption key from user ID using PBKDF2 with a specific secret.
+    Derive encryption key from user ID using PBKDF2 with a specific secret (legacy - kept for backward compatibility).
     Used for fallback decryption with default secret.
     
     Args:
@@ -68,46 +86,61 @@ def derive_key_from_user_id_with_secret(user_id: str, encryption_secret: str) ->
 
 def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
     """
-    Decrypt context data using Fernet with fallback to default secret.
+    Decrypt context data using Fernet with platform-wide key (shareable across all users)
+    Falls back to user-specific keys for backward compatibility with old files.
     Matches the implementation in file_return lambda.
     
     Args:
-        user_id: The user ID that owns the encrypted data
+        user_id: The user ID that owns the encrypted data (used for backward compatibility fallback)
         encrypted_data: The encrypted bytes to decrypt
         
     Returns:
         Dict[str, Any]: The decrypted context data as a dictionary
         
     Raises:
-        ValueError: If decryption fails with both current and default secrets
+        ValueError: If decryption fails with all methods
     """
-    # Try with current ENCRYPTION_SECRET first
+    # Try platform-wide key first (new format - shareable)
     try:
-        logger.debug(f"🔐 Starting decryption for user {user_id}, data length: {len(encrypted_data)} bytes")
-        key = derive_key_from_user_id(user_id)
-        logger.debug(f"🔐 Derived key length: {len(key)} bytes")
+        logger.debug(f"🔐 Starting decryption with platform-wide key, data length: {len(encrypted_data)} bytes")
+        key = derive_platform_key()
+        logger.debug(f"🔐 Derived platform key length: {len(key)} bytes")
         fernet = Fernet(key)
-        logger.debug(f"🔐 Attempting Fernet decryption with current secret...")
+        logger.debug(f"🔐 Attempting Fernet decryption with platform-wide key...")
         decrypted_data = fernet.decrypt(encrypted_data)
         logger.debug(f"🔐 Decrypted data length: {len(decrypted_data)} bytes")
         json_data = json.loads(decrypted_data.decode('utf-8'))
-        logger.debug(f"🔐 Successfully parsed JSON, keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'N/A'}")
+        logger.debug(f"🔐 Successfully parsed JSON with platform-wide key, keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'N/A'}")
         return json_data
     except InvalidToken:
-        # If decryption fails, try with default secret (for files encrypted before secret was set)
-        logger.warning(f"⚠️ Decryption failed with current secret, trying default secret...")
+        logger.debug(f"⚠️ Platform-wide key failed, trying user-specific key for backward compatibility...")
+        # Fallback: Try with user-specific key (for backward compatibility with old files)
         try:
-            default_secret = 'default-secret-change-in-production'
-            key = derive_key_from_user_id_with_secret(user_id, default_secret)
+            logger.debug(f"🔐 Starting decryption for user {user_id}, data length: {len(encrypted_data)} bytes")
+            key = derive_key_from_user_id(user_id)
+            logger.debug(f"🔐 Derived key length: {len(key)} bytes")
             fernet = Fernet(key)
-            logger.debug(f"🔐 Attempting Fernet decryption with default secret...")
+            logger.debug(f"🔐 Attempting Fernet decryption with current secret...")
             decrypted_data = fernet.decrypt(encrypted_data)
-            logger.warning(f"⚠️ Successfully decrypted with default secret - file should be re-encrypted with current secret")
+            logger.debug(f"🔐 Decrypted data length: {len(decrypted_data)} bytes")
             json_data = json.loads(decrypted_data.decode('utf-8'))
+            logger.debug(f"🔐 Successfully parsed JSON, keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'N/A'}")
             return json_data
         except InvalidToken:
-            logger.error(f"❌ Decryption failed with both current and default secrets")
-            raise ValueError("Failed to decrypt: File was encrypted with a different secret. Please re-save the file.")
+            # If decryption fails, try with default secret (for files encrypted before secret was set)
+            logger.warning(f"⚠️ Decryption failed with current secret, trying default secret...")
+            try:
+                default_secret = 'default-secret-change-in-production'
+                key = derive_key_from_user_id_with_secret(user_id, default_secret)
+                fernet = Fernet(key)
+                logger.debug(f"🔐 Attempting Fernet decryption with default secret...")
+                decrypted_data = fernet.decrypt(encrypted_data)
+                logger.warning(f"⚠️ Successfully decrypted with default secret - file should be re-encrypted with current secret")
+                json_data = json.loads(decrypted_data.decode('utf-8'))
+                return json_data
+            except InvalidToken:
+                logger.error(f"❌ Decryption failed with all methods (platform-wide, user-specific, and default secret)")
+                raise ValueError("Failed to decrypt: File was encrypted with a different key. Please re-save the file.")
     except Exception as e:
         logger.error(f"❌ Error decrypting context data: {str(e)}")
         logger.error(f"❌ Exception type: {type(e).__name__}")
