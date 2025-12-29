@@ -2297,22 +2297,35 @@ module "session_management_lambda" {
 
   environment_variables = {
     CHAT_SESSIONS_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
+    CHAT_FILES_BUCKET_NAME   = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+    ENCRYPTION_SECRET        = aws_secretsmanager_secret_version.encryption_secret.secret_string
   }
+
+  # Attach core and utility layers (utility layer includes cryptography for encryption)
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
+  ]
 
   additional_policy_arns = [
     aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
+    aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda          = true
-  wrapper_timeout                = 30
-  sns_topic_name                 = "${var.project_name}-session-management-completion-${var.environment}"
-  response_table_name            = null
-  completion_sns_env_var_name    = "SESSION_MANAGEMENT_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  enable_wrapper_lambda       = true
+  wrapper_timeout             = 30
+  sns_topic_name              = "${var.project_name}-session-management-completion-${var.environment}"
+  response_table_name         = null
+  completion_sns_env_var_name = "SESSION_MANAGEMENT_COMPLETION_SNS_TOPIC_ARN"
+  # Attach core and utility layers to wrapper Lambda (utility layer includes cryptography)
+  wrapper_layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
+  ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = 20
