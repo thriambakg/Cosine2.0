@@ -565,6 +565,100 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             'body': json.dumps({'error': 'Internal server error'})
         }
 
+def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
+    """
+    Handle file content requests - return file content directly as base64
+    This avoids CORS issues when fetching files from S3
+    """
+    try:
+        user_id = body.get('user_id')
+        s3_key = body.get('s3_key')
+        bucket_name = body.get('bucket')
+        
+        logger.info(f"🔍 handle_file_content called with: user_id={user_id}, bucket={bucket_name}, s3_key={s3_key}")
+        
+        if not s3_key:
+            return {
+                'statusCode': 400,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Missing required parameter: s3_key'})
+            }
+        
+        # Determine target bucket
+        is_filesys = s3_key and s3_key.startswith('users/') and '/filesys/' in s3_key
+        
+        if is_filesys:
+            # Filesystem file - validate user access
+            expected_prefix = f"users/{authenticated_user_id}/filesys/"
+            if not s3_key.startswith(expected_prefix):
+                logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to access filesys file {s3_key}")
+                return {
+                    'statusCode': 403,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
+                }
+            target_bucket = S3_BUCKET
+        elif bucket_name:
+            # Use specified bucket
+            target_bucket = bucket_name
+        else:
+            target_bucket = S3_BUCKET
+        
+        # Check if file exists in S3
+        try:
+            s3_client.head_object(Bucket=target_bucket, Key=s3_key)
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return {
+                    'statusCode': 404,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'File not found'})
+                }
+            else:
+                raise e
+        
+        # Get file content from S3
+        try:
+            response = s3_client.get_object(Bucket=target_bucket, Key=s3_key)
+            file_content = response['Body'].read()
+            
+            # Encode to base64
+            file_content_base64 = base64.b64encode(file_content).decode('utf-8')
+            
+            # Get filename from S3 key or request
+            filename = body.get('filename') or s3_key.split('/')[-1]
+            
+            logger.info(f"✅ Retrieved file content for {filename} ({len(file_content)} bytes)")
+            
+            return {
+                'statusCode': 200,
+                'headers': get_cors_headers(),
+                'body': json.dumps({
+                    'file_content': file_content_base64,
+                    'filename': filename,
+                    'content_type': response.get('ContentType', 'application/octet-stream'),
+                    'file_size': len(file_content)
+                })
+            }
+        except Exception as e:
+            logger.error(f"❌ Error reading file from S3: {str(e)}")
+            return {
+                'statusCode': 500,
+                'headers': get_cors_headers(),
+                'body': json.dumps({'error': 'Failed to read file from S3'})
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ File content error: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        
+        return {
+            'statusCode': 500,
+            'headers': get_cors_headers(),
+            'body': json.dumps({'error': 'Internal server error'})
+        }
+
 def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticated_user_id: str) -> Dict[str, Any]:
     """
     Handle file preview requests - return preview data or presigned URLs for viewing
@@ -905,11 +999,13 @@ def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str
                 'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
             }
         
-        # Check if this is a preview request
-        request_type = body.get('request_type', 'download')  # 'download' or 'preview'
+        # Check if this is a preview request or content request
+        request_type = body.get('request_type', 'download')  # 'download', 'preview', or 'content'
         
         if request_type == 'preview':
             return handle_file_preview(event, body, authenticated_user_id)
+        elif request_type == 'content':
+            return handle_file_content(event, body, authenticated_user_id)
         else:
             # Generate fresh presigned URL for download
             # handle_file_download will validate user_id and session_id for all requests

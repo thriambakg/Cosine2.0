@@ -1556,6 +1556,38 @@ export const fileReturnAPI = {
     }
   },
 
+  getFileContent: async (params: FileDownloadRequest): Promise<{ success: boolean; file_content?: string; filename?: string; error?: string }> => {
+    console.log('📥 API - Get file content:', params);
+    try {
+      const response = await apiRequest<any>('/file-download', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...params,
+          request_type: 'content',
+        }),
+      });
+      
+      if (response && typeof response === 'object' && 'file_content' in response) {
+        return {
+          success: true,
+          file_content: response.file_content,
+          filename: response.filename,
+        };
+      } else {
+        return {
+          success: false,
+          error: response?.error || 'Unexpected response format from server',
+        };
+      }
+    } catch (error: any) {
+      console.error('❌ Get file content error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to get file content',
+      };
+    }
+  },
+
   previewFile: async (params: FileDownloadRequest): Promise<FileDownloadResponse> => {
     console.log('👁️ API - File preview:', params);
     try {
