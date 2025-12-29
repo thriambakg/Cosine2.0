@@ -16,6 +16,8 @@ import {
   ListItemText,
   Tooltip,
   Drawer,
+  Menu,
+  ListItemIcon,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -29,7 +31,11 @@ import {
   Person as PersonIcon,
   SmartToy as SmartToyIcon,
   Dashboard as ContextIcon,
+  Share as ShareIcon,
+  Upload as UploadIcon,
+  Link as LinkIcon,
 } from '@mui/icons-material';
+import ChatImportExportDialog from '../dialogs/ChatImportExportDialog';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
@@ -336,46 +342,60 @@ const GlobalChatSidebar: React.FC = () => {
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const previousContextRef = useRef<ContextItem[]>([]);
   
-  // Function to detect if context has changed
-  const hasContextChanged = useCallback(() => {
-    const currentContext = sessionContext;
-    const previousContext = previousContextRef.current;
-    
-    // Context change detection
-    
-    // Compare lengths first (quick check)
-    if (currentContext.length !== previousContext.length) {
-      console.log(`📋 Sidebar: Context length changed: ${previousContext.length} → ${currentContext.length}`);
-      return true;
-    }
-    
-    // Compare each item by ID and timestamp
-    for (let i = 0; i < currentContext.length; i++) {
-      const current = currentContext[i];
-      const previous = previousContext[i];
-      
-      if (!previous || 
-          current.id !== previous.id || 
-          current.timestamp !== previous.timestamp) {
-        console.log(`📋 Sidebar: Context item changed at index ${i}:`, { current, previous });
-        return true;
-      }
-    }
-    
-      // No context changes detected
-    return false;
-  }, [sessionContext]);
-  
   // Update previous context when session changes (but not on every sessionContext change)
+  // This effect should ONLY run when activeSessionId changes, not when sessionContext.length changes
   useEffect(() => {
     if (activeSessionId) {
-      // Only update if this is a new session, not a context change
-      if (previousContextRef.current.length === 0) {
-        previousContextRef.current = [...sessionContext];
-        // Initial context set for new session
-      }
+      // When a new session is loaded, initialize the refs to match the current context
+      // This prevents showing indicator for items that were already in the session
+      previousContextRef.current = [...sessionContext];
+      previousContextLengthRef.current = sessionContext.length;
+      console.log('🔄 Session loaded - initialized context refs:', { 
+        contextLength: sessionContext.length,
+        refLength: previousContextLengthRef.current 
+      });
+    } else {
+      // When session is cleared, reset the refs
+      previousContextRef.current = [];
+      previousContextLengthRef.current = 0;
+      console.log('🔄 Session cleared - reset context refs');
     }
-  }, [activeSessionId]);
+  }, [activeSessionId]); // Only depend on activeSessionId, NOT sessionContext.length
+  
+  // Track context changes for animation indicator
+  // Works even when sidebar is open but no session is loaded
+  // Only shows indicator when items are ADDED, not removed
+  // This effect MUST run after the session initialization effect
+  useEffect(() => {
+    const currentLength = sessionContext.length;
+    const previousLength = previousContextLengthRef.current;
+    
+    console.log('🔍 Context tracking effect:', { currentLength, previousLength, activeSessionId });
+    
+    // Only trigger if length INCREASED (items were added)
+    // This includes the first item (0 -> 1)
+    if (currentLength > previousLength) {
+      console.log('✅ Context length increased - showing indicator');
+      // Context items added - show indicator (works with or without active session)
+      setShowContextIndicator(true);
+      previousContextLengthRef.current = currentLength;
+      // Hide indicator after animation completes (3 seconds for 3 flashes)
+      const timer = setTimeout(() => {
+        setShowContextIndicator(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    } else if (currentLength < previousLength) {
+      // Items were removed - update ref but don't show indicator
+      console.log('📉 Context length decreased - updating ref only');
+      previousContextLengthRef.current = currentLength;
+    } else if (currentLength === 0 && previousLength > 0) {
+      // Reset when context is cleared
+      console.log('🔄 Context cleared - resetting ref');
+      previousContextLengthRef.current = 0;
+    } else {
+      console.log('➡️ Context length unchanged or initialized');
+    }
+  }, [sessionContext.length, activeSessionId]);
   
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
@@ -388,6 +408,9 @@ const GlobalChatSidebar: React.FC = () => {
   const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false);
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
+  const [shareMenuAnchor, setShareMenuAnchor] = useState<null | HTMLElement>(null);
+  const [importExportDialogOpen, setImportExportDialogOpen] = useState(false);
+  const [importExportMode, setImportExportMode] = useState<'import' | 'export'>('export');
   const handleSidebarRemoveContextItem = useCallback(async (index: number) => {
     const newContext = sessionContext.filter((_, i) => i !== index);
     setSessionContext(newContext);
@@ -416,6 +439,36 @@ const GlobalChatSidebar: React.FC = () => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Animation state for context and files indicators
+  const [showContextIndicator, setShowContextIndicator] = useState(false);
+  const [showFilesIndicator, setShowFilesIndicator] = useState(false);
+  const previousContextLengthRef = useRef<number>(0);
+  const previousFilesLengthRef = useRef<number>(0);
+  
+  // Track files changes for animation indicator (must be after uploadedFiles declaration)
+  // Only shows indicator when files are ADDED, not removed
+  useEffect(() => {
+    const currentLength = uploadedFiles.length;
+    const previousLength = previousFilesLengthRef.current;
+    
+    if (activeSessionId && currentLength > previousLength) {
+      // Files added - show indicator
+      setShowFilesIndicator(true);
+      previousFilesLengthRef.current = currentLength;
+      // Hide indicator after animation completes (3 seconds for 3 flashes)
+      const timer = setTimeout(() => {
+        setShowFilesIndicator(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    } else if (activeSessionId && currentLength < previousLength) {
+      // Files were removed - update ref but don't show indicator
+      previousFilesLengthRef.current = currentLength;
+    } else if (!activeSessionId) {
+      // Reset when session is cleared
+      previousFilesLengthRef.current = 0;
+    }
+  }, [uploadedFiles.length, activeSessionId]);
   // COMMENTED OUT: Old WebSocket ref (replaced by messaging service)
   // const sidebarWebSocketRef = useRef<WebSocket | null>(null);
   
@@ -1405,19 +1458,8 @@ const GlobalChatSidebar: React.FC = () => {
       const contextItem = event.detail;
       console.log('📌 Adding item to sidebar context:', contextItem);
       
-      if (!activeSessionId) {
-        console.warn('⚠️ No active sidebar session, cannot add context');
-        // Dispatch error event for fallback handling
-        const errorEvent = new CustomEvent('sidebar-context-error', {
-          detail: { reason: 'no-active-session', contextItem }
-        });
-        window.dispatchEvent(errorEvent);
-        return;
-      }
-      
-      // Add to current session context
-      // Adding context item
-      
+      // Add to context even if there's no active session
+      // Session will be created when user sends first message
       // Update previous context ref to mark that context has changed
       // This ensures the next message will send context data
       previousContextRef.current = sessionContext; // Keep the old context for change detection
@@ -1428,7 +1470,7 @@ const GlobalChatSidebar: React.FC = () => {
       console.log('🎯 Sidebar: Context change detection scenario completed - context data is ready for next message');
       // Context items added
       
-      console.log('✅ Added to sidebar context');
+      console.log('✅ Added to sidebar context', activeSessionId ? '(with active session)' : '(no session yet - will create on first message)');
       console.log('📌 Context item data:', JSON.stringify(contextItem, null, 2));
       
       // Dispatch success event for feedback
@@ -1437,14 +1479,9 @@ const GlobalChatSidebar: React.FC = () => {
       });
       window.dispatchEvent(successEvent);
       
-      // Notify ChatPage of context change AFTER change detection is set up
-      const syncEvent = new CustomEvent('session-context-updated', {
-        detail: { sessionId: activeSessionId, contextItems: newContext }
-      });
-      window.dispatchEvent(syncEvent);
-      
-      // Persist the updated context to backend immediately
-      if (user?.id) {
+      // Only persist to backend if there's an active session
+      // If no session, it will be persisted when session is created on first message
+      if (activeSessionId && user?.id) {
         try {
           await sessionManagementAPI.updateSession(activeSessionId, user.id, {
             session_variables: {
@@ -1453,9 +1490,20 @@ const GlobalChatSidebar: React.FC = () => {
             }
           });
           console.log('✅ Persisted context to backend');
+          
+          // Notify ChatPage of context change AFTER a small delay
+          // This ensures the tracking effect has time to detect the addition and show the indicator
+          setTimeout(() => {
+            const syncEvent = new CustomEvent('session-context-updated', {
+              detail: { sessionId: activeSessionId, contextItems: newContext }
+            });
+            window.dispatchEvent(syncEvent);
+          }, 100);
         } catch (error) {
           console.error('❌ Failed to persist context to backend:', error);
         }
+      } else {
+        console.log('ℹ️ Context stored locally - will be persisted when session is created');
       }
     };
 
@@ -1463,20 +1511,11 @@ const GlobalChatSidebar: React.FC = () => {
       const contextItems = event.detail;
       console.log(`📌 Adding ${contextItems.length} items to sidebar context:`, contextItems);
       
-      if (!activeSessionId) {
-        console.warn('⚠️ No active sidebar session, cannot add context');
-        // Dispatch error event for fallback handling
-        const errorEvent = new CustomEvent('sidebar-context-error', {
-          detail: { reason: 'no-active-session', contextItems }
-        });
-        window.dispatchEvent(errorEvent);
-        return;
-      }
-      
-      // Add all items to current session context
+      // Add all items to context even if there's no active session
+      // Session will be created when user sends first message
       const newContext = [...sessionContext, ...contextItems];
       setSessionContext(newContext);
-      console.log(`✅ Added ${contextItems.length} items to sidebar context`);
+      console.log(`✅ Added ${contextItems.length} items to sidebar context`, activeSessionId ? '(with active session)' : '(no session yet - will create on first message)');
       
       // Dispatch success event for feedback
       const successEvent = new CustomEvent('sidebar-context-success', {
@@ -1484,14 +1523,9 @@ const GlobalChatSidebar: React.FC = () => {
       });
       window.dispatchEvent(successEvent);
       
-      // Notify ChatPage of context change
-      const syncEvent = new CustomEvent('session-context-updated', {
-        detail: { sessionId: activeSessionId, contextItems: newContext }
-      });
-      window.dispatchEvent(syncEvent);
-      
-      // Persist the updated context to backend immediately
-      if (user?.id) {
+      // Only persist to backend if there's an active session
+      // If no session, it will be persisted when session is created on first message
+      if (activeSessionId && user?.id) {
         try {
           await sessionManagementAPI.updateSession(activeSessionId, user.id, {
             session_variables: {
@@ -1500,9 +1534,20 @@ const GlobalChatSidebar: React.FC = () => {
             }
           });
           console.log('✅ Persisted context to backend');
+          
+          // Notify ChatPage of context change AFTER a small delay
+          // This ensures the tracking effect has time to detect the addition and show the indicator
+          setTimeout(() => {
+            const syncEvent = new CustomEvent('session-context-updated', {
+              detail: { sessionId: activeSessionId, contextItems: newContext }
+            });
+            window.dispatchEvent(syncEvent);
+          }, 100);
         } catch (error) {
           console.error('❌ Failed to persist context to backend:', error);
         }
+      } else {
+        console.log('ℹ️ Context stored locally - will be persisted when session is created');
       }
     };
 
@@ -1513,7 +1558,7 @@ const GlobalChatSidebar: React.FC = () => {
       window.removeEventListener('add-to-sidebar-context', handleAddToSidebarContext as any);
       window.removeEventListener('add-multiple-to-sidebar-context', handleAddMultipleToSidebarContext as any);
     };
-  }, [activeSessionId, sessionContext, user?.id]);
+  }, [activeSessionId, sessionContext, user?.id, isVisible, setIsVisible]);
 
   // Listen for context updates from ChatPage
   useEffect(() => {
@@ -1522,9 +1567,16 @@ const GlobalChatSidebar: React.FC = () => {
       console.log('🔄 Sidebar: Received context sync from ChatPage:', { sessionId, itemCount: contextItems.length });
       
       if (sessionId === activeSessionId) {
-        // Don't update previousContextRef here - it should already be set correctly
-        // The context sync is just synchronizing the state, not adding new items
-        // Context sync - no update needed
+        const currentLength = sessionContext.length;
+        const syncLength = contextItems.length;
+        
+        // Only update the ref if the lengths are the same (we're just syncing, not adding)
+        // If sync length is different, let the tracking effect handle it
+        if (currentLength === syncLength) {
+          // Update the length ref to match the synced context
+          // This prevents the tracking effect from thinking items were added when we're just syncing
+          previousContextLengthRef.current = syncLength;
+        }
         
         setSessionContext(contextItems);
         console.log('✅ Sidebar: Synced context from ChatPage');
@@ -1536,7 +1588,7 @@ const GlobalChatSidebar: React.FC = () => {
     return () => {
       window.removeEventListener('session-context-updated', handleContextSync as any);
     };
-  }, [activeSessionId]);
+  }, [activeSessionId, sessionContext.length]);
 
   // Handle session variables updates (e.g., new files uploaded)
   useEffect(() => {
@@ -1904,44 +1956,109 @@ const GlobalChatSidebar: React.FC = () => {
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+          {/* Share Menu Button */}
+          <Tooltip title="Share Chat Session">
+            <IconButton
+              size="small"
+              onClick={(e) => setShareMenuAnchor(e.currentTarget)}
+              disabled={!activeSessionId}
+              sx={{
+                color: '#9ca3af',
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+                '&:disabled': {
+                  color: '#475569',
+                },
+              }}
+            >
+              <ShareIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
           {/* Open Files side panel */}
-          <IconButton
-            size="small"
-            onClick={() => {
-              setIsFilesPanelOpen((v) => !v);
-              // ensure other panel closes if desired
-              if (!isFilesPanelOpen) setIsContextPanelOpen(false);
-            }}
-            title={isFilesPanelOpen ? 'Hide Files' : 'Show Files'}
-            sx={{
-              color: '#3b82f6',
-              '&:hover': {
-                color: '#60a5fa',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              },
-            }}
-          >
-            <FileIcon fontSize="small" />
-          </IconButton>
+          <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <IconButton
+              size="small"
+              onClick={() => {
+                setIsFilesPanelOpen((v) => !v);
+                // ensure other panel closes if desired
+                if (!isFilesPanelOpen) setIsContextPanelOpen(false);
+              }}
+              title={isFilesPanelOpen ? 'Hide Files' : 'Show Files'}
+              sx={{
+                color: '#3b82f6',
+                '&:hover': {
+                  color: '#60a5fa',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              <FileIcon fontSize="small" />
+            </IconButton>
+            {/* Flashing dot indicator for files */}
+            {showFilesIndicator && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  bottom: -4,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#3b82f6',
+                  animation: 'flash 1s ease-in-out 3',
+                  '@keyframes flash': {
+                    '0%, 100%': { opacity: 1 },
+                    '50%': { opacity: 0.3 },
+                  },
+                }}
+              />
+            )}
+          </Box>
           {/* Open Context side panel */}
-          <IconButton
-            size="small"
-            onClick={() => {
-              setIsContextPanelOpen((v) => !v);
-              if (!isContextPanelOpen) setIsFilesPanelOpen(false);
-            }}
-            title={isContextPanelOpen ? 'Hide Context' : 'Show Context'}
-            sx={{
-              color: '#10b981',
-              '&:hover': {
-                color: '#34d399',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-              },
-            }}
-          >
-            <ContextIcon fontSize="small" />
-          </IconButton>
+          <Box sx={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <IconButton
+              size="small"
+              onClick={() => {
+                setIsContextPanelOpen((v) => !v);
+                if (!isContextPanelOpen) setIsFilesPanelOpen(false);
+              }}
+              title={isContextPanelOpen ? 'Hide Context' : 'Show Context'}
+              sx={{
+                color: '#10b981',
+                '&:hover': {
+                  color: '#34d399',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              <ContextIcon fontSize="small" />
+            </IconButton>
+            {/* Flashing dot indicator for context */}
+            {showContextIndicator && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  bottom: -4,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#10b981',
+                  animation: 'flash 1s ease-in-out 3',
+                  '@keyframes flash': {
+                    '0%, 100%': { opacity: 1 },
+                    '50%': { opacity: 0.3 },
+                  },
+                }}
+              />
+            )}
+          </Box>
           {activeSessionId && (
             <IconButton
               size="small"
@@ -2312,7 +2429,9 @@ const GlobalChatSidebar: React.FC = () => {
                 let result;
                 if (uploadedFiles.length > 0) {
                   result = await sendUnifiedFileMessage(text, uploadedFiles as unknown as File[], selectedModel);
-                } else if (sessionContext.length > 0 && hasContextChanged()) {
+                } else if (sessionContext.length > 0) {
+                  // If we have context items, always send as context message
+                  // This will create a session if one doesn't exist
                   result = await sendUnifiedContextMessage(text, sessionContext, selectedModel, activeSessionId || undefined);
                   previousContextRef.current = [...sessionContext];
                 } else if (activeSessionId) {
@@ -2353,13 +2472,39 @@ const GlobalChatSidebar: React.FC = () => {
                     // Broadcast loading state for the new session
                     unifiedMessageHandler.broadcastLoadingState(result.sessionId, true, 'sidebar');
                     
+                    // If we have context items, persist them to the new session
+                    if (sessionContext.length > 0 && user?.id) {
+                      try {
+                        await sessionManagementAPI.updateSession(result.sessionId, user.id, {
+                          session_variables: {
+                            context_items: sessionContext,
+                            context_added_at: Date.now(),
+                          }
+                        });
+                        console.log('✅ Persisted context items to new session');
+                      } catch (error) {
+                        console.error('❌ Failed to persist context to new session:', error);
+                      }
+                    }
+                    
+                    // CRITICAL: Get cached messages BEFORE updating sessionId to preserve them
+                    const cachedMessagesBeforeUpdate = unifiedMessageHandler.getMessagesForSession(result.sessionId);
+                    console.log(`📨 Sidebar: Found ${cachedMessagesBeforeUpdate.length} cached messages before session update`);
+                    
                     // CRITICAL: Update activeSessionId FIRST to ensure subscription is set up
                     // before we try to display messages
                     setActiveSessionId(result.sessionId);
                     
+                    // CRITICAL: Immediately notify subscribers with cached messages to ensure they display
+                    // This must happen before waiting for React to process state updates
+                    if (cachedMessagesBeforeUpdate.length > 0) {
+                      unifiedMessageHandler.notifyMessageUpdate(result.sessionId, cachedMessagesBeforeUpdate);
+                      console.log(`🔄 Sidebar: Immediately notified subscribers with ${cachedMessagesBeforeUpdate.length} cached messages`);
+                    }
+                    
                     // CRITICAL: Wait for React to process the state update and for useUnifiedMessaging
                     // to set up the subscription and load messages from cache
-                    await new Promise(resolve => setTimeout(resolve, 50));
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     
                     // Notify ChatPage that a new session was created (matching ChatPage pattern)
                     // This ensures ChatPage can update its session list
@@ -2372,8 +2517,8 @@ const GlobalChatSidebar: React.FC = () => {
                     });
                     window.dispatchEvent(newSessionEvent);
                     
-                    // Get cached messages BEFORE loading from database to ensure we preserve them
-                    const cachedMessagesBeforeLoad = unifiedMessageHandler.getMessagesForSession(result.sessionId);
+                    // Get cached messages again after subscription is set up
+                    const cachedMessagesAfterWait = unifiedMessageHandler.getMessagesForSession(result.sessionId);
                     
                     // Load session - this will merge any cached messages with backend messages
                     // For new sessions, the message is already in unifiedMessageHandler cache
@@ -2386,12 +2531,12 @@ const GlobalChatSidebar: React.FC = () => {
                     const cachedMessagesAfterLoad = unifiedMessageHandler.getMessagesForSession(result.sessionId);
                     const messagesToDisplay = cachedMessagesAfterLoad.length > 0 
                       ? cachedMessagesAfterLoad 
-                      : cachedMessagesBeforeLoad;
+                      : (cachedMessagesAfterWait.length > 0 ? cachedMessagesAfterWait : cachedMessagesBeforeUpdate);
                     
                     if (messagesToDisplay.length > 0) {
                       // Force a notification to ensure all subscribers get the update
                       unifiedMessageHandler.notifyMessageUpdate(result.sessionId, messagesToDisplay);
-                      console.log(`🔄 Sidebar: Forced message update for new session, ${messagesToDisplay.length} messages`);
+                      console.log(`🔄 Sidebar: Final forced message update for new session, ${messagesToDisplay.length} messages`);
                     }
                     
                     // Reset sync tracking for the new session
@@ -2596,6 +2741,104 @@ const GlobalChatSidebar: React.FC = () => {
         </List>
       </Box>
     </Drawer>
+
+    {/* Share Menu */}
+    <Menu
+      anchorEl={shareMenuAnchor}
+      open={Boolean(shareMenuAnchor)}
+      onClose={() => setShareMenuAnchor(null)}
+      anchorOrigin={{
+        vertical: 'bottom',
+        horizontal: 'left',
+      }}
+      transformOrigin={{
+        vertical: 'top',
+        horizontal: 'left',
+      }}
+      PaperProps={{
+        sx: {
+          backgroundColor: '#1f2937',
+          border: '1px solid #374151',
+          minWidth: 200,
+          mt: 0.5,
+        },
+      }}
+    >
+      <MenuItem
+        onClick={() => {
+          setShareMenuAnchor(null);
+          setImportExportMode('export');
+          setImportExportDialogOpen(true);
+        }}
+        sx={{
+          color: '#e5e7eb',
+          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+        }}
+      >
+        <ListItemIcon>
+          <LinkIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+        </ListItemIcon>
+        <ListItemText>Share Link</ListItemText>
+      </MenuItem>
+      <MenuItem
+        onClick={() => {
+          setShareMenuAnchor(null);
+          setImportExportMode('import');
+          setImportExportDialogOpen(true);
+        }}
+        sx={{
+          color: '#e5e7eb',
+          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+        }}
+      >
+        <ListItemIcon>
+          <UploadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+        </ListItemIcon>
+        <ListItemText>Import Chat</ListItemText>
+      </MenuItem>
+      <MenuItem
+        onClick={async () => {
+          setShareMenuAnchor(null);
+          if (!activeSessionId || !user?.id) return;
+          try {
+            const response = await sessionManagementAPI.shareSession(activeSessionId, user.id, 'download');
+            if (response.success && response.downloadUrl) {
+              const link = document.createElement('a');
+              link.href = response.downloadUrl;
+              link.download = `${currentSession?.title || 'chat-session'}.cosine`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }
+          } catch (error) {
+            console.error('Error downloading chat session:', error);
+          }
+        }}
+        sx={{
+          color: '#e5e7eb',
+          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+        }}
+      >
+        <ListItemIcon>
+          <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+        </ListItemIcon>
+        <ListItemText>Download as .cosine</ListItemText>
+      </MenuItem>
+    </Menu>
+
+    {/* Import/Export Dialog */}
+    <ChatImportExportDialog
+      open={importExportDialogOpen}
+      onClose={() => setImportExportDialogOpen(false)}
+      mode={importExportMode}
+      sessionId={activeSessionId || undefined}
+      sessionTitle={currentSession?.title}
+      userId={user?.id || ''}
+      onImportSuccess={(newSessionId) => {
+        setActiveSessionId(newSessionId);
+        // The session will be loaded automatically by the useEffect that watches activeSessionId
+      }}
+    />
     </>
   );
 };

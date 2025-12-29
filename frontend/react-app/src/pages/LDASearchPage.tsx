@@ -36,7 +36,6 @@ import {
   KeyboardArrowRight as KeyboardArrowRightIcon,
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
 } from '@mui/icons-material';
@@ -694,7 +693,7 @@ const LDASearchPage: React.FC = () => {
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedFilingObjects = currentResults.filter(filing => 
       selectedFilings.has(filing.id || filing.filing_uuid || '')
     );
@@ -703,9 +702,9 @@ const LDASearchPage: React.FC = () => {
 
     // Add to context using the context manager functions
     if (selectedFilingObjects.length === 1) {
-      addLDAFilingToContext(selectedFilingObjects[0], target);
+      addLDAFilingToContext(selectedFilingObjects[0]);
     } else {
-      addMultipleLDAFilingsToContext(selectedFilingObjects, target);
+      addMultipleLDAFilingsToContext(selectedFilingObjects);
     }
 
     setSelectedFilings(new Set());
@@ -2666,13 +2665,9 @@ const LDASearchPage: React.FC = () => {
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')} sx={{ color: '#10b981', fontWeight: 600 }}>
-          <NewChatIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')} sx={{ color: '#3b82f6', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
           <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />

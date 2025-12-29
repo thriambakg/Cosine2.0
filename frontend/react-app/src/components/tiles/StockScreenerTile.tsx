@@ -41,7 +41,6 @@ import {
   AttachMoney as MoneyIcon,
   Speed as SpeedIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   ViewColumn as ViewColumnIcon,
   ExpandMore as ExpandMoreIcon,
@@ -925,7 +924,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     if (selectedStocks.length === 0) return;
     
     // Get the selected stock objects from filteredResults state
@@ -933,7 +932,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       selectedStocks.includes(stock.symbol)
     );
     
-    console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context (target: ${target})`);
+    console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context`);
     
     // Prepare stock data for batch addition
     const stocksToAdd = selectedStockObjects.map(stock => {
@@ -969,7 +968,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     
     // Use batch addition for multiple stocks, single addition for one stock
     if (stocksToAdd.length > 1) {
-      addMultipleStocksToContext(stocksToAdd, target);
+      addMultipleStocksToContext(stocksToAdd);
       console.log(`✅ Added ${stocksToAdd.length} stocks to context in batch`);
     } else if (stocksToAdd.length === 1) {
       const stock = stocksToAdd[0];
@@ -977,8 +976,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         stock.symbol,
         stock.name,
         stock.timeframe,
-        stock.stockData,
-        target
+        stock.stockData
       );
       console.log(`✅ Added stock to context: ${stock.symbol}`);
     }
@@ -1755,13 +1753,9 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')}>
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+        <MenuItem onClick={handleAddToContext}>
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem onClick={handleAddToFiles}>
           <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />

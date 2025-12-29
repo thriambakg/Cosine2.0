@@ -41,7 +41,6 @@ import {
   FilterList as FilterIcon,
   ExpandMore as ExpandMoreIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   ViewColumn as ViewColumnIcon,
   Stop as StopIcon,
@@ -1085,7 +1084,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedResultObjects = currentResults.filter(result => 
       selectedResults.has(result.accession)
     );
@@ -1096,9 +1095,9 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     // For single filing, use the same format as parent page: "Form - Entity"
     // For multiple filings, each gets its own context item with proper formatting
     if (selectedResultObjects.length === 1) {
-      addFilingToContext(selectedResultObjects[0], target);
+      addFilingToContext(selectedResultObjects[0]);
     } else {
-      addMultipleFilingsToContext(selectedResultObjects, target);
+      addMultipleFilingsToContext(selectedResultObjects);
     }
 
     setSelectedResults(new Set());
@@ -2872,13 +2871,9 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')} sx={{ color: '#10b981', fontWeight: 600 }}>
-          <ListItemIcon><NewChatIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /></ListItemIcon>
-          <ListItemText primary="Add to New Chat" />
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')} sx={{ color: '#3b82f6', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
-          <ListItemText primary="Add to Current Sidebar Chat" />
+          <ListItemText primary="Add to Context" />
         </MenuItem>
         <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>

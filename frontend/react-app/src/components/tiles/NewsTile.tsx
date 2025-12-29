@@ -42,7 +42,6 @@ import {
   Article as ArticleIcon,
   Launch as LaunchIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
@@ -883,7 +882,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedArticleObjects = currentResults.filter(article => 
       selectedArticles.has(article.id)
     );
@@ -897,8 +896,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         article.id,
         article.title,
         article.source_name || article.source_url || 'Unknown',
-        article,
-        target
+        article
       );
     } else {
       addMultipleArticlesToContext(
@@ -907,8 +905,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
           title: article.title,
           source: article.source_name || article.source_url || 'Unknown',
           articleData: article,
-        })),
-        target
+        }))
       );
     }
 
@@ -1940,13 +1937,9 @@ const NewsTile: React.FC<NewsTileProps> = ({
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')} sx={{ color: '#10b981', fontWeight: 600 }}>
-          <ListItemIcon><NewChatIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /></ListItemIcon>
-          <ListItemText primary="Add to New Chat" />
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')} sx={{ color: '#3b82f6', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
-          <ListItemText primary="Add to Current Sidebar Chat" />
+          <ListItemText primary="Add to Context" />
         </MenuItem>
         <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>

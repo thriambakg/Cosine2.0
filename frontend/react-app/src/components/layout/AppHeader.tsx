@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -16,7 +16,6 @@ import {
   Menu as MenuIcon,
   NavigateNext as NavigateNextIcon,
   AccessTime as ClockIcon,
-  Dashboard as ContextIcon,
   Chat as ChatIcon,
   ViewColumn as DualScreenIcon,
 } from '@mui/icons-material';
@@ -24,7 +23,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { toggleSidebar } from '../../store/slices/navigationSlice';
 import { useAuth } from '../../contexts/AuthContext';
-import { useContextWindow } from '../../contexts/ContextWindowContext';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 
@@ -34,7 +32,6 @@ export default function AppHeader() {
   // const location = useLocation(); // Removed unused variable
   const dispatch = useAppDispatch();
   const { user, logout } = useAuth();
-  const { isVisible: isContextVisible, setIsVisible: setContextVisible } = useContextWindow();
   const { isVisible: isGlobalChatVisible, toggle: toggleGlobalChat } = useGlobalChat();
   const { isDualScreenMode, toggleDualScreenMode } = useDualScreenMode();
   
@@ -43,8 +40,30 @@ export default function AppHeader() {
     const saved = localStorage.getItem('floating-clock-visible');
     return saved ? JSON.parse(saved) : false; // Default to hidden
   });
+  const [shouldJump, setShouldJump] = useState(false);
   
   const { breadcrumbs } = useAppSelector((state) => state.navigation);
+  
+  // Listen for context additions when sidebar is closed - trigger jump animation
+  useEffect(() => {
+    const handleSidebarContextSuccess = (_event: CustomEvent) => {
+      // Only jump if sidebar is not visible
+      if (!isGlobalChatVisible) {
+        setShouldJump(true);
+        // Reset after animation completes (4 jumps * 0.75s each = 3s, add buffer)
+        const timer = setTimeout(() => {
+          setShouldJump(false);
+        }, 3200);
+        return () => clearTimeout(timer);
+      }
+    };
+
+    window.addEventListener('sidebar-context-success', handleSidebarContextSuccess as EventListener);
+
+    return () => {
+      window.removeEventListener('sidebar-context-success', handleSidebarContextSuccess as EventListener);
+    };
+  }, [isGlobalChatVisible]);
 
   const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -72,10 +91,6 @@ export default function AppHeader() {
     window.dispatchEvent(new CustomEvent('clock-visibility-changed', { 
       detail: { isVisible: newVisibility } 
     }));
-  };
-
-  const handleContextToggle = () => {
-    setContextVisible(!isContextVisible);
   };
 
   return (
@@ -218,31 +233,8 @@ export default function AppHeader() {
             </Box>
           </Box>
 
-          {/* Right Section - Context + Clock + Notifications + Profile */}
+          {/* Right Section - Clock + Notifications + Profile */}
           <Box display="flex" alignItems="center" gap={1}>
-            <IconButton
-              color="inherit"
-              onClick={handleContextToggle}
-              sx={{
-                color: isContextVisible ? '#3b82f6' : '#8b8b8b',
-                backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                width: 44,
-                height: 44,
-                borderRadius: '8px',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  color: isContextVisible ? '#60a5fa' : '#ffffff',
-                  transform: 'translateY(-1px)',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                },
-              }}
-            >
-              <ContextIcon />
-            </IconButton>
-            
             <IconButton
               color="inherit"
               onClick={toggleGlobalChat}
@@ -254,11 +246,18 @@ export default function AppHeader() {
                 height: 44,
                 borderRadius: '8px',
                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                animation: shouldJump ? 'jump 0.75s ease-in-out 4' : 'none',
+                '@keyframes jump': {
+                  '0%, 100%': { transform: 'translateY(0)' },
+                  '25%': { transform: 'translateY(-8px)' },
+                  '50%': { transform: 'translateY(0)' },
+                  '75%': { transform: 'translateY(-8px)' },
+                },
                 '&:hover': {
                   backgroundColor: 'rgba(255, 255, 255, 0.1)',
                   border: '1px solid rgba(255, 255, 255, 0.2)',
                   color: isGlobalChatVisible ? '#34d399' : '#ffffff',
-                  transform: 'translateY(-1px)',
+                  transform: shouldJump ? undefined : 'translateY(-1px)',
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                 },
               }}

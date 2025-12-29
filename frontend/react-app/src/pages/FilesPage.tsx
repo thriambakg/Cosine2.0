@@ -37,7 +37,6 @@ import {
   Visibility as ViewIcon,
   ArrowBack as ArrowBackIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import FilePreviewDialog from '@/components/common/FilePreviewDialog';
@@ -1596,21 +1595,7 @@ const FilesPage: React.FC = () => {
                 {selectedItems.size > 0 && (
                   <ListItemSecondaryAction>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <Tooltip title="Add to New Chat">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleBulkAddToContext('new')}
-                          sx={{
-                            color: '#10b981',
-                            '&:hover': {
-                              backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                            },
-                          }}
-                        >
-                          <NewChatIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Add to Sidebar Chat">
+                      <Tooltip title="Add to Context">
                         <IconButton
                           size="small"
                           onClick={() => handleBulkAddToContext('sidebar')}
@@ -2111,13 +2096,9 @@ const FilesPage: React.FC = () => {
         )}
         {selectedItem && (
           <>
-            <MenuItem onClick={() => handleAddItemToContext(selectedItem, 'new')}>
-              <NewChatIcon sx={{ mr: 1.5, fontSize: 18, color: '#10b981' }} />
-              Add to New Chat
-            </MenuItem>
             <MenuItem onClick={() => handleAddItemToContext(selectedItem, 'sidebar')}>
               <SidebarChatIcon sx={{ mr: 1.5, fontSize: 18, color: '#3b82f6' }} />
-              Add to Sidebar Chat
+              Add to Context
             </MenuItem>
           </>
         )}

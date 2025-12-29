@@ -36,7 +36,6 @@ import {
   Visibility as VisibilityIcon,
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   Folder as FolderIcon,
 } from '@mui/icons-material';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
@@ -52,7 +51,7 @@ import { policyAreaSuggestionsService } from '../services/policyAreaSuggestions'
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
-import { addToContext } from '../components/tiles/common/contextManager';
+import { addBillToContext, addMultipleBillsToContext } from '../components/tiles/common/contextManager';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -689,58 +688,19 @@ const CongressBillsSearchPage: React.FC = () => {
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedBillObjects = currentResults.filter(bill => 
       selectedBills.has(bill.bill_id)
     );
 
     if (selectedBillObjects.length === 0) return;
 
-    // Format date helper
-    const formatDate = (dateString?: string): string => {
-      if (!dateString) return '';
-      try {
-        // Parse date string directly to avoid timezone conversion issues
-        const [year, month, day] = dateString.split('T')[0].split('-');
-        const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        return date.toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short', 
-          day: 'numeric' 
-        });
-      } catch {
-        return dateString;
-      }
-    };
-
-    // Add bills to context
-    selectedBillObjects.forEach((bill) => {
-      const billId = bill.bill_id || `bill_${Date.now()}`;
-      const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
-      const subtitle = bill.introduced_date 
-        ? `${formatDate(bill.introduced_date)}${bill.sponsor_name ? ` • ${bill.sponsor_name}` : ''}${bill.congress ? ` • ${bill.congress}th Congress` : ''}`
-        : bill.sponsor_name ? bill.sponsor_name : 'Congress Bill';
-      
-      const contextItem = {
-        id: `congress_bill_${billId}_${Date.now()}`,
-        type: 'congress_bill' as const,
-        title,
-        subtitle,
-        data: bill,
-        timestamp: Date.now(),
-      };
-
-      if (target === 'sidebar') {
-        // Add to current sidebar session's context
-        const event = new CustomEvent('add-to-sidebar-context', {
-          detail: contextItem
-        });
-        window.dispatchEvent(event);
-      } else {
-        // Add to new chat
-        addToContext(contextItem);
-      }
-    });
+    // Add bills to context using the context manager functions
+    if (selectedBillObjects.length === 1) {
+      addBillToContext(selectedBillObjects[0]);
+    } else {
+      addMultipleBillsToContext(selectedBillObjects);
+    }
 
     setSelectedBills(new Set());
     handleContextMenuClose();
@@ -2759,18 +2719,11 @@ const CongressBillsSearchPage: React.FC = () => {
         }}
       >
         <MenuItem
-          onClick={() => handleAddToContext('new')}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem
-          onClick={() => handleAddToContext('sidebar')}
+          onClick={handleAddToContext}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem
           onClick={handleAddToFiles}

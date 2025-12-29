@@ -34,7 +34,6 @@ import {
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   Launch as LaunchIcon,
   Folder as FolderIcon,
 } from '@mui/icons-material';
@@ -444,7 +443,7 @@ const NewsSearchPage: React.FC = () => {
     setContextMenuAnchor(null);
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedArticleObjects = currentResults.filter(article => 
       selectedArticles.has(article.id)
     );
@@ -458,8 +457,7 @@ const NewsSearchPage: React.FC = () => {
         article.id,
         article.title,
         article.source_name || article.source_url || 'Unknown',
-        article,
-        target
+        article
       );
     } else {
       addMultipleArticlesToContext(
@@ -468,8 +466,7 @@ const NewsSearchPage: React.FC = () => {
           title: article.title,
           source: article.source_name || article.source_url || 'Unknown',
           articleData: article,
-        })),
-        target
+        }))
       );
     }
 
@@ -1830,13 +1827,9 @@ const NewsSearchPage: React.FC = () => {
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')} sx={{ color: '#10b981', fontWeight: 600 }}>
-          <NewChatIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')} sx={{ color: '#3b82f6', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
           <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />

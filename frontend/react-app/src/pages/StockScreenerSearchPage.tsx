@@ -30,7 +30,6 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
   Visibility as VisibilityIcon,
@@ -644,7 +643,7 @@ const StockScreenerSearchPage: React.FC = () => {
     setContextMenuAnchor(null);
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     if (selectedStocks.size === 0) return;
     
     const selectedStockObjects = filteredResults.filter(stock => 
@@ -674,15 +673,14 @@ const StockScreenerSearchPage: React.FC = () => {
     });
     
     if (stocksToAdd.length > 1) {
-      addMultipleStocksToContext(stocksToAdd, target);
+      addMultipleStocksToContext(stocksToAdd);
     } else if (stocksToAdd.length === 1) {
       const stock = stocksToAdd[0];
       addStockToContext(
         stock.symbol,
         stock.name,
         stock.timeframe,
-        stock.stockData,
-        target
+        stock.stockData
       );
     }
     
@@ -1863,13 +1861,9 @@ const StockScreenerSearchPage: React.FC = () => {
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')}>
-          <NewChatIcon sx={{ mr: 1, color: '#3b82f6' }} />
-          <Typography sx={{ color: '#f1f5f9' }}>New Chat</Typography>
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+        <MenuItem onClick={handleAddToContext}>
           <SidebarChatIcon sx={{ mr: 1, color: '#3b82f6' }} />
-          <Typography sx={{ color: '#f1f5f9' }}>Sidebar Chat</Typography>
+          <Typography sx={{ color: '#f1f5f9' }}>Add to Context</Typography>
         </MenuItem>
       </Menu>
 

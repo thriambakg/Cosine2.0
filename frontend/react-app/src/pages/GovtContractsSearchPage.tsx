@@ -32,7 +32,6 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
   Folder as FolderIcon,
@@ -852,7 +851,7 @@ const GovtContractsSearchPage: React.FC = () => {
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedAwardObjects = currentResults.filter(award => 
       selectedAwards.has(award.award_id)
     );
@@ -860,9 +859,9 @@ const GovtContractsSearchPage: React.FC = () => {
     if (selectedAwardObjects.length === 0) return;
 
     if (selectedAwardObjects.length === 1) {
-      addAwardToContext(selectedAwardObjects[0], target);
+      addAwardToContext(selectedAwardObjects[0]);
     } else {
-      addMultipleAwardsToContext(selectedAwardObjects, target);
+      addMultipleAwardsToContext(selectedAwardObjects);
     }
 
     setSelectedAwards(new Set());
@@ -3150,18 +3149,11 @@ const GovtContractsSearchPage: React.FC = () => {
         }}
       >
         <MenuItem
-          onClick={() => handleAddToContext('new')}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem
-          onClick={() => handleAddToContext('sidebar')}
+          onClick={handleAddToContext}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem
           onClick={handleAddToFiles}

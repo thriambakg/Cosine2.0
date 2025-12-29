@@ -24,7 +24,6 @@ import {
   Refresh as RefreshIcon,
   ArrowBack as ArrowBackIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Folder as FolderIcon,
 } from '@mui/icons-material';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
@@ -288,7 +287,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   }, [data, enrichmentLoading, user_id, onEnrich]);
 
   // Handle adding item to context (sidebar)
-  const handleAddToContext = useCallback((target: 'new' | 'sidebar') => {
+  const handleAddToContext = useCallback(() => {
     const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
     
     if (!itemData) return;
@@ -296,30 +295,29 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     try {
       switch (itemType) {
         case 'govt_contract':
-          addAwardToContext(itemData, target);
+          addAwardToContext(itemData);
           break;
         case 'sec_filing':
-          addFilingToContext(itemData, target);
+          addFilingToContext(itemData);
           break;
         case 'news_article':
-          addArticleToContext(itemData.id, itemData.title, itemData.source_name || itemData.source_url || 'Unknown', itemData, target);
+          addArticleToContext(itemData.id, itemData.title, itemData.source_name || itemData.source_url || 'Unknown', itemData);
           break;
         case 'politician_trade':
-          addTradeToContext(itemData, target);
+          addTradeToContext(itemData);
           break;
         case 'congress_bill':
-          addBillToContext(itemData, target);
+          addBillToContext(itemData);
           break;
         case 'lda_disclosure':
-          addLDAFilingToContext(itemData, target);
+          addLDAFilingToContext(itemData);
           break;
         case 'stock_result':
           addStockToContext(
             itemData.symbol || 'Unknown',
             itemData.name || itemData.companyName || 'Unknown',
             itemData.timeframe || '1D',
-            itemData,
-            target
+            itemData
           );
           break;
         default:
@@ -3747,7 +3745,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           <Tooltip title="Add to Context">
             <IconButton
               size="small"
-              onClick={() => handleAddToContext('sidebar')}
+              onClick={handleAddToContext}
               sx={{
                 color: '#9ca3af',
                 '&:hover': {
@@ -3757,23 +3755,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               }}
             >
               <AddToContextIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          
-          {/* Add to New Chat */}
-          <Tooltip title="Add to New Chat">
-            <IconButton
-              size="small"
-              onClick={() => handleAddToContext('new')}
-              sx={{
-                color: '#9ca3af',
-                '&:hover': {
-                  color: '#10b981',
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                },
-              }}
-            >
-              <NewChatIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           

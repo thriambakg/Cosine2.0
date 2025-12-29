@@ -35,7 +35,6 @@ import {
   Chat as SidebarChatIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
-  AddComment as NewChatIcon,
   Launch as LaunchIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
@@ -666,13 +665,13 @@ const PoliticianTradesSearchPage: React.FC = () => {
   };
 
   // Handle add to context - mirroring SEC page approach
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     if (selectedTrades.size === 0) return;
     
     // Get the selected trade objects from currentResults
     const selectedTradeObjects = currentResults.filter(trade => selectedTrades.has(trade.tradeId));
     
-    console.log(`🏛️ Adding ${selectedTradeObjects.length} politician trade(s) to context (target: ${target})`);
+    console.log(`🏛️ Adding ${selectedTradeObjects.length} politician trade(s) to context`);
     
     // Comprehensive logging of politician trade data structures
     selectedTradeObjects.forEach((trade, idx) => {
@@ -785,17 +784,17 @@ const PoliticianTradesSearchPage: React.FC = () => {
     
     // Add to context using the context manager functions
     if (selectedTradeObjects.length > 1) {
-      console.log(`🚀 Politician Trades Search: Initiating batch context addition for ${selectedTradeObjects.length} trades (target: ${target})`);
-      addMultipleTradesToContext(selectedTradeObjects, target);
-      console.log(`✅ Added ${selectedTradeObjects.length} trades to context in batch (target: ${target})`);
+      console.log(`🚀 Politician Trades Search: Initiating batch context addition for ${selectedTradeObjects.length} trades`);
+      addMultipleTradesToContext(selectedTradeObjects);
+      console.log(`✅ Added ${selectedTradeObjects.length} trades to context in batch`);
     } else if (selectedTradeObjects.length === 1) {
-      console.log(`🚀 Politician Trades Search: Initiating single trade context addition (target: ${target})`);
-      addTradeToContext(selectedTradeObjects[0], target);
-      console.log(`✅ Added trade to context: ${selectedTradeObjects[0].politicianName || 'Unknown'} - ${selectedTradeObjects[0].securitySymbol || 'Unknown'} (target: ${target})`);
+      console.log(`🚀 Politician Trades Search: Initiating single trade context addition`);
+      addTradeToContext(selectedTradeObjects[0]);
+      console.log(`✅ Added trade to context: ${selectedTradeObjects[0].politicianName || 'Unknown'} - ${selectedTradeObjects[0].securitySymbol || 'Unknown'}`);
     }
     
     // Add user feedback for context operations
-    if (target === 'sidebar') {
+    {
       // Listen for sidebar success/error events for user feedback
       const handleSidebarSuccess = () => {
         console.log('🎉 Politician Trades Search: Sidebar context addition successful');
@@ -1891,18 +1890,11 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   }}
                 >
                   <MenuItem
-                    onClick={() => handleAddToContext('new')}
-                    sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-                  >
-                    <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-                    Add to New Chat
-                  </MenuItem>
-                  <MenuItem
-                    onClick={() => handleAddToContext('sidebar')}
+                    onClick={handleAddToContext}
                     sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
                   >
                     <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-                    Add to Current Sidebar Chat
+                    Add to Context
                   </MenuItem>
                   <MenuItem
                     onClick={handleAddToFiles}

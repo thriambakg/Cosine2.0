@@ -40,7 +40,6 @@ import {
   AccountBalance as GovernmentIcon,
   Launch as LaunchIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
@@ -720,7 +719,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedTradeObjects = currentResults.filter(trade => 
       selectedTrades.has(trade.tradeId)
     );
@@ -731,9 +730,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     // For single trade, use the same format as parent page: "Politician Name - Security Symbol"
     // For multiple trades, each gets its own context item with proper formatting
     if (selectedTradeObjects.length === 1) {
-      addTradeToContext(selectedTradeObjects[0], target);
+      addTradeToContext(selectedTradeObjects[0]);
     } else {
-      addMultipleTradesToContext(selectedTradeObjects, target);
+      addMultipleTradesToContext(selectedTradeObjects);
     }
 
     setSelectedTrades(new Set());
@@ -2189,13 +2188,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')} sx={{ color: '#10b981', fontWeight: 600 }}>
-          <ListItemIcon><NewChatIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /></ListItemIcon>
-          <ListItemText primary="Add to New Chat" />
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')} sx={{ color: '#3b82f6', fontWeight: 600 }}>
+        <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
           <ListItemIcon><SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} /></ListItemIcon>
-          <ListItemText primary="Add to Current Sidebar Chat" />
+          <ListItemText primary="Add to Context" />
         </MenuItem>
         <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <ListItemIcon><FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} /></ListItemIcon>

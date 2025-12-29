@@ -33,7 +33,6 @@ import {
   Search as SearchIcon,
   AccountBalance as GovernmentIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
@@ -1038,7 +1037,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedAwardObjects = currentResults.filter(award => 
       selectedAwards.has(award.award_id)
     );
@@ -1046,9 +1045,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     if (selectedAwardObjects.length === 0) return;
 
     if (selectedAwardObjects.length === 1) {
-      addAwardToContext(selectedAwardObjects[0], target);
+      addAwardToContext(selectedAwardObjects[0]);
     } else {
-      addMultipleAwardsToContext(selectedAwardObjects, target);
+      addMultipleAwardsToContext(selectedAwardObjects);
     }
 
     setSelectedAwards(new Set());
@@ -3032,18 +3031,11 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         }}
       >
         <MenuItem
-          onClick={() => handleAddToContext('new')}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem
-          onClick={() => handleAddToContext('sidebar')}
+          onClick={handleAddToContext}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem
           onClick={handleAddToFiles}
@@ -3075,18 +3067,11 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         }}
       >
         <MenuItem
-          onClick={() => handleAddToContext('new')}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem
-          onClick={() => handleAddToContext('sidebar')}
+          onClick={handleAddToContext}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem
           onClick={handleAddToFiles}

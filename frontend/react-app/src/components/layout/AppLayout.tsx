@@ -6,11 +6,10 @@ import { setCurrentPage } from '../../store/slices/navigationSlice';
 import AppHeader from './AppHeader';
 import AppSidebar from './AppSidebar';
 import FloatingClock from './FloatingClock';
-import ContextWindow from './ContextWindow';
 import GlobalChatSidebar from './GlobalChatSidebar';
 import ContextSessionHandler from './ContextSessionHandler';
+import ContextSuccessNotification from '../common/ContextSuccessNotification';
 import { ClockProvider } from '../../contexts/ClockContext';
-import { ContextWindowProvider } from '../../contexts/ContextWindowContext';
 // import { WebSocketProvider } from '../../contexts/WebSocketContext'; // COMMENTED OUT: Replaced by UnifiedMessageHandler
 import { GlobalChatProvider } from '../../contexts/GlobalChatContext';
 import { DualScreenModeProvider, useDualScreenMode } from '../../contexts/DualScreenModeContext';
@@ -65,21 +64,19 @@ const AppLayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
 export default function AppLayout({ children }: AppLayoutProps) {
   return (
     <ClockProvider>
-      <ContextWindowProvider>
-        <GlobalChatProvider>
-          <DualScreenModeProvider>
-            <AppLayoutContent>
-              {children}
-            </AppLayoutContent>
-            
-            {/* Global Context Session Handler - processes context sessions from any page */}
-            <ContextSessionHandler />
-            
-            {/* Context Window - moved outside main Box to ensure proper provider access */}
-            <ContextWindow />
-          </DualScreenModeProvider>
-        </GlobalChatProvider>
-      </ContextWindowProvider>
+      <GlobalChatProvider>
+        <DualScreenModeProvider>
+          <AppLayoutContent>
+            {children}
+          </AppLayoutContent>
+          
+          {/* Global Context Session Handler - processes context sessions from any page */}
+          <ContextSessionHandler />
+          
+          {/* Global Success Notification for sidebar context additions */}
+          <ContextSuccessNotification />
+        </DualScreenModeProvider>
+      </GlobalChatProvider>
     </ClockProvider>
   );
 }

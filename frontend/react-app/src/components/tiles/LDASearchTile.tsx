@@ -32,7 +32,6 @@ import {
   AutoAwesome as AutoRefreshIcon,
   Search as SearchIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
@@ -1111,7 +1110,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     const selectedFilingObjects = currentResults.filter(filing => 
       selectedFilings.has(filing.id || filing.filing_uuid || filing.PK || '')
     );
@@ -1120,10 +1119,10 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
     if (selectedFilingObjects.length === 1) {
       // Add single filing to context
-      addLDAFilingToContext(selectedFilingObjects[0], target);
+      addLDAFilingToContext(selectedFilingObjects[0]);
     } else {
       // Add multiple filings to context
-      addMultipleLDAFilingsToContext(selectedFilingObjects, target);
+      addMultipleLDAFilingsToContext(selectedFilingObjects);
     }
 
     setSelectedFilings(new Set());
@@ -2995,18 +2994,11 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         }}
       >
         <MenuItem
-          onClick={() => handleAddToContext('new')}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem
-          onClick={() => handleAddToContext('sidebar')}
+          onClick={handleAddToContext}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem
           onClick={handleAddToFiles}

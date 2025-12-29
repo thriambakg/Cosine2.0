@@ -1281,6 +1281,47 @@ export const sessionManagementAPI = {
       method: 'DELETE',
     });
   },
+
+  // Share/Export a session
+  shareSession: async (
+    sessionId: string,
+    userId: string,
+    shareType: 'link' | 'download'
+  ): Promise<{ success: boolean; shareId?: string; shareLink?: string; downloadUrl?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; shareId?: string; shareLink?: string; downloadUrl?: string; error?: string }>(
+      `/session-share?userId=${userId}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ sessionId, shareType }),
+      }
+    );
+  },
+
+  // Import a session
+  importSession: async (
+    userId: string,
+    importType: 'file' | 'link',
+    fileContent?: string,
+    shareId?: string
+  ): Promise<{ success: boolean; session_id?: string; session_data?: any; error?: string }> => {
+    const body: any = {
+      importType,
+    };
+
+    if (importType === 'file' && fileContent) {
+      body.fileContent = fileContent;
+    } else if (importType === 'link' && shareId) {
+      body.shareId = shareId;
+    }
+
+    return apiRequest<{ success: boolean; session_id?: string; session_data?: any; error?: string }>(
+      `/session-import?userId=${userId}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+  },
 };
 
 // ============================================================================

@@ -50,6 +50,7 @@ export interface TileContextData {
 
 /**
  * Add an item to the context window
+ * Now adds directly to sidebar instead of opening context window popup
  */
 export const addToContext = (item: ContextItem): void => {
   console.log('🔥 addToContext called with:', item);
@@ -89,12 +90,14 @@ export const addToContext = (item: ContextItem): void => {
     data_s3_key: cleanItem.data?.s3_key
   });
   
-  const event = new CustomEvent('add-to-context', {
+  // Add directly to sidebar instead of opening context window
+  // This allows users to add context items and send messages when ready
+  const event = new CustomEvent('add-to-sidebar-context', {
     detail: cleanItem
   });
-  console.log('🔥 Dispatching event:', event);
+  console.log('🔥 Dispatching add-to-sidebar-context event:', event);
   window.dispatchEvent(event);
-  console.log('🔥 Event dispatched successfully');
+  console.log('🔥 Event dispatched successfully - item added to sidebar');
 };
 
 /**
@@ -145,7 +148,7 @@ export const addMultipleTilesToContext = (
       customSubtitle?: string;
     };
   }>,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const contextItems: ContextItem[] = tiles.map(tile => {
     const title = tile.options?.customTitle || `${getTileTypeName(tile.tileType)} Tile`;
@@ -233,7 +236,7 @@ export const addArticleToContext = (
   title: string,
   source: string,
   articleData: any,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   // Format published date
   const formatPublishedDate = (dateStr?: string): string => {
@@ -287,7 +290,7 @@ export const addMultipleArticlesToContext = (
     source: string;
     articleData: any;
   }>,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   // Format published date
   const formatPublishedDate = (dateStr?: string): string => {
@@ -341,7 +344,7 @@ export const addStockToContext = (
   name: string,
   timeframe: string,
   stockData: any,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const contextItem: ContextItem = {
     id: `stock_${symbol}_${Date.now()}`,
@@ -380,7 +383,7 @@ export const addMultipleStocksToContext = (
     timeframe: string;
     stockData: any;
   }>,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const contextItems: ContextItem[] = stocks.map(stock => ({
     id: `stock_${stock.symbol}_${Date.now()}_${Math.random()}`,
@@ -455,7 +458,7 @@ export const addMultipleChatSessionsToContext = (
     messageCount: number;
     sessionData: any;
   }>,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   console.log('🔍 DEBUG: addMultipleChatSessionsToContext called with sessions:', sessions);
   
@@ -519,7 +522,7 @@ export const addMultipleChatSessionsToContext = (
  */
 export const addFilingToContext = (
   filing: any,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   // Use filingId as the primary unique identifier, fallback to other fields
   const filingId = filing.filingId || filing.adsh || filing.objectAccession || 
@@ -546,38 +549,13 @@ export const addFilingToContext = (
     contextItemId: contextItem.id
   });
   
-  if (target === 'sidebar') {
-    // Check if we have access to user and session state for better error handling
-    console.log('📌 Context Manager: Attempting to add to sidebar context...');
-    
-    // Add to current sidebar session's context
-    const event = new CustomEvent('add-to-sidebar-context', {
-      detail: contextItem
-    });
-    window.dispatchEvent(event);
-    
-    // Listen for potential error response (if sidebar can't handle it)
-    const handleSidebarError = () => {
-      console.log('⚠️ Context Manager: Sidebar context failed, falling back to new chat');
-      // Fallback to new chat if sidebar fails
-      addToContext(contextItem);
-      // Remove the listener after use
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    };
-    
-    // Set up temporary listener for error fallback
-    window.addEventListener('sidebar-context-error', handleSidebarError);
-    
-    // Remove the listener after 1 second if no error occurs
-    setTimeout(() => {
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    }, 1000);
-    
-  } else {
-    // Add to new chat (existing behavior)
-    console.log('🆕 Context Manager: Adding to new chat context');
-    addToContext(contextItem);
-  }
+  // Add to current sidebar session's context
+  console.log('📌 Context Manager: Attempting to add to sidebar context...');
+  
+  const event = new CustomEvent('add-to-sidebar-context', {
+    detail: contextItem
+  });
+  window.dispatchEvent(event);
 };
 
 /**
@@ -586,7 +564,7 @@ export const addFilingToContext = (
  */
 export const addMultipleFilingsToContext = (
   filings: any[],
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const contextItems: ContextItem[] = filings.map(filing => {
     // Use filingId as the primary unique identifier, fallback to other fields
@@ -653,7 +631,7 @@ export const addMultipleFilingsToContext = (
  */
 export const addTradeToContext = (
   trade: any,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   // Use tradeId as the primary unique identifier, fallback to other fields
   const tradeId = trade.tradeId || trade.id || 
@@ -717,37 +695,13 @@ export const addTradeToContext = (
     contextItemId: contextItem.id
   });
   
-  if (target === 'sidebar') {
-    console.log('📌 Context Manager: Attempting to add to sidebar context...');
-    
-    // Add to current sidebar session's context
-    const event = new CustomEvent('add-to-sidebar-context', {
-      detail: contextItem
-    });
-    window.dispatchEvent(event);
-    
-    // Listen for potential error response (if sidebar can't handle it)
-    const handleSidebarError = () => {
-      console.log('⚠️ Context Manager: Sidebar context failed, falling back to new chat');
-      // Fallback to new chat if sidebar fails
-      addToContext(contextItem);
-      // Remove the listener after use
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    };
-    
-    // Set up temporary listener for error fallback
-    window.addEventListener('sidebar-context-error', handleSidebarError);
-    
-    // Remove the listener after 1 second if no error occurs
-    setTimeout(() => {
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    }, 1000);
-    
-  } else {
-    // Add to new chat (existing behavior)
-    console.log('🆕 Context Manager: Adding to new chat context');
-    addToContext(contextItem);
-  }
+  // Add to current sidebar session's context
+  console.log('📌 Context Manager: Attempting to add to sidebar context...');
+  
+  const event = new CustomEvent('add-to-sidebar-context', {
+    detail: contextItem
+  });
+  window.dispatchEvent(event);
 };
 
 /**
@@ -756,7 +710,7 @@ export const addTradeToContext = (
  */
 export const addMultipleTradesToContext = (
   trades: any[],
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const contextItems: ContextItem[] = trades.map(trade => {
     // Use tradeId as the primary unique identifier, fallback to other fields
@@ -858,8 +812,7 @@ export const addMultipleTradesToContext = (
  * Used for adding individual awards from the government contracts search page
  */
 export const addAwardToContext = (
-  award: any,
-  target: 'new' | 'sidebar' = 'new'
+  award: any
 ): void => {
   // Use award_id as the primary unique identifier
   const awardId = award.award_id || award.id || `award_${Date.now()}`;
@@ -912,28 +865,11 @@ export const addAwardToContext = (
     timestamp: Date.now(),
   };
   
-  if (target === 'sidebar') {
-    // Add to current sidebar session's context
-    const event = new CustomEvent('add-to-sidebar-context', {
-      detail: contextItem
-    });
-    window.dispatchEvent(event);
-    
-    // Listen for potential error response (if sidebar can't handle it)
-    const handleSidebarError = () => {
-      // Fallback to new chat if sidebar fails
-      addToContext(contextItem);
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    };
-    
-    window.addEventListener('sidebar-context-error', handleSidebarError);
-    setTimeout(() => {
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    }, 1000);
-  } else {
-    // Add to new chat (existing behavior)
-    addToContext(contextItem);
-  }
+  // Add to current sidebar session's context
+  const event = new CustomEvent('add-to-sidebar-context', {
+    detail: contextItem
+  });
+  window.dispatchEvent(event);
 };
 
 /**
@@ -941,8 +877,7 @@ export const addAwardToContext = (
  * Used for adding multiple selected awards from the government contracts search page
  */
 export const addMultipleAwardsToContext = (
-  awards: any[],
-  target: 'new' | 'sidebar' = 'new'
+  awards: any[]
 ): void => {
   // Format date
   const formatDate = (dateString?: string): string => {
@@ -996,28 +931,11 @@ export const addMultipleAwardsToContext = (
     };
   });
   
-  if (target === 'sidebar') {
-    // Add multiple items to current sidebar session's context
-    const event = new CustomEvent('add-multiple-to-sidebar-context', {
-      detail: contextItems
-    });
-    window.dispatchEvent(event);
-    
-    // Listen for potential error response
-    const handleSidebarError = () => {
-      // Fallback to new chat if sidebar fails
-      contextItems.forEach(item => addToContext(item));
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    };
-    
-    window.addEventListener('sidebar-context-error', handleSidebarError);
-    setTimeout(() => {
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    }, 1000);
-  } else {
-    // Add to new chat (existing behavior) - dispatch each item separately
-    contextItems.forEach(item => addToContext(item));
-  }
+  // Add multiple items to current sidebar session's context
+  const event = new CustomEvent('add-multiple-to-sidebar-context', {
+    detail: contextItems
+  });
+  window.dispatchEvent(event);
 };
 
 /**
@@ -1026,7 +944,7 @@ export const addMultipleAwardsToContext = (
  */
 export const addBillToContext = (
   bill: any,
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const billId = bill.bill_id || bill.id || `bill_${Date.now()}`;
   
@@ -1088,7 +1006,7 @@ export const addBillToContext = (
  */
 export const addMultipleBillsToContext = (
   bills: any[],
-  target: 'new' | 'sidebar' = 'new'
+  target: 'sidebar' = 'sidebar'
 ): void => {
   const formatDate = (dateString?: string): string => {
     if (!dateString) return '';
@@ -1173,8 +1091,7 @@ export const addCustomToContext = (
  * Used for adding individual filings from the LDA search page
  */
 export const addLDAFilingToContext = (
-  filing: any,
-  target: 'new' | 'sidebar' = 'new'
+  filing: any
 ): void => {
   // Use filing_uuid as the primary unique identifier, fallback to other fields
   const filingId = filing.filing_uuid || filing.PK?.replace('FILING#', '').replace('CONTRIBUTION#', '') || 
@@ -1228,28 +1145,11 @@ export const addLDAFilingToContext = (
     timestamp: Date.now(),
   };
   
-  if (target === 'sidebar') {
-    // Add to current sidebar session's context
-    const event = new CustomEvent('add-to-sidebar-context', {
-      detail: contextItem
-    });
-    window.dispatchEvent(event);
-    
-    // Listen for potential error response (if sidebar can't handle it)
-    const handleSidebarError = () => {
-      // Fallback to new chat if sidebar fails
-      addToContext(contextItem);
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    };
-    
-    window.addEventListener('sidebar-context-error', handleSidebarError);
-    setTimeout(() => {
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    }, 1000);
-  } else {
-    // Add to new chat (existing behavior)
-    addToContext(contextItem);
-  }
+  // Add to current sidebar session's context
+  const event = new CustomEvent('add-to-sidebar-context', {
+    detail: contextItem
+  });
+  window.dispatchEvent(event);
 };
 
 /**
@@ -1257,8 +1157,7 @@ export const addLDAFilingToContext = (
  * Used for adding multiple selected filings from the LDA search page
  */
 export const addMultipleLDAFilingsToContext = (
-  filings: any[],
-  target: 'new' | 'sidebar' = 'new'
+  filings: any[]
 ): void => {
   // Format date
   const formatDate = (dateString?: string): string => {
@@ -1314,28 +1213,11 @@ export const addMultipleLDAFilingsToContext = (
     };
   });
   
-  if (target === 'sidebar') {
-    // Add multiple items to current sidebar session's context
-    const event = new CustomEvent('add-multiple-to-sidebar-context', {
-      detail: contextItems
-    });
-    window.dispatchEvent(event);
-    
-    // Listen for potential error response
-    const handleSidebarError = () => {
-      // Fallback to new chat if sidebar fails - dispatch each item separately
-      contextItems.forEach(item => addToContext(item));
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    };
-    
-    window.addEventListener('sidebar-context-error', handleSidebarError);
-    setTimeout(() => {
-      window.removeEventListener('sidebar-context-error', handleSidebarError);
-    }, 1000);
-  } else {
-    // Add to new chat (existing behavior) - dispatch each item separately
-    contextItems.forEach(item => addToContext(item));
-  }
+  // Add multiple items to current sidebar session's context
+  const event = new CustomEvent('add-multiple-to-sidebar-context', {
+    detail: contextItems
+  });
+  window.dispatchEvent(event);
 };
 
 /**

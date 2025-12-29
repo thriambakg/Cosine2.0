@@ -44,7 +44,6 @@ import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Dashboard as AddToContextIcon,
-  AddComment as NewChatIcon,
   Chat as SidebarChatIcon,
   VerifiedUser as VerifiedUserIcon,
   ViewColumn as ViewColumnIcon,
@@ -1670,13 +1669,13 @@ const SECSearchPage: React.FC = () => {
     }
   };
 
-  const handleAddToContext = (target: 'new' | 'sidebar') => {
+  const handleAddToContext = () => {
     if (selectedFilings.size === 0) return;
     
     // Get the selected filing objects from currentResults
     const selectedFilingObjects = currentResults.filter((_, idx) => selectedFilings.has(idx));
     
-    console.log(`📦 Adding ${selectedFilingObjects.length} filing(s) to context (target: ${target})`);
+    console.log(`📦 Adding ${selectedFilingObjects.length} filing(s) to context`);
     
     // Comprehensive logging of SEC filing data structures
     selectedFilingObjects.forEach((filing, idx) => {
@@ -1787,18 +1786,18 @@ const SECSearchPage: React.FC = () => {
     
     // Add to context using the context manager functions
     if (selectedFilingObjects.length > 1) {
-      console.log(`🚀 SEC Search: Initiating batch context addition for ${selectedFilingObjects.length} filings (target: ${target})`);
-      addMultipleFilingsToContext(selectedFilingObjects, target);
-      console.log(`✅ Added ${selectedFilingObjects.length} filings to context in batch (target: ${target})`);
+      console.log(`🚀 SEC Search: Initiating batch context addition for ${selectedFilingObjects.length} filings`);
+      addMultipleFilingsToContext(selectedFilingObjects);
+      console.log(`✅ Added ${selectedFilingObjects.length} filings to context in batch`);
     } else if (selectedFilingObjects.length === 1) {
-      console.log(`🚀 SEC Search: Initiating single filing context addition (target: ${target})`);
-      addFilingToContext(selectedFilingObjects[0], target);
-      console.log(`✅ Added filing to context: ${selectedFilingObjects[0].form || 'SEC Filing'} (target: ${target})`);
+      console.log(`🚀 SEC Search: Initiating single filing context addition`);
+      addFilingToContext(selectedFilingObjects[0]);
+      console.log(`✅ Added filing to context: ${selectedFilingObjects[0].form || 'SEC Filing'}`);
     }
     
     // Add user feedback for context operations
-    if (target === 'sidebar') {
-      // Listen for sidebar success/error events for user feedback
+    // Listen for sidebar success/error events for user feedback
+    {
       const handleSidebarSuccess = () => {
         console.log('🎉 SEC Search: Sidebar context addition successful');
         window.removeEventListener('sidebar-context-success', handleSidebarSuccess);
@@ -3506,13 +3505,9 @@ const SECSearchPage: React.FC = () => {
           },
         }}
       >
-        <MenuItem onClick={() => handleAddToContext('new')}>
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem onClick={() => handleAddToContext('sidebar')}>
+        <MenuItem onClick={handleAddToContext}>
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
         <MenuItem onClick={handleAddToFiles}>
           <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />

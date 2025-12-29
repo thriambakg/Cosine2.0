@@ -31,7 +31,6 @@ import {
   Delete as DeleteIcon,
   MoreVert as MoreVertIcon,
   Chat as SidebarChatIcon,
-  AddComment as NewChatIcon,
   Dashboard as AddToContextIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
@@ -1068,20 +1067,12 @@ const FolderTile: React.FC<FolderTileProps> = ({
         }}
       >
         <MenuItem
-          onClick={() => handleAddToContext('new')}
-          disabled={selectedItems.size === 0}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <NewChatIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-          Add to New Chat
-        </MenuItem>
-        <MenuItem
           onClick={() => handleAddToContext('sidebar')}
           disabled={selectedItems.size === 0}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Current Sidebar Chat
+          Add to Context
         </MenuItem>
       </Menu>
 

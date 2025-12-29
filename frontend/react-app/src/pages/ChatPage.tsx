@@ -54,7 +54,10 @@ import {
   OpenInNew as OpenInNewIcon,
   Download as DownloadIcon,
   SmartToy as SmartToyIcon,
+  Share as ShareIcon,
+  Upload as UploadIcon,
 } from '@mui/icons-material';
+import ChatImportExportDialog from '@/components/dialogs/ChatImportExportDialog';
 
 interface Message {
   id: string;
@@ -422,6 +425,9 @@ export default function ChatPage() {
   const previousContextRef = useRef<ContextItem[]>([]);
   const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
   const [isFilesDrawerOpen, setIsFilesDrawerOpen] = useState(false);
+  const [shareMenuAnchor, setShareMenuAnchor] = useState<null | HTMLElement>(null);
+  const [importExportDialogOpen, setImportExportDialogOpen] = useState(false);
+  const [importExportMode, setImportExportMode] = useState<'import' | 'export'>('export');
   const headerHeight = 64; // Top navigation bar height
   const handleRemoveContextItem = useCallback(async (index: number) => {
     const newContext = sessionContext.filter((_, i) => i !== index);
@@ -1444,7 +1450,7 @@ export default function ChatPage() {
   };
 
   // Add selected sessions to context
-  const handleAddSessionsToContext = (target: 'new' | 'sidebar') => {
+  const handleAddSessionsToContext = () => {
     if (selectedSessions.size === 0) {
       console.log('No sessions selected to add to context');
       return;
@@ -1479,7 +1485,7 @@ export default function ChatPage() {
 
     // Import context manager
     import('../components/tiles/common/contextManager').then(({ addMultipleChatSessionsToContext }) => {
-      addMultipleChatSessionsToContext(sessionsToAdd, target);
+      addMultipleChatSessionsToContext(sessionsToAdd);
     });
 
     // Clear selection
@@ -1907,6 +1913,7 @@ export default function ChatPage() {
                   borderColor: '#374151',
                   color: 'white',
                   textTransform: 'uppercase',
+                  mb: 1,
                   '&:hover': {
                     borderColor: '#3b82f6',
                     backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -1914,6 +1921,26 @@ export default function ChatPage() {
                 }}
               >
                 {persistenceLoading ? 'Creating...' : 'New Chat'}
+              </Button>
+              <Button
+                fullWidth
+                variant="outlined"
+                startIcon={<UploadIcon />}
+                onClick={() => {
+                  setImportExportMode('import');
+                  setImportExportDialogOpen(true);
+                }}
+                sx={{
+                  borderColor: '#374151',
+                  color: 'white',
+                  textTransform: 'uppercase',
+                  '&:hover': {
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              >
+                Import Chat
               </Button>
             </Box>
           )}
@@ -2164,6 +2191,28 @@ export default function ChatPage() {
             </Tooltip>
           )}
           
+          {/* Share Button */}
+          <Tooltip title="Share Chat Session">
+            <IconButton
+              onClick={(e) => setShareMenuAnchor(e.currentTarget)}
+              disabled={!currentSession?.session_id}
+              sx={{
+                color: '#9ca3af',
+                backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                border: '1px solid #374151',
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+                '&:disabled': {
+                  color: '#475569',
+                },
+              }}
+            >
+              <ShareIcon />
+            </IconButton>
+          </Tooltip>
+
           {/* Context Button */}
           <Tooltip title={isContextDrawerOpen ? 'Hide Context' : `Show Context (${sessionContext.length})`}>
             <IconButton
@@ -2628,6 +2677,90 @@ export default function ChatPage() {
               </Box>
       </Drawer>
 
+      {/* Share Menu */}
+      <Menu
+        anchorEl={shareMenuAnchor}
+        open={Boolean(shareMenuAnchor)}
+        onClose={() => setShareMenuAnchor(null)}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#1f2937',
+            border: '1px solid #374151',
+            minWidth: 200,
+            mt: 0.5,
+          },
+        }}
+      >
+        <MenuItem
+          onClick={() => {
+            setShareMenuAnchor(null);
+            setImportExportMode('export');
+            setImportExportDialogOpen(true);
+          }}
+          sx={{
+            color: '#e5e7eb',
+            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+          }}
+        >
+          <ListItemIcon>
+            <ShareIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+          </ListItemIcon>
+          <ListItemText>Share Link</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={async () => {
+            setShareMenuAnchor(null);
+            if (!currentSession?.session_id || !user?.id) return;
+            try {
+              const response = await sessionManagementAPI.shareSession(currentSession.session_id, user.id, 'download');
+              if (response.success && response.downloadUrl) {
+                const link = document.createElement('a');
+                link.href = response.downloadUrl;
+                link.download = `${currentSession.title || 'chat-session'}.cosine`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }
+            } catch (error) {
+              console.error('Error downloading chat session:', error);
+            }
+          }}
+          sx={{
+            color: '#e5e7eb',
+            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+          }}
+        >
+          <ListItemIcon>
+            <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+          </ListItemIcon>
+          <ListItemText>Download as .cosine</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* Import/Export Dialog */}
+      <ChatImportExportDialog
+        open={importExportDialogOpen}
+        onClose={() => setImportExportDialogOpen(false)}
+        mode={importExportMode}
+        sessionId={currentSession?.session_id}
+        sessionTitle={currentSession?.title}
+        userId={user?.id || ''}
+        onImportSuccess={(newSessionId) => {
+          // Load the imported session
+          if (user?.id) {
+            loadSessionFromDatabase(newSessionId, user.id);
+          }
+        }}
+      />
+
       {/* Session Context Menu */}
       <Menu
         open={sessionContextMenu !== null}
@@ -2648,26 +2781,14 @@ export default function ChatPage() {
         }}
       >
         <MenuItem 
-          onClick={() => handleAddSessionsToContext('new')} 
-          disabled={selectedSessions.size === 0}
-        >
-          <ListItemIcon>
-            <ContextIcon sx={{ color: '#3b82f6' }} />
-          </ListItemIcon>
-          <ListItemText>
-            Add to New Chat ({selectedSessions.size} selected)
-          </ListItemText>
-        </MenuItem>
-        
-        <MenuItem 
-          onClick={() => handleAddSessionsToContext('sidebar')} 
+          onClick={handleAddSessionsToContext} 
           disabled={selectedSessions.size === 0}
         >
           <ListItemIcon>
             <SidebarChatIcon sx={{ color: '#10b981' }} />
           </ListItemIcon>
           <ListItemText>
-            Add to Sidebar Chat ({selectedSessions.size} selected)
+            Add to Context ({selectedSessions.size} selected)
           </ListItemText>
         </MenuItem>
       </Menu>

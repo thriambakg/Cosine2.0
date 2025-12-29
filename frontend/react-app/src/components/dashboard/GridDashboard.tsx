@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Dashboard as ContextIcon, Chat as SidebarChatIcon, Folder as FolderIcon } from '@mui/icons-material';
+import { Chat as SidebarChatIcon, Folder as FolderIcon } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI } from '@/services/api';
@@ -18,7 +18,7 @@ import FolderTile from '../tiles/FolderTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
 import { getTileConfig, validateTileSize } from '../tiles/tileConfig';
-import { addTileToContext, addMultipleTilesToContext, extractTileData } from '../tiles/common';
+import { addMultipleTilesToContext, extractTileData } from '../tiles/common';
 
 interface GridDashboardProps {
   tiles: UnifiedTile[];
@@ -721,44 +721,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }));
   }, []);
 
-
-  // Add selected tiles to context window
-  const handleAddToContext = useCallback(() => {
-    const selectedTilesArray = Array.from(selectionState.selectedTiles);
-    console.log('📦 Adding tiles to context:', selectedTilesArray);
-    
-    if (selectedTilesArray.length === 0) {
-      console.log('No tiles selected to add to context');
-      return;
-    }
-
-    // Get selected tiles data
-    const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
-    
-    // Prepare tile data for batch addition
-    const tilesToAdd = selectedTilesData.map(tile => ({
-      tileId: tile.id,
-      tileType: tile.type,
-      tileData: extractTileData(tile),
-      options: {
-        customTitle: `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`,
-        customSubtitle: tile.symbol ? `${tile.symbol} • ${tile.timeframe || '1d'}` : `Tile ${tile.id.substring(0, 8)}`
-      }
-    }));
-    
-    // Use batch addition for multiple tiles, single addition for one tile
-    if (tilesToAdd.length > 1) {
-      addMultipleTilesToContext(tilesToAdd, 'new');
-      console.log(`✅ Added ${tilesToAdd.length} tiles to context in batch`);
-    } else if (tilesToAdd.length === 1) {
-      const tile = tilesToAdd[0];
-      addTileToContext(tile.tileId, tile.tileType, tile.tileData, tile.options);
-      console.log(`✅ Added ${tile.tileType} tile to context:`, tile.tileId);
-    }
-    
-    // Close context menu
-    handleContextMenuClose();
-  }, [selectionState.selectedTiles, tiles, handleContextMenuClose]);
 
   const handleAddToSidebarContext = useCallback(() => {
     if (selectionState.selectedTiles.size === 0) {
@@ -1607,21 +1569,12 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           },
         }}
       >
-        <MenuItem onClick={handleAddToContext} disabled={selectionState.selectedTiles.size === 0}>
-          <ListItemIcon>
-            <ContextIcon sx={{ color: '#3b82f6' }} />
-          </ListItemIcon>
-          <ListItemText>
-            Add to New Chat ({selectionState.selectedTiles.size} selected)
-          </ListItemText>
-        </MenuItem>
-        
         <MenuItem onClick={handleAddToSidebarContext} disabled={selectionState.selectedTiles.size === 0}>
           <ListItemIcon>
             <SidebarChatIcon sx={{ color: '#10b981' }} />
           </ListItemIcon>
           <ListItemText>
-            Add to Sidebar Chat ({selectionState.selectedTiles.size} selected)
+            Add to Context ({selectionState.selectedTiles.size} selected)
           </ListItemText>
         </MenuItem>
         

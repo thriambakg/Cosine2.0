@@ -77,6 +77,7 @@ def process_session_request(event, context):
     try:
         # Parse request
         http_method = event.get('httpMethod', 'GET')
+        path = event.get('path', '')
         query_params = event.get('queryStringParameters') or {}
         user_id = query_params.get('user_id') if query_params else None
         
@@ -95,7 +96,15 @@ def process_session_request(event, context):
                 'body': ''
             }
         
-        # Route to appropriate handler
+        # Route to export/import/share handlers based on path
+        if path.startswith('/share') or '/session-share' in path or path.endswith('/share'):
+            return handle_share_session(user_id, http_method, event)
+        elif path.startswith('/import') or '/session-import' in path or path.endswith('/import'):
+            return handle_import_session(user_id, http_method, event)
+        elif path.startswith('/export') or '/session-export' in path or path.endswith('/export'):
+            return handle_export_session(user_id, http_method, event)
+        
+        # Route to appropriate handler for standard session operations
         session_id = query_params.get('session_id') if query_params else None
         if http_method == 'GET':
             if session_id:
@@ -500,6 +509,162 @@ def kill_session(user_id: str, session_id: str, reason: str = 'user_cancellation
             'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
             'body': json_dumps_safe({'error': 'Failed to set kill flag'})
         }
+
+def handle_share_session(user_id: str, http_method: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle session sharing operations (export for download or share link)"""
+    if http_method != 'POST':
+        return {
+            'statusCode': 405,
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+            'body': json_dumps_safe({'error': 'Method not allowed'})
+        }
+    
+    try:
+        from exporter import ChatSessionExporter
+        
+        body = json.loads(event.get('body', '{}'))
+        session_id = body.get('sessionId')
+        share_type = body.get('shareType', 'download')  # 'link' or 'download'
+        
+        if not session_id:
+            return {
+                'statusCode': 400,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'sessionId is required'})
+            }
+        
+        # Get session title
+        response = table.get_item(Key={'user_id': user_id, 'session_id': session_id})
+        if 'Item' not in response:
+            return {
+                'statusCode': 404,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'Session not found'})
+            }
+        
+        session_title = response['Item'].get('title', 'Untitled')
+        
+        # Initialize exporter
+        exporter = ChatSessionExporter()
+        
+        if share_type == 'link':
+            result = exporter.export_for_share_link(user_id, session_id)
+            if result.get('success'):
+                # Generate share link (frontend will construct the full URL)
+                share_id = result.get('share_id')
+                return {
+                    'statusCode': 200,
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                    'body': json_dumps_safe({
+                        'success': True,
+                        'shareId': share_id,
+                        'shareLink': f"/import-chat?shareId={share_id}"
+                    })
+                }
+            else:
+                return {
+                    'statusCode': 500,
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                    'body': json_dumps_safe(result)
+                }
+        else:  # download
+            result = exporter.export_for_download(user_id, session_id, session_title)
+            return {
+                'statusCode': 200 if result.get('success') else 500,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe(result)
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error handling share session: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+            'body': json_dumps_safe({'error': f'Failed to share session: {str(e)}'})
+        }
+
+
+def handle_export_session(user_id: str, http_method: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle session export operations (alias for share with download type)"""
+    # This is essentially the same as share with download type
+    return handle_share_session(user_id, http_method, event)
+
+
+def handle_import_session(user_id: str, http_method: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle session import operations (from file or share link)"""
+    if http_method != 'POST':
+        return {
+            'statusCode': 405,
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+            'body': json_dumps_safe({'error': 'Method not allowed'})
+        }
+    
+    try:
+        from importer import ChatSessionImporter
+        
+        body = json.loads(event.get('body', '{}'))
+        import_type = body.get('importType')  # 'file' or 'link'
+        
+        if not import_type:
+            return {
+                'statusCode': 400,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'importType is required'})
+            }
+        
+        # Initialize importer
+        importer = ChatSessionImporter()
+        
+        if import_type == 'file':
+            file_content_base64 = body.get('fileContent')
+            if not file_content_base64:
+                return {
+                    'statusCode': 400,
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                    'body': json_dumps_safe({'error': 'fileContent is required for file import'})
+                }
+            
+            # Decode base64 file content
+            import base64 as b64
+            file_content = b64.b64decode(file_content_base64)
+            
+            result = importer.import_from_file(file_content, user_id)
+            return {
+                'statusCode': 200 if result.get('success') else 500,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe(result)
+            }
+            
+        elif import_type == 'link':
+            share_id = body.get('shareId')
+            if not share_id:
+                return {
+                    'statusCode': 400,
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                    'body': json_dumps_safe({'error': 'shareId is required for link import'})
+                }
+            
+            result = importer.import_from_share_link(share_id, user_id)
+            return {
+                'statusCode': 200 if result.get('success') else 500,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe(result)
+            }
+        else:
+            return {
+                'statusCode': 400,
+                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                'body': json_dumps_safe({'error': 'Invalid importType. Must be "file" or "link"'})
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error handling import session: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+            'body': json_dumps_safe({'error': f'Failed to import session: {str(e)}'})
+        }
+
 
 def delete_session(user_id: str, session_id: str) -> Dict[str, Any]:
     """Delete a chat session and send kill signal to any active processing"""
