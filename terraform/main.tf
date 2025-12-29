@@ -155,6 +155,15 @@ module "api_gateway" {
     session = {
       path_part = "session"
     }
+    session_share = {
+      path_part = "session-share"
+    }
+    session_import = {
+      path_part = "session-import"
+    }
+    session_export = {
+      path_part = "session-export"
+    }
     news = {
       path_part = "news"
     }
@@ -414,6 +423,33 @@ module "api_gateway" {
       integration_http_method = "POST"
       lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
       request_parameters      = {}
+    }
+    session_share_post = {
+      resource_key            = "session_share"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    session_import_post = {
+      resource_key            = "session_import"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    session_export_post = {
+      resource_key            = "session_export"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
     # POST method for news search
     news_post = {
@@ -689,6 +725,21 @@ module "api_gateway" {
       http_method   = "DELETE"
       resource_path = "session"
     }
+    session_share_post = {
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "session-share"
+    }
+    session_import_post = {
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "session-import"
+    }
+    session_export_post = {
+      function_arn  = module.session_management_lambda.wrapper_function_arn != null ? module.session_management_lambda.wrapper_function_arn : module.session_management_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "session-export"
+    }
     news_post = {
       function_arn  = module.news_search_lambda.wrapper_function_arn != null ? module.news_search_lambda.wrapper_function_arn : module.news_search_lambda.function_arn
       http_method   = "POST"
@@ -775,7 +826,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "73" # Updated for dashboard import endpoint
+  deployment_trigger = "74" # Updated for session import/export endpoints
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

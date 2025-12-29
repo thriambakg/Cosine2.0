@@ -79,13 +79,14 @@ def process_session_request(event, context):
         http_method = event.get('httpMethod', 'GET')
         path = event.get('path', '')
         query_params = event.get('queryStringParameters') or {}
-        user_id = query_params.get('user_id') if query_params else None
+        # Support both userId and user_id for compatibility
+        user_id = query_params.get('user_id') or query_params.get('userId') if query_params else None
         
         if not user_id:
             return {
                 'statusCode': 400,
                 'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
-                'body': json_dumps_safe({'error': 'user_id is required'})
+                'body': json_dumps_safe({'error': 'user_id or userId is required'})
             }
         
         # Handle CORS preflight
@@ -97,11 +98,17 @@ def process_session_request(event, context):
             }
         
         # Route to export/import/share handlers based on path
-        if path.startswith('/share') or '/session-share' in path or path.endswith('/share'):
+        # Normalize path for matching (remove leading/trailing slashes and stage prefix)
+        normalized_path = path.strip('/').lower()
+        if '/production/' in normalized_path or '/staging/' in normalized_path:
+            # Remove stage prefix if present
+            normalized_path = normalized_path.split('/', 1)[-1] if '/' in normalized_path else normalized_path
+        
+        if 'session-share' in normalized_path or normalized_path.endswith('share'):
             return handle_share_session(user_id, http_method, event)
-        elif path.startswith('/import') or '/session-import' in path or path.endswith('/import'):
+        elif 'session-import' in normalized_path or normalized_path.endswith('import'):
             return handle_import_session(user_id, http_method, event)
-        elif path.startswith('/export') or '/session-export' in path or path.endswith('/export'):
+        elif 'session-export' in normalized_path or normalized_path.endswith('export'):
             return handle_export_session(user_id, http_method, event)
         
         # Route to appropriate handler for standard session operations
