@@ -452,10 +452,10 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
     const activeTabInGroup = groupTabs.find(tab => tab.id === activeTabId);
     
     if (isExpanded) {
-      // Show individual tabs when expanded
+      // Show group header only in fixed area when expanded - tabs will be in scrollable area
       return (
-        <Box key={group.id} sx={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
-          {/* Group header */}
+        <Box key={group.id} sx={{ display: 'flex', alignItems: 'center', position: 'relative', mr: 1 }}>
+          {/* Group header - always visible in fixed area */}
           <Box
             sx={{
               display: 'flex',
@@ -512,24 +512,14 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
               }}
             />
           </Box>
-          
-          {/* Individual tabs */}
-          {groupTabs.map((tab, index) => (
-            <React.Fragment key={tab.id}>
-              {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
-              {renderTab(tab)}
-              {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
-            </React.Fragment>
-          ))}
         </Box>
       );
     }
 
     // Show dropdown when collapsed
     return (
-      <Box key={group.id} sx={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
-        {/* Group dropdown - only render if group has tabs */}
-        {groupTabs && groupTabs.length > 0 && (
+      <Box key={group.id} sx={{ display: 'flex', alignItems: 'center', position: 'relative', mr: 1 }}>
+        {/* Group dropdown - show even if group has no tabs */}
         <FormControl size="small" sx={{ minWidth: 200 }}>
           <Select
             value={(() => {
@@ -804,7 +794,6 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
             })}
           </Select>
         </FormControl>
-        )}
       </Box>
     );
   };
@@ -817,21 +806,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
         backgroundColor: '#0f172a',
         borderBottom: '1px solid #374151',
         minHeight: '40px',
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        '&::-webkit-scrollbar': {
-          height: '6px'
-        },
-        '&::-webkit-scrollbar-track': {
-          backgroundColor: '#1e293b'
-        },
-        '&::-webkit-scrollbar-thumb': {
-          backgroundColor: '#374151',
-          borderRadius: '3px',
-          '&:hover': {
-            backgroundColor: '#4b5563'
-          }
-        }
+        position: 'relative'
       }}
       onDragOver={(e) => {
         // Allow drag over the entire tab bar area
@@ -843,85 +818,149 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
         console.log('🔄 Drop on main tab bar area');
       }}
     >
-      {/* Tab groups */}
-      {tabGroups.map((group, index) => (
-        <React.Fragment key={group.id}>
-          {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
-          {renderGroup(group)}
-          {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
-        </React.Fragment>
-      ))}
-
-      {/* Divider between groups and ungrouped tabs */}
-      {tabGroups.length > 0 && ungroupedTabs.length > 0 && (
-        <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: '#374151' }} />
+      {/* Fixed groups section on the left */}
+      {tabGroups.length > 0 && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            flexShrink: 0,
+            backgroundColor: '#0f172a',
+            borderRight: '1px solid #374151',
+            pr: 1,
+            pl: 1,
+            position: 'sticky',
+            left: 0,
+            zIndex: 10,
+            minWidth: 'fit-content'
+          }}
+        >
+          {tabGroups.map((group, index) => (
+            <React.Fragment key={group.id}>
+              {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+              {renderGroup(group)}
+              {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+            </React.Fragment>
+          ))}
+        </Box>
       )}
 
-      {/* Ungrouped tabs with drop zone */}
+      {/* Scrollable tabs section on the right */}
       <Box
         sx={{
           display: 'flex',
           alignItems: 'center',
-          minHeight: '40px',
-          backgroundColor: dragOverTab === 'ungrouped-area' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-          borderLeft: dragOverTab === 'ungrouped-area' ? '3px solid #3b82f6' : 'none',
-          px: dragOverTab === 'ungrouped-area' ? 1 : 0,
-          transition: 'all 0.2s ease',
-          position: 'relative'
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOverTab('ungrouped-area');
-        }}
-        onDragLeave={() => {
-          setDragOverTab(null);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (draggedTab) {
-            console.log('🔄 Dropping tab in ungrouped area:', draggedTab.id);
-            onTabUngroup(draggedTab.id);
+          flex: 1,
+          minWidth: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          '&::-webkit-scrollbar': {
+            height: '6px'
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: '#1e293b'
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: '#374151',
+            borderRadius: '3px',
+            '&:hover': {
+              backgroundColor: '#4b5563'
+            }
           }
-          setDragOverTab(null);
-          setDraggedTab(null);
         }}
       >
-        {ungroupedTabs.map((tab, index) => (
-          <React.Fragment key={tab.id}>
-            {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
-            {renderTab(tab)}
-            {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
-          </React.Fragment>
-        ))}
+        {/* Expanded group tabs - render tabs from expanded groups in scrollable area */}
+        {tabGroups.map((group) => {
+          const groupTabs = groupedTabs[group.id] || [];
+          const isExpanded = expandedGroups[group.id] || false;
+          if (!isExpanded || groupTabs.length === 0) return null;
+          
+          return (
+            <React.Fragment key={`expanded-${group.id}`}>
+              {groupTabs.map((tab, index) => (
+                <React.Fragment key={tab.id}>
+                  {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+                  {renderTab(tab)}
+                  {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+                </React.Fragment>
+              ))}
+            </React.Fragment>
+          );
+        })}
+
+        {/* Divider between groups and ungrouped tabs */}
+        {tabGroups.length > 0 && ungroupedTabs.length > 0 && (
+          <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: '#374151' }} />
+        )}
+
+        {/* Ungrouped tabs with drop zone */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            minHeight: '40px',
+            backgroundColor: dragOverTab === 'ungrouped-area' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+            borderLeft: dragOverTab === 'ungrouped-area' ? '3px solid #3b82f6' : 'none',
+            px: dragOverTab === 'ungrouped-area' ? 1 : 0,
+            transition: 'all 0.2s ease',
+            position: 'relative'
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOverTab('ungrouped-area');
+          }}
+          onDragLeave={() => {
+            setDragOverTab(null);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (draggedTab) {
+              console.log('🔄 Dropping tab in ungrouped area:', draggedTab.id);
+              onTabUngroup(draggedTab.id);
+            }
+            setDragOverTab(null);
+            setDraggedTab(null);
+          }}
+        >
+          {ungroupedTabs.map((tab, index) => (
+            <React.Fragment key={tab.id}>
+              {dragPreviewPosition?.index === index && dragPreviewPosition?.type === 'before' && renderDragPreviewLine(index)}
+              {renderTab(tab)}
+              {dragPreviewPosition?.index === index + 1 && dragPreviewPosition?.type === 'after' && renderDragPreviewLine(index + 1)}
+            </React.Fragment>
+          ))}
+        </Box>
+
+        {/* Add tab button */}
+        <IconButton
+          onClick={onTabCreate}
+          sx={{
+            color: '#9ca3af',
+            flexShrink: 0,
+            '&:hover': {
+              color: '#ffffff',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)'
+            }
+          }}
+        >
+          <AddIcon />
+        </IconButton>
+
+        {/* Add group button */}
+        <IconButton
+          onClick={onGroupCreate}
+          sx={{
+            color: '#9ca3af',
+            flexShrink: 0,
+            '&:hover': {
+              color: '#ffffff',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)'
+            }
+          }}
+        >
+          <GroupIcon />
+        </IconButton>
       </Box>
-
-      {/* Add tab button */}
-      <IconButton
-        onClick={onTabCreate}
-        sx={{
-          color: '#9ca3af',
-          '&:hover': {
-            color: '#ffffff',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)'
-          }
-        }}
-      >
-        <AddIcon />
-      </IconButton>
-
-      {/* Add group button */}
-      <IconButton
-        onClick={onGroupCreate}
-        sx={{
-          color: '#9ca3af',
-          '&:hover': {
-            color: '#ffffff',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)'
-          }
-        }}
-      >
-        <GroupIcon />
-      </IconButton>
 
       {/* Tab Context Menu */}
       <Menu
