@@ -1012,7 +1012,7 @@ export default function ChatPage() {
     };
   }, []); // Empty dependency array - only run on mount/unmount
 
-  // Listen for new session creation from sidebar
+  // Listen for new session creation from sidebar and session list refresh requests
   useEffect(() => {
     const handleNewSessionCreated = (event: CustomEvent) => {
       const { sessionId, source } = event.detail;
@@ -1024,12 +1024,26 @@ export default function ChatPage() {
       }
     };
 
+    const handleRefreshSessionList = async (event: CustomEvent) => {
+      const { sessionId } = event.detail;
+      console.log('🔄 ChatPage: Refreshing session list after import:', sessionId);
+      // Reload sessions from backend to include the imported session
+      await loadSessionsFromBackend();
+      // If a sessionId is provided, load it
+      if (sessionId) {
+        await loadSession(sessionId);
+        await loadSessionFromDatabase(sessionId);
+      }
+    };
+
     window.addEventListener('new-session-created', handleNewSessionCreated as EventListener);
+    window.addEventListener('refresh-session-list', handleRefreshSessionList as EventListener);
     
     return () => {
       window.removeEventListener('new-session-created', handleNewSessionCreated as EventListener);
+      window.removeEventListener('refresh-session-list', handleRefreshSessionList as EventListener);
     };
-  }, [loadSessionsFromBackend]);
+  }, [loadSessionsFromBackend, loadSession]);
 
   const editContainerRef = useRef<HTMLDivElement>(null);
 
@@ -2722,12 +2736,19 @@ export default function ChatPage() {
             try {
               const response = await sessionManagementAPI.shareSession(currentSession.session_id, user.id, 'download');
               if (response.success && response.downloadUrl) {
+                // Use direct download approach (same as dashboard)
                 const link = document.createElement('a');
                 link.href = response.downloadUrl;
                 link.download = `${currentSession.title || 'chat-session'}.cosine`;
+                link.style.display = 'none';
                 document.body.appendChild(link);
                 link.click();
-                document.body.removeChild(link);
+                // Small delay before removing to ensure click is processed
+                setTimeout(() => {
+                  document.body.removeChild(link);
+                }, 100);
+              } else {
+                console.error('Download failed:', response.error);
               }
             } catch (error) {
               console.error('Error downloading chat session:', error);
@@ -2753,9 +2774,13 @@ export default function ChatPage() {
         sessionId={currentSession?.session_id}
         sessionTitle={currentSession?.title}
         userId={user?.id || ''}
-        onImportSuccess={(newSessionId) => {
-          // Load the imported session
-          loadSessionFromDatabase(newSessionId);
+        onImportSuccess={async (newSessionId) => {
+          // Refresh session list to include the imported session
+          await loadSessionsFromBackend();
+          // Load and set the imported session as current
+          await loadSession(newSessionId);
+          // Load full session data (messages, context, etc.)
+          await loadSessionFromDatabase(newSessionId);
         }}
       />
 

@@ -106,13 +106,18 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
     try {
       const response = await sessionManagementAPI.shareSession(sessionId, userId, 'download');
       if (response.success && response.downloadUrl) {
-        // Trigger download
+        // Use direct download approach (same as dashboard)
         const link = document.createElement('a');
         link.href = response.downloadUrl;
         link.download = `${sessionTitle || 'chat-session'}.cosine`;
+        link.style.display = 'none';
         document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
+        // Small delay before removing to ensure click is processed
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+        
         setSuccess('Chat session downloaded successfully!');
       } else {
         setError(response.error || 'Failed to download chat session');

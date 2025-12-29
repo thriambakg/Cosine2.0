@@ -2803,12 +2803,17 @@ const GlobalChatSidebar: React.FC = () => {
           try {
             const response = await sessionManagementAPI.shareSession(activeSessionId, user.id, 'download');
             if (response.success && response.downloadUrl) {
+              // Use direct download approach (same as dashboard)
               const link = document.createElement('a');
               link.href = response.downloadUrl;
               link.download = `${currentSession?.title || 'chat-session'}.cosine`;
+              link.style.display = 'none';
               document.body.appendChild(link);
               link.click();
-              document.body.removeChild(link);
+              // Small delay before removing to ensure click is processed
+              setTimeout(() => {
+                document.body.removeChild(link);
+              }, 100);
             }
           } catch (error) {
             console.error('Error downloading chat session:', error);
@@ -2834,9 +2839,18 @@ const GlobalChatSidebar: React.FC = () => {
       sessionId={activeSessionId || undefined}
       sessionTitle={currentSession?.title}
       userId={user?.id || ''}
-      onImportSuccess={(newSessionId) => {
+      onImportSuccess={async (newSessionId) => {
+        // Dispatch event to refresh session list in ChatPage if it's open
+        const refreshEvent = new CustomEvent('refresh-session-list', {
+          detail: { sessionId: newSessionId }
+        });
+        window.dispatchEvent(refreshEvent);
+        
+        // Set the imported session as active and open sidebar
+        setIsVisible(true);
         setActiveSessionId(newSessionId);
         // The session will be loaded automatically by the useEffect that watches activeSessionId
+        await loadSessionFromDatabase(newSessionId);
       }}
     />
     </>
