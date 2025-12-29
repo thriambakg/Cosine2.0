@@ -2755,9 +2755,7 @@ export default function ChatPage() {
         userId={user?.id || ''}
         onImportSuccess={(newSessionId) => {
           // Load the imported session
-          if (user?.id) {
-            loadSessionFromDatabase(newSessionId, user.id);
-          }
+          loadSessionFromDatabase(newSessionId);
         }}
       />
 

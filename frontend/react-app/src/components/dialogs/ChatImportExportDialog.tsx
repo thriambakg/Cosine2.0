@@ -45,8 +45,6 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState(0);
   const [shareLink, setShareLink] = useState('');
-  const [shareId, setShareId] = useState('');
-  const [downloadUrl, setDownloadUrl] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLink, setImportLink] = useState('');
   const [loading, setLoading] = useState(false);
@@ -58,8 +56,6 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
   const handleClose = () => {
     setActiveTab(0);
     setShareLink('');
-    setShareId('');
-    setDownloadUrl('');
     setImportFile(null);
     setImportLink('');
     setError('');
@@ -86,7 +82,6 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
       if (response.success && response.shareId) {
         const fullLink = `${window.location.origin}/import-chat?shareId=${response.shareId}`;
         setShareLink(fullLink);
-        setShareId(response.shareId);
         setSuccess('Share link generated successfully!');
       } else {
         setError(response.error || 'Failed to generate share link');
@@ -111,7 +106,6 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
     try {
       const response = await sessionManagementAPI.shareSession(sessionId, userId, 'download');
       if (response.success && response.downloadUrl) {
-        setDownloadUrl(response.downloadUrl);
         // Trigger download
         const link = document.createElement('a');
         link.href = response.downloadUrl;
