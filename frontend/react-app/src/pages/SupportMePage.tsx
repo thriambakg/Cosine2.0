@@ -25,6 +25,16 @@ import { Elements, CardElement, useStripe, useElements } from '@stripe/react-str
 // Initialize Stripe (you'll need to add your Stripe publishable key to environment)
 // Vite uses VITE_ prefix for environment variables
 const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '';
+
+// Debug logging (only in development)
+if (import.meta.env.DEV) {
+  if (!STRIPE_PUBLISHABLE_KEY) {
+    console.warn('⚠️ VITE_STRIPE_PUBLISHABLE_KEY is not set. Check GitHub secrets and rebuild.');
+  } else {
+    console.log('✅ Stripe publishable key loaded:', STRIPE_PUBLISHABLE_KEY.substring(0, 20) + '...');
+  }
+}
+
 const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
 
 interface MonthlySpending {
