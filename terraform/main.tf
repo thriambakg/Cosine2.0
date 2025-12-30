@@ -826,7 +826,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "78" # Updated for tile/tab/group duplication endpoints
+  deployment_trigger = "79" # Updated for tile duplication pathfinding
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

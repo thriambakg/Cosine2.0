@@ -125,7 +125,7 @@ def lambda_handler(event, context):
             result = handle_share_dashboard(user_id, http_method, event)
         elif path.startswith('/import') or '/dashboard-import' in path or path.endswith('/import'):
             result = handle_import_dashboard(user_id, http_method, event)
-        elif path.startswith('/tiles'):
+        elif path.startswith('/tiles') or '/dashboard-tiles' in path or '/tiles' in path:
             result = handle_tiles_operations(user_id, http_method, path, event)
         elif path.startswith('/reorder'):
             result = handle_reorder_components(user_id, event)
@@ -677,6 +677,17 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
         now = datetime.utcnow().isoformat()
         tile_type = tile_config.get('type', 'crypto')
         
+        # Get tile size for position calculation
+        tile_size = tile_config.get('gridSize', {'width': 4, 'height': 4})
+        tile_width = tile_size.get('width', 4) if isinstance(tile_size, dict) else 4
+        tile_height = tile_size.get('height', 4) if isinstance(tile_size, dict) else 4
+        
+        # If no position provided, find next available position
+        grid_position = tile_config.get('gridPosition')
+        if not grid_position:
+            existing_tiles = target_tab.get('tiles', [])
+            grid_position = find_next_available_position(existing_tiles, tile_width, tile_height)
+        
         # Base tile structure
         new_tile = {
             'id': str(uuid.uuid4()),
@@ -685,8 +696,8 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
             'displayOptions': tile_config.get('displayOptions', {}),
             'autoRefresh': tile_config.get('autoRefresh', False),
             'isPinned': tile_config.get('isPinned', False),
-            'gridPosition': tile_config.get('gridPosition', {'x': 0, 'y': 0}),
-            'gridSize': tile_config.get('gridSize', {'width': 1, 'height': 1}),
+            'gridPosition': grid_position,
+            'gridSize': tile_size,
             'tab_id': target_tab['id'],
             'created_at': now,
             'updated_at': now
@@ -1019,13 +1030,24 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
                 del portfolio_data['results']
             duplicated_tile['portfolioData'] = portfolio_data
         
-        # Adjust grid position slightly to avoid overlap (optional)
-        if 'gridPosition' in duplicated_tile:
-            pos = duplicated_tile['gridPosition']
-            duplicated_tile['gridPosition'] = {
-                'x': pos.get('x', 0) + 1,
-                'y': pos.get('y', 0) + 1
-            }
+        # Find next available position using the same pathfinding logic as frontend
+        tile_size = duplicated_tile.get('gridSize', duplicated_tile.get('size', {}))
+        if isinstance(tile_size, dict):
+            tile_width = tile_size.get('width', 4)
+            tile_height = tile_size.get('height', 4)
+        else:
+            # Legacy size format or missing
+            tile_width = 4
+            tile_height = 4
+        
+        # Get all tiles in the target tab (excluding the source tile we're duplicating)
+        existing_tiles = [t for t in target_tab.get('tiles', []) if t.get('id') != tile_id]
+        
+        # Find next available position
+        new_position = find_next_available_position(existing_tiles, tile_width, tile_height)
+        duplicated_tile['gridPosition'] = new_position
+        if 'gridSize' not in duplicated_tile:
+            duplicated_tile['gridSize'] = {'width': tile_width, 'height': tile_height}
         
         # Add tile to target tab
         if 'tiles' not in target_tab:
@@ -1525,6 +1547,103 @@ def validate_tile_config(tile: Dict) -> bool:
             return False
     
     return True
+
+def find_next_available_position(existing_tiles: List[Dict], tile_width: int, tile_height: int) -> Dict[str, int]:
+    """
+    Find the nearest available position for a tile using spiral search algorithm
+    Matches the frontend findNextAvailablePosition logic
+    """
+    GRID_COLUMNS = 16  # Match frontend default
+    MAX_ROWS = 50  # Match frontend constant
+    
+    # If no existing tiles, place at origin
+    if not existing_tiles:
+        return {'x': 0, 'y': 0}
+    
+    # Create a 2D grid to track occupied positions
+    grid = [[False for _ in range(GRID_COLUMNS)] for _ in range(MAX_ROWS)]
+    
+    # Mark occupied positions
+    for tile in existing_tiles:
+        pos = tile.get('gridPosition', tile.get('position', {}))
+        size = tile.get('gridSize', tile.get('size', {}))
+        
+        # Get position coordinates
+        if isinstance(pos, dict):
+            tile_x = pos.get('x', 0)
+            tile_y = pos.get('y', 0)
+        else:
+            tile_x = 0
+            tile_y = 0
+        
+        # Get size dimensions
+        if isinstance(size, dict):
+            tile_w = size.get('width', 4)
+            tile_h = size.get('height', 4)
+        else:
+            tile_w = 4
+            tile_h = 4
+        
+        # Mark all cells occupied by this tile
+        for x in range(tile_x, min(tile_x + tile_w, GRID_COLUMNS)):
+            for y in range(tile_y, min(tile_y + tile_h, MAX_ROWS)):
+                if 0 <= y < MAX_ROWS and 0 <= x < GRID_COLUMNS:
+                    grid[y][x] = True
+    
+    # Check if a position is available for the given tile size
+    def is_position_available(x: int, y: int, width: int, height: int) -> bool:
+        if x < 0 or y < 0 or x + width > GRID_COLUMNS or y + height > MAX_ROWS:
+            return False
+        for dx in range(width):
+            for dy in range(height):
+                if grid[y + dy][x + dx]:
+                    return False
+        return True
+    
+    # Spiral search from origin - finds the nearest available space
+    directions = [
+        {'dx': 1, 'dy': 0},   # Right
+        {'dx': 0, 'dy': 1},   # Down
+        {'dx': -1, 'dy': 0},  # Left
+        {'dx': 0, 'dy': -1}   # Up
+    ]
+    
+    x, y = 0, 0
+    step = 1
+    direction_index = 0
+    steps_in_direction = 0
+    
+    while x < GRID_COLUMNS and y < MAX_ROWS:
+        # Check current position
+        if is_position_available(x, y, tile_width, tile_height):
+            logger.info(f"📍 Found nearest available position: x={x}, y={y}, size={tile_width}x{tile_height}")
+            return {'x': x, 'y': y}
+        
+        # Move in current direction
+        direction = directions[direction_index]
+        x += direction['dx']
+        y += direction['dy']
+        steps_in_direction += 1
+        
+        # Change direction when we've taken enough steps
+        if steps_in_direction == step:
+            steps_in_direction = 0
+            direction_index = (direction_index + 1) % 4
+            
+            # Increase step size every 2 direction changes (completes a square)
+            if direction_index == 0 or direction_index == 2:
+                step += 1
+    
+    # Fallback: Linear search if spiral fails
+    for y in range(MAX_ROWS):
+        for x in range(GRID_COLUMNS - tile_width + 1):
+            if is_position_available(x, y, tile_width, tile_height):
+                logger.info(f"📍 Fallback position found: x={x}, y={y}")
+                return {'x': x, 'y': y}
+    
+    # Ultimate fallback: place at origin
+    logger.warning("📍 No space found, placing at origin")
+    return {'x': 0, 'y': 0}
 
 def create_response(status_code: int, body: Dict) -> Dict:
     """Create a standardized API Gateway response"""
