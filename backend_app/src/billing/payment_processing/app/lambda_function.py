@@ -26,8 +26,7 @@ secrets_client = boto3.client('secretsmanager')
 
 # Environment variables
 SPENDING_BUCKET_NAME = os.environ.get('SPENDING_BUCKET_NAME')
-STRIPE_SECRET_NAME = os.environ.get('STRIPE_SECRET_NAME', 'cosine-stripe-secret-production')
-STRIPE_WEBHOOK_SECRET_NAME = os.environ.get('STRIPE_WEBHOOK_SECRET_NAME', 'cosine-stripe-webhook-secret-production')
+STRIPE_SECRET_NAME = os.environ.get('STRIPE_SECRET_NAME', 'cosine-stripe-production')
 
 # Try to import stripe (will be in requirements.txt)
 try:
@@ -76,10 +75,10 @@ def get_stripe_secret() -> str:
         raise
 
 def get_stripe_webhook_secret() -> str:
-    """Get Stripe webhook secret from Secrets Manager"""
+    """Get Stripe webhook secret from Secrets Manager (from consolidated secret)"""
     try:
-        logger.info(f"🔑 Fetching Stripe webhook secret from Secrets Manager: {STRIPE_WEBHOOK_SECRET_NAME}")
-        response = secrets_client.get_secret_value(SecretId=STRIPE_WEBHOOK_SECRET_NAME)
+        logger.info(f"🔑 Fetching Stripe webhook secret from Secrets Manager: {STRIPE_SECRET_NAME}")
+        response = secrets_client.get_secret_value(SecretId=STRIPE_SECRET_NAME)
         secret_data = json.loads(response['SecretString'])
         
         # Try both key names for compatibility
@@ -252,10 +251,52 @@ def update_earnings_summary(amount: float, currency: str = 'usd') -> str:
         logger.error(f"Error storing earnings summary: {str(e)}")
         raise
 
+def check_event_processed(event_id: str) -> bool:
+    """Check if a webhook event has already been processed (idempotency)"""
+    try:
+        # Use S3 to track processed events (simple key-based check)
+        key = f"webhook_events/{event_id}.processed"
+        s3_client.head_object(Bucket=SPENDING_BUCKET_NAME, Key=key)
+        logger.info(f"⚠️ Event {event_id} already processed (idempotency check)")
+        return True
+    except ClientError as e:
+        if e.response['Error']['Code'] == '404':
+            return False
+        logger.warning(f"⚠️ Error checking event processing status: {str(e)}")
+        return False
+
+def mark_event_processed(event_id: str) -> None:
+    """Mark a webhook event as processed (idempotency)"""
+    try:
+        key = f"webhook_events/{event_id}.processed"
+        s3_client.put_object(
+            Bucket=SPENDING_BUCKET_NAME,
+            Key=key,
+            Body=json.dumps({'event_id': event_id, 'processed_at': datetime.now().isoformat()}, indent=2),
+            ContentType='application/json',
+            ServerSideEncryption='aws:kms'
+        )
+        logger.info(f"✅ Marked event {event_id} as processed")
+    except ClientError as e:
+        logger.error(f"❌ Error marking event as processed: {str(e)}")
+        # Don't raise - this is not critical, just logging
+
 def handle_webhook_event(event_data: Dict) -> Dict:
-    """Handle Stripe webhook events"""
+    """Handle Stripe webhook events with idempotency"""
     event_type = event_data.get('type')
+    event_id = event_data.get('id')
     event_object = event_data.get('data', {}).get('object', {})
+    
+    logger.info(f"📨 Processing webhook event: {event_type} (ID: {event_id})")
+    
+    # Idempotency check - prevent duplicate processing
+    if event_id and check_event_processed(event_id):
+        return {
+            'event_type': event_type,
+            'event_id': event_id,
+            'processed': False,
+            'message': 'Event already processed (idempotency)'
+        }
     
     payment_data = {
         'payment_intent_id': event_object.get('id'),
@@ -271,9 +312,25 @@ def handle_webhook_event(event_data: Dict) -> Dict:
         # Update earnings summary
         update_earnings_summary(payment_data.get('amount', 0), payment_data.get('currency', 'usd'))
         logger.info(f"✅ Payment succeeded: {payment_data['payment_intent_id']}")
+        # Mark event as processed
+        if event_id:
+            mark_event_processed(event_id)
+    elif event_type == 'payment_intent.payment_failed':
+        # Log failed payment for monitoring (don't record as earnings)
+        logger.warning(f"❌ Payment failed: {payment_data['payment_intent_id']} - Amount: ${payment_data['amount']:.2f}")
+        # Still mark as processed to prevent duplicate processing
+        if event_id:
+            mark_event_processed(event_id)
+    else:
+        # Log other event types for monitoring
+        logger.info(f"ℹ️ Received webhook event type: {event_type} (not processing)")
+        # Mark as processed to prevent reprocessing
+        if event_id:
+            mark_event_processed(event_id)
     
     return {
         'event_type': event_type,
+        'event_id': event_id,
         'payment_data': payment_data,
         'processed': True
     }
@@ -442,24 +499,44 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
             logger.info("✅ Handling CORS preflight request")
             return create_response(200, {'message': 'CORS preflight'})
         
-        # Parse body
+        # Check if this is a Stripe webhook (must check BEFORE parsing body)
+        stripe_signature = event.get('headers', {}).get('stripe-signature') or event.get('headers', {}).get('Stripe-Signature')
+        
+        if stripe_signature:
+            # Handle webhook - need raw body for signature verification
+            body_str = event.get('body', '{}')
+            
+            # Handle base64 encoded body (API Gateway may encode binary content)
+            if event.get('isBase64Encoded', False):
+                import base64
+                try:
+                    body_str = base64.b64decode(body_str).decode('utf-8')
+                    logger.info("📦 Decoded base64 encoded webhook body")
+                except Exception as e:
+                    logger.error(f"❌ Error decoding base64 body: {str(e)}")
+                    return create_response(400, {'error': 'Invalid webhook body encoding'})
+            
+            # Verify webhook signature with raw body
+            if not verify_stripe_webhook(body_str, stripe_signature):
+                logger.error("❌ Invalid webhook signature - rejecting request")
+                return create_response(400, {'error': 'Invalid webhook signature'})
+            
+            # Parse body after verification
+            try:
+                event_data = json.loads(body_str) if isinstance(body_str, str) else body_str
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Error parsing webhook JSON: {str(e)}")
+                return create_response(400, {'error': 'Invalid webhook JSON'})
+            
+            result = handle_webhook_event(event_data)
+            return create_response(200, result)
+        
+        # Parse body for non-webhook requests
         body_str = event.get('body', '{}')
         if isinstance(body_str, str):
             body = json.loads(body_str) if body_str else {}
         else:
             body = body_str
-        
-        # Check if this is a Stripe webhook
-        stripe_signature = event.get('headers', {}).get('stripe-signature') or event.get('headers', {}).get('Stripe-Signature')
-        
-        if stripe_signature:
-            # Handle webhook
-            if not verify_stripe_webhook(body_str, stripe_signature):
-                return create_response(400, {'error': 'Invalid webhook signature'})
-            
-            event_data = json.loads(body_str) if isinstance(body_str, str) else body_str
-            result = handle_webhook_event(event_data)
-            return create_response(200, result)
         
         # Handle GET requests - fetch earnings summary
         if http_method == 'GET':

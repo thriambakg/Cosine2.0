@@ -2541,8 +2541,7 @@ resource "aws_iam_policy" "billing_payment_policy" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-*",
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-secret-${var.environment}*",
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-webhook-secret-${var.environment}*"
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-${var.environment}*"
         ]
       },
       {
@@ -2653,11 +2652,10 @@ module "billing_payment_lambda" {
   source_dir = "../backend_app/src/billing/payment_processing/app"
 
   environment_variables = {
-    SPENDING_BUCKET_NAME       = data.terraform_remote_state.base_infra.outputs.spending_bucket_name
-    STRIPE_SECRET_NAME         = "${var.project_name}-stripe-secret-${var.environment}"
-    STRIPE_WEBHOOK_SECRET_NAME = "${var.project_name}-stripe-webhook-secret-${var.environment}"
-    ENVIRONMENT                = var.environment
-    LOG_LEVEL                  = var.environment == "development" ? "DEBUG" : "INFO"
+    SPENDING_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.spending_bucket_name
+    STRIPE_SECRET_NAME   = "${var.project_name}-stripe-${var.environment}"
+    ENVIRONMENT          = var.environment
+    LOG_LEVEL            = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
   layers = [
