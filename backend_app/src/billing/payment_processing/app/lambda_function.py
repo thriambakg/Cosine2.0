@@ -9,7 +9,7 @@ import logging
 import boto3
 from typing import Dict, Any, Optional
 from botocore.exceptions import ClientError
-from datetime import datetime
+from datetime import datetime, timedelta
 import hmac
 import hashlib
 import csv
@@ -241,11 +241,162 @@ def handle_webhook_event(event_data: Dict) -> Dict:
         'processed': True
     }
 
+def calculate_previous_month_earnings() -> Dict[str, float]:
+    """Calculate total earnings for the previous month from individual payment CSVs"""
+    today = datetime.now()
+    # First day of current month
+    first_of_current = today.replace(day=1)
+    # Last day of previous month
+    last_of_previous = first_of_current - timedelta(days=1)
+    # First day of previous month
+    first_of_previous = last_of_previous.replace(day=1)
+    
+    month_key = first_of_previous.strftime('%Y-%m')
+    year_month_path = first_of_previous.strftime('%Y/%m')
+    prefix = f"earnings/{year_month_path}/"
+    
+    logger.info(f"📊 Calculating earnings for previous month: {month_key} (prefix: {prefix})")
+    
+    total_earnings = 0.0
+    payment_count = 0
+    
+    try:
+        # List all objects in the previous month's earnings folder
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=SPENDING_BUCKET_NAME, Prefix=prefix)
+        
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    key = obj['Key']
+                    # Only process CSV files
+                    if key.endswith('.csv'):
+                        try:
+                            response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key=key)
+                            csv_content = response['Body'].read().decode('utf-8')
+                            reader = csv.DictReader(io.StringIO(csv_content))
+                            
+                            for row in reader:
+                                amount = float(row.get('amount', 0))
+                                status = row.get('status', '').lower()
+                                # Only count succeeded payments
+                                if status == 'succeeded':
+                                    total_earnings += amount
+                                    payment_count += 1
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error reading payment CSV {key}: {str(e)}")
+                            continue
+        
+        logger.info(f"💰 Previous month ({month_key}) totals: ${total_earnings:.2f} from {payment_count} payments")
+        
+        return {
+            'month': month_key,
+            'total_earnings': total_earnings,
+            'payment_count': payment_count,
+            'currency': 'USD'
+        }
+    except ClientError as e:
+        logger.error(f"❌ Error calculating previous month earnings: {str(e)}")
+        return {
+            'month': month_key,
+            'total_earnings': 0.0,
+            'payment_count': 0,
+            'currency': 'USD'
+        }
+
+def handle_scheduled_event(event: Dict) -> Dict:
+    """Handle scheduled EventBridge event - calculate previous month's earnings"""
+    logger.info("📅 Processing scheduled monthly earnings calculation")
+    
+    try:
+        # Calculate previous month's earnings from individual payment CSVs
+        earnings_data = calculate_previous_month_earnings()
+        
+        # Update earnings summary CSV (this ensures the summary is up to date)
+        month_key = earnings_data['month']
+        csv_key = "earnings_summary.csv"
+        
+        # Read existing summary
+        existing_data = []
+        try:
+            response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key=csv_key)
+            csv_content = response['Body'].read().decode('utf-8')
+            reader = csv.DictReader(io.StringIO(csv_content))
+            existing_data = list(reader)
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'NoSuchKey':
+                logger.warning(f"Error reading existing earnings CSV: {str(e)}")
+        
+        # Update or add the month's data
+        updated = False
+        for i, row in enumerate(existing_data):
+            if row.get('month') == month_key:
+                existing_data[i] = {
+                    'month': month_key,
+                    'total_earnings': f"{earnings_data['total_earnings']:.2f}",
+                    'payment_count': str(earnings_data['payment_count']),
+                    'currency': earnings_data['currency'],
+                    'updated_at': datetime.now().isoformat()
+                }
+                updated = True
+                break
+        
+        if not updated:
+            existing_data.append({
+                'month': month_key,
+                'total_earnings': f"{earnings_data['total_earnings']:.2f}",
+                'payment_count': str(earnings_data['payment_count']),
+                'currency': earnings_data['currency'],
+                'updated_at': datetime.now().isoformat()
+            })
+        
+        # Write back to S3
+        output = io.StringIO()
+        fieldnames = ['month', 'total_earnings', 'payment_count', 'currency', 'updated_at']
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(existing_data)
+        
+        s3_client.put_object(
+            Bucket=SPENDING_BUCKET_NAME,
+            Key=csv_key,
+            Body=output.getvalue(),
+            ContentType='text/csv',
+            ServerSideEncryption='aws:kms'
+        )
+        
+        logger.info(f"✅ Monthly earnings summary updated for {month_key}")
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'success': True,
+                'month': month_key,
+                'earnings': earnings_data,
+                'message': f'Monthly earnings calculated for {month_key}'
+            }, default=str)
+        }
+    except Exception as e:
+        logger.error(f"❌ Error processing scheduled earnings event: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'success': False,
+                'error': f'Failed to calculate monthly earnings: {str(e)}'
+            }, default=str)
+        }
+
 def lambda_handler(event: Dict, context: Any) -> Dict:
     """Main Lambda handler"""
     logger.info(f"📥 Received event: {json.dumps(event, default=str)}")
     
     try:
+        # Check if this is a scheduled EventBridge event
+        if 'source' in event and event.get('source') == 'aws.events':
+            logger.info("📅 Processing scheduled EventBridge event - calculating monthly earnings")
+            return handle_scheduled_event(event)
+        
+        # Otherwise, handle HTTP API Gateway request
         http_method = event.get('httpMethod', 'POST')
         logger.info(f"🔍 Processing {http_method} request")
         
@@ -319,15 +470,15 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                     })
                 except ClientError as e:
                     error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-                    logger.warning(f"⚠️ S3 error ({error_code}): {str(e)}")
                     if error_code == 'NoSuchKey':
-                        logger.info("📝 earnings_summary.csv not found in S3 - returning empty data")
+                        logger.warning("⚠️ earnings_summary.csv not found in S3 - returning empty data. Run scheduled event to generate summary files.")
                         return create_response(200, {
                             'success': True,
                             'current_month_total': 0.0,
                             'total_raised': 0.0,
                             'monthly_earnings': []
                         })
+                    logger.error(f"❌ Error reading earnings summary from S3: {str(e)}")
                     raise
         
         # Handle payment intent creation

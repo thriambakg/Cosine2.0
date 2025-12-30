@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -18,7 +18,7 @@ import {
   Alert,
   Snackbar,
 } from '@mui/material';
-import { AttachMoney as MoneyIcon, TrendingUp as TrendingUpIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import { AttachMoney as MoneyIcon, TrendingUp as TrendingUpIcon, Refresh as RefreshIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -35,6 +35,8 @@ interface MonthlySpending {
   blended_cost: string;
   unblended_cost: string;
   usage_quantity: string;
+  total_earnings?: string;
+  payment_count?: string;
   currency: string;
   updated_at: string;
 }
@@ -142,6 +144,7 @@ const SupportMePage: React.FC = () => {
   const [monthlySpending, setMonthlySpending] = useState<MonthlySpending[]>([]);
   const [totalRaised, setTotalRaised] = useState<number>(0);
   const [monthlyEarnings, setMonthlyEarnings] = useState<MonthlyEarnings[]>([]);
+  const [monthlyReports, setMonthlyReports] = useState<Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [donationAmount, setDonationAmount] = useState<string>('10');
@@ -151,14 +154,24 @@ const SupportMePage: React.FC = () => {
     message: '',
     severity: 'success',
   });
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
+    // Prevent duplicate calls in React Strict Mode
+    if (hasLoadedRef.current) {
+      return;
+    }
+    hasLoadedRef.current = true;
     loadData();
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (!isRefresh) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
       
       // Fetch spending data
       const spendingResponse = await api.billing.getSpendingSummary();
@@ -174,6 +187,12 @@ const SupportMePage: React.FC = () => {
         setTotalRaised(earningsResponse.current_month_total);
         setMonthlyEarnings(earningsResponse.monthly_earnings || []);
       }
+
+      // Fetch monthly reports list
+      const reportsResponse = await api.billing.listMonthlyReports();
+      if (reportsResponse.success) {
+        setMonthlyReports(reportsResponse.reports || []);
+      }
     } catch (error: any) {
       console.error('Error loading billing data:', error);
       setSnackbar({
@@ -182,7 +201,11 @@ const SupportMePage: React.FC = () => {
         severity: 'error',
       });
     } finally {
-      setLoading(false);
+      if (!isRefresh) {
+        setLoading(false);
+      } else {
+        setRefreshing(false);
+      }
     }
   };
 
@@ -217,6 +240,30 @@ const SupportMePage: React.FC = () => {
       message: error,
       severity: 'error',
     });
+  };
+
+  const handleDownloadReport = async (month: string) => {
+    try {
+      const response = await api.billing.getMonthlyReportDownloadUrl(month);
+      if (response.success && response.presigned_url) {
+        // Open download URL in new window/tab
+        window.open(response.presigned_url, '_blank');
+        setSnackbar({
+          open: true,
+          message: `Downloading report for ${month}`,
+          severity: 'success',
+        });
+      } else {
+        throw new Error('Failed to generate download URL');
+      }
+    } catch (error: any) {
+      console.error('Error downloading report:', error);
+      setSnackbar({
+        open: true,
+        message: error.message || 'Failed to download report',
+        severity: 'error',
+      });
+    }
   };
 
   const formatCurrency = (amount: number | string) => {
@@ -254,9 +301,27 @@ const SupportMePage: React.FC = () => {
         }}
       >
         <CardContent>
-          <Typography variant="h6" sx={{ color: '#9ca3af', mb: 2, textAlign: 'center' }}>
-            Current Month Spending
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6" sx={{ color: '#9ca3af' }}>
+              Current Month Spending
+            </Typography>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={() => loadData(true)}
+              disabled={refreshing}
+              sx={{
+                borderColor: '#374151',
+                color: '#9ca3af',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  borderColor: '#475569',
+                },
+              }}
+            >
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </Button>
+          </Box>
           <Typography
             variant="h2"
             sx={{
@@ -292,32 +357,65 @@ const SupportMePage: React.FC = () => {
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Blended Cost</TableCell>
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Unblended Cost</TableCell>
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Usage Quantity</TableCell>
+                  <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Earnings</TableCell>
+                  <TableCell align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Report</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {monthlySpending.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>
+                    <TableCell colSpan={6} align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>
                       No spending data available
                     </TableCell>
                   </TableRow>
                 ) : (
                   monthlySpending
                     .sort((a, b) => b.month.localeCompare(a.month))
-                    .map((row) => (
-                      <TableRow key={row.month}>
-                        <TableCell sx={{ color: '#e5e7eb', borderColor: '#374151' }}>{row.month}</TableCell>
-                        <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                          {formatCurrency(row.blended_cost)}
-                        </TableCell>
-                        <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                          {formatCurrency(row.unblended_cost)}
-                        </TableCell>
-                        <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                          {parseFloat(row.usage_quantity).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    .map((row) => {
+                      const reportExists = monthlyReports.some(r => r.month === row.month);
+                      const earnings = row.total_earnings ? parseFloat(row.total_earnings) : 0;
+                      return (
+                        <TableRow key={row.month}>
+                          <TableCell sx={{ color: '#e5e7eb', borderColor: '#374151' }}>{row.month}</TableCell>
+                          <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                            {formatCurrency(row.blended_cost)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                            {formatCurrency(row.unblended_cost)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                            {parseFloat(row.usage_quantity).toFixed(2)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: earnings > 0 ? '#10b981' : '#6b7280', borderColor: '#374151' }}>
+                            {formatCurrency(earnings)}
+                          </TableCell>
+                          <TableCell align="center" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                            {reportExists ? (
+                              <Button
+                                size="small"
+                                startIcon={<DownloadIcon />}
+                                onClick={() => handleDownloadReport(row.month)}
+                                sx={{
+                                  color: '#3b82f6',
+                                  borderColor: '#3b82f6',
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                    borderColor: '#2563eb',
+                                  },
+                                }}
+                                variant="outlined"
+                              >
+                                Download
+                              </Button>
+                            ) : (
+                              <Typography variant="body2" sx={{ color: '#6b7280' }}>
+                                Not available
+                              </Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                 )}
               </TableBody>
             </Table>
@@ -344,30 +442,7 @@ const SupportMePage: React.FC = () => {
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
-              onClick={async () => {
-                setRefreshing(true);
-                try {
-                  const currentMonth = new Date().toISOString().slice(0, 7);
-                  const earningsResponse = await api.billing.getEarningsSummary(currentMonth);
-                  if (earningsResponse.success) {
-                    setTotalRaised(earningsResponse.current_month_total);
-                    setSnackbar({
-                      open: true,
-                      message: 'Earnings data refreshed',
-                      severity: 'success',
-                    });
-                  }
-                } catch (error: any) {
-                  console.error('Error refreshing earnings:', error);
-                  setSnackbar({
-                    open: true,
-                    message: 'Failed to refresh earnings data',
-                    severity: 'error',
-                  });
-                } finally {
-                  setRefreshing(false);
-                }
-              }}
+              onClick={() => loadData(true)}
               disabled={refreshing}
               sx={{
                 borderColor: '#374151',

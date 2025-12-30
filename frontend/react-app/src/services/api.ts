@@ -2045,6 +2045,16 @@ export const api = {
         },
       });
     },
+    listMonthlyReports: async (): Promise<{ success: boolean; reports: Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }> }> => {
+      return apiRequest<{ success: boolean; reports: Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }> }>(`/billing-spending?list_reports=true`, {
+        method: 'GET',
+      });
+    },
+    getMonthlyReportDownloadUrl: async (month: string): Promise<{ success: boolean; month: string; s3_key: string; presigned_url: string; expires_in: number }> => {
+      return apiRequest<{ success: boolean; month: string; s3_key: string; presigned_url: string; expires_in: number }>(`/billing-spending?download=true&month=${month}`, {
+        method: 'GET',
+      });
+    },
   },
 };
 
