@@ -1862,6 +1862,38 @@ resource "aws_lambda_function" "chat_agent" {
   depends_on = [data.terraform_remote_state.base_infra]
 }
 
+# Lambda Version for Chat Agent (required for provisioned concurrency)
+resource "aws_lambda_function_version" "chat_agent_version" {
+  function_name = aws_lambda_function.chat_agent.function_name
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Lambda Alias for Chat Agent (points to version for provisioned concurrency)
+resource "aws_lambda_alias" "chat_agent_alias" {
+  name             = "production"
+  description      = "Production alias for chat agent with provisioned concurrency"
+  function_name    = aws_lambda_function.chat_agent.function_name
+  function_version = aws_lambda_function_version.chat_agent_version.version
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Provisioned Concurrency for Chat Agent Lambda (Performance Optimization)
+# Keeps 2 containers warm to eliminate cold starts for first 2 concurrent requests
+# Cost: ~$0.015/hour per unit = ~$22/month for 2 units
+resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
+  function_name                     = aws_lambda_function.chat_agent.function_name
+  qualifier                         = aws_lambda_alias.chat_agent_alias.name
+  provisioned_concurrent_executions = 2 # Keep 2 containers warm
+
+  depends_on = [aws_lambda_function_version.chat_agent_version, aws_lambda_alias.chat_agent_alias]
+}
+
 # Note: Provisioned concurrency removed for now due to complexity with $LATEST
 # Can be added later using AWS CLI or console after Lambda is deployed
 

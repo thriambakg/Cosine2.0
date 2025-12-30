@@ -101,6 +101,28 @@ const FolderTile: React.FC<FolderTileProps> = ({
 }) => {
   const { user } = useAuth();
   
+  // Clipboard helpers (must be defined before state initialization)
+  const CLIPBOARD_STORAGE_KEY = 'filesystem_clipboard';
+  
+  const getClipboard = (): Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null => {
+    try {
+      const stored = sessionStorage.getItem(CLIPBOARD_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const setClipboard = (items: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null) => {
+    if (items && items.length > 0) {
+      sessionStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(items));
+      window.dispatchEvent(new CustomEvent('filesystem-clipboard-update'));
+    } else {
+      sessionStorage.removeItem(CLIPBOARD_STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent('filesystem-clipboard-update'));
+    }
+  };
+  
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
     initialPinned: isPinned,
@@ -128,6 +150,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
   // Context menu
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [itemContextMenuAnchor, setItemContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [itemContextMenuPosition, setItemContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
   const [folderSelectionDialogOpen, setFolderSelectionDialogOpen] = useState(false);
   
@@ -429,58 +452,55 @@ const FolderTile: React.FC<FolderTileProps> = ({
     }
   };
 
-  // Clipboard helpers (shared with FilesPage)
-  const CLIPBOARD_STORAGE_KEY = 'filesystem_clipboard';
-  
-  const getClipboard = (): Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null => {
-    try {
-      const stored = sessionStorage.getItem(CLIPBOARD_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const setClipboard = (items: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null) => {
-    if (items && items.length > 0) {
-      sessionStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(items));
-      window.dispatchEvent(new CustomEvent('filesystem-clipboard-update'));
-    } else {
-      sessionStorage.removeItem(CLIPBOARD_STORAGE_KEY);
-      window.dispatchEvent(new CustomEvent('filesystem-clipboard-update'));
-    }
-  };
-
-  // Copy item
+  // Copy item (supports both single item and multi-select)
   const handleCopyItem = () => {
-    if (!selectedItem || !user) return;
+    if (!user) return;
     
-    const isFolder = selectedItem.type === 'folder';
-    const sourcePath = isFolder ? (selectedItem.id === 'root' ? '' : selectedItem.id) : currentFolderPath;
+    const currentItems = getCurrentFolderItems();
     
-    // Store in clipboard (just UUIDs and metadata, no content)
-    const clipboardItem = {
-      item_id: selectedItem.id,
-      source_folder_path: sourcePath,
-      is_folder: isFolder,
-      name: selectedItem.name,
-    };
+    // Support both single item (from context menu) and multi-select
+    const itemsToCopy = selectedItems.size > 0 
+      ? currentItems.filter(item => selectedItems.has(item.id))
+      : selectedItem 
+        ? [selectedItem]
+        : [];
+    
+    if (itemsToCopy.length === 0) return;
     
     // Get existing clipboard or create new array
     const existingClipboard = getClipboard() || [];
+    const newClipboardItems: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> = [];
     
-    // Check if item is already in clipboard (avoid duplicates)
-    const isDuplicate = existingClipboard.some(
-      item => item.item_id === clipboardItem.item_id && item.source_folder_path === clipboardItem.source_folder_path
-    );
-    
-    if (!isDuplicate) {
-      const newClipboard = [...existingClipboard, clipboardItem];
-      setClipboard(newClipboard);
+    // Add all items to clipboard (just UUIDs and metadata, no content)
+    for (const item of itemsToCopy) {
+      const isFolder = item.type === 'folder';
+      const sourcePath = isFolder ? (item.id === 'root' ? '' : item.id) : currentFolderPath;
+      
+      const clipboardItem = {
+        item_id: item.id,
+        source_folder_path: sourcePath,
+        is_folder: isFolder,
+        name: item.name,
+      };
+      
+      // Check if item is already in clipboard (avoid duplicates)
+      const isDuplicate = existingClipboard.some(
+        existing => existing.item_id === clipboardItem.item_id && existing.source_folder_path === clipboardItem.source_folder_path
+      );
+      
+      if (!isDuplicate) {
+        newClipboardItems.push(clipboardItem);
+      }
     }
+    
+    // Merge with existing clipboard
+    const newClipboard = [...existingClipboard, ...newClipboardItems];
+    setClipboard(newClipboard);
+    setClipboardState(newClipboard);
     
     setItemContextMenuAnchor(null);
     setSelectedItem(null);
+    setSelectedItems(new Set()); // Clear selection after copying
   };
 
   // Paste item
@@ -506,6 +526,8 @@ const FolderTile: React.FC<FolderTileProps> = ({
         // Reload folder contents
         await loadFolderContents(currentFolderPath);
         setClipboard(null); // Clear clipboard after successful paste
+        setClipboardState(null);
+        setItemContextMenuAnchor(null); // Close context menu
       } else {
         setError(response.error || 'Failed to paste items');
       }
@@ -515,32 +537,47 @@ const FolderTile: React.FC<FolderTileProps> = ({
     }
   };
 
-  // Delete item
+  // Delete item (supports both single item and multi-select)
   const handleDeleteItem = async () => {
-    if (!selectedItem || !user) return;
+    if (!user) return;
+    
+    const currentItems = getCurrentFolderItems();
+    
+    // Support both single item (from context menu) and multi-select
+    const itemsToDelete = selectedItems.size > 0 
+      ? currentItems.filter(item => selectedItems.has(item.id))
+      : selectedItem 
+        ? [selectedItem]
+        : [];
+    
+    if (itemsToDelete.length === 0) return;
     
     try {
-      let response;
-      if (selectedItem.type === 'folder') {
-        response = await filesystemAPI.deleteFolder({
-          user_id: user.id,
-          folder_path: selectedItem.id === 'root' ? '' : selectedItem.id,
-        });
-      } else {
-        response = await filesystemAPI.deleteItem({
-          user_id: user.id,
-          folder_path: currentFolderPath,
-          item_id: selectedItem.id,
-        });
+      for (const item of itemsToDelete) {
+        let response;
+        if (item.type === 'folder') {
+          response = await filesystemAPI.deleteFolder({
+            user_id: user.id,
+            folder_path: item.id === 'root' ? '' : item.id,
+          });
+        } else {
+          response = await filesystemAPI.deleteItem({
+            user_id: user.id,
+            folder_path: currentFolderPath,
+            item_id: item.id,
+          });
+        }
+        
+        if (!response.success) {
+          setError(response.error || 'Failed to delete item');
+          return;
+        }
       }
       
-      if (response.success) {
-        setItemContextMenuAnchor(null);
-        setSelectedItem(null);
-        await loadFolderContents(currentFolderPath);
-      } else {
-        setError(response.error || 'Failed to delete item');
-      }
+      setItemContextMenuAnchor(null);
+      setSelectedItem(null);
+      setSelectedItems(new Set());
+      await loadFolderContents(currentFolderPath);
     } catch (err: any) {
       setError(err.message || 'Error deleting item');
     }
@@ -556,13 +593,25 @@ const FolderTile: React.FC<FolderTileProps> = ({
   };
 
   const handleItemContextMenu = (e: React.MouseEvent, item: FileSystemItem) => {
-    e.stopPropagation();
+    e.preventDefault(); // Prevent browser context menu
+    e.stopPropagation(); // Prevent GridDashboard context menu
     setSelectedItem(item);
+    setItemContextMenuPosition({ x: e.clientX, y: e.clientY });
+    setItemContextMenuAnchor(e.currentTarget as HTMLElement);
+  };
+
+  // Handle right-click on empty area within the tile
+  const handleTileContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent browser context menu
+    e.stopPropagation(); // Prevent GridDashboard context menu
+    setSelectedItem(null); // Empty area context menu
+    setItemContextMenuPosition({ x: e.clientX, y: e.clientY });
     setItemContextMenuAnchor(e.currentTarget as HTMLElement);
   };
 
   const handleItemContextMenuClose = () => {
     setItemContextMenuAnchor(null);
+    setItemContextMenuPosition(null);
     setSelectedItem(null);
   };
 
@@ -669,6 +718,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
         },
       }}
       onMouseDown={pinnedState ? undefined : onDragStart}
+      onContextMenu={handleTileContextMenu}
     >
       {/* Header with controls */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -860,8 +910,41 @@ const FolderTile: React.FC<FolderTileProps> = ({
               {error}
             </Typography>
           </Box>
+        ) : items.length === 0 && folders.length === 0 ? (
+          <Box
+            sx={{
+              p: 4,
+              textAlign: 'center',
+              minHeight: '150px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleTileContextMenu(e);
+            }}
+          >
+            <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+              This folder is empty
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#6b7280', mt: 1 }}>
+              {clipboard && clipboard.length > 0 ? 'Right-click to paste items' : 'Create a folder or add a file to get started'}
+            </Typography>
+          </Box>
         ) : (
-          <List sx={{ 
+          <List 
+            onContextMenu={(e) => {
+              // Only show context menu on empty area if no items are selected
+              if (selectedItems.size === 0 && !selectedItem) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleTileContextMenu(e);
+              }
+            }}
+            sx={{ 
             flex: 1, 
             overflow: 'auto', 
             p: 0,
@@ -1191,6 +1274,8 @@ const FolderTile: React.FC<FolderTileProps> = ({
       {/* Item Context Menu */}
       <Menu
         anchorEl={itemContextMenuAnchor}
+        anchorPosition={itemContextMenuPosition ? { top: itemContextMenuPosition.y, left: itemContextMenuPosition.x } : undefined}
+        anchorReference={itemContextMenuPosition ? 'anchorPosition' : 'anchorEl'}
         open={Boolean(itemContextMenuAnchor)}
         onClose={handleItemContextMenuClose}
         PaperProps={{
@@ -1200,27 +1285,75 @@ const FolderTile: React.FC<FolderTileProps> = ({
           },
         }}
       >
-        <MenuItem
-          onClick={handleCopyItem}
-          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
-        >
-          <CopyIcon sx={{ mr: 1, fontSize: 18, color: '#9ca3af' }} />
-          Copy
-        </MenuItem>
-        {getClipboard() && getClipboard()!.length > 0 && (
+        {/* Paste option - always available when clipboard has items */}
+        {clipboard && clipboard.length > 0 && (
           <MenuItem
             onClick={handlePasteItem}
             sx={{ color: '#10b981', '&:hover': { backgroundColor: 'rgba(16, 185, 129, 0.2)' } }}
           >
             <PasteIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
-            Paste {getClipboard()!.length === 1 ? getClipboard()![0].name : `${getClipboard()!.length} items`}
+            Paste {clipboard.length === 1 ? clipboard[0].name : `${clipboard.length} items`}
+          </MenuItem>
+        )}
+        
+        {/* Divider if we have both paste and item-specific options */}
+        {clipboard && clipboard.length > 0 && (selectedItem || selectedItems.size > 0) && <Box sx={{ borderTop: '1px solid #374151', my: 0.5 }} />}
+        
+        {/* Item-specific options */}
+        {(selectedItem || selectedItems.size > 0) && (
+          <MenuItem 
+            onClick={() => handleAddToContext('sidebar')}
+            disabled={selectedItems.size === 0 && !selectedItem}
+            sx={{ 
+              color: (selectedItems.size === 0 && !selectedItem) ? '#6b7280' : '#ffffff',
+              opacity: (selectedItems.size === 0 && !selectedItem) ? 0.5 : 1,
+              '&:hover': { 
+                backgroundColor: (selectedItems.size === 0 && !selectedItem) ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+              },
+              '&.Mui-disabled': {
+                color: '#6b7280',
+                opacity: 0.5,
+              },
+            }}
+          >
+            <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: (selectedItems.size === 0 && !selectedItem) ? '#6b7280' : '#3b82f6' }} />
+            Add to Context
           </MenuItem>
         )}
         <MenuItem
-          onClick={handleDeleteItem}
-          sx={{ color: '#ef4444', '&:hover': { backgroundColor: 'rgba(239, 68, 68, 0.2)' } }}
+          onClick={handleCopyItem}
+          disabled={!selectedItem && selectedItems.size === 0}
+          sx={{ 
+            color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ffffff',
+            opacity: (!selectedItem && selectedItems.size === 0) ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: (!selectedItem && selectedItems.size === 0) ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
         >
-          <DeleteIcon sx={{ mr: 1, fontSize: 18 }} />
+          <CopyIcon sx={{ mr: 1, fontSize: 18, color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#9ca3af' }} />
+          Copy {selectedItems.size > 1 ? `${selectedItems.size} items` : ''}
+        </MenuItem>
+        <MenuItem
+          onClick={handleDeleteItem}
+          disabled={!selectedItem && selectedItems.size === 0}
+          sx={{ 
+            color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ef4444',
+            opacity: (!selectedItem && selectedItems.size === 0) ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: (!selectedItem && selectedItems.size === 0) ? 'transparent' : 'rgba(239, 68, 68, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
+        >
+          <DeleteIcon sx={{ mr: 1, fontSize: 18, color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ef4444' }} />
           Delete
         </MenuItem>
       </Menu>

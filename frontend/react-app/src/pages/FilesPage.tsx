@@ -197,17 +197,23 @@ const FilesPage: React.FC = () => {
     };
   }, []);
 
-  // Keyboard shortcuts for copy/paste
+  // Keyboard shortcuts for copy/paste (FilesPage only)
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+C or Cmd+C for copy
+      // Prevent shortcuts when typing in input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      // Ctrl+C or Cmd+C for copy (only when items are selected)
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey && !e.altKey) {
         if (selectedItems.size > 0 || selectedItem) {
           e.preventDefault();
           handleCopyItem();
         }
       }
-      // Ctrl+V or Cmd+V for paste
+      // Ctrl+V or Cmd+V for paste (only when clipboard has items)
       if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey && !e.altKey) {
         const clipboardItems = getClipboard();
         if (clipboardItems && clipboardItems.length > 0) {
@@ -215,11 +221,18 @@ const FilesPage: React.FC = () => {
           handlePasteItem();
         }
       }
+      // Delete key for deleting selected items
+      if (e.key === 'Delete' || (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey)) {
+        if (selectedItems.size > 0 || selectedItem) {
+          e.preventDefault();
+          handleDeleteItem();
+        }
+      }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedItems, selectedItem]);
+  }, [selectedItems, selectedItem, clipboard]);
 
   // Load filesystem data from API
   React.useEffect(() => {
@@ -449,11 +462,15 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleContextMenu = (event: React.MouseEvent<HTMLElement>, item: FileSystemItem) => {
+  const handleContextMenu = (event: React.MouseEvent<HTMLElement>, item?: FileSystemItem) => {
     event.preventDefault(); // Prevent browser context menu
     event.stopPropagation();
     setContextMenuAnchor(event.currentTarget);
-    setSelectedItem(item);
+    if (item) {
+      setSelectedItem(item);
+    } else {
+      setSelectedItem(null); // Empty area context menu
+    }
   };
 
   // Bulk actions for selected items
@@ -1503,36 +1520,6 @@ const FilesPage: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          {clipboard && clipboard.length > 0 && (
-            <Button
-              startIcon={<PasteIcon />}
-              onClick={handlePasteItem}
-              sx={{
-                backgroundColor: 'transparent',
-                color: '#10b981',
-                borderRadius: '0px',
-                border: '1px solid #10b981',
-                fontWeight: 600,
-                textTransform: 'none',
-                px: 2,
-                py: 1,
-                '&:hover': { 
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                  borderColor: '#10b981',
-                  color: '#10b981',
-                },
-                '& .MuiButton-startIcon': {
-                  color: '#10b981',
-                  marginRight: '8px',
-                },
-                '&:hover .MuiButton-startIcon': {
-                  color: '#10b981',
-                },
-              }}
-            >
-              Paste {clipboard.length === 1 ? clipboard[0].name : `${clipboard.length} items`}
-            </Button>
-          )}
           <Button
             startIcon={<CreateFolderIcon />}
             onClick={() => setCreateFolderDialogOpen(true)}
@@ -1645,6 +1632,12 @@ const FilesPage: React.FC = () => {
 
       {/* File System View */}
       <Box
+        onContextMenu={(e) => {
+          // Only show context menu on empty area if no items are selected
+          if (selectedItems.size === 0 && !selectedItem) {
+            handleContextMenu(e);
+          }
+        }}
         onDragOver={(e) => {
           if (draggedItem) {
             e.preventDefault();
@@ -1747,7 +1740,11 @@ const FilesPage: React.FC = () => {
               This folder is empty
             </Typography>
             <Typography variant="body2" sx={{ color: '#6b7280' }}>
-              {draggedItem ? 'Drop here to move item' : 'Create a folder or add a context item to get started'}
+              {draggedItem 
+                ? 'Drop here to move item' 
+                : clipboard && clipboard.length > 0 
+                  ? 'Right-click to paste items' 
+                  : 'Create a folder or add a context item to get started'}
             </Typography>
           </Box>
         ) : (
@@ -1781,65 +1778,87 @@ const FilesPage: React.FC = () => {
                     </Typography>
                   }
                 />
-                {selectedItems.size > 0 && (
+                {(selectedItems.size > 0 || (clipboard && clipboard.length > 0)) && (
                   <ListItemSecondaryAction>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <Tooltip title="Add to Context">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleBulkAddToContext('sidebar')}
-                          sx={{
-                            color: '#3b82f6',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            },
-                          }}
-                        >
-                          <SidebarChatIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Copy">
-                        <IconButton
-                          size="small"
-                          onClick={handleCopyItem}
-                          sx={{
-                            color: '#9ca3af',
-                            '&:hover': {
-                              backgroundColor: 'rgba(156, 163, 175, 0.2)',
-                            },
-                          }}
-                        >
-                          <CopyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Move">
-                        <IconButton
-                          size="small"
-                          onClick={handleBulkMove}
-                          sx={{
-                            color: '#3b82f6',
-                            '&:hover': {
-                              backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            },
-                          }}
-                        >
-                          <FolderIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton
-                          size="small"
-                          onClick={handleBulkDelete}
-                          sx={{
-                            color: '#ef4444',
-                            '&:hover': {
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                            },
-                          }}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      {/* Paste button - shown when clipboard has items */}
+                      {clipboard && clipboard.length > 0 && (
+                        <Tooltip title="Paste">
+                          <IconButton
+                            size="small"
+                            onClick={handlePasteItem}
+                            sx={{
+                              color: '#10b981',
+                              '&:hover': {
+                                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                              },
+                            }}
+                          >
+                            <PasteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {/* Other bulk actions - shown when items are selected */}
+                      {selectedItems.size > 0 && (
+                        <>
+                          <Tooltip title="Add to Context">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleBulkAddToContext('sidebar')}
+                              sx={{
+                                color: '#3b82f6',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                },
+                              }}
+                            >
+                              <SidebarChatIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Copy">
+                            <IconButton
+                              size="small"
+                              onClick={handleCopyItem}
+                              sx={{
+                                color: '#9ca3af',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(156, 163, 175, 0.2)',
+                                },
+                              }}
+                            >
+                              <CopyIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Move">
+                            <IconButton
+                              size="small"
+                              onClick={handleBulkMove}
+                              sx={{
+                                color: '#3b82f6',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                },
+                              }}
+                            >
+                              <FolderIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton
+                              size="small"
+                              onClick={handleBulkDelete}
+                              sx={{
+                                color: '#ef4444',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                },
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </>
+                      )}
                     </Box>
                   </ListItemSecondaryAction>
                 )}
@@ -2285,6 +2304,26 @@ const FilesPage: React.FC = () => {
           },
         }}
       >
+        {/* Paste option - always available when clipboard has items */}
+        {clipboard && clipboard.length > 0 && (
+          <MenuItem 
+            onClick={handlePasteItem}
+            sx={{ 
+              color: '#10b981',
+              '&:hover': { 
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+              },
+            }}
+          >
+            <PasteIcon sx={{ mr: 1.5, fontSize: 18, color: '#10b981' }} />
+            Paste {clipboard.length === 1 ? clipboard[0].name : `${clipboard.length} items`}
+          </MenuItem>
+        )}
+        
+        {/* Divider if we have both paste and item-specific options */}
+        {clipboard && clipboard.length > 0 && selectedItem && <Box sx={{ borderTop: '1px solid #374151', my: 0.5 }} />}
+        
+        {/* Item-specific options - disabled when no item selected */}
         {selectedItem && selectedItem.type !== 'folder' && (
           <MenuItem onClick={() => {
             if (selectedItem) {
@@ -2305,34 +2344,76 @@ const FilesPage: React.FC = () => {
             </MenuItem>
           </>
         )}
-        <MenuItem onClick={handleCopyItem}>
-          <CopyIcon sx={{ mr: 1.5, fontSize: 18, color: '#9ca3af' }} />
-          Copy
+        <MenuItem 
+          onClick={handleCopyItem}
+          disabled={!selectedItem && selectedItems.size === 0}
+          sx={{ 
+            color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ffffff',
+            opacity: (!selectedItem && selectedItems.size === 0) ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: (!selectedItem && selectedItems.size === 0) ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
+        >
+          <CopyIcon sx={{ mr: 1.5, fontSize: 18, color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#9ca3af' }} />
+          Copy {selectedItems.size > 1 ? `${selectedItems.size} items` : ''}
         </MenuItem>
-        {clipboard && clipboard.length > 0 && (
-          <MenuItem onClick={handlePasteItem}>
-            <PasteIcon sx={{ mr: 1.5, fontSize: 18, color: '#10b981' }} />
-            Paste {clipboard.length === 1 ? clipboard[0].name : `${clipboard.length} items`}
-          </MenuItem>
-        )}
-        <MenuItem onClick={handleRenameItem}>
-          <EditIcon sx={{ mr: 1.5, fontSize: 18, color: '#9ca3af' }} />
+        <MenuItem 
+          onClick={handleRenameItem}
+          disabled={!selectedItem}
+          sx={{ 
+            color: !selectedItem ? '#6b7280' : '#ffffff',
+            opacity: !selectedItem ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: !selectedItem ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
+        >
+          <EditIcon sx={{ mr: 1.5, fontSize: 18, color: !selectedItem ? '#6b7280' : '#9ca3af' }} />
           Rename
         </MenuItem>
-        <MenuItem onClick={handleMoveItem}>
-          <FolderIcon sx={{ mr: 1.5, fontSize: 18, color: '#3b82f6' }} />
+        <MenuItem 
+          onClick={handleMoveItem}
+          disabled={!selectedItem && selectedItems.size === 0}
+          sx={{ 
+            color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ffffff',
+            opacity: (!selectedItem && selectedItems.size === 0) ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: (!selectedItem && selectedItems.size === 0) ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
+        >
+          <FolderIcon sx={{ mr: 1.5, fontSize: 18, color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#3b82f6' }} />
           Move
         </MenuItem>
         <MenuItem 
           onClick={handleDeleteItem} 
+          disabled={!selectedItem && selectedItems.size === 0}
           sx={{ 
-            color: '#ef4444',
+            color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ef4444',
+            opacity: (!selectedItem && selectedItems.size === 0) ? 0.5 : 1,
             '&:hover': { 
-              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+              backgroundColor: (!selectedItem && selectedItems.size === 0) ? 'transparent' : 'rgba(239, 68, 68, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
             },
           }}
         >
-          <DeleteIcon sx={{ mr: 1.5, fontSize: 18, color: '#ef4444' }} />
+          <DeleteIcon sx={{ mr: 1.5, fontSize: 18, color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ef4444' }} />
           Delete
         </MenuItem>
       </Menu>

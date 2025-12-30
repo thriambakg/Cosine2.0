@@ -29,8 +29,28 @@ class ContextAwareAgent:
         self.base_agent = None  # Will be created on demand to avoid import-time creation
         self.base_tools = enhanced_tools
         self.session_agents = {}  # Cache for session-specific agents
+        self._prompt_cache = {}  # Cache for system prompts: {cache_key: prompt_string}
+        self._max_prompt_cache_size = 100  # Maximum number of cached prompts
+        self._base_agent_prewarmed = False  # Track if base agent pre-warm completed
         
-        logger.debug("ContextAwareAgent system initialized")
+        # Performance optimization: Pre-warm base agent in background thread (non-blocking)
+        import threading
+        def prewarm_base_agent():
+            """Pre-warm base agent to reduce cold start latency"""
+            try:
+                logger.info("🔥 Starting base agent pre-warm...")
+                from agent import create_financial_agent
+                self.base_agent = create_financial_agent('claude-sonnet-4')
+                self._base_agent_prewarmed = True
+                logger.info("✅ Base agent pre-warmed successfully")
+            except Exception as e:
+                logger.warning(f"⚠️ Base agent pre-warm failed: {e}")
+                # Don't fail initialization if pre-warm fails
+        
+        # Start pre-warm in background thread (non-blocking)
+        prewarm_thread = threading.Thread(target=prewarm_base_agent, daemon=True)
+        prewarm_thread.start()
+        logger.debug("ContextAwareAgent system initialized (base agent pre-warming in background)")
     
     def get_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-sonnet-4') -> Any:
         """
@@ -55,8 +75,19 @@ class ContextAwareAgent:
             
             # Check if we already have a cached agent for this session and model
             if agent_key in self.session_agents:
-                logger.debug(f"Using cached agent for session {session_id} with model {model_name}")
-                return self.session_agents[agent_key]
+                cached_agent = self.session_agents[agent_key]
+                
+                # Performance optimization: Check if context changed (compare session_variables hash)
+                cached_context_hash = getattr(cached_agent, '_context_hash', None)
+                current_context_hash = hash(str(sorted(session_context.get('session_variables', {}).items())))
+                
+                if cached_context_hash == current_context_hash:
+                    logger.debug(f"✅ Using cached agent for session {session_id} (context unchanged)")
+                    return cached_agent
+                else:
+                    logger.debug(f"🔄 Context changed for session {session_id}, recreating agent")
+                    # Context changed, recreate agent
+                    del self.session_agents[agent_key]
             
             # Check if we're switching models for the same session
             existing_agent_keys = [key for key in self.session_agents.keys() if key.startswith(f"{session_id}_")]
@@ -69,6 +100,9 @@ class ContextAwareAgent:
             
             # Create new session-specific agent with the specified model
             agent = self._create_session_agent(session_context, model_name)
+            
+            # Store context hash for change detection
+            agent._context_hash = hash(str(sorted(session_context.get('session_variables', {}).items())))
             
             # Cache the agent
             self.session_agents[agent_key] = agent
@@ -232,7 +266,7 @@ class ContextAwareAgent:
     
     def _generate_session_prompt(self, session_context: Dict[str, Any]) -> str:
         """
-        Generate a session-aware system prompt with conversation history
+        Generate a session-aware system prompt with conversation history and caching
         
         Args:
             session_context: Complete session context including conversation history
@@ -240,6 +274,25 @@ class ContextAwareAgent:
         Returns:
             prompt: Session-specific system prompt with context
         """
+        # Performance optimization: Cache prompts based on session context hash
+        import hashlib
+        import json
+        
+        # Create cache key from session context (excluding volatile fields)
+        cache_key_data = {
+            'session_id': session_context.get('session_id'),
+            'user_id': session_context.get('user_id'),
+            'session_variables_hash': hash(str(sorted(session_context.get('session_variables', {}).items()))),
+            'model': session_context.get('metadata', {}).get('model', 'claude-sonnet-4')
+        }
+        cache_key = hashlib.md5(json.dumps(cache_key_data, sort_keys=True).encode()).hexdigest()
+        
+        # Check cache
+        if cache_key in self._prompt_cache:
+            logger.debug(f"✅ Using cached system prompt for session {session_context.get('session_id')}")
+            return self._prompt_cache[cache_key]
+        
+        # Generate new prompt (existing logic)
         base_prompt = """You are a financial assistant providing data-driven analysis.
 
 🚨 RULES:
@@ -392,7 +445,18 @@ When get_chat_history_tool returns data:
         # Add session-specific context
         session_info = self._format_session_context(session_context)
         
-        return base_prompt + session_info
+        final_prompt = base_prompt + session_info
+        
+        # Cache the final prompt
+        self._prompt_cache[cache_key] = final_prompt
+        
+        # Limit cache size (keep last 100)
+        if len(self._prompt_cache) > self._max_prompt_cache_size:
+            oldest_key = next(iter(self._prompt_cache))
+            del self._prompt_cache[oldest_key]
+            logger.debug(f"Cleaned prompt cache: removed oldest entry, {len(self._prompt_cache)} remaining")
+        
+        return final_prompt
     
     def _truncate_content(self, content: str, max_length: int = 1000) -> str:
         """
