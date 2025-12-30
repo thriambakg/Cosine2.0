@@ -212,6 +212,12 @@ module "api_gateway" {
     lda_autocomplete = {
       path_part = "lda-autocomplete"
     }
+    billing_spending = {
+      path_part = "billing-spending"
+    }
+    billing_payment = {
+      path_part = "billing-payment"
+    }
   }
 
   # Methods configuration
@@ -819,6 +825,16 @@ module "api_gateway" {
       function_arn  = module.lda_autocomplete_lambda.wrapper_function_arn != null ? module.lda_autocomplete_lambda.wrapper_function_arn : module.lda_autocomplete_lambda.function_arn
       http_method   = "POST"
       resource_path = "lda-autocomplete"
+    }
+    billing_spending_get = {
+      function_arn  = module.billing_spending_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "billing-spending"
+    }
+    billing_payment_post = {
+      function_arn  = module.billing_payment_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "billing-payment"
     }
   }
 
@@ -2415,6 +2431,169 @@ module "file_return_lambda" {
   ]
 
   reserved_concurrent_executions = 20
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Billing Spending Lambda to access Cost Explorer and S3
+resource "aws_iam_policy" "billing_spending_policy" {
+  name        = "${var.project_name}-billing-spending-policy-${var.environment}"
+  description = "Policy for Billing Spending Lambda to access Cost Explorer and S3 spending bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ce:GetCostAndUsage",
+          "ce:GetDimensionValues",
+          "ce:GetUsageReport"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.spending_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.spending_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.kms_key_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# IAM Policy for Billing Payment Lambda to access S3 and Secrets Manager
+resource "aws_iam_policy" "billing_payment_policy" {
+  name        = "${var.project_name}-billing-payment-policy-${var.environment}"
+  description = "Policy for Billing Payment Lambda to access S3 spending bucket and Secrets Manager"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.spending_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.spending_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-secret-${var.environment}*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-webhook-secret-${var.environment}*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.kms_key_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Billing Spending Lambda Function
+module "billing_spending_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-billing-spending-${var.environment}"
+  description   = "Lambda function for fetching AWS account spending data"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/billing/aws_spending/app"
+
+  environment_variables = {
+    SPENDING_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.spending_bucket_name
+    AWS_REGION           = var.aws_region
+    ENVIRONMENT          = var.environment
+    LOG_LEVEL            = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  additional_policy_arns = [
+    aws_iam_policy.billing_spending_policy.arn
+  ]
+
+  reserved_concurrent_executions = 5
+
+  tags = var.common_tags
+}
+
+# Billing Payment Lambda Function
+# NOTE: Stripe library is not in any existing layer. Using utility_layer for now.
+# TODO: Create a dedicated payment_layer in base infrastructure with stripe>=7.0.0
+module "billing_payment_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-billing-payment-${var.environment}"
+  description   = "Lambda function for processing payments via Stripe"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/billing/payment_processing/app"
+
+  environment_variables = {
+    SPENDING_BUCKET_NAME       = data.terraform_remote_state.base_infra.outputs.spending_bucket_name
+    STRIPE_SECRET_NAME         = "${var.project_name}-stripe-secret-${var.environment}"
+    STRIPE_WEBHOOK_SECRET_NAME = "${var.project_name}-stripe-webhook-secret-${var.environment}"
+    ENVIRONMENT                = var.environment
+    LOG_LEVEL                  = var.environment == "development" ? "DEBUG" : "INFO"
+  }
+
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
+    data.terraform_remote_state.base_infra.outputs.payment_layer_arn
+  ]
+
+  additional_policy_arns = [
+    aws_iam_policy.billing_payment_policy.arn
+  ]
+
+  reserved_concurrent_executions = 10
 
   tags = var.common_tags
 }

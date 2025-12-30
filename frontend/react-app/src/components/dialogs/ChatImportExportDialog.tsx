@@ -51,7 +51,6 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
   onClose,
   mode,
   sessionId,
-  sessionTitle,
   userId,
   onImportSuccess,
 }) => {
@@ -214,14 +213,14 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
           bucket: undefined,
         });
         
-        if (!fileResponse.success || !fileResponse.fileContent) {
+        if (!fileResponse.success || !fileResponse.file_content) {
           setError('Failed to download file from filesystem');
           setLoading(false);
           return;
         }
         
         // Convert base64 to File object
-        const base64Content = fileResponse.fileContent;
+        const base64Content = fileResponse.file_content;
         const binaryString = atob(base64Content);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {

@@ -1036,12 +1036,12 @@ export default function ChatPage() {
       }
     };
 
-    window.addEventListener('new-session-created', handleNewSessionCreated as EventListener);
-    window.addEventListener('refresh-session-list', handleRefreshSessionList as EventListener);
+    window.addEventListener('new-session-created', handleNewSessionCreated as unknown as EventListener);
+    window.addEventListener('refresh-session-list', handleRefreshSessionList as unknown as EventListener);
     
     return () => {
-      window.removeEventListener('new-session-created', handleNewSessionCreated as EventListener);
-      window.removeEventListener('refresh-session-list', handleRefreshSessionList as EventListener);
+      window.removeEventListener('new-session-created', handleNewSessionCreated as unknown as EventListener);
+      window.removeEventListener('refresh-session-list', handleRefreshSessionList as unknown as EventListener);
     };
   }, [loadSessionsFromBackend, loadSession]);
 
