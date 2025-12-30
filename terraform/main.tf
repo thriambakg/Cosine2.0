@@ -619,7 +619,16 @@ module "api_gateway" {
       lambda_arn              = module.billing_spending_lambda.function_arn
       request_parameters      = {}
     }
-    # POST method for billing payment
+    # GET method for billing payment (fetch earnings summary)
+    billing_payment_get = {
+      resource_key            = "billing_payment"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_payment_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for billing payment (create payment intent)
     billing_payment_post = {
       resource_key            = "billing_payment"
       http_method             = "POST"
@@ -850,6 +859,11 @@ module "api_gateway" {
       http_method   = "GET"
       resource_path = "billing-spending"
     }
+    billing_payment_get = {
+      function_arn  = module.billing_payment_lambda.function_arn
+      http_method   = "GET"
+      resource_path = "billing-payment"
+    }
     billing_payment_post = {
       function_arn  = module.billing_payment_lambda.function_arn
       http_method   = "POST"
@@ -861,7 +875,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "81" # Updated for billing lambdas CORS fix
+  deployment_trigger = "82" # Updated for billing payment GET method and logging
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

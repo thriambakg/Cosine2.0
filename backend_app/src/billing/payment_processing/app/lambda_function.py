@@ -243,11 +243,15 @@ def handle_webhook_event(event_data: Dict) -> Dict:
 
 def lambda_handler(event: Dict, context: Any) -> Dict:
     """Main Lambda handler"""
+    logger.info(f"📥 Received event: {json.dumps(event, default=str)}")
+    
     try:
         http_method = event.get('httpMethod', 'POST')
+        logger.info(f"🔍 Processing {http_method} request")
         
         # Handle CORS preflight
         if http_method == 'OPTIONS':
+            logger.info("✅ Handling CORS preflight request")
             return create_response(200, {'message': 'CORS preflight'})
         
         # Parse body
@@ -272,28 +276,40 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
         # Handle GET requests - fetch earnings summary
         if http_method == 'GET':
             query_params = event.get('queryStringParameters') or {}
+            logger.info(f"📋 Query parameters: {query_params}")
+            
             if query_params.get('summary') == 'true':
                 # Get month from query params or default to current month
                 target_month = query_params.get('month')
                 if not target_month:
                     target_month = datetime.now().strftime('%Y-%m')
+                logger.info(f"🗓️ Target month: {target_month}")
                 
                 # Return earnings summary CSV data
+                logger.info(f"📊 Fetching earnings summary from S3 bucket: {SPENDING_BUCKET_NAME}")
                 try:
                     response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key='earnings_summary.csv')
                     csv_content = response['Body'].read().decode('utf-8')
+                    logger.info(f"📄 CSV content length: {len(csv_content)} bytes")
+                    
                     reader = csv.DictReader(io.StringIO(csv_content))
                     earnings_data = list(reader)
+                    logger.info(f"💰 Found {len(earnings_data)} months of earnings data: {[row.get('month') for row in earnings_data]}")
                     
                     # Find current month's total
                     current_month_total = 0.0
                     for row in earnings_data:
                         if row.get('month') == target_month:
                             current_month_total = float(row.get('total_earnings', 0))
+                            logger.info(f"💵 Current month ({target_month}) total: ${current_month_total:.2f}")
                             break
+                    
+                    if current_month_total == 0.0:
+                        logger.info(f"ℹ️ No earnings data found for month {target_month}")
                     
                     # Calculate all-time total raised (for historical data)
                     total_raised = sum(float(row.get('total_earnings', 0)) for row in earnings_data)
+                    logger.info(f"📊 All-time total raised: ${total_raised:.2f}")
                     
                     return create_response(200, {
                         'success': True,
@@ -302,7 +318,10 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                         'monthly_earnings': earnings_data
                     })
                 except ClientError as e:
-                    if e.response['Error']['Code'] == 'NoSuchKey':
+                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                    logger.warning(f"⚠️ S3 error ({error_code}): {str(e)}")
+                    if error_code == 'NoSuchKey':
+                        logger.info("📝 earnings_summary.csv not found in S3 - returning empty data")
                         return create_response(200, {
                             'success': True,
                             'current_month_total': 0.0,

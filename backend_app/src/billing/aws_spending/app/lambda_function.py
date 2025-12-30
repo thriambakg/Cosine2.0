@@ -238,32 +238,47 @@ def update_monthly_summary(totals: Dict[str, float], start_date: str, end_date: 
 
 def lambda_handler(event: Dict, context: Any) -> Dict:
     """Main Lambda handler"""
+    logger.info(f"📥 Received event: {json.dumps(event, default=str)}")
+    
     try:
         http_method = event.get('httpMethod', 'GET')
+        logger.info(f"🔍 Processing {http_method} request")
         
         # Handle CORS preflight
         if http_method == 'OPTIONS':
+            logger.info("✅ Handling CORS preflight request")
             return create_response(200, {'message': 'CORS preflight'})
         
         # Handle GET requests - can fetch current spending or historical data
         if http_method == 'GET':
             # Check if requesting summary data
             query_params = event.get('queryStringParameters') or {}
+            logger.info(f"📋 Query parameters: {query_params}")
+            
             if query_params.get('summary') == 'true':
                 # Return monthly summary CSV data
+                logger.info(f"📊 Fetching spending summary from S3 bucket: {SPENDING_BUCKET_NAME}")
                 try:
                     response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key='monthly_summary.csv')
                     csv_content = response['Body'].read().decode('utf-8')
+                    logger.info(f"📄 CSV content length: {len(csv_content)} bytes")
+                    
                     reader = csv.DictReader(io.StringIO(csv_content))
                     monthly_data = list(reader)
+                    logger.info(f"📈 Found {len(monthly_data)} months of data: {[row.get('month') for row in monthly_data]}")
                     
                     # Calculate current month total
                     current_month = datetime.now().strftime('%Y-%m')
+                    logger.info(f"🗓️ Current month: {current_month}")
                     current_total = 0.0
                     for row in monthly_data:
                         if row.get('month') == current_month:
                             current_total = float(row.get('blended_cost', 0))
+                            logger.info(f"💰 Current month total: ${current_total:.2f}")
                             break
+                    
+                    if current_total == 0.0:
+                        logger.warning(f"⚠️ No spending data found for current month {current_month}")
                     
                     return create_response(200, {
                         'success': True,
@@ -271,7 +286,10 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                         'monthly_data': monthly_data
                     })
                 except ClientError as e:
-                    if e.response['Error']['Code'] == 'NoSuchKey':
+                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                    logger.warning(f"⚠️ S3 error ({error_code}): {str(e)}")
+                    if error_code == 'NoSuchKey':
+                        logger.info("📝 monthly_summary.csv not found in S3 - returning empty data")
                         return create_response(200, {
                             'success': True,
                             'current_month_total': 0.0,
@@ -280,8 +298,10 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                     raise
             else:
                 # Default behavior - fetch and store current month spending
+                logger.info("🔄 Fetching and storing current month spending data")
                 pass  # Continue to normal flow below
         else:
+            logger.warning(f"❌ Unsupported HTTP method: {http_method}")
             return create_response(405, {'error': 'Method not allowed'})
         
         # Get current billing period
