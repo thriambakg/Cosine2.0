@@ -53,21 +53,51 @@ def create_response(status_code: int, body: Dict) -> Dict:
 def get_stripe_secret() -> str:
     """Get Stripe secret key from Secrets Manager"""
     try:
+        logger.info(f"🔑 Fetching Stripe secret from Secrets Manager: {STRIPE_SECRET_NAME}")
         response = secrets_client.get_secret_value(SecretId=STRIPE_SECRET_NAME)
         secret_data = json.loads(response['SecretString'])
-        return secret_data.get('stripe_secret_key') or secret_data.get('secret_key', '')
+        
+        # Try both key names for compatibility
+        secret_key = secret_data.get('stripe_secret_key') or secret_data.get('secret_key', '')
+        
+        if not secret_key or secret_key.startswith('PLACEHOLDER_'):
+            logger.warning(f"⚠️ Stripe secret key not configured or still using placeholder value")
+            raise ValueError("Stripe secret key not configured. Please update the secret in AWS Secrets Manager.")
+        
+        logger.info(f"✅ Successfully retrieved Stripe secret key (length: {len(secret_key)})")
+        return secret_key
     except ClientError as e:
-        logger.error(f"Error retrieving Stripe secret: {str(e)}")
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_message = e.response.get('Error', {}).get('Message', str(e))
+        logger.error(f"❌ Error retrieving Stripe secret from Secrets Manager ({error_code}): {error_message}")
+        raise
+    except (ValueError, KeyError) as e:
+        logger.error(f"❌ Invalid Stripe secret format: {str(e)}")
         raise
 
 def get_stripe_webhook_secret() -> str:
     """Get Stripe webhook secret from Secrets Manager"""
     try:
+        logger.info(f"🔑 Fetching Stripe webhook secret from Secrets Manager: {STRIPE_WEBHOOK_SECRET_NAME}")
         response = secrets_client.get_secret_value(SecretId=STRIPE_WEBHOOK_SECRET_NAME)
         secret_data = json.loads(response['SecretString'])
-        return secret_data.get('webhook_secret') or secret_data.get('secret', '')
+        
+        # Try both key names for compatibility
+        webhook_secret = secret_data.get('webhook_secret') or secret_data.get('secret', '')
+        
+        if not webhook_secret or webhook_secret.startswith('PLACEHOLDER_'):
+            logger.warning(f"⚠️ Stripe webhook secret not configured or still using placeholder value")
+            raise ValueError("Stripe webhook secret not configured. Please update the secret in AWS Secrets Manager.")
+        
+        logger.info(f"✅ Successfully retrieved Stripe webhook secret (length: {len(webhook_secret)})")
+        return webhook_secret
     except ClientError as e:
-        logger.error(f"Error retrieving Stripe webhook secret: {str(e)}")
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_message = e.response.get('Error', {}).get('Message', str(e))
+        logger.error(f"❌ Error retrieving Stripe webhook secret from Secrets Manager ({error_code}): {error_message}")
+        raise
+    except (ValueError, KeyError) as e:
+        logger.error(f"❌ Invalid Stripe webhook secret format: {str(e)}")
         raise
 
 def verify_stripe_webhook(payload: str, signature: str) -> bool:
@@ -91,7 +121,13 @@ def create_payment_intent(amount: float, currency: str = 'usd', metadata: Option
     if not STRIPE_AVAILABLE:
         raise Exception("Stripe library not available")
     
-    stripe.api_key = get_stripe_secret()
+    # Fetch Stripe secret key from Secrets Manager
+    try:
+        stripe.api_key = get_stripe_secret()
+        logger.info(f"💳 Creating Stripe payment intent for ${amount:.2f} {currency.upper()}")
+    except Exception as e:
+        logger.error(f"❌ Failed to retrieve Stripe secret key: {str(e)}")
+        raise Exception(f"Stripe payment processing not configured: {str(e)}")
     
     try:
         intent = stripe.PaymentIntent.create(
@@ -100,6 +136,7 @@ def create_payment_intent(amount: float, currency: str = 'usd', metadata: Option
             metadata=metadata or {},
             description='Cosine Platform Donation'
         )
+        logger.info(f"✅ Successfully created Stripe payment intent: {intent.id}")
         return {
             'client_secret': intent.client_secret,
             'payment_intent_id': intent.id,
@@ -107,7 +144,7 @@ def create_payment_intent(amount: float, currency: str = 'usd', metadata: Option
             'currency': currency
         }
     except stripe.error.StripeError as e:
-        logger.error(f"Stripe error creating payment intent: {str(e)}")
+        logger.error(f"❌ Stripe API error creating payment intent: {str(e)}")
         raise
 
 def record_donation_csv(payment_data: Dict) -> str:

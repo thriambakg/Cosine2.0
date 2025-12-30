@@ -549,7 +549,7 @@ const SupportMePage: React.FC = () => {
             </Elements>
           ) : (
             <Alert severity="warning" sx={{ backgroundColor: 'rgba(251, 191, 36, 0.1)', color: '#fbbf24', borderColor: '#fbbf24' }}>
-              Stripe payment processing is not configured. Please set REACT_APP_STRIPE_PUBLISHABLE_KEY in your environment.
+              Stripe payment processing is not configured. Please set VITE_STRIPE_PUBLISHABLE_KEY in your environment.
             </Alert>
           )}
         </CardContent>
