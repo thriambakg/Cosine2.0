@@ -1030,24 +1030,36 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
                 del portfolio_data['results']
             duplicated_tile['portfolioData'] = portfolio_data
         
-        # Find next available position using the same pathfinding logic as frontend
-        tile_size = duplicated_tile.get('gridSize', duplicated_tile.get('size', {}))
-        if isinstance(tile_size, dict):
-            tile_width = tile_size.get('width', 4)
-            tile_height = tile_size.get('height', 4)
+        # Use provided position or calculate next available position
+        provided_position = body.get('gridPosition')
+        if provided_position and isinstance(provided_position, dict):
+            # Frontend calculated the position (consistent with new tiles)
+            duplicated_tile['gridPosition'] = provided_position
         else:
-            # Legacy size format or missing
-            tile_width = 4
-            tile_height = 4
+            # Backend fallback: calculate position if frontend didn't provide it
+            tile_size = duplicated_tile.get('gridSize', duplicated_tile.get('size', {}))
+            if isinstance(tile_size, dict):
+                tile_width = tile_size.get('width', 4)
+                tile_height = tile_size.get('height', 4)
+            else:
+                # Legacy size format or missing
+                tile_width = 4
+                tile_height = 4
+            
+            # Get all tiles in the target tab (excluding the source tile we're duplicating)
+            existing_tiles = [t for t in target_tab.get('tiles', []) if t.get('id') != tile_id]
+            
+            # Find next available position
+            new_position = find_next_available_position(existing_tiles, tile_width, tile_height)
+            duplicated_tile['gridPosition'] = new_position
         
-        # Get all tiles in the target tab (excluding the source tile we're duplicating)
-        existing_tiles = [t for t in target_tab.get('tiles', []) if t.get('id') != tile_id]
-        
-        # Find next available position
-        new_position = find_next_available_position(existing_tiles, tile_width, tile_height)
-        duplicated_tile['gridPosition'] = new_position
+        # Ensure gridSize is set
         if 'gridSize' not in duplicated_tile:
-            duplicated_tile['gridSize'] = {'width': tile_width, 'height': tile_height}
+            tile_size = duplicated_tile.get('size', {})
+            if isinstance(tile_size, dict):
+                duplicated_tile['gridSize'] = {'width': tile_size.get('width', 4), 'height': tile_size.get('height', 4)}
+            else:
+                duplicated_tile['gridSize'] = {'width': 4, 'height': 4}
         
         # Add tile to target tab
         if 'tiles' not in target_tab:

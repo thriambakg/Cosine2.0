@@ -724,7 +724,7 @@ export const dashboardAPI = {
     });
   },
 
-  duplicateTile: async (tileId: string, tabId?: string, userId?: string): Promise<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }> => {
+  duplicateTile: async (tileId: string, tabId?: string, userId?: string, gridPosition?: { x: number; y: number }): Promise<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }> => {
     const body: any = {
       operation: 'duplicate_tile',
       tileId
@@ -732,9 +732,12 @@ export const dashboardAPI = {
     if (tabId) {
       body.tabId = tabId;
     }
+    if (gridPosition) {
+      body.gridPosition = gridPosition;
+    }
     return apiRequest<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }>(`/dashboard-tiles?userId=${userId}`, {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: body, // Plain object, not JSON.stringify
     });
   },
 

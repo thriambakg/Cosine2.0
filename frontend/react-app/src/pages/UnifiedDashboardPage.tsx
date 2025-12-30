@@ -1564,7 +1564,24 @@ const UnifiedDashboardPage: React.FC = () => {
     }
 
     try {
-      const response = await dashboardAPI.duplicateTile(tileId, activeTab.id, user.id);
+      // Find the source tile to get its size
+      const sourceTile = tiles.find(t => t.id === tileId);
+      if (!sourceTile) {
+        setSnackbar({
+          open: true,
+          message: 'Tile not found',
+          severity: 'error'
+        });
+        return;
+      }
+
+      // Get tile size (use gridSize if available, otherwise default)
+      const tileSize = sourceTile.gridSize || getDefaultTileSize(sourceTile.type);
+      
+      // Calculate next available position using the same logic as new tiles
+      const gridPosition = findNextAvailablePosition(tileSize);
+
+      const response = await dashboardAPI.duplicateTile(tileId, activeTab.id, user.id, gridPosition);
       if (response.success && response.tile) {
         // Reload from database to get the duplicated tile
         await reloadFromDatabase();
