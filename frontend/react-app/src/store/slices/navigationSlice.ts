@@ -130,6 +130,13 @@ const defaultNavigationItems: NavigationItem[] = [
     path: '/news-search',
     icon: 'ArticleIcon',
     category: 'news'
+  },
+  {
+    id: 'support',
+    label: 'Support Me',
+    path: '/support',
+    icon: 'FavoriteIcon',
+    category: 'other'
   }
 ];
 

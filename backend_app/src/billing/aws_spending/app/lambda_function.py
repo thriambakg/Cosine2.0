@@ -67,8 +67,8 @@ def get_cost_and_usage(start_date: str, end_date: str) -> Dict[str, Any]:
         logger.error(f"Error fetching cost data: {str(e)}")
         raise
 
-def get_detailed_costs(start_date: str, end_date: str) -> Dict[str, Any]:
-    """Get detailed cost breakdown by service"""
+def get_daily_costs(start_date: str, end_date: str) -> Dict[str, Any]:
+    """Get daily cost breakdown by service"""
     try:
         response = ce_client.get_cost_and_usage(
             TimePeriod={
@@ -84,7 +84,7 @@ def get_detailed_costs(start_date: str, end_date: str) -> Dict[str, Any]:
         )
         return response
     except ClientError as e:
-        logger.error(f"Error fetching detailed cost data: {str(e)}")
+        logger.error(f"Error fetching daily cost data: {str(e)}")
         raise
 
 def calculate_totals(cost_data: Dict) -> Dict[str, float]:
@@ -111,37 +111,71 @@ def calculate_totals(cost_data: Dict) -> Dict[str, float]:
     
     return totals
 
-def store_detailed_summary(cost_data: Dict, start_date: str, end_date: str) -> str:
-    """Store detailed monthly summary in S3"""
-    month_key = datetime.now().strftime('%Y-%m')
-    key = f"detailed/{month_key}_detailed.json"
+def store_daily_spending_csv(daily_data: Dict, date: datetime) -> str:
+    """Store daily spending CSV in spendings/yyyy/mm/dd.csv format"""
+    date_str = date.strftime('%Y-%m-%d')
+    year_month = date.strftime('%Y/%m')
+    day = date.strftime('%d')
+    key = f"spendings/{year_month}/{day}.csv"
     
-    summary = {
-        'period': {
-            'start': start_date,
-            'end': end_date,
-            'month': month_key
-        },
-        'cost_data': cost_data,
-        'generated_at': datetime.now().isoformat()
-    }
+    # Extract costs for this specific day
+    day_costs = []
+    if 'ResultsByTime' in daily_data:
+        for result in daily_data['ResultsByTime']:
+            time_start = result.get('TimePeriod', {}).get('Start', '')
+            if time_start == date_str:
+                # Extract groups for this day
+                if 'Groups' in result:
+                    for group in result['Groups']:
+                        service = group.get('Keys', [])[0] if group.get('Keys') else 'Unknown'
+                        usage_type = group.get('Keys', [])[1] if len(group.get('Keys', [])) > 1 else 'Unknown'
+                        metrics = group.get('Metrics', {})
+                        blended_cost = float(metrics.get('BlendedCost', {}).get('Amount', 0))
+                        unblended_cost = float(metrics.get('UnblendedCost', {}).get('Amount', 0))
+                        
+                        day_costs.append({
+                            'date': date_str,
+                            'service': service,
+                            'usage_type': usage_type,
+                            'blended_cost': f"{blended_cost:.2f}",
+                            'unblended_cost': f"{unblended_cost:.2f}",
+                            'currency': 'USD'
+                        })
+    
+    # If no costs found for this day, create empty record
+    if not day_costs:
+        day_costs.append({
+            'date': date_str,
+            'service': 'NoCost',
+            'usage_type': 'NoUsage',
+            'blended_cost': '0.00',
+            'unblended_cost': '0.00',
+            'currency': 'USD'
+        })
+    
+    # Write CSV
+    output = io.StringIO()
+    fieldnames = ['date', 'service', 'usage_type', 'blended_cost', 'unblended_cost', 'currency']
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(day_costs)
     
     try:
         s3_client.put_object(
             Bucket=SPENDING_BUCKET_NAME,
             Key=key,
-            Body=json.dumps(summary, indent=2, default=str),
-            ContentType='application/json',
+            Body=output.getvalue(),
+            ContentType='text/csv',
             ServerSideEncryption='aws:kms'
         )
-        logger.info(f"✅ Stored detailed summary: {key}")
+        logger.info(f"✅ Stored daily spending CSV: {key}")
         return key
     except ClientError as e:
-        logger.error(f"Error storing detailed summary: {str(e)}")
+        logger.error(f"Error storing daily spending CSV: {str(e)}")
         raise
 
-def append_monthly_summary(totals: Dict[str, float], start_date: str, end_date: str) -> str:
-    """Append monthly totals to aggregated table CSV"""
+def update_monthly_summary(totals: Dict[str, float], start_date: str, end_date: str) -> str:
+    """Update monthly totals in shared summary CSV at root"""
     month_key = datetime.now().strftime('%Y-%m')
     csv_key = "monthly_summary.csv"
     
@@ -209,25 +243,62 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
         if http_method == 'OPTIONS':
             return create_response(200, {'message': 'CORS preflight'})
         
-        if http_method != 'GET':
+        # Handle GET requests - can fetch current spending or historical data
+        if http_method == 'GET':
+            # Check if requesting summary data
+            query_params = event.get('queryStringParameters') or {}
+            if query_params.get('summary') == 'true':
+                # Return monthly summary CSV data
+                try:
+                    response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key='monthly_summary.csv')
+                    csv_content = response['Body'].read().decode('utf-8')
+                    reader = csv.DictReader(io.StringIO(csv_content))
+                    monthly_data = list(reader)
+                    
+                    # Calculate current month total
+                    current_month = datetime.now().strftime('%Y-%m')
+                    current_total = 0.0
+                    for row in monthly_data:
+                        if row.get('month') == current_month:
+                            current_total = float(row.get('blended_cost', 0))
+                            break
+                    
+                    return create_response(200, {
+                        'success': True,
+                        'current_month_total': current_total,
+                        'monthly_data': monthly_data
+                    })
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'NoSuchKey':
+                        return create_response(200, {
+                            'success': True,
+                            'current_month_total': 0.0,
+                            'monthly_data': []
+                        })
+                    raise
+            else:
+                # Default behavior - fetch and store current month spending
+                pass  # Continue to normal flow below
+        else:
             return create_response(405, {'error': 'Method not allowed'})
         
         # Get current billing period
         start_date, end_date = get_current_billing_period()
+        today = datetime.now()
         logger.info(f"📊 Fetching AWS spending for period: {start_date} to {end_date}")
         
         # Fetch cost data
         cost_data = get_cost_and_usage(start_date, end_date)
-        detailed_data = get_detailed_costs(start_date, end_date)
+        daily_data = get_daily_costs(start_date, end_date)
         
         # Calculate totals
         totals = calculate_totals(cost_data)
         
-        # Store detailed summary
-        detailed_key = store_detailed_summary(detailed_data, start_date, end_date)
+        # Store today's daily spending CSV
+        daily_key = store_daily_spending_csv(daily_data, today)
         
-        # Append to monthly summary table
-        summary_key = append_monthly_summary(totals, start_date, end_date)
+        # Update monthly summary table
+        summary_key = update_monthly_summary(totals, start_date, end_date)
         
         # Return response
         return create_response(200, {
@@ -235,11 +306,11 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
             'period': {
                 'start': start_date,
                 'end': end_date,
-                'month': datetime.now().strftime('%Y-%m')
+                'month': today.strftime('%Y-%m')
             },
             'totals': totals,
             'stored': {
-                'detailed': detailed_key,
+                'daily': daily_key,
                 'summary': summary_key
             },
             'message': 'AWS spending data fetched and stored successfully'

@@ -24,6 +24,7 @@ import {
   SmartToy as BotIcon,
   Description as DescriptionIcon,
   Article as ArticleIcon,
+  Favorite as FavoriteIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -46,6 +47,7 @@ const iconMap = {
   BotIcon,
   DescriptionIcon,
   ArticleIcon,
+  FavoriteIcon,
 };
 
 export default function AppSidebar() {

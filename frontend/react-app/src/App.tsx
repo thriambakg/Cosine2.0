@@ -24,6 +24,7 @@ import CongressBillsSearchPage from './pages/CongressBillsSearchPage';
 import LDASearchPage from './pages/LDASearchPage';
 import StockScreenerSearchPage from './pages/StockScreenerSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+import SupportMePage from './pages/SupportMePage';
 import { ConfirmDialog } from './components/tiles/common';
 
 // Protected Route Component
@@ -134,6 +135,11 @@ function AppContent() {
               <Route path="/stock-screener-search" element={
                 <ProtectedRoute>
                   <StockScreenerSearchPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/support" element={
+                <ProtectedRoute>
+                  <SupportMePage />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<Navigate to="/" replace />} />

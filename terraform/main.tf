@@ -610,6 +610,25 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    # GET method for billing spending
+    billing_spending_get = {
+      resource_key            = "billing_spending"
+      http_method             = "GET"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_spending_lambda.function_arn
+      request_parameters      = {}
+    }
+    # POST method for billing payment
+    billing_payment_post = {
+      resource_key            = "billing_payment"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.billing_payment_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
     # OPTIONS methods are now automatically created by the API Gateway module
   }
 
@@ -842,7 +861,7 @@ module "api_gateway" {
   tags = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "79" # Updated for tile duplication pathfinding
+  deployment_trigger = "80" # Updated for billing lambdas (spending and payment)
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

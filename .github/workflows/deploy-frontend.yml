@@ -422,6 +422,7 @@ jobs:
           VITE_API_GATEWAY_URL: ${{ steps.get-build-env.outputs.next_public_api_gateway_url }}
           VITE_REDIRECT_SIGN_IN: ${{ steps.get-build-env.outputs.next_public_redirect_sign_in }}
           VITE_REDIRECT_SIGN_OUT: ${{ steps.get-build-env.outputs.next_public_redirect_sign_out }}
+          VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
         run: |
           echo "🔨 Building React.js (Vite) application with environment variables..."
           echo "  - AWS Region: $VITE_AWS_REGION"

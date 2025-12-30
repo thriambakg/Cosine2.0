@@ -2022,6 +2022,30 @@ export const api = {
   ldaAutocomplete: ldaAutocompleteAPI,
   fileReturn: fileReturnAPI,
   filesystem: filesystemAPI,
+  billing: {
+    getSpendingSummary: async (): Promise<{ success: boolean; current_month_total: number; monthly_data: any[] }> => {
+      return apiRequest<{ success: boolean; current_month_total: number; monthly_data: any[] }>(`/billing-spending?summary=true`, {
+        method: 'GET',
+      });
+    },
+    getEarningsSummary: async (month?: string): Promise<{ success: boolean; current_month_total: number; total_raised: number; monthly_earnings: any[] }> => {
+      const monthParam = month ? `&month=${month}` : '';
+      return apiRequest<{ success: boolean; current_month_total: number; total_raised: number; monthly_earnings: any[] }>(`/billing-payment?summary=true${monthParam}`, {
+        method: 'GET',
+      });
+    },
+    createPaymentIntent: async (amount: number, currency: string = 'usd', metadata?: Record<string, string>): Promise<{ success: boolean; payment_intent: { client_secret: string; payment_intent_id: string; amount: number; currency: string } }> => {
+      return apiRequest<{ success: boolean; payment_intent: { client_secret: string; payment_intent_id: string; amount: number; currency: string } }>(`/billing-payment`, {
+        method: 'POST',
+        body: {
+          operation: 'create_payment_intent',
+          amount,
+          currency,
+          metadata: metadata || {}
+        },
+      });
+    },
+  },
 };
 
 export default api;
