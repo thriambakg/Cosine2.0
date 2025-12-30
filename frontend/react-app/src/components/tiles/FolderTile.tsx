@@ -32,6 +32,8 @@ import {
   MoreVert as MoreVertIcon,
   Chat as SidebarChatIcon,
   Dashboard as AddToContextIcon,
+  ContentCopy as CopyIcon,
+  ContentPaste as PasteIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI } from '@/services/api';
@@ -136,6 +138,30 @@ const FolderTile: React.FC<FolderTileProps> = ({
   // Multi-select state
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+
+  // Clipboard state (synced with sessionStorage)
+  const [clipboard, setClipboardState] = useState<Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null>(getClipboard());
+  
+  // Sync clipboard from sessionStorage
+  React.useEffect(() => {
+    const syncClipboard = () => {
+      const stored = getClipboard();
+      setClipboardState(stored);
+    };
+    
+    // Initial sync
+    syncClipboard();
+    
+    // Listen for clipboard updates
+    const handleClipboardUpdate = () => syncClipboard();
+    window.addEventListener('filesystem-clipboard-update', handleClipboardUpdate);
+    window.addEventListener('storage', syncClipboard);
+    
+    return () => {
+      window.removeEventListener('filesystem-clipboard-update', handleClipboardUpdate);
+      window.removeEventListener('storage', syncClipboard);
+    };
+  }, []);
 
   // Load folder contents
   const loadFolderContents = useCallback(async (path: string = '') => {
@@ -400,6 +426,92 @@ const FolderTile: React.FC<FolderTileProps> = ({
       setError(err.message || 'Error uploading file');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  // Clipboard helpers (shared with FilesPage)
+  const CLIPBOARD_STORAGE_KEY = 'filesystem_clipboard';
+  
+  const getClipboard = (): Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null => {
+    try {
+      const stored = sessionStorage.getItem(CLIPBOARD_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const setClipboard = (items: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null) => {
+    if (items && items.length > 0) {
+      sessionStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(items));
+      window.dispatchEvent(new CustomEvent('filesystem-clipboard-update'));
+    } else {
+      sessionStorage.removeItem(CLIPBOARD_STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent('filesystem-clipboard-update'));
+    }
+  };
+
+  // Copy item
+  const handleCopyItem = () => {
+    if (!selectedItem || !user) return;
+    
+    const isFolder = selectedItem.type === 'folder';
+    const sourcePath = isFolder ? (selectedItem.id === 'root' ? '' : selectedItem.id) : currentFolderPath;
+    
+    // Store in clipboard (just UUIDs and metadata, no content)
+    const clipboardItem = {
+      item_id: selectedItem.id,
+      source_folder_path: sourcePath,
+      is_folder: isFolder,
+      name: selectedItem.name,
+    };
+    
+    // Get existing clipboard or create new array
+    const existingClipboard = getClipboard() || [];
+    
+    // Check if item is already in clipboard (avoid duplicates)
+    const isDuplicate = existingClipboard.some(
+      item => item.item_id === clipboardItem.item_id && item.source_folder_path === clipboardItem.source_folder_path
+    );
+    
+    if (!isDuplicate) {
+      const newClipboard = [...existingClipboard, clipboardItem];
+      setClipboard(newClipboard);
+    }
+    
+    setItemContextMenuAnchor(null);
+    setSelectedItem(null);
+  };
+
+  // Paste item
+  const handlePasteItem = async () => {
+    const clipboardItems = getClipboard();
+    if (!clipboardItems || clipboardItems.length === 0 || !user) return;
+    
+    try {
+      // Prepare item_data for backend (just UUIDs and paths)
+      const item_data = clipboardItems.map(item => ({
+        item_id: item.item_id,
+        source_folder_path: item.source_folder_path,
+        is_folder: item.is_folder,
+      }));
+      
+      const response = await filesystemAPI.pasteItemsByIds({
+        user_id: user.id,
+        dest_folder_path: currentFolderPath,
+        item_data: item_data,
+      });
+      
+      if (response.success) {
+        // Reload folder contents
+        await loadFolderContents(currentFolderPath);
+        setClipboard(null); // Clear clipboard after successful paste
+      } else {
+        setError(response.error || 'Failed to paste items');
+      }
+    } catch (err: any) {
+      console.error('Error pasting items:', err);
+      setError(err.message || 'Error pasting items');
     }
   };
 
@@ -1088,6 +1200,22 @@ const FolderTile: React.FC<FolderTileProps> = ({
           },
         }}
       >
+        <MenuItem
+          onClick={handleCopyItem}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <CopyIcon sx={{ mr: 1, fontSize: 18, color: '#9ca3af' }} />
+          Copy
+        </MenuItem>
+        {getClipboard() && getClipboard()!.length > 0 && (
+          <MenuItem
+            onClick={handlePasteItem}
+            sx={{ color: '#10b981', '&:hover': { backgroundColor: 'rgba(16, 185, 129, 0.2)' } }}
+          >
+            <PasteIcon sx={{ mr: 1, fontSize: 18, color: '#10b981' }} />
+            Paste {getClipboard()!.length === 1 ? getClipboard()![0].name : `${getClipboard()!.length} items`}
+          </MenuItem>
+        )}
         <MenuItem
           onClick={handleDeleteItem}
           sx={{ color: '#ef4444', '&:hover': { backgroundColor: 'rgba(239, 68, 68, 0.2)' } }}

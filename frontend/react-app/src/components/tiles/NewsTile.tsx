@@ -306,6 +306,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
     });
   }, [localDisplayOptions, id, onSettingsChange]);
 
+  // Persist searchParams when they change
+  useEffect(() => {
+    onSettingsChange(id, { searchParams: currentSearchParams });
+  }, [currentSearchParams, id, onSettingsChange]);
+
   // Column width state for dynamic sizing
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [currentPage, setCurrentPage] = useState(1);

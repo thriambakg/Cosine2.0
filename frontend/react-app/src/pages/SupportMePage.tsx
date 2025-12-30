@@ -16,8 +16,10 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
+  Tooltip,
+  IconButton,
 } from '@mui/material';
-import { AttachMoney as MoneyIcon, Refresh as RefreshIcon, Download as DownloadIcon } from '@mui/icons-material';
+import { Refresh as RefreshIcon, Download as DownloadIcon, Info as InfoIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
 import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -207,7 +209,6 @@ const PaymentForm: React.FC<{ amount: number; onSuccess: () => void; onError: (e
 const SupportMePage: React.FC = () => {
   const [currentSpending, setCurrentSpending] = useState<number>(0);
   const [monthlySpending, setMonthlySpending] = useState<MonthlySpending[]>([]);
-  const [totalRaised, setTotalRaised] = useState<number>(0);
   const [monthlyReports, setMonthlyReports] = useState<Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -242,13 +243,6 @@ const SupportMePage: React.FC = () => {
       if (spendingResponse.success) {
         setCurrentSpending(spendingResponse.current_month_total);
         setMonthlySpending(spendingResponse.monthly_data || []);
-      }
-
-      // Fetch earnings data (current month)
-      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
-      const earningsResponse = await api.billing.getEarningsSummary(currentMonth);
-      if (earningsResponse.success) {
-        setTotalRaised(earningsResponse.current_month_total);
       }
 
       // Fetch monthly reports list
@@ -365,9 +359,20 @@ const SupportMePage: React.FC = () => {
       >
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" sx={{ color: '#9ca3af' }}>
-              Current Month Spending
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="h6" sx={{ color: '#9ca3af' }}>
+                Current Month Spending
+              </Typography>
+              <Tooltip
+                title="Total AWS infrastructure costs for the current billing period (month-to-date). This includes compute, storage, API calls, and other AWS services used to run the platform."
+                arrow
+                placement="top"
+              >
+                <IconButton size="small" sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}>
+                  <InfoIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
@@ -420,7 +425,7 @@ const SupportMePage: React.FC = () => {
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Blended Cost</TableCell>
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Unblended Cost</TableCell>
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Usage Quantity</TableCell>
-                  <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Earnings</TableCell>
+                  <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Donations</TableCell>
                   <TableCell align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Report</TableCell>
                 </TableRow>
               </TableHead>
@@ -495,34 +500,10 @@ const SupportMePage: React.FC = () => {
         }}
       >
         <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <MoneyIcon sx={{ color: '#10b981', mr: 1, fontSize: '2rem' }} />
-              <Typography variant="h5" sx={{ color: '#e5e7eb' }}>
-                Total Raised This Month: {formatCurrency(totalRaised)}
-              </Typography>
-            </Box>
-            <Button
-              variant="outlined"
-              startIcon={<RefreshIcon />}
-              onClick={() => loadData(true)}
-              disabled={refreshing}
-              sx={{
-                borderColor: '#374151',
-                color: '#9ca3af',
-                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                '&:hover': {
-                  borderColor: '#4b5563',
-                  backgroundColor: 'rgba(15, 23, 42, 1)',
-                },
-                '&:disabled': {
-                  borderColor: '#374151',
-                  color: '#6b7280',
-                },
-              }}
-            >
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3 }}>
+            <Typography variant="h6" sx={{ color: '#e5e7eb', textAlign: 'center' }}>
+              Any amount is appreciated 😊
+            </Typography>
           </Box>
 
           {!showPaymentForm ? (

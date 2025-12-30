@@ -1791,6 +1791,9 @@ const UnifiedDashboardPage: React.FC = () => {
             // Special handling for paginationState - always replace entirely to preserve lastEvaluatedKeys array
             if (key === 'paginationState' && settings[key] && typeof settings[key] === 'object' && !Array.isArray(settings[key])) {
               mergedSettings[key] = { ...settings[key] }; // Replace entirely, don't merge
+            } else if (key === 'searchParams' && settings[key] && typeof settings[key] === 'object' && !Array.isArray(settings[key])) {
+              // Special handling for searchParams - replace entirely to preserve nested structure (general_text_search_fields, arrays, etc.)
+              mergedSettings[key] = JSON.parse(JSON.stringify(settings[key])); // Deep copy to ensure all nested objects/arrays are preserved
             } else if (typeof settings[key] === 'object' && settings[key] !== null && !Array.isArray(settings[key]) && tile[key]) {
               // Deep merge for other objects (displayOptions, filterSettings, etc.)
               mergedSettings[key] = { ...tile[key], ...settings[key] };

@@ -559,6 +559,226 @@ def rename_item(user_id: str, folder_path: str, item_id: str, new_name: str) -> 
         logger.error(f"Error renaming item: {str(e)}")
         raise
 
+def copy_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
+    """Copy an item (file) to clipboard - returns item metadata for copying"""
+    try:
+        manifest = get_folder_manifest(user_id, folder_path)
+        
+        if item_id not in manifest['items']:
+            raise ValueError(f"Item {item_id} not found")
+        
+        item = manifest['items'][item_id].copy()
+        
+        # Fetch the actual content from S3
+        s3_key = item.get('s3_key')
+        if s3_key and validate_s3_key(user_id, s3_key):
+            try:
+                response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
+                content_bytes = response['Body'].read()
+                
+                # For .cosine files, decrypt the content
+                if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
+                    item['content'] = decrypt_context_data(user_id, content_bytes)
+                else:
+                    # For regular files, store as base64
+                    import base64
+                    item['content'] = base64.b64encode(content_bytes).decode('utf-8')
+                    item['content_type'] = 'base64'
+            except Exception as e:
+                logger.warning(f"Error fetching content for copy: {str(e)}")
+                item['content'] = None
+        
+        return {
+            'type': 'item',
+            'item_data': item,
+            'source_folder_path': folder_path,
+            'source_item_id': item_id
+        }
+    except Exception as e:
+        logger.error(f"Error copying item: {str(e)}")
+        raise
+
+def copy_folder(user_id: str, folder_path: str) -> Dict[str, Any]:
+    """Copy a folder and all its contents recursively"""
+    try:
+        manifest = get_folder_manifest(user_id, folder_path)
+        
+        # Get all items in the folder
+        items_data = {}
+        for item_id, item in manifest['items'].items():
+            try:
+                s3_key = item.get('s3_key')
+                if s3_key and validate_s3_key(user_id, s3_key):
+                    response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
+                    content_bytes = response['Body'].read()
+                    
+                    # For .cosine files, decrypt the content
+                    if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
+                        items_data[item_id] = {
+                            **item,
+                            'content': decrypt_context_data(user_id, content_bytes)
+                        }
+                    else:
+                        # For regular files, store as base64
+                        import base64
+                        items_data[item_id] = {
+                            **item,
+                            'content': base64.b64encode(content_bytes).decode('utf-8'),
+                            'content_type': 'base64'
+                        }
+                else:
+                    items_data[item_id] = item.copy()
+            except Exception as e:
+                logger.warning(f"Error fetching content for item {item_id}: {str(e)}")
+                items_data[item_id] = item.copy()
+        
+        # Recursively get all subfolders
+        subfolders_data = {}
+        for subfolder_id, folder_info in manifest.get('folders', {}).items():
+            subfolder_path = folder_info.get('path', f"{folder_path}/{folder_info.get('name', subfolder_id)}")
+            subfolders_data[subfolder_id] = copy_folder(user_id, subfolder_path)
+        
+        return {
+            'type': 'folder',
+            'folder_data': {
+                'name': manifest.get('name'),
+                'folder_id': manifest.get('folder_id'),
+                'items': items_data,
+                'subfolders': subfolders_data
+            },
+            'source_folder_path': folder_path
+        }
+    except Exception as e:
+        logger.error(f"Error copying folder: {str(e)}")
+        raise
+
+def paste_items_by_ids(user_id: str, dest_folder_path: str, item_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Paste multiple items by copying them first, then pasting
+    item_data: List of {item_id, source_folder_path, is_folder}
+    """
+    try:
+        results = []
+        for item_info in item_data:
+            item_id = item_info.get('item_id')
+            source_folder_path = item_info.get('source_folder_path', '')
+            is_folder = item_info.get('is_folder', False)
+            
+            # Copy the item/folder first
+            if is_folder:
+                clipboard_data = copy_folder(user_id, source_folder_path)
+            else:
+                clipboard_data = copy_item(user_id, source_folder_path, item_id)
+            
+            # Then paste it
+            result = paste_item(user_id, dest_folder_path, clipboard_data)
+            results.append(result)
+        
+        return {
+            'pasted_items': results,
+            'count': len(results)
+        }
+    except Exception as e:
+        logger.error(f"Error pasting items by IDs: {str(e)}")
+        raise
+
+def paste_item(user_id: str, dest_folder_path: str, clipboard_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Paste a copied item into a destination folder"""
+    try:
+        if clipboard_data.get('type') == 'item':
+            # Paste a single item
+            item_data = clipboard_data['item_data'].copy()
+            original_item_id = clipboard_data.get('source_item_id')
+            
+            # Generate new ID for the copied item
+            new_item_id = str(uuid.uuid4())
+            
+            # Get destination manifest
+            dest_manifest = get_folder_manifest(user_id, dest_folder_path)
+            
+            # Create new S3 key with new ID
+            old_s3_key = item_data.get('s3_key', '')
+            file_extension = os.path.splitext(old_s3_key)[1] if old_s3_key else ''
+            if not file_extension and item_data.get('type') == 'context_item':
+                file_extension = CONTEXT_ITEM_EXTENSION
+            
+            new_s3_key = f"users/{user_id}/filesys/{dest_folder_path}/{new_item_id}{file_extension}" if dest_folder_path else f"users/{user_id}/filesys/{new_item_id}{file_extension}"
+            
+            # Upload content to S3
+            if item_data.get('content') is not None:
+                if item_data.get('s3_key', '').endswith(CONTEXT_ITEM_EXTENSION) or file_extension == CONTEXT_ITEM_EXTENSION:
+                    # Encrypt and save .cosine file
+                    encrypted_data = encrypt_context_data(user_id, item_data['content'])
+                    s3_client.put_object(
+                        Bucket=CHAT_FILES_BUCKET_NAME,
+                        Key=new_s3_key,
+                        Body=encrypted_data,
+                        ContentType=CONTEXT_ITEM_MIME_TYPE
+                    )
+                elif item_data.get('content_type') == 'base64':
+                    # Decode base64 and save regular file
+                    import base64
+                    file_content = base64.b64decode(item_data['content'])
+                    content_type = item_data.get('metadata', {}).get('content_type', 'application/octet-stream')
+                    s3_client.put_object(
+                        Bucket=CHAT_FILES_BUCKET_NAME,
+                        Key=new_s3_key,
+                        Body=file_content,
+                        ContentType=content_type
+                    )
+                else:
+                    # Save as JSON
+                    content_json = json.dumps(item_data['content'], default=str)
+                    s3_client.put_object(
+                        Bucket=CHAT_FILES_BUCKET_NAME,
+                        Key=new_s3_key,
+                        Body=content_json.encode('utf-8'),
+                        ContentType='application/json'
+                    )
+            
+            # Create new item entry
+            new_item = {
+                'id': new_item_id,
+                'name': item_data.get('name', 'Copied Item'),
+                'type': item_data.get('type', 'context_item'),
+                's3_key': new_s3_key,
+                'metadata': item_data.get('metadata', {}),
+                'created_at': int(datetime.now().timestamp()),
+                'updated_at': int(datetime.now().timestamp())
+            }
+            
+            # Add to destination manifest
+            dest_manifest['items'][new_item_id] = new_item
+            save_folder_manifest(user_id, dest_folder_path, dest_manifest)
+            
+            return new_item
+        elif clipboard_data.get('type') == 'folder':
+            # Paste a folder recursively
+            folder_data = clipboard_data['folder_data']
+            folder_name = folder_data.get('name', 'Copied Folder')
+            
+            # Create new folder
+            new_folder = create_folder(user_id, folder_name, dest_folder_path)
+            new_folder_path = new_folder['path']
+            
+            # Paste all items
+            for old_item_id, item_data in folder_data.get('items', {}).items():
+                paste_item(user_id, new_folder_path, {
+                    'type': 'item',
+                    'item_data': item_data,
+                    'source_item_id': old_item_id
+                })
+            
+            # Recursively paste all subfolders
+            for old_subfolder_id, subfolder_clipboard in folder_data.get('subfolders', {}).items():
+                paste_item(user_id, new_folder_path, subfolder_clipboard)
+            
+            return new_folder
+        else:
+            raise ValueError(f"Unknown clipboard type: {clipboard_data.get('type')}")
+    except Exception as e:
+        logger.error(f"Error pasting item: {str(e)}")
+        raise
+
 def find_folder_by_id(user_id: str, folder_id: str, search_path: str = '') -> Optional[str]:
     """Find folder path by folder_id by searching through manifests"""
     try:
@@ -821,6 +1041,25 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             folder_path = body.get('folder_path', '')
             item_id = body.get('item_id')
             result = get_item(user_id, folder_path, item_id)
+            
+        elif operation == 'copy_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            result = copy_item(user_id, folder_path, item_id)
+            
+        elif operation == 'copy_folder':
+            folder_path = body.get('folder_path', '')
+            result = copy_folder(user_id, folder_path)
+            
+        elif operation == 'paste_item':
+            dest_folder_path = body.get('dest_folder_path', '')
+            clipboard_data = body.get('clipboard_data', {})
+            result = paste_item(user_id, dest_folder_path, clipboard_data)
+            
+        elif operation == 'paste_items_by_ids':
+            dest_folder_path = body.get('dest_folder_path', '')
+            item_data = body.get('item_data', [])  # List of {item_id, source_folder_path, is_folder}
+            result = paste_items_by_ids(user_id, dest_folder_path, item_data)
             
         else:
             return {

@@ -37,6 +37,8 @@ import {
   Visibility as ViewIcon,
   ArrowBack as ArrowBackIcon,
   Chat as SidebarChatIcon,
+  ContentCopy as CopyIcon,
+  ContentPaste as PasteIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import FilePreviewDialog from '@/components/common/FilePreviewDialog';
@@ -143,6 +145,81 @@ const FilesPage: React.FC = () => {
   const [moveDialogBreadcrumb, setMoveDialogBreadcrumb] = useState<Array<{ id: string; name: string }>>([
     { id: 'root', name: 'Files' }
   ]);
+
+  // Clipboard state for copy/paste (stored in sessionStorage for cross-page persistence)
+  const CLIPBOARD_STORAGE_KEY = 'filesystem_clipboard';
+  
+  const getClipboard = (): Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null => {
+    try {
+      const stored = sessionStorage.getItem(CLIPBOARD_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const setClipboard = (items: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null) => {
+    if (items) {
+      sessionStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(items));
+    } else {
+      sessionStorage.removeItem(CLIPBOARD_STORAGE_KEY);
+    }
+  };
+
+  const [clipboard, setClipboardState] = useState<Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null>(getClipboard());
+  
+  // Sync clipboard state with sessionStorage
+  const updateClipboard = (items: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> | null) => {
+    setClipboard(items);
+    setClipboardState(items);
+  };
+
+  // Sync clipboard from sessionStorage on mount and when it changes
+  React.useEffect(() => {
+    const syncClipboard = () => {
+      const stored = getClipboard();
+      setClipboardState(stored);
+    };
+    
+    // Initial sync
+    syncClipboard();
+    
+    // Listen for storage events (for cross-tab sync)
+    window.addEventListener('storage', syncClipboard);
+    
+    // Custom event for same-tab updates
+    const handleClipboardUpdate = () => syncClipboard();
+    window.addEventListener('filesystem-clipboard-update', handleClipboardUpdate);
+    
+    return () => {
+      window.removeEventListener('storage', syncClipboard);
+      window.removeEventListener('filesystem-clipboard-update', handleClipboardUpdate);
+    };
+  }, []);
+
+  // Keyboard shortcuts for copy/paste
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+C or Cmd+C for copy
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey && !e.altKey) {
+        if (selectedItems.size > 0 || selectedItem) {
+          e.preventDefault();
+          handleCopyItem();
+        }
+      }
+      // Ctrl+V or Cmd+V for paste
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !e.shiftKey && !e.altKey) {
+        const clipboardItems = getClipboard();
+        if (clipboardItems && clipboardItems.length > 0) {
+          e.preventDefault();
+          handlePasteItem();
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedItems, selectedItem]);
 
   // Load filesystem data from API
   React.useEffect(() => {
@@ -1155,6 +1232,88 @@ const FilesPage: React.FC = () => {
     setNewItemName('');
   };
 
+  const handleCopyItem = async () => {
+    if (!user) return;
+    
+    const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+    
+    // Support both single item (from context menu) and multi-select
+    const itemsToCopy = selectedItems.size > 0 
+      ? Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[]
+      : selectedItem 
+        ? [selectedItem]
+        : [];
+    
+    if (itemsToCopy.length === 0) return;
+    
+    // Get existing clipboard or create new array
+    const existingClipboard = getClipboard() || [];
+    const newClipboardItems: Array<{ item_id: string; source_folder_path: string; is_folder: boolean; name: string }> = [];
+    
+    // Add all items to clipboard (just UUIDs and metadata, no content)
+    for (const item of itemsToCopy) {
+      const isFolder = item.type === 'folder';
+      const sourcePath = isFolder ? (item.id === 'root' ? '' : item.id) : folderPath;
+      
+      const clipboardItem = {
+        item_id: item.id,
+        source_folder_path: sourcePath,
+        is_folder: isFolder,
+        name: item.name,
+      };
+      
+      // Check if item is already in clipboard (avoid duplicates)
+      const isDuplicate = existingClipboard.some(
+        existing => existing.item_id === clipboardItem.item_id && existing.source_folder_path === clipboardItem.source_folder_path
+      );
+      
+      if (!isDuplicate) {
+        newClipboardItems.push(clipboardItem);
+      }
+    }
+    
+    // Merge with existing clipboard
+    const newClipboard = [...existingClipboard, ...newClipboardItems];
+    updateClipboard(newClipboard);
+    
+    setContextMenuAnchor(null);
+    setSelectedItem(null);
+    setSelectedItems(new Set()); // Clear selection after copying
+  };
+
+  const handlePasteItem = async () => {
+    const clipboardItems = getClipboard();
+    if (!clipboardItems || clipboardItems.length === 0 || !user) return;
+    
+    const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+    
+    try {
+      // Prepare item_data for backend (just UUIDs and paths)
+      const item_data = clipboardItems.map(item => ({
+        item_id: item.item_id,
+        source_folder_path: item.source_folder_path,
+        is_folder: item.is_folder,
+      }));
+      
+      const response = await filesystemAPI.pasteItemsByIds({
+        user_id: user.id,
+        dest_folder_path: folderPath,
+        item_data: item_data,
+      });
+      
+      if (response.success) {
+        // Reload folder contents
+        await loadFolderContents(folderPath);
+        updateClipboard(null); // Clear clipboard after successful paste
+      } else {
+        alert(`Failed to paste: ${response.error || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      console.error('Error pasting items:', error);
+      alert(`Failed to paste: ${error.message || 'Unknown error'}`);
+    }
+  };
+
   const handleMoveItem = async () => {
     // Support both single item (from context menu) and multi-select
     const itemsToMoveArray = selectedItems.size > 0 
@@ -1344,6 +1503,36 @@ const FilesPage: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
+          {clipboard && clipboard.length > 0 && (
+            <Button
+              startIcon={<PasteIcon />}
+              onClick={handlePasteItem}
+              sx={{
+                backgroundColor: 'transparent',
+                color: '#10b981',
+                borderRadius: '0px',
+                border: '1px solid #10b981',
+                fontWeight: 600,
+                textTransform: 'none',
+                px: 2,
+                py: 1,
+                '&:hover': { 
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  borderColor: '#10b981',
+                  color: '#10b981',
+                },
+                '& .MuiButton-startIcon': {
+                  color: '#10b981',
+                  marginRight: '8px',
+                },
+                '&:hover .MuiButton-startIcon': {
+                  color: '#10b981',
+                },
+              }}
+            >
+              Paste {clipboard.length === 1 ? clipboard[0].name : `${clipboard.length} items`}
+            </Button>
+          )}
           <Button
             startIcon={<CreateFolderIcon />}
             onClick={() => setCreateFolderDialogOpen(true)}
@@ -1607,6 +1796,20 @@ const FilesPage: React.FC = () => {
                           }}
                         >
                           <SidebarChatIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Copy">
+                        <IconButton
+                          size="small"
+                          onClick={handleCopyItem}
+                          sx={{
+                            color: '#9ca3af',
+                            '&:hover': {
+                              backgroundColor: 'rgba(156, 163, 175, 0.2)',
+                            },
+                          }}
+                        >
+                          <CopyIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Move">
@@ -2101,6 +2304,16 @@ const FilesPage: React.FC = () => {
               Add to Context
             </MenuItem>
           </>
+        )}
+        <MenuItem onClick={handleCopyItem}>
+          <CopyIcon sx={{ mr: 1.5, fontSize: 18, color: '#9ca3af' }} />
+          Copy
+        </MenuItem>
+        {clipboard && clipboard.length > 0 && (
+          <MenuItem onClick={handlePasteItem}>
+            <PasteIcon sx={{ mr: 1.5, fontSize: 18, color: '#10b981' }} />
+            Paste {clipboard.length === 1 ? clipboard[0].name : `${clipboard.length} items`}
+          </MenuItem>
         )}
         <MenuItem onClick={handleRenameItem}>
           <EditIcon sx={{ mr: 1.5, fontSize: 18, color: '#9ca3af' }} />

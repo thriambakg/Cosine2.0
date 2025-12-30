@@ -921,6 +921,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   useEffect(() => {
     if (searchParams && JSON.stringify(searchParams) !== JSON.stringify(currentSearchParams)) {
       console.log('🔄 LDASearchTile: Syncing searchParams from props');
+      isSyncingFromPropsRef.current = true; // Mark that we're syncing from props
       setCurrentSearchParams(searchParams);
       
       // Rebuild generalSearchItems from searchParams
@@ -1202,8 +1203,91 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     onSettingsChange(id, { filterSettings });
   }, [selectedFilters, id, onSettingsChange]);
 
-  // Note: searchParams are persisted when user clicks "Search" button or when performSearch/handleLoadMore is called
-  // This matches the NewsTile pattern - no auto-persistence on every change
+  // Refs for managing sync and persistence
+  const isSyncingFromPropsRef = useRef(false);
+  const prevSearchParamsRef = useRef<LDASearchFilters>(currentSearchParams);
+
+  // Sync generalSearchItems to currentSearchParams.general_text_search_fields
+  // Skip this sync when we're syncing from props to avoid overwriting
+  useEffect(() => {
+    if (isSyncingFromPropsRef.current) {
+      return; // Don't sync when syncing from props
+    }
+    
+    if (generalSearchItems.length > 0) {
+      const generalTextSearchFields: {
+        registrant?: string[] | false;
+        client?: string[] | false;
+        lobbyist?: string[] | false;
+        pac?: string[] | false;
+        foreign?: string[] | false;
+      } = {
+        registrant: false,
+        client: false,
+        lobbyist: false,
+        pac: false,
+        foreign: false,
+      };
+      
+      const itemsByType: Record<string, string[]> = {};
+      generalSearchItems.forEach(item => {
+        const type = item.type || 'unknown';
+        if (!itemsByType[type]) {
+          itemsByType[type] = [];
+        }
+        itemsByType[type].push(item.value);
+      });
+      
+      if (itemsByType['registrant']) {
+        generalTextSearchFields.registrant = itemsByType['registrant'];
+      }
+      if (itemsByType['client']) {
+        generalTextSearchFields.client = itemsByType['client'];
+      }
+      if (itemsByType['lobbyist']) {
+        generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
+      }
+      if (itemsByType['pac']) {
+        generalTextSearchFields.pac = itemsByType['pac'];
+      }
+      if (itemsByType['foreign']) {
+        generalTextSearchFields.foreign = itemsByType['foreign'];
+      }
+      
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        general_text_search_fields: generalTextSearchFields
+      }));
+    } else {
+      // Clear general_text_search_fields if generalSearchItems is empty
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        general_text_search_fields: {
+          registrant: false,
+          client: false,
+          lobbyist: false,
+          pac: false,
+          foreign: false,
+        }
+      }));
+    }
+  }, [generalSearchItems]);
+
+  // Persist searchParams when they change (but not when syncing from props)
+  useEffect(() => {
+    // Skip persistence if we're currently syncing from props to avoid overwriting with stale data
+    if (isSyncingFromPropsRef.current) {
+      isSyncingFromPropsRef.current = false;
+      prevSearchParamsRef.current = currentSearchParams; // Update ref to match new value
+      return;
+    }
+    // Only persist if searchParams actually changed (deep comparison)
+    const hasChanged = JSON.stringify(prevSearchParamsRef.current) !== JSON.stringify(currentSearchParams);
+    if (hasChanged) {
+      prevSearchParamsRef.current = currentSearchParams;
+      onSettingsChange(id, { searchParams: currentSearchParams });
+    }
+  }, [currentSearchParams, id, onSettingsChange]);
 
   // Persist displayOptions when they change (maxResults, compactView, showResultsTable, etc.)
   // Use ref to track previous value and only persist when it actually changes (not from prop updates)

@@ -788,11 +788,27 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       let successCount = 0;
       for (const tile of selectedTilesData) {
         // For filesystem, send full tile data including all configuration and results
-        const fullTileData = {
+        // The spread operator includes all tile properties, but we explicitly ensure
+        // searchParams, filterSettings, and paginationState are included for search tiles
+        const fullTileData: any = {
           ...tile,
           tileId: tile.id,
           tileType: tile.type,
         };
+        
+        // For search tiles, ensure searchParams are always included (even if empty)
+        // This ensures the tile can be restored with its search configuration
+        if (['lda_disclosures', 'congress_bills', 'news', 'sec_search', 'govt_contracts', 'politician_trades'].includes(tile.type)) {
+          if (tile.searchParams !== undefined) {
+            fullTileData.searchParams = tile.searchParams;
+          }
+          if (tile.filterSettings !== undefined) {
+            fullTileData.filterSettings = tile.filterSettings;
+          }
+          if (tile.paginationState !== undefined) {
+            fullTileData.paginationState = tile.paginationState;
+          }
+        }
         const title = tile.symbol 
           ? `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} - ${tile.symbol}`
           : `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`;

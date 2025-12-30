@@ -1162,8 +1162,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [selectedFilters, id, onSettingsChange]);
 
-  // Note: searchParams are persisted when user clicks "Search" button or when performSearch/handleLoadMore is called
-  // This matches the NewsTile pattern - no auto-persistence on every change
+  // Persist searchParams when they change
+  useEffect(() => {
+    onSettingsChange(id, { searchParams: currentSearchParams });
+  }, [currentSearchParams, id, onSettingsChange]);
 
   // Persist displayOptions when they change (maxResults, compactView, showResultsTable, etc.)
   // Use ref to track previous value and only persist when it actually changes (not from prop updates)

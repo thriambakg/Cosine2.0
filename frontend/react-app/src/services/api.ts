@@ -1776,6 +1776,33 @@ export interface FilesystemGetItemRequest {
   item_id: string;
 }
 
+export interface FilesystemCopyItemRequest {
+  user_id: string;
+  folder_path?: string;
+  item_id: string;
+}
+
+export interface FilesystemCopyFolderRequest {
+  user_id: string;
+  folder_path: string;
+}
+
+export interface FilesystemPasteItemRequest {
+  user_id: string;
+  dest_folder_path?: string;
+  clipboard_data: any; // Clipboard data from copy operation
+}
+
+export interface FilesystemPasteItemsByIdsRequest {
+  user_id: string;
+  dest_folder_path?: string;
+  item_data: Array<{
+    item_id: string;
+    source_folder_path: string;
+    is_folder: boolean;
+  }>;
+}
+
 export interface FilesystemResponse<T = any> {
   success: boolean;
   result?: T;
@@ -1993,6 +2020,108 @@ export const filesystemAPI = {
       return {
         success: false,
         error: error.message || 'Failed to get item',
+      };
+    }
+  },
+
+  copyItem: async (params: FilesystemCopyItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'copy_item',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem copy item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to copy item',
+      };
+    }
+  },
+
+  copyFolder: async (params: FilesystemCopyFolderRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'copy_folder',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem copy folder error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to copy folder',
+      };
+    }
+  },
+
+  pasteItem: async (params: FilesystemPasteItemRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'paste_item',
+          ...params,
+        }),
+      });
+      
+      // Dispatch success notification
+      if (response.success && response.result) {
+        const itemName = response.result.name || 'Item';
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: 1,
+            itemName: itemName
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem paste item error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to paste item',
+      };
+    }
+  },
+
+  pasteItemsByIds: async (params: FilesystemPasteItemsByIdsRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'paste_items_by_ids',
+          ...params,
+        }),
+      });
+      
+      // Dispatch success notification
+      if (response.success && response.result) {
+        const count = response.result.count || 1;
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: count,
+            itemName: count === 1 ? 'Item' : `${count} items`
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem paste items by IDs error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to paste items',
       };
     }
   },
