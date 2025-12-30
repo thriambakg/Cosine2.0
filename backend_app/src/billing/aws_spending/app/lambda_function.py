@@ -23,7 +23,9 @@ s3_client = boto3.client('s3')
 
 # Environment variables
 SPENDING_BUCKET_NAME = os.environ.get('SPENDING_BUCKET_NAME')
-AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+# AWS_REGION is automatically available in Lambda runtime context
+# Use boto3's default region (Lambda automatically sets this)
+AWS_REGION = boto3.Session().region_name or 'us-east-1'
 
 def create_response(status_code: int, body: Dict) -> Dict:
     """Create a standardized API Gateway response"""

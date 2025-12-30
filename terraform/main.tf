@@ -2562,7 +2562,6 @@ module "billing_spending_lambda" {
 
   environment_variables = {
     SPENDING_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.spending_bucket_name
-    AWS_REGION           = var.aws_region
     ENVIRONMENT          = var.environment
     LOG_LEVEL            = var.environment == "development" ? "DEBUG" : "INFO"
   }
