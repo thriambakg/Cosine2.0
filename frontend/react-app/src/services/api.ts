@@ -2037,12 +2037,12 @@ export const api = {
     createPaymentIntent: async (amount: number, currency: string = 'usd', metadata?: Record<string, string>): Promise<{ success: boolean; payment_intent: { client_secret: string; payment_intent_id: string; amount: number; currency: string } }> => {
       return apiRequest<{ success: boolean; payment_intent: { client_secret: string; payment_intent_id: string; amount: number; currency: string } }>(`/billing-payment`, {
         method: 'POST',
-        body: {
+        body: JSON.stringify({
           operation: 'create_payment_intent',
           amount,
           currency,
           metadata: metadata || {}
-        },
+        }),
       });
     },
     listMonthlyReports: async (): Promise<{ success: boolean; reports: Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }> }> => {

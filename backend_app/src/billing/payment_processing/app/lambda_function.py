@@ -123,7 +123,9 @@ def create_payment_intent(amount: float, currency: str = 'usd', metadata: Option
     # Fetch Stripe secret key from Secrets Manager
     try:
         stripe.api_key = get_stripe_secret()
-        logger.info(f"💳 Creating Stripe payment intent for ${amount:.2f} {currency.upper()}")
+        # Set API version to match webhook endpoint configuration (2025-12-15.clover)
+        stripe.api_version = '2025-12-15.clover'
+        logger.info(f"💳 Creating Stripe payment intent for ${amount:.2f} {currency.upper()} (API: {stripe.api_version})")
     except Exception as e:
         logger.error(f"❌ Failed to retrieve Stripe secret key: {str(e)}")
         raise Exception(f"Stripe payment processing not configured: {str(e)}")

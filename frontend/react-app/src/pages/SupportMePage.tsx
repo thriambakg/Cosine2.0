@@ -9,7 +9,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   TextField,
   Button,
   Card,
@@ -18,7 +17,7 @@ import {
   Alert,
   Snackbar,
 } from '@mui/material';
-import { AttachMoney as MoneyIcon, TrendingUp as TrendingUpIcon, Refresh as RefreshIcon, Download as DownloadIcon } from '@mui/icons-material';
+import { AttachMoney as MoneyIcon, Refresh as RefreshIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -37,14 +36,6 @@ interface MonthlySpending {
   usage_quantity: string;
   total_earnings?: string;
   payment_count?: string;
-  currency: string;
-  updated_at: string;
-}
-
-interface MonthlyEarnings {
-  month: string;
-  total_earnings: string;
-  payment_count: string;
   currency: string;
   updated_at: string;
 }
@@ -143,7 +134,6 @@ const SupportMePage: React.FC = () => {
   const [currentSpending, setCurrentSpending] = useState<number>(0);
   const [monthlySpending, setMonthlySpending] = useState<MonthlySpending[]>([]);
   const [totalRaised, setTotalRaised] = useState<number>(0);
-  const [monthlyEarnings, setMonthlyEarnings] = useState<MonthlyEarnings[]>([]);
   const [monthlyReports, setMonthlyReports] = useState<Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -185,7 +175,6 @@ const SupportMePage: React.FC = () => {
       const earningsResponse = await api.billing.getEarningsSummary(currentMonth);
       if (earningsResponse.success) {
         setTotalRaised(earningsResponse.current_month_total);
-        setMonthlyEarnings(earningsResponse.monthly_earnings || []);
       }
 
       // Fetch monthly reports list
@@ -514,7 +503,7 @@ const SupportMePage: React.FC = () => {
               stripe={stripePromise}
               options={{
                 appearance: {
-                  theme: 'dark',
+                  theme: 'night',
                   variables: {
                     colorPrimary: '#3b82f6',
                     colorBackground: '#0f172a',
