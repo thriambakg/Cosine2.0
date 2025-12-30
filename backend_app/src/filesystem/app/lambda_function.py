@@ -410,6 +410,11 @@ def delete_folder(user_id: str, folder_path: str) -> bool:
     """Delete a folder and all its contents"""
     try:
         manifest = get_folder_manifest(user_id, folder_path)
+        folder_id = manifest.get('folder_id')
+        
+        if not folder_id:
+            logger.error(f"No folder_id found in manifest for path: {folder_path}")
+            raise ValueError(f"Cannot delete folder: no folder_id in manifest")
         
         # Delete all items
         for item_id, item in manifest['items'].items():
@@ -421,9 +426,14 @@ def delete_folder(user_id: str, folder_path: str) -> bool:
                     logger.warning(f"Error deleting S3 object {s3_key}: {str(e)}")
         
         # Recursively delete subfolders
-        for folder_id, folder_info in manifest['folders'].items():
-            subfolder_path = folder_info.get('path', f"{folder_path}/{folder_info.get('name', folder_id)}")
+        for subfolder_id, folder_info in manifest['folders'].items():
+            subfolder_path = folder_info.get('path', f"{folder_path}/{folder_info.get('name', subfolder_id)}")
             delete_folder(user_id, subfolder_path)
+        
+        # Get parent path before deleting manifest
+        parent_path = manifest.get('parent_path')
+        if parent_path is None:
+            parent_path = ''
         
         # Delete manifest file
         manifest_key = get_manifest_key(user_id, folder_path)
@@ -432,14 +442,23 @@ def delete_folder(user_id: str, folder_path: str) -> bool:
         except ClientError as e:
             logger.warning(f"Error deleting manifest {manifest_key}: {str(e)}")
         
-        # Remove from parent manifest
-        parent_path = manifest.get('parent_path') or ''
-        if parent_path or folder_path:
-            parent_manifest = get_folder_manifest(user_id, parent_path)
-            folder_id = manifest.get('folder_id')
-            if folder_id and folder_id in parent_manifest.get('folders', {}):
-                del parent_manifest['folders'][folder_id]
-                save_folder_manifest(user_id, parent_path, parent_manifest)
+        # Remove from parent manifest (must happen after getting parent_path but can happen after deleting manifest)
+        # Only try to remove from parent if this is not the root folder
+        if folder_path:  # Root folder has empty path, so skip parent removal for root
+            try:
+                parent_manifest = get_folder_manifest(user_id, parent_path)
+                if folder_id in parent_manifest.get('folders', {}):
+                    logger.info(f"Removing folder_id {folder_id} from parent manifest at path: {parent_path}")
+                    del parent_manifest['folders'][folder_id]
+                    save_folder_manifest(user_id, parent_path, parent_manifest)
+                    logger.info(f"Successfully removed folder from parent manifest")
+                else:
+                    logger.warning(f"Folder_id {folder_id} not found in parent manifest folders. Available folders: {list(parent_manifest.get('folders', {}).keys())}")
+            except Exception as e:
+                logger.error(f"Error removing folder from parent manifest: {str(e)}")
+                # Don't raise - folder is already deleted, just log the error
+        else:
+            logger.info(f"Skipping parent manifest removal for root folder")
         
         return True
     except Exception as e:
@@ -539,6 +558,30 @@ def rename_item(user_id: str, folder_path: str, item_id: str, new_name: str) -> 
     except Exception as e:
         logger.error(f"Error renaming item: {str(e)}")
         raise
+
+def find_folder_by_id(user_id: str, folder_id: str, search_path: str = '') -> Optional[str]:
+    """Find folder path by folder_id by searching through manifests"""
+    try:
+        manifest = get_folder_manifest(user_id, search_path)
+        
+        # Check if this folder matches
+        if manifest.get('folder_id') == folder_id:
+            return manifest.get('path', search_path)
+        
+        # Check subfolders
+        for subfolder_id, folder_info in manifest.get('folders', {}).items():
+            if subfolder_id == folder_id:
+                return folder_info.get('path')
+            # Recursively search in subfolder
+            subfolder_path = folder_info.get('path', f"{search_path}/{folder_info.get('name', subfolder_id)}")
+            result = find_folder_by_id(user_id, folder_id, subfolder_path)
+            if result:
+                return result
+        
+        return None
+    except Exception as e:
+        logger.warning(f"Error searching for folder_id {folder_id} in path {search_path}: {str(e)}")
+        return None
 
 def list_folder(user_id: str, folder_path: str = '') -> Dict[str, Any]:
     """List contents of a folder"""
@@ -728,6 +771,28 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             
         elif operation == 'delete_folder':
             folder_path = body.get('folder_path', '')
+            folder_id = body.get('folder_id')
+            
+            # If folder_path looks like a UUID (folder_id), try to find the actual path
+            if folder_path and len(folder_path) == 36 and folder_path.count('-') == 4:
+                # Likely a UUID, try to find the actual folder path
+                logger.info(f"folder_path looks like a UUID, searching for actual path...")
+                actual_path = find_folder_by_id(user_id, folder_path, '')
+                if actual_path:
+                    folder_path = actual_path
+                    logger.info(f"Found folder path: {folder_path}")
+                else:
+                    logger.warning(f"Could not find folder path for folder_id: {folder_path}")
+            elif folder_id:
+                # If folder_id is provided separately, use it to find the path
+                logger.info(f"folder_id provided, searching for actual path...")
+                actual_path = find_folder_by_id(user_id, folder_id, '')
+                if actual_path:
+                    folder_path = actual_path
+                    logger.info(f"Found folder path: {folder_path}")
+                else:
+                    logger.warning(f"Could not find folder path for folder_id: {folder_id}")
+            
             result = delete_folder(user_id, folder_path)
             
         elif operation == 'move_item':

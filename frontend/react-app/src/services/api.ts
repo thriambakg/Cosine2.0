@@ -1755,6 +1755,18 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification
+      if (response.success && response.result) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: 1,
+            itemName: response.result.name || params.filename || 'File'
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem add file error:', error);
@@ -1774,6 +1786,18 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification
+      if (response.success && response.result) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: 1,
+            itemName: response.result.name || params.title || 'Item'
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem add context item error:', error);

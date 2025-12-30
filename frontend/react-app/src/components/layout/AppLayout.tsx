@@ -9,6 +9,7 @@ import FloatingClock from './FloatingClock';
 import GlobalChatSidebar from './GlobalChatSidebar';
 import ContextSessionHandler from './ContextSessionHandler';
 import ContextSuccessNotification from '../common/ContextSuccessNotification';
+import FilesystemSuccessNotification from '../common/FilesystemSuccessNotification';
 import { ClockProvider } from '../../contexts/ClockContext';
 // import { WebSocketProvider } from '../../contexts/WebSocketContext'; // COMMENTED OUT: Replaced by UnifiedMessageHandler
 import { GlobalChatProvider } from '../../contexts/GlobalChatContext';
@@ -75,6 +76,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
           
           {/* Global Success Notification for sidebar context additions */}
           <ContextSuccessNotification />
+          
+          {/* Global Success Notification for filesystem additions */}
+          <FilesystemSuccessNotification />
         </DualScreenModeProvider>
       </GlobalChatProvider>
     </ClockProvider>

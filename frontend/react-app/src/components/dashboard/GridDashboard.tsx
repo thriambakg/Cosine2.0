@@ -783,6 +783,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
       
       // Save each tile to the filesystem with FULL data
+      let successCount = 0;
       for (const tile of selectedTilesData) {
         // For filesystem, send full tile data including all configuration and results
         const fullTileData = {
@@ -794,16 +795,30 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           ? `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} - ${tile.symbol}`
           : `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`;
         
-        await filesystemAPI.addContextItem({
+        const response = await filesystemAPI.addContextItem({
           user_id: user.id,
           folder_path: folderPath,
           context_data: fullTileData, // Full tile object with all fields
           title: title,
           item_type: 'tile',
         });
+        
+        if (response.success) {
+          successCount++;
+        }
       }
       
-      console.log(`✅ Saved ${selectedTilesData.length} tile(s) to filesystem`);
+      console.log(`✅ Saved ${successCount} tile(s) to filesystem`);
+      
+      // Dispatch success notification for multiple items (API already dispatches for single items)
+      if (successCount > 1) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: successCount
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
     } catch (error) {
       console.error('Error saving tiles to filesystem:', error);
     }
