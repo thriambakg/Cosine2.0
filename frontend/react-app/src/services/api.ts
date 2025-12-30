@@ -725,13 +725,16 @@ export const dashboardAPI = {
   },
 
   duplicateTile: async (tileId: string, tabId?: string, userId?: string): Promise<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }> => {
+    const body: any = {
+      operation: 'duplicate_tile',
+      tileId
+    };
+    if (tabId) {
+      body.tabId = tabId;
+    }
     return apiRequest<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }>(`/dashboard-tiles?userId=${userId}`, {
       method: 'POST',
-      body: JSON.stringify({
-        operation: 'duplicate_tile',
-        tileId,
-        tabId
-      }),
+      body: JSON.stringify(body),
     });
   },
 

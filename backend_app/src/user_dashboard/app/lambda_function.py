@@ -263,14 +263,29 @@ def handle_tiles_operations(user_id: str, http_method: str, path: str, event: Di
     if http_method == 'GET':
         return handle_get_tiles(user_id, event)
     elif http_method == 'POST':
-        body = json.loads(event.get('body', '{}'))
-        # Check if this is an import tiles request
-        if body.get('operation') == 'import_tiles':
-            return handle_import_tiles(user_id, event)
-        elif body.get('operation') == 'duplicate_tile':
-            return handle_duplicate_tile(user_id, event)
-        else:
-            return handle_add_tile(user_id, event)
+        try:
+            # Parse body - handle both string and dict
+            body_str = event.get('body', '{}')
+            if isinstance(body_str, str):
+                body = json.loads(body_str) if body_str else {}
+            else:
+                body = body_str if body_str else {}
+            
+            logger.info(f"📋 Tiles POST operation: {body.get('operation', 'add_tile')}, body keys: {list(body.keys())}")
+            
+            # Check if this is an import tiles request
+            if body.get('operation') == 'import_tiles':
+                return handle_import_tiles(user_id, event)
+            elif body.get('operation') == 'duplicate_tile':
+                return handle_duplicate_tile(user_id, event)
+            else:
+                return handle_add_tile(user_id, event)
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON decode error in handle_tiles_operations: {str(e)}, body: {event.get('body')}")
+            return create_response(400, {"error": f"Invalid JSON in request body: {str(e)}"})
+        except Exception as e:
+            logger.error(f"❌ Error parsing request body in handle_tiles_operations: {str(e)}")
+            return create_response(400, {"error": f"Error parsing request: {str(e)}"})
     elif http_method == 'PUT':
         # Extract tile ID from path (e.g., /tiles/tile123 -> tile123)
         tile_id = path.split('/')[-1]
@@ -933,11 +948,20 @@ def handle_import_tiles(user_id: str, event: Dict) -> Dict:
 def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
     """Duplicate a tile (table operation only - no S3 replication)"""
     try:
-        body = json.loads(event.get('body', '{}'))
+        # Parse body - handle both string and dict
+        body_str = event.get('body', '{}')
+        if isinstance(body_str, str):
+            body = json.loads(body_str)
+        else:
+            body = body_str if body_str else {}
+        
         tile_id = body.get('tileId')
         tab_id = body.get('tabId')  # Optional: target tab (defaults to same tab)
         
+        logger.info(f"🔄 Duplicating tile: tileId={tile_id}, tabId={tab_id}, user_id={user_id}")
+        
         if not tile_id:
+            logger.error(f"❌ Missing tileId in request body: {body}")
             return create_response(400, {"error": "tileId is required"})
         
         # Get current dashboard
@@ -1022,9 +1046,12 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
             'message': 'Tile duplicated successfully'
         })
         
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ JSON decode error in handle_duplicate_tile: {str(e)}, body: {event.get('body')}")
+        return create_response(400, {"error": f"Invalid JSON in request body: {str(e)}"})
     except Exception as e:
-        logger.error(f"Error duplicating tile: {str(e)}")
-        return create_response(500, {"error": "Failed to duplicate tile"})
+        logger.error(f"❌ Error duplicating tile: {str(e)}", exc_info=True)
+        return create_response(500, {"error": f"Failed to duplicate tile: {str(e)}"})
 
 def handle_duplicate_tab(user_id: str, event: Dict) -> Dict:
     """Duplicate a tab with all its tiles (table operation only - no S3 replication)"""
