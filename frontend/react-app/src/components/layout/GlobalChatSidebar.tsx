@@ -2814,9 +2814,15 @@ const GlobalChatSidebar: React.FC = () => {
               setTimeout(() => {
                 document.body.removeChild(link);
               }, 100);
+            } else {
+              const errorMessage = response?.error || 'Failed to download chat session. Please try again.';
+              console.error('Download failed:', errorMessage);
+              alert(errorMessage);
             }
-          } catch (error) {
+          } catch (error: any) {
+            const errorMessage = error?.message || error?.response?.data?.error || 'Failed to download chat session. Please try again.';
             console.error('Error downloading chat session:', error);
+            alert(errorMessage);
           }
         }}
         sx={{

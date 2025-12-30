@@ -2748,10 +2748,14 @@ export default function ChatPage() {
                   document.body.removeChild(link);
                 }, 100);
               } else {
-                console.error('Download failed:', response.error);
+                const errorMessage = response?.error || 'Failed to download chat session. Please try again.';
+                console.error('Download failed:', errorMessage);
+                alert(errorMessage);
               }
-            } catch (error) {
+            } catch (error: any) {
+              const errorMessage = error?.message || error?.response?.data?.error || 'Failed to download chat session. Please try again.';
               console.error('Error downloading chat session:', error);
+              alert(errorMessage);
             }
           }}
           sx={{

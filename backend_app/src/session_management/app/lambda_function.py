@@ -576,11 +576,24 @@ def handle_share_session(user_id: str, http_method: str, event: Dict[str, Any]) 
                 }
         else:  # download
             result = exporter.export_for_download(user_id, session_id, session_title)
-            return {
-                'statusCode': 200 if result.get('success') else 500,
-                'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
-                'body': json_dumps_safe(result)
-            }
+            if result.get('success'):
+                # Transform snake_case to camelCase to match frontend expectations (consistent with dashboard)
+                return {
+                    'statusCode': 200,
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                    'body': json_dumps_safe({
+                        'success': True,
+                        'downloadUrl': result.get('download_url'),
+                        'shareId': result.get('share_id'),
+                        'expiresIn': result.get('expires_in'),
+                    })
+                }
+            else:
+                return {
+                    'statusCode': 500,
+                    'headers': {**get_cors_headers(), 'Content-Type': 'application/json'},
+                    'body': json_dumps_safe(result)
+                }
             
     except Exception as e:
         logger.error(f"❌ Error handling share session: {str(e)}", exc_info=True)
