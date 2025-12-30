@@ -20,7 +20,7 @@ import {
 import { AttachMoney as MoneyIcon, Refresh as RefreshIcon, Download as DownloadIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 // Initialize Stripe (you'll need to add your Stripe publishable key to environment)
 // Vite uses VITE_ prefix for environment variables
@@ -73,12 +73,18 @@ const PaymentForm: React.FC<{ amount: number; onSuccess: () => void; onError: (e
         throw new Error('Failed to create payment intent');
       }
 
+      // Get card element
+      const cardElement = elements.getElement(CardNumberElement);
+      if (!cardElement) {
+        throw new Error('Card details not found');
+      }
+
       // Confirm payment with Stripe
       const { error, paymentIntent } = await stripe.confirmCardPayment(
         response.payment_intent.client_secret,
         {
           payment_method: {
-            card: elements.getElement(CardElement)!,
+            card: cardElement,
           },
         }
       );
@@ -95,26 +101,84 @@ const PaymentForm: React.FC<{ amount: number; onSuccess: () => void; onError: (e
     }
   };
 
+  const cardElementOptions = {
+    style: {
+      base: {
+        fontSize: '16px',
+        color: '#e5e7eb',
+        '::placeholder': {
+          color: '#9ca3af',
+        },
+        fontFamily: 'system-ui, sans-serif',
+      },
+      invalid: {
+        color: '#ef4444',
+      },
+    },
+  };
+
   return (
     <form onSubmit={handleSubmit}>
+      {/* Card Number - Top Priority */}
       <Box sx={{ mb: 2 }}>
-        <CardElement
-          options={{
-            style: {
-              base: {
-                fontSize: '16px',
-                color: '#e5e7eb',
-                '::placeholder': {
-                  color: '#9ca3af',
-                },
-              },
-              invalid: {
-                color: '#ef4444',
-              },
+        <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '14px' }}>
+          Card Number
+        </Typography>
+        <Box
+          sx={{
+            p: 1.5,
+            border: '1px solid #374151',
+            borderRadius: '4px',
+            backgroundColor: 'rgba(15, 23, 42, 0.5)',
+            '&:focus-within': {
+              borderColor: '#3b82f6',
             },
           }}
-        />
+        >
+          <CardNumberElement options={cardElementOptions} />
+        </Box>
       </Box>
+
+      {/* Expiry and CVC - Side by Side */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '14px' }}>
+            Expiry
+          </Typography>
+          <Box
+            sx={{
+              p: 1.5,
+              border: '1px solid #374151',
+              borderRadius: '4px',
+              backgroundColor: 'rgba(15, 23, 42, 0.5)',
+              '&:focus-within': {
+                borderColor: '#3b82f6',
+              },
+            }}
+          >
+            <CardExpiryElement options={cardElementOptions} />
+          </Box>
+        </Box>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '14px' }}>
+            CVC
+          </Typography>
+          <Box
+            sx={{
+              p: 1.5,
+              border: '1px solid #374151',
+              borderRadius: '4px',
+              backgroundColor: 'rgba(15, 23, 42, 0.5)',
+              '&:focus-within': {
+                borderColor: '#3b82f6',
+              },
+            }}
+          >
+            <CardCvcElement options={cardElementOptions} />
+          </Box>
+        </Box>
+      </Box>
+
       <Button
         type="submit"
         fullWidth
