@@ -33,7 +33,6 @@ import {
   Dashboard as ContextIcon,
   Share as ShareIcon,
   Upload as UploadIcon,
-  Link as LinkIcon,
 } from '@mui/icons-material';
 import ChatImportExportDialog from '../dialogs/ChatImportExportDialog';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
@@ -2767,22 +2766,6 @@ const GlobalChatSidebar: React.FC = () => {
       <MenuItem
         onClick={() => {
           setShareMenuAnchor(null);
-          setImportExportMode('export');
-          setImportExportDialogOpen(true);
-        }}
-        sx={{
-          color: '#e5e7eb',
-          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-        }}
-      >
-        <ListItemIcon>
-          <LinkIcon fontSize="small" sx={{ color: '#60a5fa' }} />
-        </ListItemIcon>
-        <ListItemText>Share Link</ListItemText>
-      </MenuItem>
-      <MenuItem
-        onClick={() => {
-          setShareMenuAnchor(null);
           setImportExportMode('import');
           setImportExportDialogOpen(true);
         }}
@@ -2797,33 +2780,10 @@ const GlobalChatSidebar: React.FC = () => {
         <ListItemText>Import Chat</ListItemText>
       </MenuItem>
       <MenuItem
-        onClick={async () => {
+        onClick={() => {
           setShareMenuAnchor(null);
-          if (!activeSessionId || !user?.id) return;
-          try {
-            const response = await sessionManagementAPI.shareSession(activeSessionId, user.id, 'download');
-            if (response.success && response.downloadUrl) {
-              // Use direct download approach (same as dashboard)
-              const link = document.createElement('a');
-              link.href = response.downloadUrl;
-              link.download = `${currentSession?.title || 'chat-session'}.cosine`;
-              link.style.display = 'none';
-              document.body.appendChild(link);
-              link.click();
-              // Small delay before removing to ensure click is processed
-              setTimeout(() => {
-                document.body.removeChild(link);
-              }, 100);
-            } else {
-              const errorMessage = response?.error || 'Failed to download chat session. Please try again.';
-              console.error('Download failed:', errorMessage);
-              alert(errorMessage);
-            }
-          } catch (error: any) {
-            const errorMessage = error?.message || error?.response?.data?.error || 'Failed to download chat session. Please try again.';
-            console.error('Error downloading chat session:', error);
-            alert(errorMessage);
-          }
+          setImportExportMode('export');
+          setImportExportDialogOpen(true);
         }}
         sx={{
           color: '#e5e7eb',
@@ -2833,7 +2793,7 @@ const GlobalChatSidebar: React.FC = () => {
         <ListItemIcon>
           <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
         </ListItemIcon>
-        <ListItemText>Download as .cosine</ListItemText>
+        <ListItemText>Export Chat</ListItemText>
       </MenuItem>
     </Menu>
 

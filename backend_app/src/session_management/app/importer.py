@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -58,6 +59,61 @@ class ChatSessionImporter:
         key = base64.urlsafe_b64encode(kdf.derive(f"platform-wide{self.encryption_secret}".encode()))
         return key
     
+    def derive_key_from_user_id(self, user_id: str) -> bytes:
+        """Derive encryption key from user ID using PBKDF2 (for filesystem items)"""
+        salt = hashlib.sha256(f"{self.encryption_secret}{user_id}".encode()).digest()[:16]
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{self.encryption_secret}".encode()))
+        return key
+    
+    def encrypt_context_data(self, user_id: str, data: Dict[str, Any]) -> bytes:
+        """Encrypt context data using Fernet with platform-wide key (shareable across all users)
+        Falls back to user-specific keys for backward compatibility"""
+        try:
+            # Use platform-wide key for shareable items
+            key = self.derive_platform_key()
+            fernet = Fernet(key)
+            json_data = json.dumps(data, default=str)
+            encrypted_data = fernet.encrypt(json_data.encode('utf-8'))
+            logger.info(f"✅ Encrypted context data with platform-wide key: {len(encrypted_data)} bytes")
+            return encrypted_data
+        except Exception as e:
+            logger.error(f"❌ Error encrypting context data: {str(e)}")
+            raise
+    
+    def decrypt_context_data(self, user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
+        """Decrypt context data using Fernet with platform-wide key (shareable across all users)
+        Falls back to user-specific keys for backward compatibility with old files"""
+        from cryptography.fernet import InvalidToken
+        
+        # Try platform-wide key first (new format - shareable)
+        try:
+            logger.debug(f"🔐 Starting decryption with platform-wide key, data length: {len(encrypted_data)} bytes")
+            key = self.derive_platform_key()
+            fernet = Fernet(key)
+            decrypted_data = fernet.decrypt(encrypted_data)
+            json_data = json.loads(decrypted_data.decode('utf-8'))
+            logger.debug(f"🔐 Successfully decrypted with platform-wide key")
+            return json_data
+        except InvalidToken:
+            logger.debug(f"⚠️ Platform-wide key failed, trying user-specific key for backward compatibility...")
+            # Fallback: Try with user-specific key (for backward compatibility with old files)
+            try:
+                key = self.derive_key_from_user_id(user_id)
+                fernet = Fernet(key)
+                decrypted_data = fernet.decrypt(encrypted_data)
+                json_data = json.loads(decrypted_data.decode('utf-8'))
+                logger.debug(f"🔐 Successfully decrypted with user-specific key (backward compatibility)")
+                return json_data
+            except Exception as e:
+                logger.error(f"❌ Error decrypting context data with all methods: {str(e)}")
+                raise
+    
     def decrypt_session_data(self, encrypted_data: bytes) -> Dict[str, Any]:
         """Decrypt session data using Fernet with platform-wide key (shareable across all users)"""
         try:
@@ -77,6 +133,7 @@ class ChatSessionImporter:
         """
         Upload S3 objects to new session location
         Maps old S3 keys to new S3 keys
+        Handles filesystem items specially - re-encrypts and stores in filesystem location
         
         Args:
             s3_objects_base64: Dict mapping old S3 keys to base64-encoded file content
@@ -88,41 +145,130 @@ class ChatSessionImporter:
         """
         try:
             s3_key_mapping = {}
+            filesys_prefix_old = "users/"  # Will check if contains /filesys/
+            filesys_prefix_new = f"users/{importing_user_id}/filesys/"
             
             for old_s3_key, content_base64 in s3_objects_base64.items():
                 # Decode base64 content
                 file_content = base64.b64decode(content_base64)
                 
-                # Extract filename from old S3 key
-                # Old format: users/{old_user_id}/sessions/{old_session_id}/files/{filename}
-                # or: users/{old_user_id}/sessions/{old_session_id}/agent-files/{filename}
-                parts = old_s3_key.split('/')
-                if len(parts) >= 2:
-                    filename = parts[-1]
-                    folder = parts[-2] if len(parts) >= 2 else 'files'
+                # Check if this is a filesystem item
+                is_filesystem_item = '/filesys/' in old_s3_key
+                
+                if is_filesystem_item:
+                    # Handle filesystem items - re-encrypt and store in filesystem location
+                    try:
+                        # Extract folder path and filename from old S3 key
+                        # Format: users/{old_user_id}/filesys/{folder_path}/{item_id}.cosine
+                        parts = old_s3_key.split('/filesys/')
+                        if len(parts) == 2:
+                            folder_path_and_file = parts[1]
+                            folder_parts = folder_path_and_file.split('/')
+                            
+                            if len(folder_parts) > 1:
+                                # Has folder path
+                                folder_path = '/'.join(folder_parts[:-1])
+                                filename = folder_parts[-1]
+                            else:
+                                # Root folder
+                                folder_path = ''
+                                filename = folder_parts[0]
+                            
+                            # Check if this was decrypted during export (JSON string)
+                            # or if it's still encrypted
+                            try:
+                                # Try to parse as JSON (means it was decrypted during export)
+                                decrypted_data = json.loads(file_content.decode('utf-8'))
+                                
+                                # Re-encrypt with importing user's key (platform-wide for shareability)
+                                encrypted_data = self.encrypt_context_data(importing_user_id, decrypted_data)
+                                
+                                # Generate new item ID and S3 key
+                                item_id = str(uuid.uuid4())
+                                if folder_path:
+                                    new_s3_key = f"{filesys_prefix_new}{folder_path}/{item_id}{CONTEXT_ITEM_EXTENSION}"
+                                else:
+                                    new_s3_key = f"{filesys_prefix_new}{item_id}{CONTEXT_ITEM_EXTENSION}"
+                                
+                                # Upload encrypted file to filesystem
+                                self.s3_client.put_object(
+                                    Bucket=self.bucket_name,
+                                    Key=new_s3_key,
+                                    Body=encrypted_data,
+                                    ContentType='application/octet-stream',
+                                    Metadata={
+                                        'user_id': importing_user_id,
+                                        'imported_at': datetime.utcnow().isoformat(),
+                                        'original_s3_key': old_s3_key,
+                                    }
+                                )
+                                
+                                s3_key_mapping[old_s3_key] = new_s3_key
+                                logger.info(f"✅ Uploaded and re-encrypted filesystem item: {old_s3_key} -> {new_s3_key}")
+                                
+                            except (json.JSONDecodeError, UnicodeDecodeError):
+                                # Still encrypted - re-encrypt with new user's key
+                                # First decrypt with old key (try platform-wide, then user-specific)
+                                try:
+                                    # Try to decrypt (might fail if encrypted with different key)
+                                    # For now, just upload as-is and let filesystem handle it
+                                    item_id = str(uuid.uuid4())
+                                    if folder_path:
+                                        new_s3_key = f"{filesys_prefix_new}{folder_path}/{item_id}{CONTEXT_ITEM_EXTENSION}"
+                                    else:
+                                        new_s3_key = f"{filesys_prefix_new}{item_id}{CONTEXT_ITEM_EXTENSION}"
+                                    
+                                    # Upload encrypted file as-is (will be re-encrypted by filesystem if needed)
+                                    self.s3_client.put_object(
+                                        Bucket=self.bucket_name,
+                                        Key=new_s3_key,
+                                        Body=file_content,
+                                        ContentType='application/octet-stream',
+                                        Metadata={
+                                            'user_id': importing_user_id,
+                                            'imported_at': datetime.utcnow().isoformat(),
+                                            'original_s3_key': old_s3_key,
+                                        }
+                                    )
+                                    
+                                    s3_key_mapping[old_s3_key] = new_s3_key
+                                    logger.info(f"✅ Uploaded filesystem item (encrypted): {old_s3_key} -> {new_s3_key}")
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Failed to process filesystem item {old_s3_key}: {str(e)}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to upload filesystem item {old_s3_key}: {str(e)}")
                 else:
-                    filename = old_s3_key.split('/')[-1]
-                    folder = 'files'
-                
-                # Generate new S3 key
-                new_s3_key = f"users/{importing_user_id}/sessions/{new_session_id}/{folder}/{filename}"
-                
-                # Upload to S3
-                self.s3_client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=new_s3_key,
-                    Body=file_content,
-                    ContentType='application/octet-stream',
-                    Metadata={
-                        'user_id': importing_user_id,
-                        'session_id': new_session_id,
-                        'filename': filename,
-                        'imported_at': datetime.utcnow().isoformat(),
-                    }
-                )
-                
-                s3_key_mapping[old_s3_key] = new_s3_key
-                logger.info(f"✅ Uploaded S3 object: {old_s3_key} -> {new_s3_key}")
+                    # Regular session file - upload to session location
+                    # Extract filename from old S3 key
+                    # Old format: users/{old_user_id}/sessions/{old_session_id}/files/{filename}
+                    # or: users/{old_user_id}/sessions/{old_session_id}/agent-files/{filename}
+                    parts = old_s3_key.split('/')
+                    if len(parts) >= 2:
+                        filename = parts[-1]
+                        folder = parts[-2] if len(parts) >= 2 else 'files'
+                    else:
+                        filename = old_s3_key.split('/')[-1]
+                        folder = 'files'
+                    
+                    # Generate new S3 key
+                    new_s3_key = f"users/{importing_user_id}/sessions/{new_session_id}/{folder}/{filename}"
+                    
+                    # Upload to S3
+                    self.s3_client.put_object(
+                        Bucket=self.bucket_name,
+                        Key=new_s3_key,
+                        Body=file_content,
+                        ContentType='application/octet-stream',
+                        Metadata={
+                            'user_id': importing_user_id,
+                            'session_id': new_session_id,
+                            'filename': filename,
+                            'imported_at': datetime.utcnow().isoformat(),
+                        }
+                    )
+                    
+                    s3_key_mapping[old_s3_key] = new_s3_key
+                    logger.info(f"✅ Uploaded S3 object: {old_s3_key} -> {new_s3_key}")
             
             logger.info(f"✅ Uploaded {len(s3_key_mapping)} S3 objects for new session {new_session_id}")
             return s3_key_mapping
@@ -134,6 +280,7 @@ class ChatSessionImporter:
     def update_session_variables_s3_keys(self, session_variables: Dict[str, Any], s3_key_mapping: Dict[str, str]) -> Dict[str, Any]:
         """
         Update S3 keys in session_variables to point to new locations
+        Handles uploaded_files, agent_files, and context_items with filesystem references
         
         Args:
             session_variables: Original session_variables dict
@@ -164,6 +311,33 @@ class ChatSessionImporter:
                         file_meta['s3_key'] = new_s3_key
                         file_meta['s3_url'] = f"https://{self.bucket_name}.s3.amazonaws.com/{new_s3_key}"
                         logger.info(f"✅ Updated agent_file S3 key: {old_s3_key} -> {new_s3_key}")
+            
+            # Update context_items with filesystem references
+            if 'context_items' in updated_vars:
+                for context_item in updated_vars['context_items']:
+                    if isinstance(context_item, dict):
+                        # Update direct s3_key reference
+                        old_s3_key = context_item.get('s3_key') or context_item.get('data', {}).get('s3_key')
+                        if old_s3_key and old_s3_key in s3_key_mapping:
+                            new_s3_key = s3_key_mapping[old_s3_key]
+                            if 's3_key' in context_item:
+                                context_item['s3_key'] = new_s3_key
+                            if 'data' in context_item and isinstance(context_item['data'], dict):
+                                context_item['data']['s3_key'] = new_s3_key
+                            logger.info(f"✅ Updated context_item S3 key: {old_s3_key} -> {new_s3_key}")
+                        
+                        # Update filesystem folder references (s3_keys array)
+                        if context_item.get('data', {}).get('filesystem_type') == 'folder':
+                            nested_keys = context_item.get('data', {}).get('s3_keys', [])
+                            updated_keys = []
+                            for nested_key in nested_keys:
+                                if nested_key in s3_key_mapping:
+                                    updated_keys.append(s3_key_mapping[nested_key])
+                                    logger.info(f"✅ Updated folder context_item nested S3 key: {nested_key} -> {s3_key_mapping[nested_key]}")
+                                else:
+                                    updated_keys.append(nested_key)
+                            if 'data' in context_item and isinstance(context_item['data'], dict):
+                                context_item['data']['s3_keys'] = updated_keys
             
             return updated_vars
             

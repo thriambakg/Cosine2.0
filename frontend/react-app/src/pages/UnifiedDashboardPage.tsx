@@ -18,7 +18,9 @@ import {
   ListItemIcon,
   ListItemText,
   Snackbar,
-  Alert
+  Alert,
+  InputAdornment,
+  CircularProgress
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -36,7 +38,10 @@ import {
   ZoomOutMap,
   Share as ShareIcon,
   Link as LinkIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon,
+  ContentCopy as CopyIcon,
+  Check as CheckIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
@@ -314,6 +319,8 @@ const UnifiedDashboardPage: React.FC = () => {
   const [shareMenuAnchor, setShareMenuAnchor] = useState<null | HTMLElement>(null);
   const [shareLinkDialogOpen, setShareLinkDialogOpen] = useState(false);
   const [shareLink, setShareLink] = useState<string>('');
+  const [shareLinkLoading, setShareLinkLoading] = useState(false);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -1728,13 +1735,13 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
 
+    setShareLinkLoading(true);
     try {
       const response = await dashboardAPI.shareDashboard(activeTab.id, user.id, 'link');
       if (response.success && response.shareId) {
         // Construct full share link URL
         const fullLink = `${window.location.origin}${response.shareLink || `/dashboard/shared/${response.shareId}`}`;
         setShareLink(fullLink);
-        setShareLinkDialogOpen(true);
         setSnackbar({ open: true, message: 'Share link generated successfully!', severity: 'success' });
       } else {
         setSnackbar({ open: true, message: response.error || 'Failed to generate share link', severity: 'error' });
@@ -1742,7 +1749,24 @@ const UnifiedDashboardPage: React.FC = () => {
     } catch (error: any) {
       console.error('Error sharing dashboard:', error);
       setSnackbar({ open: true, message: 'Failed to generate share link', severity: 'error' });
+    } finally {
+      setShareLinkLoading(false);
     }
+  };
+
+  const handleCopyShareLink = () => {
+    if (shareLink) {
+      navigator.clipboard.writeText(shareLink);
+      setShareLinkCopied(true);
+      setSnackbar({ open: true, message: 'Link copied to clipboard!', severity: 'success' });
+      setTimeout(() => setShareLinkCopied(false), 2000);
+    }
+  };
+
+  const handleCloseShareDialog = () => {
+    setShareLinkDialogOpen(false);
+    setShareLink('');
+    setShareLinkCopied(false);
   };
 
   const handleDownloadDashboard = async () => {
@@ -1937,9 +1961,9 @@ const UnifiedDashboardPage: React.FC = () => {
             }}
           >
             <MenuItem
-              onClick={async () => {
+              onClick={() => {
                 setShareMenuAnchor(null);
-                await handleShareLink();
+                setShareLinkDialogOpen(true);
               }}
               sx={{
                 color: '#e5e7eb',
@@ -1971,52 +1995,93 @@ const UnifiedDashboardPage: React.FC = () => {
           {/* Share Link Dialog */}
           <Dialog
             open={shareLinkDialogOpen}
-            onClose={() => setShareLinkDialogOpen(false)}
+            onClose={handleCloseShareDialog}
+            maxWidth="sm"
+            fullWidth
             PaperProps={{
               sx: {
-                backgroundColor: '#1f2937',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
                 border: '1px solid #374151',
-                minWidth: 400,
               }
             }}
           >
-            <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
-              Share Dashboard
+            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#ffffff' }}>
+              <Typography variant="h6">Share Dashboard</Typography>
+              <IconButton onClick={handleCloseShareDialog} sx={{ color: '#9ca3af' }}>
+                <CloseIcon />
+              </IconButton>
             </DialogTitle>
             <DialogContent sx={{ pt: 2 }}>
-              <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
-                Copy this link to share your dashboard:
-              </Typography>
-              <TextField
-                fullWidth
-                value={shareLink}
-                InputProps={{
-                  readOnly: true,
-                  sx: {
-                    color: '#ffffff',
-                    backgroundColor: '#111827',
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#374151',
-                    },
-                  }
-                }}
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-              />
+              {!shareLink ? (
+                <Box>
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    onClick={handleShareLink}
+                    disabled={shareLinkLoading || !activeTab}
+                    sx={{
+                      backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
+                      color: '#9ca3af !important',
+                      borderRadius: '0px',
+                      border: '2px solid #4b5563 !important',
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      px: 2,
+                      py: 1,
+                      '&.MuiButton-contained': {
+                        backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
+                        color: '#9ca3af !important',
+                        border: '2px solid #4b5563 !important',
+                      },
+                      '&:hover': {
+                        backgroundColor: '#475569 !important',
+                        borderColor: '#6b7280 !important',
+                        color: '#9ca3af !important',
+                      },
+                      '&:disabled': {
+                        backgroundColor: 'rgba(31, 41, 55, 0.3) !important',
+                        borderColor: '#4b5563 !important',
+                        color: '#6b7280 !important',
+                      },
+                    }}
+                  >
+                    {shareLinkLoading ? <CircularProgress size={24} sx={{ color: '#9ca3af' }} /> : 'Generate Share Link'}
+                  </Button>
+                </Box>
+              ) : (
+                <Box>
+                  <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
+                    Copy this link to share your dashboard:
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    value={shareLink}
+                    InputProps={{
+                      readOnly: true,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton onClick={handleCopyShareLink} sx={{ color: '#9ca3af', '&:hover': { color: '#d1d5db', backgroundColor: 'rgba(71, 85, 105, 0.2)' } }}>
+                            {shareLinkCopied ? <CheckIcon /> : <CopyIcon />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      mb: 2,
+                      '& .MuiOutlinedInput-root': {
+                        backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                        color: '#ffffff',
+                      },
+                    }}
+                  />
+                  <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block' }}>
+                    {shareLinkCopied ? 'Link copied to clipboard!' : 'Click the copy icon to copy the link'}
+                  </Typography>
+                </Box>
+              )}
             </DialogContent>
             <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
-              <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(shareLink);
-                  setSnackbar({ open: true, message: 'Link copied to clipboard!', severity: 'success' });
-                }}
-                sx={{ color: '#60a5fa' }}
-              >
-                Copy Link
-              </Button>
-              <Button
-                onClick={() => setShareLinkDialogOpen(false)}
-                sx={{ color: '#9ca3af' }}
-              >
+              <Button onClick={handleCloseShareDialog} sx={{ color: '#9ca3af' }}>
                 Close
               </Button>
             </DialogActions>

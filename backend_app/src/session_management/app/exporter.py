@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional, List
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -59,6 +60,46 @@ class ChatSessionExporter:
         key = base64.urlsafe_b64encode(kdf.derive(f"platform-wide{self.encryption_secret}".encode()))
         return key
     
+    def derive_key_from_user_id(self, user_id: str) -> bytes:
+        """Derive encryption key from user ID using PBKDF2 (for filesystem items)"""
+        salt = hashlib.sha256(f"{self.encryption_secret}{user_id}".encode()).digest()[:16]
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(f"{user_id}{self.encryption_secret}".encode()))
+        return key
+    
+    def decrypt_context_data(self, user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
+        """Decrypt context data using Fernet with platform-wide key (shareable across all users)
+        Falls back to user-specific keys for backward compatibility with old files"""
+        from cryptography.fernet import InvalidToken
+        
+        # Try platform-wide key first (new format - shareable)
+        try:
+            logger.debug(f"🔐 Starting decryption with platform-wide key, data length: {len(encrypted_data)} bytes")
+            key = self.derive_platform_key()
+            fernet = Fernet(key)
+            decrypted_data = fernet.decrypt(encrypted_data)
+            json_data = json.loads(decrypted_data.decode('utf-8'))
+            logger.debug(f"🔐 Successfully decrypted with platform-wide key")
+            return json_data
+        except InvalidToken:
+            logger.debug(f"⚠️ Platform-wide key failed, trying user-specific key for backward compatibility...")
+            # Fallback: Try with user-specific key (for backward compatibility with old files)
+            try:
+                key = self.derive_key_from_user_id(user_id)
+                fernet = Fernet(key)
+                decrypted_data = fernet.decrypt(encrypted_data)
+                json_data = json.loads(decrypted_data.decode('utf-8'))
+                logger.debug(f"🔐 Successfully decrypted with user-specific key (backward compatibility)")
+                return json_data
+            except Exception as e:
+                logger.error(f"❌ Error decrypting context data with all methods: {str(e)}")
+                raise
+    
     def encrypt_session_data(self, session_data: Dict[str, Any]) -> bytes:
         """Encrypt session data using Fernet with platform-wide key (shareable across all users)"""
         try:
@@ -74,10 +115,117 @@ class ChatSessionExporter:
             logger.error(f"❌ Error encrypting session data: {str(e)}")
             raise
     
+    def get_filesystem_items_for_session(self, user_id: str, session_id: str) -> Dict[str, bytes]:
+        """
+        Get all filesystem items referenced in the session's context_items
+        Downloads and decrypts .cosine files from filesystem
+        
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            
+        Returns:
+            Dict mapping S3 keys to decrypted file content (bytes)
+        """
+        try:
+            # Get session from DynamoDB
+            response = self.dynamodb_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id}
+            )
+            
+            if 'Item' not in response:
+                logger.warning(f"Session not found: {session_id}")
+                return {}
+            
+            session_variables = response['Item'].get('session_variables', {})
+            context_items = session_variables.get('context_items', [])
+            
+            filesystem_items = {}
+            filesys_prefix = f"users/{user_id}/filesys/"
+            
+            # Check context_items for filesystem references
+            for context_item in context_items:
+                # Check if context item references a filesystem item
+                s3_key = None
+                
+                # Check for direct s3_key reference
+                if isinstance(context_item, dict):
+                    s3_key = context_item.get('s3_key') or context_item.get('data', {}).get('s3_key')
+                    
+                    # Also check for filesystem folder references
+                    if not s3_key and context_item.get('data', {}).get('filesystem_type') == 'folder':
+                        # Folder reference - get all nested S3 keys
+                        nested_keys = context_item.get('data', {}).get('s3_keys', [])
+                        for nested_key in nested_keys:
+                            if nested_key.startswith(filesys_prefix):
+                                try:
+                                    obj_response = self.s3_client.get_object(
+                                        Bucket=self.bucket_name,
+                                        Key=nested_key
+                                    )
+                                    file_content = obj_response['Body'].read()
+                                    
+                                    # Decrypt if it's a .cosine file
+                                    if nested_key.endswith(CONTEXT_ITEM_EXTENSION):
+                                        try:
+                                            decrypted_data = self.decrypt_context_data(user_id, file_content)
+                                            # Store as JSON string for export
+                                            filesystem_items[nested_key] = json.dumps(decrypted_data).encode('utf-8')
+                                            logger.info(f"✅ Downloaded and decrypted filesystem item: {nested_key}")
+                                        except Exception as e:
+                                            logger.warning(f"⚠️ Failed to decrypt filesystem item {nested_key}: {str(e)}")
+                                            # Store encrypted version as fallback
+                                            filesystem_items[nested_key] = file_content
+                                    else:
+                                        # Regular file - store as-is
+                                        filesystem_items[nested_key] = file_content
+                                        logger.info(f"✅ Downloaded filesystem file: {nested_key}")
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Failed to download filesystem item {nested_key}: {str(e)}")
+                
+                # Download individual filesystem item
+                if s3_key and s3_key.startswith(filesys_prefix):
+                    try:
+                        obj_response = self.s3_client.get_object(
+                            Bucket=self.bucket_name,
+                            Key=s3_key
+                        )
+                        file_content = obj_response['Body'].read()
+                        
+                        # Decrypt if it's a .cosine file
+                        if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
+                            try:
+                                decrypted_data = self.decrypt_context_data(user_id, file_content)
+                                # Store as JSON string for export
+                                filesystem_items[s3_key] = json.dumps(decrypted_data).encode('utf-8')
+                                logger.info(f"✅ Downloaded and decrypted filesystem item: {s3_key}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to decrypt filesystem item {s3_key}: {str(e)}")
+                                # Store encrypted version as fallback
+                                filesystem_items[s3_key] = file_content
+                        else:
+                            # Regular file - store as-is
+                            filesystem_items[s3_key] = file_content
+                            logger.info(f"✅ Downloaded filesystem file: {s3_key}")
+                    except ClientError as e:
+                        if e.response['Error']['Code'] == 'NoSuchKey':
+                            logger.warning(f"⚠️ Filesystem item not found: {s3_key}")
+                        else:
+                            logger.warning(f"⚠️ Failed to download filesystem item {s3_key}: {str(e)}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to download filesystem item {s3_key}: {str(e)}")
+            
+            logger.info(f"✅ Retrieved {len(filesystem_items)} filesystem items for session {session_id}")
+            return filesystem_items
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting filesystem items for session: {str(e)}")
+            return {}
+    
     def get_s3_objects_for_session(self, user_id: str, session_id: str) -> Dict[str, bytes]:
         """
         Get all S3 objects associated with a session
-        Includes uploaded_files and agent_files from session_variables
+        Includes uploaded_files, agent_files, and filesystem items from session_variables
         
         Args:
             user_id: User ID
@@ -130,7 +278,11 @@ class ChatSessionExporter:
                     except Exception as e:
                         logger.warning(f"⚠️ Failed to download agent file {s3_key}: {str(e)}")
             
-            logger.info(f"✅ Retrieved {len(s3_objects)} S3 objects for session {session_id}")
+            # Get filesystem items (decrypted)
+            filesystem_items = self.get_filesystem_items_for_session(user_id, session_id)
+            s3_objects.update(filesystem_items)
+            
+            logger.info(f"✅ Retrieved {len(s3_objects)} S3 objects for session {session_id} ({len(filesystem_items)} from filesystem)")
             return s3_objects
             
         except Exception as e:

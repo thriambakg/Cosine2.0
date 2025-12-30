@@ -1547,23 +1547,44 @@ export default function ChatPage() {
         dateObj = timestamp;
       } else if (typeof timestamp === 'number') {
         // Handle Unix timestamp (could be seconds or milliseconds)
-        if (timestamp > 1000000000000) {
-          // Milliseconds
+        // Check if it's a valid number first
+        if (!isFinite(timestamp) || isNaN(timestamp)) {
+          dateObj = new Date();
+        } else if (timestamp > 1000000000000) {
+          // Milliseconds (timestamp after year 2001)
           dateObj = new Date(timestamp);
-        } else {
-          // Seconds
+        } else if (timestamp > 0) {
+          // Seconds (reasonable timestamp)
           dateObj = new Date(timestamp * 1000);
+        } else {
+          // Invalid or negative timestamp
+          dateObj = new Date();
         }
       } else if (typeof timestamp === 'string') {
-        dateObj = new Date(timestamp);
+        // Try to parse string - could be ISO string, number string, etc.
+        const numTimestamp = Number(timestamp);
+        if (!isNaN(numTimestamp) && isFinite(numTimestamp)) {
+          // It's a numeric string
+          if (numTimestamp > 1000000000000) {
+            dateObj = new Date(numTimestamp);
+          } else if (numTimestamp > 0) {
+            dateObj = new Date(numTimestamp * 1000);
+          } else {
+            dateObj = new Date(timestamp);
+          }
+        } else {
+          // Try parsing as ISO string or other format
+          dateObj = new Date(timestamp);
+        }
       } else {
-        console.warn('Invalid timestamp format:', timestamp);
         dateObj = new Date();
       }
 
-      // Validate the date
+      // Validate the date - only log in development to reduce console noise
       if (isNaN(dateObj.getTime())) {
-        console.warn('Invalid date created from timestamp:', timestamp);
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Invalid date created from timestamp:', timestamp);
+        }
         dateObj = new Date();
       }
 
@@ -1935,26 +1956,6 @@ export default function ChatPage() {
                 }}
               >
                 {persistenceLoading ? 'Creating...' : 'New Chat'}
-              </Button>
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<UploadIcon />}
-                onClick={() => {
-                  setImportExportMode('import');
-                  setImportExportDialogOpen(true);
-                }}
-                sx={{
-                  borderColor: '#374151',
-                  color: 'white',
-                  textTransform: 'uppercase',
-                  '&:hover': {
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  },
-                }}
-              >
-                Import Chat
               </Button>
             </Box>
           )}
@@ -2716,6 +2717,22 @@ export default function ChatPage() {
         <MenuItem
           onClick={() => {
             setShareMenuAnchor(null);
+            setImportExportMode('import');
+            setImportExportDialogOpen(true);
+          }}
+          sx={{
+            color: '#e5e7eb',
+            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+          }}
+        >
+          <ListItemIcon>
+            <UploadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
+          </ListItemIcon>
+          <ListItemText>Import Chat</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setShareMenuAnchor(null);
             setImportExportMode('export');
             setImportExportDialogOpen(true);
           }}
@@ -2725,48 +2742,9 @@ export default function ChatPage() {
           }}
         >
           <ListItemIcon>
-            <ShareIcon fontSize="small" sx={{ color: '#60a5fa' }} />
-          </ListItemIcon>
-          <ListItemText>Share Link</ListItemText>
-        </MenuItem>
-        <MenuItem
-          onClick={async () => {
-            setShareMenuAnchor(null);
-            if (!currentSession?.session_id || !user?.id) return;
-            try {
-              const response = await sessionManagementAPI.shareSession(currentSession.session_id, user.id, 'download');
-              if (response.success && response.downloadUrl) {
-                // Use direct download approach (same as dashboard)
-                const link = document.createElement('a');
-                link.href = response.downloadUrl;
-                link.download = `${currentSession.title || 'chat-session'}.cosine`;
-                link.style.display = 'none';
-                document.body.appendChild(link);
-                link.click();
-                // Small delay before removing to ensure click is processed
-                setTimeout(() => {
-                  document.body.removeChild(link);
-                }, 100);
-              } else {
-                const errorMessage = response?.error || 'Failed to download chat session. Please try again.';
-                console.error('Download failed:', errorMessage);
-                alert(errorMessage);
-              }
-            } catch (error: any) {
-              const errorMessage = error?.message || error?.response?.data?.error || 'Failed to download chat session. Please try again.';
-              console.error('Error downloading chat session:', error);
-              alert(errorMessage);
-            }
-          }}
-          sx={{
-            color: '#e5e7eb',
-            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-          }}
-        >
-          <ListItemIcon>
             <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
           </ListItemIcon>
-          <ListItemText>Download as .cosine</ListItemText>
+          <ListItemText>Export Chat</ListItemText>
         </MenuItem>
       </Menu>
 
