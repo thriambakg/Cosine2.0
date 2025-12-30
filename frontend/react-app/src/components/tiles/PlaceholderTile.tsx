@@ -55,6 +55,7 @@ interface PlaceholderTileProps {
   dashboardContext?: string;
   isSelected?: boolean;
   onSelectionChange?: (id: string, selected: boolean) => void;
+  onDuplicate?: (id: string) => void;
 }
 
 const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
@@ -68,6 +69,7 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
   dashboardContext: _dashboardContext,
   isSelected = false,
   onSelectionChange,
+  onDuplicate,
 }) => {
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const lastClickTimeRef = React.useRef<number>(0);
@@ -283,12 +285,17 @@ const PlaceholderTile: React.FC<PlaceholderTileProps> = ({
           </ListItemIcon>
           <ListItemText>Settings</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleMenuClose}>
-          <ListItemIcon>
-            <ContentCopyIcon sx={{ color: '#9ca3af' }} />
-          </ListItemIcon>
-          <ListItemText>Duplicate</ListItemText>
-        </MenuItem>
+        {onDuplicate && (
+          <MenuItem onClick={() => {
+            onDuplicate(tile.id);
+            handleMenuClose();
+          }}>
+            <ListItemIcon>
+              <ContentCopyIcon sx={{ color: '#9ca3af' }} />
+            </ListItemIcon>
+            <ListItemText>Duplicate</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem onClick={handleRemove} sx={{ color: '#ef4444' }}>
           <ListItemIcon>
             <DeleteIcon sx={{ color: '#ef4444' }} />

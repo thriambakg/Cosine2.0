@@ -724,6 +724,37 @@ export const dashboardAPI = {
     });
   },
 
+  duplicateTile: async (tileId: string, tabId?: string, userId?: string): Promise<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; tile?: DashboardTile; message?: string; error?: string }>(`/dashboard-tiles?userId=${userId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'duplicate_tile',
+        tileId,
+        tabId
+      }),
+    });
+  },
+
+  duplicateTab: async (tabId: string, userId: string): Promise<{ success: boolean; tab?: DashboardTab; message?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; tab?: DashboardTab; message?: string; error?: string }>(`/dashboard?userId=${userId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'duplicate_tab',
+        tabId
+      }),
+    });
+  },
+
+  duplicateGroup: async (groupId: string, userId: string): Promise<{ success: boolean; group?: DashboardGroup; tabs?: DashboardTab[]; tileCount?: number; message?: string; error?: string }> => {
+    return apiRequest<{ success: boolean; group?: DashboardGroup; tabs?: DashboardTab[]; tileCount?: number; message?: string; error?: string }>(`/dashboard?userId=${userId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'duplicate_group',
+        groupId
+      }),
+    });
+  },
+
   updateTile: async (tileId: string, updates: Partial<DashboardTile>): Promise<{ message: string }> => {
     return apiRequest<{ message: string }>(`/dashboard-tiles/${tileId}`, {
       method: 'PUT',

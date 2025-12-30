@@ -47,7 +47,9 @@ export class FileUploadService {
     // Additional text formats
     'text/html', 'text/css', 'text/javascript', 'application/javascript',
     // Database exports
-    'application/sql', 'text/sql'
+    'application/sql', 'text/sql',
+    // Cosine files (encrypted context items)
+    'application/octet-stream'
   ];
 
   /**
@@ -186,7 +188,11 @@ export class FileUploadService {
       }
       
       // Validate file type
-      if (!this.ALLOWED_TYPES.includes(file.type)) {
+      // Allow .cosine files (application/octet-stream) or files with .cosine extension
+      const isCosineFile = file.name.toLowerCase().endsWith('.cosine');
+      const isAllowedType = this.ALLOWED_TYPES.includes(file.type) || isCosineFile;
+      
+      if (!isAllowedType) {
         console.error(`❌ Unsupported file type: ${file.type} for ${file.name}`);
         alert(`File type ${file.type} is not supported.`);
         continue;

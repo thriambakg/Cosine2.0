@@ -1557,6 +1557,109 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
+  const handleDuplicateTile = async (tileId: string) => {
+    if (!user || !activeTab) {
+      console.warn('No user or active tab found, cannot duplicate tile');
+      return;
+    }
+
+    try {
+      const response = await dashboardAPI.duplicateTile(tileId, activeTab.id, user.id);
+      if (response.success && response.tile) {
+        // Reload from database to get the duplicated tile
+        await reloadFromDatabase();
+        setSnackbar({
+          open: true,
+          message: 'Tile duplicated successfully',
+          severity: 'success'
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: response.error || 'Failed to duplicate tile',
+          severity: 'error'
+        });
+      }
+    } catch (error: any) {
+      console.error('Error duplicating tile:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to duplicate tile',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleDuplicateTab = async (tabId: string) => {
+    if (!user) {
+      console.warn('No user found, cannot duplicate tab');
+      return;
+    }
+
+    try {
+      const response = await dashboardAPI.duplicateTab(tabId, user.id);
+      if (response.success && response.tab) {
+        // Reload from database to get the duplicated tab
+        await reloadFromDatabase();
+        // Activate the duplicated tab
+        if (response.tab.id) {
+          activateTab(response.tab.id);
+        }
+        setSnackbar({
+          open: true,
+          message: 'Tab duplicated successfully',
+          severity: 'success'
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: response.error || 'Failed to duplicate tab',
+          severity: 'error'
+        });
+      }
+    } catch (error: any) {
+      console.error('Error duplicating tab:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to duplicate tab',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleDuplicateGroup = async (groupId: string) => {
+    if (!user) {
+      console.warn('No user found, cannot duplicate group');
+      return;
+    }
+
+    try {
+      const response = await dashboardAPI.duplicateGroup(groupId, user.id);
+      if (response.success && response.group) {
+        // Reload from database to get the duplicated group
+        await reloadFromDatabase();
+        setSnackbar({
+          open: true,
+          message: response.message || `Group duplicated successfully with ${response.tileCount || 0} tiles`,
+          severity: 'success'
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: response.error || 'Failed to duplicate group',
+          severity: 'error'
+        });
+      }
+    } catch (error: any) {
+      console.error('Error duplicating group:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to duplicate group',
+        severity: 'error'
+      });
+    }
+  };
+
   // Helper function to clean up old tile results from sessionStorage
   const cleanupOldTileResults = useCallback((keepTileIds: Set<string>) => {
     try {
@@ -1817,6 +1920,8 @@ const UnifiedDashboardPage: React.FC = () => {
         onGroupDissolve={dissolveGroup}
         onTabReorder={reorderTab}
         onGroupReorder={reorderGroup}
+        onTabDuplicate={handleDuplicateTab}
+        onGroupDuplicate={handleDuplicateGroup}
         getTabsByGroup={getTabsByGroup}
       />
       
@@ -2122,6 +2227,7 @@ const UnifiedDashboardPage: React.FC = () => {
             onSettingsChange={handleSettingsChange}
             onResizeTile={handleResizeTile}
             onMoveTile={handleMoveTile}
+            onDuplicateTile={handleDuplicateTile}
             zoomLevel={zoomLevel}
           />
         )}

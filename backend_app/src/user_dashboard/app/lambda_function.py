@@ -130,7 +130,17 @@ def lambda_handler(event, context):
         elif path.startswith('/reorder'):
             result = handle_reorder_components(user_id, event)
         else:
-            result = handle_dashboard_operations(user_id, http_method, path, event)
+            # Check for duplicate tab/group operations
+            if http_method == 'POST':
+                body = json.loads(event.get('body', '{}'))
+                if body.get('operation') == 'duplicate_tab':
+                    result = handle_duplicate_tab(user_id, event)
+                elif body.get('operation') == 'duplicate_group':
+                    result = handle_duplicate_group(user_id, event)
+                else:
+                    result = handle_dashboard_operations(user_id, http_method, path, event)
+            else:
+                result = handle_dashboard_operations(user_id, http_method, path, event)
         
         # If this was from SQS, publish completion notification
         if is_sqs_event and job_id and completion_sns_topic:
@@ -253,7 +263,14 @@ def handle_tiles_operations(user_id: str, http_method: str, path: str, event: Di
     if http_method == 'GET':
         return handle_get_tiles(user_id, event)
     elif http_method == 'POST':
-        return handle_add_tile(user_id, event)
+        body = json.loads(event.get('body', '{}'))
+        # Check if this is an import tiles request
+        if body.get('operation') == 'import_tiles':
+            return handle_import_tiles(user_id, event)
+        elif body.get('operation') == 'duplicate_tile':
+            return handle_duplicate_tile(user_id, event)
+        else:
+            return handle_add_tile(user_id, event)
     elif http_method == 'PUT':
         # Extract tile ID from path (e.g., /tiles/tile123 -> tile123)
         tile_id = path.split('/')[-1]
@@ -780,6 +797,434 @@ def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
     except Exception as e:
         logger.error(f"Error removing tile: {str(e)}")
         return create_response(500, {"error": "Failed to remove tile"})
+
+def handle_import_tiles(user_id: str, event: Dict) -> Dict:
+    """Import tiles from a dashboard export (file or share link)"""
+    try:
+        from importer import DashboardImporter
+        
+        body = json.loads(event.get('body', '{}'))
+        import_type = body.get('importType')  # 'file' or 'link'
+        share_id = body.get('shareId')  # For link imports
+        file_content = body.get('fileContent')  # Base64 encoded file content for file imports
+        tab_id = body.get('tabId')  # Target tab to import tiles into
+        tile_ids = body.get('tileIds', [])  # Optional: specific tile IDs to import (empty = all tiles)
+        
+        if not import_type:
+            return create_response(400, {'error': 'importType is required (file or link)'})
+        
+        importer = DashboardImporter()
+        
+        # Get dashboard data from file or link
+        if import_type == 'link':
+            if not share_id:
+                return create_response(400, {'error': 'shareId is required for link imports'})
+            result = importer.import_from_share_link(share_id, user_id)
+            if not result.get('success'):
+                return create_response(400, {
+                    'success': False,
+                    'error': result.get('error', 'Failed to import dashboard from link')
+                })
+            dashboard_data = result.get('dashboard_data')
+        elif import_type == 'file':
+            if not file_content:
+                return create_response(400, {'error': 'fileContent is required for file imports'})
+            try:
+                import base64
+                file_bytes = base64.b64decode(file_content)
+            except Exception as e:
+                return create_response(400, {'error': f'Invalid file content encoding: {str(e)}'})
+            result = importer.import_from_file(file_bytes, user_id)
+            if not result.get('success'):
+                return create_response(400, {
+                    'success': False,
+                    'error': result.get('error', 'Failed to import dashboard from file')
+                })
+            dashboard_data = result.get('dashboard_data')
+        else:
+            return create_response(400, {'error': 'importType must be "file" or "link"'})
+        
+        # Extract tiles from imported dashboard
+        tab_data = dashboard_data.get('tab', {})
+        source_tiles = tab_data.get('tiles', [])
+        
+        # Filter to specific tiles if tileIds provided
+        if tile_ids:
+            source_tiles = [tile for tile in source_tiles if tile.get('id') in tile_ids]
+        
+        if not source_tiles:
+            return create_response(400, {'error': 'No tiles found to import'})
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {"error": "User not found"})
+        
+        # Find target tab
+        target_tab = None
+        if tab_id:
+            target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == tab_id), None)
+        else:
+            active_tab_id = dashboard_config.get('activeTabId')
+            if active_tab_id:
+                target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == active_tab_id), None)
+            else:
+                tabs = dashboard_config.get('tabs', [])
+                target_tab = tabs[0] if tabs else None
+        
+        if not target_tab:
+            return create_response(400, {"error": "No tab found to import tiles into"})
+        
+        # Import tiles (generate new IDs, clean runtime data)
+        now = datetime.utcnow().isoformat()
+        imported_tiles = []
+        
+        for source_tile in source_tiles:
+            # Create new tile with new ID
+            new_tile = source_tile.copy()
+            new_tile['id'] = str(uuid.uuid4())
+            new_tile['tab_id'] = target_tab['id']
+            new_tile['created_at'] = now
+            new_tile['updated_at'] = now
+            
+            # Remove runtime-specific data (results, etc.)
+            # Keep all configuration (searchParams, filterSettings, portfolioData, etc.)
+            if 'articles' in new_tile:
+                del new_tile['articles']
+            if 'trades' in new_tile:
+                del new_tile['trades']
+            
+            # For portfolio tiles, preserve portfolioData but remove results
+            if 'portfolioData' in new_tile and isinstance(new_tile['portfolioData'], dict):
+                portfolio_data = new_tile['portfolioData'].copy()
+                if 'results' in portfolio_data:
+                    del portfolio_data['results']
+                new_tile['portfolioData'] = portfolio_data
+            
+            imported_tiles.append(new_tile)
+        
+        # Add tiles to target tab
+        if 'tiles' not in target_tab:
+            target_tab['tiles'] = []
+        
+        target_tab['tiles'].extend(imported_tiles)
+        target_tab['updated_at'] = now
+        dashboard_config['last_updated'] = now
+        
+        # Save updated dashboard
+        save_user_dashboard(user_id, dashboard_config)
+        
+        logger.info(f"✅ Successfully imported {len(imported_tiles)} tile(s) to tab {target_tab['id']}")
+        
+        return create_response(200, {
+            'success': True,
+            'tiles': imported_tiles,
+            'count': len(imported_tiles),
+            'message': f'Successfully imported {len(imported_tiles)} tile(s)'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error importing tiles: {str(e)}", exc_info=True)
+        return create_response(500, {
+            'success': False,
+            'error': f'Failed to import tiles: {str(e)}'
+        })
+
+def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
+    """Duplicate a tile (table operation only - no S3 replication)"""
+    try:
+        body = json.loads(event.get('body', '{}'))
+        tile_id = body.get('tileId')
+        tab_id = body.get('tabId')  # Optional: target tab (defaults to same tab)
+        
+        if not tile_id:
+            return create_response(400, {"error": "tileId is required"})
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {"error": "User not found"})
+        
+        # Find the source tile
+        source_tile = None
+        source_tab = None
+        for tab in dashboard_config.get('tabs', []):
+            for tile in tab.get('tiles', []):
+                if tile['id'] == tile_id:
+                    source_tile = tile
+                    source_tab = tab
+                    break
+            if source_tile:
+                break
+        
+        if not source_tile:
+            return create_response(404, {"error": "Tile not found"})
+        
+        # Find target tab (use provided tab_id or same tab as source)
+        target_tab = None
+        if tab_id:
+            target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == tab_id), None)
+        else:
+            target_tab = source_tab
+        
+        if not target_tab:
+            return create_response(400, {"error": "Target tab not found"})
+        
+        # Create duplicate tile with new ID
+        now = datetime.utcnow().isoformat()
+        duplicated_tile = source_tile.copy()
+        duplicated_tile['id'] = str(uuid.uuid4())
+        duplicated_tile['tab_id'] = target_tab['id']
+        duplicated_tile['created_at'] = now
+        duplicated_tile['updated_at'] = now
+        
+        # Update title to indicate it's a copy
+        original_title = duplicated_tile.get('title', 'Untitled')
+        duplicated_tile['title'] = f"{original_title} (Copy)"
+        
+        # Remove runtime-specific data (results, etc.)
+        if 'articles' in duplicated_tile:
+            del duplicated_tile['articles']
+        if 'trades' in duplicated_tile:
+            del duplicated_tile['trades']
+        
+        # For portfolio tiles, preserve portfolioData but remove results
+        if 'portfolioData' in duplicated_tile and isinstance(duplicated_tile['portfolioData'], dict):
+            portfolio_data = duplicated_tile['portfolioData'].copy()
+            if 'results' in portfolio_data:
+                del portfolio_data['results']
+            duplicated_tile['portfolioData'] = portfolio_data
+        
+        # Adjust grid position slightly to avoid overlap (optional)
+        if 'gridPosition' in duplicated_tile:
+            pos = duplicated_tile['gridPosition']
+            duplicated_tile['gridPosition'] = {
+                'x': pos.get('x', 0) + 1,
+                'y': pos.get('y', 0) + 1
+            }
+        
+        # Add tile to target tab
+        if 'tiles' not in target_tab:
+            target_tab['tiles'] = []
+        
+        target_tab['tiles'].append(duplicated_tile)
+        target_tab['updated_at'] = now
+        dashboard_config['last_updated'] = now
+        
+        # Save updated dashboard
+        save_user_dashboard(user_id, dashboard_config)
+        
+        logger.info(f"✅ Successfully duplicated tile {tile_id} to tile {duplicated_tile['id']}")
+        
+        return create_response(200, {
+            'success': True,
+            'tile': duplicated_tile,
+            'message': 'Tile duplicated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error duplicating tile: {str(e)}")
+        return create_response(500, {"error": "Failed to duplicate tile"})
+
+def handle_duplicate_tab(user_id: str, event: Dict) -> Dict:
+    """Duplicate a tab with all its tiles (table operation only - no S3 replication)"""
+    try:
+        body = json.loads(event.get('body', '{}'))
+        tab_id = body.get('tabId')
+        
+        if not tab_id:
+            return create_response(400, {"error": "tabId is required"})
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {"error": "User not found"})
+        
+        # Find the source tab
+        source_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == tab_id), None)
+        if not source_tab:
+            return create_response(404, {"error": "Tab not found"})
+        
+        # Create duplicate tab with new ID
+        now = datetime.utcnow().isoformat()
+        duplicated_tab = source_tab.copy()
+        duplicated_tab['id'] = str(uuid.uuid4())
+        duplicated_tab['name'] = f"{source_tab.get('name', 'Untitled')} (Copy)"
+        duplicated_tab['created_at'] = now
+        duplicated_tab['updated_at'] = now
+        
+        # Duplicate all tiles with new IDs
+        duplicated_tiles = []
+        for tile in source_tab.get('tiles', []):
+            new_tile = tile.copy()
+            new_tile['id'] = str(uuid.uuid4())
+            new_tile['tab_id'] = duplicated_tab['id']
+            new_tile['created_at'] = now
+            new_tile['updated_at'] = now
+            
+            # Remove runtime-specific data
+            if 'articles' in new_tile:
+                del new_tile['articles']
+            if 'trades' in new_tile:
+                del new_tile['trades']
+            
+            # For portfolio tiles, preserve portfolioData but remove results
+            if 'portfolioData' in new_tile and isinstance(new_tile['portfolioData'], dict):
+                portfolio_data = new_tile['portfolioData'].copy()
+                if 'results' in portfolio_data:
+                    del portfolio_data['results']
+                new_tile['portfolioData'] = portfolio_data
+            
+            duplicated_tiles.append(new_tile)
+        
+        duplicated_tab['tiles'] = duplicated_tiles
+        
+        # Add tab to dashboard
+        if 'tabs' not in dashboard_config:
+            dashboard_config['tabs'] = []
+        
+        dashboard_config['tabs'].append(duplicated_tab)
+        
+        # Add to tabOrder
+        if 'tabOrder' not in dashboard_config:
+            dashboard_config['tabOrder'] = []
+        dashboard_config['tabOrder'].append(duplicated_tab['id'])
+        
+        dashboard_config['last_updated'] = now
+        
+        # Save updated dashboard
+        save_user_dashboard(user_id, dashboard_config)
+        
+        logger.info(f"✅ Successfully duplicated tab {tab_id} to tab {duplicated_tab['id']} with {len(duplicated_tiles)} tiles")
+        
+        return create_response(200, {
+            'success': True,
+            'tab': duplicated_tab,
+            'message': f'Tab duplicated successfully with {len(duplicated_tiles)} tiles'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error duplicating tab: {str(e)}")
+        return create_response(500, {"error": "Failed to duplicate tab"})
+
+def handle_duplicate_group(user_id: str, event: Dict) -> Dict:
+    """Duplicate a group with all its tabs and nested tiles (recursive deep copy, table operation only)"""
+    try:
+        body = json.loads(event.get('body', '{}'))
+        group_id = body.get('groupId')
+        
+        if not group_id:
+            return create_response(400, {"error": "groupId is required"})
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {"error": "User not found"})
+        
+        # Find the source group
+        source_group = next((g for g in dashboard_config.get('tabGroups', []) if g['id'] == group_id), None)
+        if not source_group:
+            return create_response(404, {"error": "Group not found"})
+        
+        # Get all tabs in the group
+        group_tab_ids = source_group.get('tabs', []) or source_group.get('tabIds', [])
+        source_tabs = [t for t in dashboard_config.get('tabs', []) if t['id'] in group_tab_ids]
+        
+        # Create duplicate group with new ID
+        now = datetime.utcnow().isoformat()
+        duplicated_group = source_group.copy()
+        duplicated_group['id'] = str(uuid.uuid4())
+        duplicated_group['name'] = f"{source_group.get('name', 'Untitled')} (Copy)"
+        duplicated_group['created_at'] = now
+        duplicated_group['updated_at'] = now
+        duplicated_group['tabs'] = []
+        duplicated_group['tabIds'] = []
+        
+        # Recursively duplicate all tabs and their tiles
+        duplicated_tab_ids = []
+        duplicated_tabs = []
+        total_tiles_duplicated = 0
+        
+        for source_tab in source_tabs:
+            # Create duplicate tab with new ID
+            duplicated_tab = source_tab.copy()
+            duplicated_tab['id'] = str(uuid.uuid4())
+            duplicated_tab['name'] = f"{source_tab.get('name', 'Untitled')} (Copy)"
+            duplicated_tab['created_at'] = now
+            duplicated_tab['updated_at'] = now
+            
+            # Duplicate all tiles with new IDs
+            duplicated_tiles = []
+            for tile in source_tab.get('tiles', []):
+                new_tile = tile.copy()
+                new_tile['id'] = str(uuid.uuid4())
+                new_tile['tab_id'] = duplicated_tab['id']
+                new_tile['created_at'] = now
+                new_tile['updated_at'] = now
+                
+                # Remove runtime-specific data
+                if 'articles' in new_tile:
+                    del new_tile['articles']
+                if 'trades' in new_tile:
+                    del new_tile['trades']
+                
+                # For portfolio tiles, preserve portfolioData but remove results
+                if 'portfolioData' in new_tile and isinstance(new_tile['portfolioData'], dict):
+                    portfolio_data = new_tile['portfolioData'].copy()
+                    if 'results' in portfolio_data:
+                        del portfolio_data['results']
+                    new_tile['portfolioData'] = portfolio_data
+                
+                duplicated_tiles.append(new_tile)
+                total_tiles_duplicated += 1
+            
+            duplicated_tab['tiles'] = duplicated_tiles
+            duplicated_tabs.append(duplicated_tab)
+            duplicated_tab_ids.append(duplicated_tab['id'])
+        
+        duplicated_group['tabs'] = duplicated_tab_ids
+        duplicated_group['tabIds'] = duplicated_tab_ids
+        
+        # Add duplicated tabs to dashboard
+        if 'tabs' not in dashboard_config:
+            dashboard_config['tabs'] = []
+        
+        dashboard_config['tabs'].extend(duplicated_tabs)
+        
+        # Add group to dashboard
+        if 'tabGroups' not in dashboard_config:
+            dashboard_config['tabGroups'] = []
+        
+        dashboard_config['tabGroups'].append(duplicated_group)
+        
+        # Add to groupOrder
+        if 'groupOrder' not in dashboard_config:
+            dashboard_config['groupOrder'] = []
+        dashboard_config['groupOrder'].append(duplicated_group['id'])
+        
+        # Add duplicated tab IDs to tabOrder
+        if 'tabOrder' not in dashboard_config:
+            dashboard_config['tabOrder'] = []
+        dashboard_config['tabOrder'].extend(duplicated_tab_ids)
+        
+        dashboard_config['last_updated'] = now
+        
+        # Save updated dashboard
+        save_user_dashboard(user_id, dashboard_config)
+        
+        logger.info(f"✅ Successfully duplicated group {group_id} to group {duplicated_group['id']} with {len(duplicated_tabs)} tabs and {total_tiles_duplicated} tiles")
+        
+        return create_response(200, {
+            'success': True,
+            'group': duplicated_group,
+            'tabs': duplicated_tabs,
+            'tileCount': total_tiles_duplicated,
+            'message': f'Group duplicated successfully with {len(duplicated_tabs)} tabs and {total_tiles_duplicated} tiles'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error duplicating group: {str(e)}")
+        return create_response(500, {"error": "Failed to duplicate group"})
 
 
 # Helper functions

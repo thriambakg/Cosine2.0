@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Chat as SidebarChatIcon, Folder as FolderIcon } from '@mui/icons-material';
+import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI } from '@/services/api';
@@ -28,6 +28,7 @@ interface GridDashboardProps {
   onSettingsChange: (id: string, settings: any) => void;
   onResizeTile: (id: string, size: { width: number; height: number }) => void;
   onMoveTile: (id: string, position: GridPosition) => void;
+  onDuplicateTile?: (tileId: string) => void;
   zoomLevel?: number;
 }
 
@@ -70,6 +71,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onSettingsChange,
   onResizeTile,
   onMoveTile: _onMoveTile,
+  onDuplicateTile,
   zoomLevel: zoomLevelProp = 1.0,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -865,6 +867,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isResizing,
       isSelected: isTileSelected,
       onSelectionChange: handleTileSelection,
+      onDuplicate: onDuplicateTile,
     };
 
     // Type-specific props
@@ -1248,6 +1251,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             onResize={onResizeTile}
             isSelected={commonProps.isSelected}
             onSelectionChange={handleTileSelection}
+            onDuplicate={onDuplicateTile}
           />
         )}
         
@@ -1601,6 +1605,19 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             Add to Files ({selectionState.selectedTiles.size} selected)
           </ListItemText>
         </MenuItem>
+
+        {onDuplicateTile && selectionState.selectedTiles.size === 1 && (
+          <MenuItem onClick={() => {
+            const tileId = Array.from(selectionState.selectedTiles)[0];
+            onDuplicateTile(tileId);
+            handleContextMenuClose();
+          }}>
+            <ListItemIcon>
+              <ContentCopy sx={{ color: '#9ca3af' }} />
+            </ListItemIcon>
+            <ListItemText>Duplicate Tile</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
       
       <FileBrowserDialog

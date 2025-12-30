@@ -22,7 +22,8 @@ import {
   PushPinOutlined as UnpinIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
-  DragIndicator as DragIcon
+  DragIndicator as DragIcon,
+  ContentCopy as CopyIcon
 } from '@mui/icons-material';
 import { DashboardTab, DashboardGroup } from '../../types/dashboardTypes';
 import EditTabDialog from '../dialogs/EditTabDialog';
@@ -46,6 +47,8 @@ interface DashboardTabBarProps {
   onGroupDissolve: (groupId: string, deleteDashboards: boolean) => void;
   onTabReorder: (tabId: string, newPosition: number) => void;
   onGroupReorder: (groupId: string, newPosition: number) => void;
+  onTabDuplicate?: (tabId: string) => void;
+  onGroupDuplicate?: (groupId: string) => void;
   getTabsByGroup: () => { groupedTabs: { [groupId: string]: DashboardTab[] }; ungroupedTabs: DashboardTab[] };
 }
 
@@ -67,6 +70,8 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
   onGroupDissolve,
   onTabReorder,
   onGroupReorder,
+  onTabDuplicate,
+  onGroupDuplicate,
   getTabsByGroup
 }) => {
   const [contextMenu, setContextMenu] = useState<{
@@ -1047,6 +1052,18 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
 
             <Divider sx={{ borderColor: '#374151' }} />
 
+            {onTabDuplicate && (
+              <MenuItem onClick={() => {
+                onTabDuplicate(contextMenu.tab!.id);
+                handleCloseContextMenu();
+              }}>
+                <ListItemIcon>
+                  <CopyIcon sx={{ color: '#9ca3af' }} />
+                </ListItemIcon>
+                <ListItemText>Duplicate Tab</ListItemText>
+              </MenuItem>
+            )}
+
             <MenuItem 
               onClick={() => {
                 console.log('🗑️ DashboardTabBar - Close from context menu for tab:', { id: contextMenu.tab!.id, name: contextMenu.tab!.name });
@@ -1189,6 +1206,18 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
                 {expandedGroups[groupContextMenu.group!.id] ? 'Collapse Group' : 'Expand Group'}
               </ListItemText>
             </MenuItem>
+
+            {onGroupDuplicate && (
+              <MenuItem onClick={() => {
+                onGroupDuplicate(groupContextMenu.group!.id);
+                handleCloseContextMenu();
+              }}>
+                <ListItemIcon>
+                  <CopyIcon sx={{ color: '#9ca3af' }} />
+                </ListItemIcon>
+                <ListItemText>Duplicate Group</ListItemText>
+              </MenuItem>
+            )}
 
             <MenuItem onClick={() => {
               onGroupDissolve(groupContextMenu.group!.id, false);
