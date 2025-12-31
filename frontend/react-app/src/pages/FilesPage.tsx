@@ -1178,11 +1178,18 @@ const FilesPage: React.FC = () => {
         return newSet;
       });
     } else {
-      // Regular click: Select item (for both folders and files)
+      // Regular click: Select item, or deselect if already selected
       // Folders open on double-click, not single-click
       event.preventDefault();
-      setSelectedItems(new Set([item.id]));
-      setLastSelectedIndex(index);
+      if (selectedItems.has(item.id)) {
+        // If item is already selected, deselect it
+        setSelectedItems(new Set());
+        setLastSelectedIndex(null);
+      } else {
+        // Otherwise, select only this item
+        setSelectedItems(new Set([item.id]));
+        setLastSelectedIndex(index);
+      }
     }
   };
 

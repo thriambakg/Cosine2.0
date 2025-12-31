@@ -502,7 +502,7 @@ const SupportMePage: React.FC = () => {
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3 }}>
             <Typography variant="h6" sx={{ color: '#e5e7eb', textAlign: 'center' }}>
-              Any amount is appreciated 😊
+              Your contributions will go towards higher quality datasets, improving existing and implementing new features. Any donation is appreciated 😊
             </Typography>
           </Box>
 

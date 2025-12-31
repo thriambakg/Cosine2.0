@@ -1548,14 +1548,27 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
 
-  const handleRemoveTile = (id: string) => {
-    if (activeTab) {
+  const handleRemoveTile = useCallback(async (id: string) => {
+    if (!activeTab || !user?.id) {
+      console.warn('No active tab or user found, cannot remove tile');
+      return;
+    }
+
+    try {
+      // Immediately delete from backend to prevent tile from reappearing
+      await dashboardAPI.removeTile(id);
+      console.log('✅ Tile deleted from backend:', id);
+      
+      // Then update local state
       const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
       updateTabTiles(activeTab.id, updatedTiles);
-    } else {
-      console.warn('No active tab found, cannot remove tile');
+    } catch (error) {
+      console.error('❌ Failed to delete tile from backend:', error);
+      // Still update local state even if backend call fails
+      const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
+      updateTabTiles(activeTab.id, updatedTiles);
     }
-  };
+  }, [activeTab, updateTabTiles, user?.id]);
 
   const handleDuplicateTile = async (tileId: string) => {
     if (!user || !activeTab) {
@@ -1700,7 +1713,7 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   }, []);
 
-  const handleUpdateTile = (id: string, data: any) => {
+  const handleUpdateTile = useCallback((id: string, data: any) => {
     if (!activeTabId) {
       console.warn('No active tab ID found, cannot update tile');
       return;
@@ -1768,14 +1781,22 @@ const UnifiedDashboardPage: React.FC = () => {
         return updatedTiles;
       });
     }
-  };
+  }, [activeTabId, updateTabTiles, activeTab, cleanupOldTileResults]);
 
-  const handleSettingsChange = (id: string, settings: any) => {
+  const handleSettingsChange = useCallback((id: string, settings: any) => {
     if (!activeTabId) {
       console.warn('No active tab ID found, cannot update tile settings');
       return;
     }
     
+    // Log when searchParams are being saved
+    if (settings.searchParams) {
+      console.log('💾 UnifiedDashboardPage: handleSettingsChange called with searchParams:', {
+        tileId: id,
+        searchParams: settings.searchParams,
+        general_text_search_fields: settings.searchParams.general_text_search_fields
+      });
+    }
     
     // Use a function-based approach to get CURRENT tiles from state
     // This ensures we always work with the latest data, not stale closures
@@ -1812,9 +1833,9 @@ const UnifiedDashboardPage: React.FC = () => {
       
       return updatedTiles;
     });
-  };
+  }, [activeTabId, updateTabTiles]);
 
-  const handleResizeTile = (id: string, size: { width: number; height: number }) => {
+  const handleResizeTile = useCallback((id: string, size: { width: number; height: number }) => {
     if (!activeTabId) return;
 
     // Convert pixel size back to grid size for consistency
@@ -1838,9 +1859,9 @@ const UnifiedDashboardPage: React.FC = () => {
       );
       return updatedTiles;
     });
-  };
+  }, [activeTabId, updateTabTiles]);
 
-  const handleMoveTile = (id: string, position: GridPosition) => {
+  const handleMoveTile = useCallback((id: string, position: GridPosition) => {
     if (!activeTabId) return;
     
     // Use functional update to get current tiles
@@ -1849,7 +1870,7 @@ const UnifiedDashboardPage: React.FC = () => {
         tile.id === id ? { ...tile, gridPosition: position } : tile
       );
     });
-  };
+  }, [activeTabId, updateTabTiles]);
 
   // Share dashboard handlers
   const handleShareLink = async () => {

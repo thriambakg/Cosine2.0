@@ -240,12 +240,19 @@ class WebSocketHandler:
                     'is_complete': is_complete
                 }
                 
-                # Send to all active connections
-                for connection_id in connection_ids:
-                    try:
-                        self.send_to_client(connection_id, ai_response_chunk)
-                    except Exception as e:
-                        logger.warning(f"Failed to send streaming chunk to connection {connection_id}: {str(e)}")
+                # Send to all active connections in parallel for better performance
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                with ThreadPoolExecutor(max_workers=min(len(connection_ids), 10)) as executor:
+                    futures = {
+                        executor.submit(self.send_to_client, connection_id, ai_response_chunk): connection_id
+                        for connection_id in connection_ids
+                    }
+                    for future in as_completed(futures):
+                        connection_id = futures[future]
+                        try:
+                            future.result()  # Raise any exceptions
+                        except Exception as e:
+                            logger.warning(f"Failed to send streaming chunk to connection {connection_id}: {str(e)}")
             else:
                 # Send complete response (backward compatibility)
                 ai_response_message = {
@@ -256,13 +263,20 @@ class WebSocketHandler:
                     'timestamp': timestamp_ms
                 }
                 
-                # Send to all active connections
-                for connection_id in connection_ids:
-                    try:
-                        self.send_to_client(connection_id, ai_response_message)
-                        logger.info(f"✅ Sent chat response to connection {connection_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
+                # Send to all active connections in parallel for better performance
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                with ThreadPoolExecutor(max_workers=min(len(connection_ids), 10)) as executor:
+                    futures = {
+                        executor.submit(self.send_to_client, connection_id, ai_response_message): connection_id
+                        for connection_id in connection_ids
+                    }
+                    for future in as_completed(futures):
+                        connection_id = futures[future]
+                        try:
+                            future.result()  # Raise any exceptions
+                            logger.info(f"✅ Sent chat response to connection {connection_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
                     
         except Exception as e:
             logger.error(f"Error sending chat response: {str(e)}")

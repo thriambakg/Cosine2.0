@@ -172,25 +172,32 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
     kill_flag = threading.Event()
     
     def check_kill_signal():
-        """Periodically check for kill signal"""
+        """Dedicated background thread for fast kill signal detection"""
         session_manager = get_session_manager()
-        check_interval = 30.0  # Check every 30 seconds (much less frequent to reduce polling)
-        max_checks = 30  # Maximum 30 checks (15 minutes total)
+        # Fast polling: Check every 2 seconds for immediate kill signal detection
+        # This runs in a separate thread so it doesn't block main processing
+        check_interval = 2.0  # Check every 2 seconds for fast response
+        max_checks = 450  # Maximum 450 checks (2s * 450 = 15 minutes total)
         check_count = 0
         
         while not kill_flag.is_set() and check_count < max_checks:
             try:
-                # Get fresh session context to check for kill signal
-                fresh_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
+                # Always get fresh context (bypass cache) to ensure we detect kill signals immediately
+                # This ensures kill signals are detected within 2 seconds
+                fresh_context = session_manager.get_session_context(
+                    session_id, user_id, 
+                    include_conversation_history=False,
+                    bypass_cache=True  # Bypass cache for kill signal detection
+                )
                 if fresh_context and fresh_context.get('killed_at'):
-                    logger.warning(f"Kill signal detected for session {session_id}: {fresh_context.get('kill_reason', 'unknown')}")
+                    logger.warning(f"🚨 Kill signal detected for session {session_id}: {fresh_context.get('kill_reason', 'unknown')}")
                     kill_flag.set()
                     break
             except Exception as e:
                 logger.error(f"Error checking kill signal: {str(e)}")
             
             check_count += 1
-            if check_count < max_checks:
+            if check_count < max_checks and not kill_flag.is_set():
                 time.sleep(check_interval)
     
     # Start kill signal monitoring in background thread
@@ -203,7 +210,8 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
     
     try:
         # Process with timeout and kill signal monitoring
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        # Increased workers to 4 for parallel operations (context building, tool calls, etc.)
+        with ThreadPoolExecutor(max_workers=4) as executor:
             # For streaming, we need to intercept the agent's output
             # Strands Agent with streaming=True should stream tokens, but we need to capture them
             # We'll use a wrapper that monitors the agent's response as it's generated
@@ -318,10 +326,11 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             max_timeout = 720  # 12 minutes in seconds
             start_time = time.time()
             
-            # Wait for completion with periodic kill signal checks
+            # Wait for completion - kill signal is checked by dedicated background thread
+            # Main loop just checks if future is done and handles timeout
             while not future.done():
                 if kill_flag.is_set():
-                    logger.warning(f"Kill signal received, stopping agent processing for session {session_id}")
+                    logger.warning(f"🚨 Kill signal received, stopping agent processing for session {session_id}")
                     # Cancel the future if possible
                     future.cancel()
                     raise Exception("Session has been terminated")
@@ -332,7 +341,8 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                     future.cancel()
                     raise Exception("Request timed out after 12 minutes. Please try again.")
                 
-                time.sleep(0.5)  # Check more frequently for streaming (every 0.5 seconds)
+                # Short sleep - kill signal checking happens in dedicated background thread (every 2s)
+                time.sleep(0.1)  # Check every 100ms (kill signal thread checks every 2s)
             
             # Get the result
             if future.cancelled():

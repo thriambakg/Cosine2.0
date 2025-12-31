@@ -203,7 +203,41 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [currentSearchParams, setCurrentSearchParams] = useState<LDASearchFilters>(searchParams);
   const [currentResults, setCurrentResults] = useState<LDAFiling[]>(results);
-  const [generalSearchItems, setGeneralSearchItems] = useState<LDAAutocompleteItem[]>([]);
+  
+  // Initialize generalSearchItems from searchParams on mount (for restoration after refresh)
+  const initializeGeneralSearchItems = (params: LDASearchFilters): LDAAutocompleteItem[] => {
+    const items: LDAAutocompleteItem[] = [];
+    if (params?.general_text_search_fields) {
+      if (Array.isArray(params.general_text_search_fields.registrant) && params.general_text_search_fields.registrant.length > 0) {
+        params.general_text_search_fields.registrant.forEach(value => {
+          items.push({ value, type: 'registrant', label: value });
+        });
+      }
+      if (Array.isArray(params.general_text_search_fields.client) && params.general_text_search_fields.client.length > 0) {
+        params.general_text_search_fields.client.forEach(value => {
+          items.push({ value, type: 'client', label: value });
+        });
+      }
+      if (Array.isArray(params.general_text_search_fields.lobbyist) && params.general_text_search_fields.lobbyist.length > 0) {
+        params.general_text_search_fields.lobbyist.forEach(value => {
+          items.push({ value, type: 'lobbyist', label: value });
+        });
+      }
+      if (Array.isArray(params.general_text_search_fields.pac) && params.general_text_search_fields.pac.length > 0) {
+        params.general_text_search_fields.pac.forEach(value => {
+          items.push({ value, type: 'pac', label: value });
+        });
+      }
+      if (Array.isArray(params.general_text_search_fields.foreign) && params.general_text_search_fields.foreign.length > 0) {
+        params.general_text_search_fields.foreign.forEach(value => {
+          items.push({ value, type: 'foreign', label: value });
+        });
+      }
+    }
+    return items;
+  };
+  
+  const [generalSearchItems, setGeneralSearchItems] = useState<LDAAutocompleteItem[]>(() => initializeGeneralSearchItems(searchParams));
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
@@ -924,35 +958,9 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       isSyncingFromPropsRef.current = true; // Mark that we're syncing from props
       setCurrentSearchParams(searchParams);
       
-      // Rebuild generalSearchItems from searchParams
-      const newGeneralSearchItems: LDAAutocompleteItem[] = [];
-      if (searchParams.general_text_search_fields) {
-        if (Array.isArray(searchParams.general_text_search_fields.registrant) && searchParams.general_text_search_fields.registrant.length > 0) {
-          searchParams.general_text_search_fields.registrant.forEach(value => {
-            newGeneralSearchItems.push({ value, type: 'registrant', label: value });
-          });
-        }
-        if (Array.isArray(searchParams.general_text_search_fields.client) && searchParams.general_text_search_fields.client.length > 0) {
-          searchParams.general_text_search_fields.client.forEach(value => {
-            newGeneralSearchItems.push({ value, type: 'client', label: value });
-          });
-        }
-        if (Array.isArray(searchParams.general_text_search_fields.lobbyist) && searchParams.general_text_search_fields.lobbyist.length > 0) {
-          searchParams.general_text_search_fields.lobbyist.forEach(value => {
-            newGeneralSearchItems.push({ value, type: 'lobbyist', label: value });
-          });
-        }
-        if (Array.isArray(searchParams.general_text_search_fields.pac) && searchParams.general_text_search_fields.pac.length > 0) {
-          searchParams.general_text_search_fields.pac.forEach(value => {
-            newGeneralSearchItems.push({ value, type: 'pac', label: value });
-          });
-        }
-        if (Array.isArray(searchParams.general_text_search_fields.foreign) && searchParams.general_text_search_fields.foreign.length > 0) {
-          searchParams.general_text_search_fields.foreign.forEach(value => {
-            newGeneralSearchItems.push({ value, type: 'foreign', label: value });
-          });
-        }
-      }
+      // Rebuild generalSearchItems from searchParams using the same helper function
+      const newGeneralSearchItems = initializeGeneralSearchItems(searchParams);
+      console.log('🔄 LDASearchTile: Rebuilt generalSearchItems from props:', newGeneralSearchItems.length, 'items', newGeneralSearchItems);
       setGeneralSearchItems(newGeneralSearchItems);
     }
   }, [searchParams]); // Sync when searchParams prop changes
@@ -1277,6 +1285,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   useEffect(() => {
     // Skip persistence if we're currently syncing from props to avoid overwriting with stale data
     if (isSyncingFromPropsRef.current) {
+      console.log('⏭️ LDASearchTile: Skipping persistence (syncing from props)');
       isSyncingFromPropsRef.current = false;
       prevSearchParamsRef.current = currentSearchParams; // Update ref to match new value
       return;
@@ -1284,8 +1293,15 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     // Only persist if searchParams actually changed (deep comparison)
     const hasChanged = JSON.stringify(prevSearchParamsRef.current) !== JSON.stringify(currentSearchParams);
     if (hasChanged) {
+      console.log('💾 LDASearchTile: Persisting searchParams:', {
+        tileId: id,
+        searchParams: currentSearchParams,
+        general_text_search_fields: currentSearchParams.general_text_search_fields
+      });
       prevSearchParamsRef.current = currentSearchParams;
       onSettingsChange(id, { searchParams: currentSearchParams });
+    } else {
+      console.log('➡️ LDASearchTile: searchParams unchanged, skipping persistence');
     }
   }, [currentSearchParams, id, onSettingsChange]);
 

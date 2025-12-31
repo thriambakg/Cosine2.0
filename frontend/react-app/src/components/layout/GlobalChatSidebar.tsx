@@ -1251,15 +1251,79 @@ const GlobalChatSidebar: React.FC = () => {
         console.log('✅ Session data loaded into sidebar');
       } else {
         console.log('⚠️ Session not found in database');
+        // Clear state if session doesn't exist
+        setCurrentSession(null);
+        setSessionContext([]);
       }
     } catch (error: any) {
       console.error('❌ Failed to load session:', error);
       
       if (error?.response?.status === 404) {
-        console.log('🔄 Session not found (404) - might be newly created');
+        console.log('🔄 Session not found (404) - clearing stale state');
+        // Clear state if session doesn't exist
+        setCurrentSession(null);
+        setSessionContext([]);
       }
     }
   };
+
+  // Track if we've already refreshed on mount to prevent duplicate refreshes
+  const hasRefreshedOnMountRef = useRef(false);
+  const hasReloadedSessionRef = useRef(false);
+
+  // Refresh sidebar state on page refresh/mount
+  // This ensures we have fresh data and prevents stale state conflicts
+  useEffect(() => {
+    // Only refresh once on initial mount (page refresh)
+    if (hasRefreshedOnMountRef.current) return;
+    
+    console.log('🔄 Sidebar: Page refresh detected - refreshing state');
+    hasRefreshedOnMountRef.current = true;
+    
+    // Clear any stale local state first
+    setCurrentSession(null);
+    setSessionContext([]);
+    setIsLoadingMessage(false);
+    setUploadedFiles([]);
+    setEditingMessage(null);
+    setEditingMessageIndex(null);
+    setEditText('');
+    
+    // Reset context tracking refs
+    previousContextRef.current = [];
+    previousContextLengthRef.current = 0;
+    previousFilesLengthRef.current = 0;
+  }, []); // Run only on mount (page refresh)
+
+  // Reload session from database when user and session become available after page refresh
+  // This runs after the initial state clear to ensure we have fresh data
+  useEffect(() => {
+    // Only reload once after page refresh
+    if (hasReloadedSessionRef.current) return;
+    
+    // Wait for user to be loaded (it's loaded asynchronously from Cognito)
+    if (!user?.id) {
+      console.log('🔄 Sidebar: Waiting for user to load before reloading session...');
+      return;
+    }
+    
+    // Get session ID from sessionStorage or context
+    const latestSessionId = sessionStorage.getItem('global-chat-active-session') || activeSessionId;
+    
+    if (!latestSessionId) {
+      console.log('🔄 Sidebar: No active session found - state cleared');
+      hasReloadedSessionRef.current = true; // Mark as done even if no session
+      return;
+    }
+    
+    console.log('🔄 Sidebar: User loaded, reloading active session from database:', latestSessionId);
+    hasReloadedSessionRef.current = true;
+    
+    // Reload session from database to ensure fresh data
+    loadSessionFromDatabase(latestSessionId).catch(error => {
+      console.error('❌ Sidebar: Failed to reload session on refresh:', error);
+    });
+  }, [user?.id, activeSessionId]); // Watch for user and session to become available
 
   // Mirror ChatPage's current session
   useEffect(() => {

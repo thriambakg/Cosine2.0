@@ -41,7 +41,7 @@ class SessionManager:
         
         # Performance optimization: In-memory cache for session contexts
         self._context_cache = {}  # {cache_key: (context_data, timestamp)}
-        self._cache_ttl = 30  # 30 seconds TTL for session context cache
+        self._cache_ttl = 120  # 120 seconds TTL for session context cache (increased from 30s for better performance)
         self._max_cache_size = 1000  # Maximum number of cached contexts
         
         logger.info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
@@ -97,7 +97,7 @@ class SessionManager:
             logger.error(f"Error creating session: {str(e)}")
             raise
     
-    def get_session_context(self, session_id: str, user_id: str, include_conversation_history: bool = False) -> Optional[Dict[str, Any]]:
+    def get_session_context(self, session_id: str, user_id: str, include_conversation_history: bool = False, bypass_cache: bool = False) -> Optional[Dict[str, Any]]:
         """
         Retrieve session context with validation and caching
         
@@ -105,22 +105,24 @@ class SessionManager:
             session_id: Unique identifier for the session
             user_id: User ID for validation
             include_conversation_history: Whether to include full conversation history (default: False for efficiency)
+            bypass_cache: If True, skip cache and always fetch fresh from DynamoDB (for kill signal detection)
             
         Returns:
             session_context: Complete session context or None if not found
         """
-        # Performance optimization: Check cache first
-        cache_key = f"{user_id}:{session_id}:{include_conversation_history}"
-        current_time = time.time()
-        
-        if cache_key in self._context_cache:
-            cached_data, cached_time = self._context_cache[cache_key]
-            if current_time - cached_time < self._cache_ttl:
-                logger.debug(f"✅ Using cached session context for {session_id} (age: {current_time - cached_time:.2f}s)")
-                return cached_data
-            else:
-                # Cache expired, remove it
-                del self._context_cache[cache_key]
+        # Performance optimization: Check cache first (unless bypassing for kill signal detection)
+        if not bypass_cache:
+            cache_key = f"{user_id}:{session_id}:{include_conversation_history}"
+            current_time = time.time()
+            
+            if cache_key in self._context_cache:
+                cached_data, cached_time = self._context_cache[cache_key]
+                if current_time - cached_time < self._cache_ttl:
+                    logger.debug(f"✅ Using cached session context for {session_id} (age: {current_time - cached_time:.2f}s)")
+                    return cached_data
+                else:
+                    # Cache expired, remove it
+                    del self._context_cache[cache_key]
         
         try:
             # Get complete session data using new schema
@@ -184,8 +186,11 @@ class SessionManager:
             # Update last activity
             self._update_session_activity(session_id, user_id)
             
-            # Cache the context
-            self._context_cache[cache_key] = (session_context, current_time)
+            # Cache the context (only if not bypassing cache)
+            if not bypass_cache:
+                cache_key = f"{user_id}:{session_id}:{include_conversation_history}"
+                current_time = time.time()
+                self._context_cache[cache_key] = (session_context, current_time)
             
             # Limit cache size (remove oldest entries if over limit)
             if len(self._context_cache) > self._max_cache_size:

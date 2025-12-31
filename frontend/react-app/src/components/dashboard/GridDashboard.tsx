@@ -842,10 +842,38 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     }
   }, [user, selectionState.selectedTiles, tiles]);
 
-  // Render tile with grid positioning
-  const renderTile = (tile: UnifiedTile) => {
+  // Memoize sessionStorage reads for all tiles to avoid reading on every render
+  const tilePaginationStates = useMemo(() => {
+    const states = new Map<string, any>();
+    tiles.forEach(tile => {
+      try {
+        const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+        if (sessionData) {
+          const parsed = JSON.parse(sessionData);
+          if (parsed.paginationState) {
+            states.set(tile.id, parsed.paginationState);
+          }
+        }
+      } catch (error) {
+        // Ignore sessionStorage errors
+      }
+    });
+    return states;
+  }, [tiles]); // Only recompute when tiles array changes
+
+  // Memoize tile configs to avoid repeated lookups
+  const tileConfigs = useMemo(() => {
+    const configs = new Map<string, any>();
+    tiles.forEach(tile => {
+      configs.set(tile.id, getTileConfig(tile.type));
+    });
+    return configs;
+  }, [tiles]); // Only recompute when tiles array changes
+
+  // Render tile with grid positioning - memoized with useCallback
+  const renderTile = useCallback((tile: UnifiedTile) => {
     const { position, size } = getDefaultGridProps(tile);
-    const tileConfig = getTileConfig(tile.type);
+    const tileConfig = tileConfigs.get(tile.id) || getTileConfig(tile.type);
     const supportsResize = (tileConfig?.supportsResize ?? true) && !tile.isPinned;
 
     // Check if this tile is being dragged
@@ -925,19 +953,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
-    // Restore paginationState from sessionStorage if available (for session persistence)
-    let sessionPaginationStateScreener = tile.paginationState;
-    try {
-      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
-      if (sessionData) {
-        const parsed = JSON.parse(sessionData);
-        if (parsed.paginationState) {
-          sessionPaginationStateScreener = parsed.paginationState;
-        }
-      }
-    } catch (error) {
-      // Ignore sessionStorage errors
-    }
+    // Use memoized pagination state instead of reading from sessionStorage
+    const sessionPaginationStateScreener = tilePaginationStates.get(tile.id) || tile.paginationState;
 
     const stockScreenerProps = {
       ...commonProps,
@@ -962,19 +979,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
-    // Restore paginationState from sessionStorage if available (for session persistence)
-    let sessionPaginationStateNews = tile.paginationState;
-    try {
-      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
-      if (sessionData) {
-        const parsed = JSON.parse(sessionData);
-        if (parsed.paginationState) {
-          sessionPaginationStateNews = parsed.paginationState;
-        }
-      }
-    } catch (error) {
-      // Ignore sessionStorage errors
-    }
+    // Use memoized pagination state instead of reading from sessionStorage
+    const sessionPaginationStateNews = tilePaginationStates.get(tile.id) || tile.paginationState;
 
     const newsProps = {
       ...commonProps,
@@ -1019,19 +1025,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
-    // Restore paginationState from sessionStorage if available (for session persistence)
-    let sessionPaginationStateTrades = tile.paginationState;
-    try {
-      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
-      if (sessionData) {
-        const parsed = JSON.parse(sessionData);
-        if (parsed.paginationState) {
-          sessionPaginationStateTrades = parsed.paginationState;
-        }
-      }
-    } catch (error) {
-      // Ignore sessionStorage errors
-    }
+    // Use memoized pagination state instead of reading from sessionStorage
+    const sessionPaginationStateTrades = tilePaginationStates.get(tile.id) || tile.paginationState;
 
     const politicianTradesProps = {
       ...commonProps,
@@ -1297,7 +1292,26 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         )}
       </Box>
     );
-  };
+  }, [
+    getDefaultGridProps,
+    tileConfigs,
+    dragState.dragTileId,
+    dragState.currentPosition,
+    resizeState.resizeTileId,
+    resizeState.previewSize,
+    selectionState.selectedTiles,
+    tilePaginationStates,
+    handleDragStart,
+    handleResizeStart,
+    handleTileSelection,
+    onRemoveTile,
+    onUpdateTile,
+    onSettingsChange,
+    onResizeTile,
+    onDuplicateTile,
+    dashboardContext,
+    cellSize,
+  ]);
 
   // Render preview outline for resizing
   const renderResizePreview = () => {
@@ -1345,6 +1359,9 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     );
   };
 
+  // Memoize rendered tiles array to prevent unnecessary re-renders
+  // Must be after renderTile is defined but before any early returns
+  const renderedTiles = useMemo(() => tiles.map(renderTile), [tiles, renderTile]);
 
   if (tiles.length === 0) {
     return (
@@ -1574,8 +1591,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         }}
       />
       
-      {/* Tiles */}
-      {tiles.map(renderTile)}
+      {/* Tiles - Memoized to prevent unnecessary re-renders */}
+      {renderedTiles}
       
       {/* Drag preview */}
       {renderDragPreview()}

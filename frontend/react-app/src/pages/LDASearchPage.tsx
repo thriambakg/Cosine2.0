@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   TextField,
   Typography,
@@ -120,8 +120,10 @@ const LDASearchPage: React.FC = () => {
     }
   );
   
-  // Store selected general search items with their types
-  const [generalSearchItems, setGeneralSearchItems] = useState<LDAAutocompleteItem[]>([]);
+  // Store selected general search items with their types - restore from saved state
+  const [generalSearchItems, setGeneralSearchItems] = useState<LDAAutocompleteItem[]>(
+    savedState?.generalSearchItems || []
+  );
   
   const [allSearchResults, setAllSearchResults] = useState<LDAFiling[]>(
     savedState?.allSearchResults || []
@@ -276,11 +278,123 @@ const LDASearchPage: React.FC = () => {
   }, []);
 
 
+  // Track if we're syncing from saved state to prevent loops
+  const isSyncingFromSavedStateRef = useRef(false);
+
+  // Rebuild generalSearchItems from searchParams.general_text_search_fields if it exists
+  // This ensures consistency when searchParams is restored from sessionStorage
+  useEffect(() => {
+    if (searchParams.general_text_search_fields && generalSearchItems.length === 0) {
+      isSyncingFromSavedStateRef.current = true;
+      const newGeneralSearchItems: LDAAutocompleteItem[] = [];
+      if (searchParams.general_text_search_fields.registrant && Array.isArray(searchParams.general_text_search_fields.registrant)) {
+        searchParams.general_text_search_fields.registrant.forEach(value => {
+          newGeneralSearchItems.push({ value, type: 'registrant', label: value });
+        });
+      }
+      if (searchParams.general_text_search_fields.client && Array.isArray(searchParams.general_text_search_fields.client)) {
+        searchParams.general_text_search_fields.client.forEach(value => {
+          newGeneralSearchItems.push({ value, type: 'client', label: value });
+        });
+      }
+      if (searchParams.general_text_search_fields.lobbyist && Array.isArray(searchParams.general_text_search_fields.lobbyist)) {
+        searchParams.general_text_search_fields.lobbyist.forEach(value => {
+          newGeneralSearchItems.push({ value, type: 'lobbyist', label: value });
+        });
+      }
+      if (searchParams.general_text_search_fields.pac && Array.isArray(searchParams.general_text_search_fields.pac)) {
+        searchParams.general_text_search_fields.pac.forEach(value => {
+          newGeneralSearchItems.push({ value, type: 'pac', label: value });
+        });
+      }
+      if (searchParams.general_text_search_fields.foreign && Array.isArray(searchParams.general_text_search_fields.foreign)) {
+        searchParams.general_text_search_fields.foreign.forEach(value => {
+          newGeneralSearchItems.push({ value, type: 'foreign', label: value });
+        });
+      }
+      if (newGeneralSearchItems.length > 0) {
+        console.log('🔄 Rebuilding generalSearchItems from searchParams:', newGeneralSearchItems.length, 'items');
+        setGeneralSearchItems(newGeneralSearchItems);
+      }
+      isSyncingFromSavedStateRef.current = false;
+    }
+  }, [searchParams.general_text_search_fields]); // Only run when general_text_search_fields changes
+
+  // Sync generalSearchItems to searchParams.general_text_search_fields
+  // Skip this sync when we're syncing from saved state to avoid overwriting
+  useEffect(() => {
+    if (isSyncingFromSavedStateRef.current) {
+      return; // Don't sync when syncing from saved state
+    }
+    
+    if (generalSearchItems.length > 0) {
+      const generalTextSearchFields: {
+        registrant?: string[] | false;
+        client?: string[] | false;
+        lobbyist?: string[] | false;
+        pac?: string[] | false;
+        foreign?: string[] | false;
+      } = {
+        registrant: false,
+        client: false,
+        lobbyist: false,
+        pac: false,
+        foreign: false,
+      };
+      
+      const itemsByType: Record<string, string[]> = {};
+      generalSearchItems.forEach(item => {
+        const type = item.type || 'unknown';
+        if (!itemsByType[type]) {
+          itemsByType[type] = [];
+        }
+        itemsByType[type].push(item.value);
+      });
+      
+      if (itemsByType['registrant']) {
+        generalTextSearchFields.registrant = itemsByType['registrant'];
+      }
+      if (itemsByType['client']) {
+        generalTextSearchFields.client = itemsByType['client'];
+      }
+      if (itemsByType['lobbyist']) {
+        generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
+      }
+      if (itemsByType['pac']) {
+        generalTextSearchFields.pac = itemsByType['pac'];
+      }
+      if (itemsByType['foreign']) {
+        generalTextSearchFields.foreign = itemsByType['foreign'];
+      }
+      
+      setSearchParams(prev => ({
+        ...prev,
+        general_text_search_fields: generalTextSearchFields
+      }));
+    } else {
+      // Clear general_text_search_fields if generalSearchItems is empty
+      setSearchParams(prev => {
+        const newParams = { ...prev };
+        if (newParams.general_text_search_fields) {
+          newParams.general_text_search_fields = {
+            registrant: false,
+            client: false,
+            lobbyist: false,
+            pac: false,
+            foreign: false,
+          };
+        }
+        return newParams;
+      });
+    }
+  }, [generalSearchItems]);
+
   // Save state to sessionStorage whenever relevant state changes
   useEffect(() => {
     try {
       const stateToSave = {
         searchParams,
+        generalSearchItems, // Include generalSearchItems in saved state
         allSearchResults,
         totalFound,
         isSearching,
@@ -302,6 +416,7 @@ const LDASearchPage: React.FC = () => {
     }
   }, [
     searchParams,
+    generalSearchItems, // Include in dependency array
     allSearchResults,
     totalFound,
     isSearching,

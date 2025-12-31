@@ -29,8 +29,9 @@ class ContextAwareAgent:
         self.base_agent = None  # Will be created on demand to avoid import-time creation
         self.base_tools = enhanced_tools
         self.session_agents = {}  # Cache for session-specific agents
-        self._prompt_cache = {}  # Cache for system prompts: {cache_key: prompt_string}
-        self._max_prompt_cache_size = 100  # Maximum number of cached prompts
+        self._prompt_cache = {}  # Cache for system prompts: {cache_key: (prompt_string, timestamp)}
+        self._max_prompt_cache_size = 200  # Maximum number of cached prompts (increased from 100)
+        self._prompt_cache_ttl = 600  # 10 minutes TTL for prompt cache
         self._base_agent_prewarmed = False  # Track if base agent pre-warm completed
         
         # Performance optimization: Pre-warm base agent in background thread (non-blocking)
@@ -175,7 +176,7 @@ class ContextAwareAgent:
             
             agent_thread = threading.Thread(target=agent_creator, daemon=True)
             agent_thread.start()
-            agent_thread.join(timeout=10.0)  # 10 second timeout for Agent creation
+            agent_thread.join(timeout=5.0)  # 5 second timeout for Agent creation (reduced from 10s for faster failure)
             
             if agent_thread.is_alive():
                 logger.error("Agent creation timed out after 10 seconds - MetricsClient may be hanging")
@@ -287,10 +288,17 @@ class ContextAwareAgent:
         }
         cache_key = hashlib.md5(json.dumps(cache_key_data, sort_keys=True).encode()).hexdigest()
         
-        # Check cache
+        # Check cache (with TTL support)
+        import time
+        current_time = time.time()
         if cache_key in self._prompt_cache:
-            logger.debug(f"✅ Using cached system prompt for session {session_context.get('session_id')}")
-            return self._prompt_cache[cache_key]
+            cached_prompt, cached_time = self._prompt_cache[cache_key]
+            if current_time - cached_time < self._prompt_cache_ttl:
+                logger.debug(f"✅ Using cached system prompt for session {session_context.get('session_id')} (age: {current_time - cached_time:.1f}s)")
+                return cached_prompt
+            else:
+                # Cache expired, remove it
+                del self._prompt_cache[cache_key]
         
         # Generate new prompt (existing logic)
         base_prompt = """You are a financial assistant providing data-driven analysis.
@@ -447,14 +455,17 @@ When get_chat_history_tool returns data:
         
         final_prompt = base_prompt + session_info
         
-        # Cache the final prompt
-        self._prompt_cache[cache_key] = final_prompt
+        # Cache the final prompt (with timestamp for TTL)
+        import time
+        self._prompt_cache[cache_key] = (final_prompt, time.time())
         
-        # Limit cache size (keep last 100)
+        # Limit cache size (remove oldest entries)
         if len(self._prompt_cache) > self._max_prompt_cache_size:
-            oldest_key = next(iter(self._prompt_cache))
-            del self._prompt_cache[oldest_key]
-            logger.debug(f"Cleaned prompt cache: removed oldest entry, {len(self._prompt_cache)} remaining")
+            # Remove oldest 20 entries
+            sorted_items = sorted(self._prompt_cache.items(), key=lambda x: x[1][1])
+            for key, _ in sorted_items[:20]:
+                del self._prompt_cache[key]
+            logger.debug(f"Cleaned prompt cache: removed 20 oldest entries, {len(self._prompt_cache)} remaining")
         
         return final_prompt
     

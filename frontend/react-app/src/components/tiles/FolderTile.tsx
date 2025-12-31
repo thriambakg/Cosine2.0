@@ -34,6 +34,8 @@ import {
   Dashboard as AddToContextIcon,
   ContentCopy as CopyIcon,
   ContentPaste as PasteIcon,
+  DriveFileRenameOutline as RenameIcon,
+  DriveFileMove as MoveIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI } from '@/services/api';
@@ -146,6 +148,14 @@ const FolderTile: React.FC<FolderTileProps> = ({
   const [fileTitle, setFileTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [itemToRename, setItemToRename] = useState<FileSystemItem | null>(null);
+  const [newItemName, setNewItemName] = useState('');
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  
+  // Drag and drop state
+  const [draggedItem, setDraggedItem] = useState<FileSystemItem | null>(null);
+  const [dragOverItem, setDragOverItem] = useState<string | null>(null);
 
   // Context menu
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
@@ -303,11 +313,18 @@ const FolderTile: React.FC<FolderTileProps> = ({
         return newSet;
       });
     } else {
-      // Regular click: Select item (for both folders and files)
+      // Regular click: Select item, or deselect if already selected
       // Folders open on double-click, not single-click
       event.preventDefault();
-      setSelectedItems(new Set([item.id]));
-      setLastSelectedIndex(index);
+      if (selectedItems.has(item.id)) {
+        // If item is already selected, deselect it
+        setSelectedItems(new Set());
+        setLastSelectedIndex(null);
+      } else {
+        // Otherwise, select only this item
+        setSelectedItems(new Set([item.id]));
+        setLastSelectedIndex(index);
+      }
     }
   };
 
@@ -535,6 +552,202 @@ const FolderTile: React.FC<FolderTileProps> = ({
       console.error('Error pasting items:', err);
       setError(err.message || 'Error pasting items');
     }
+  };
+
+  // Rename item handler
+  const handleRenameItem = () => {
+    if (!selectedItem) return;
+    setItemToRename(selectedItem);
+    setNewItemName(selectedItem.name);
+    setRenameDialogOpen(true);
+    setItemContextMenuAnchor(null);
+    setSelectedItem(null);
+  };
+
+  const handleConfirmRename = async () => {
+    if (!itemToRename || !newItemName.trim() || !user) return;
+    
+    try {
+      const response = await filesystemAPI.renameItem({
+        user_id: user.id,
+        folder_path: currentFolderPath,
+        item_id: itemToRename.id,
+        new_name: newItemName.trim(),
+      });
+      
+      if (response.success && response.result) {
+        // Reload folder contents
+        await loadFolderContents(currentFolderPath);
+      } else {
+        setError(response.error || 'Failed to rename item');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Error renaming item');
+    }
+    
+    setRenameDialogOpen(false);
+    setItemToRename(null);
+    setNewItemName('');
+  };
+
+  // Move item handler
+  const handleMoveItem = () => {
+    if (!selectedItem && selectedItems.size === 0) return;
+    setMoveDialogOpen(true);
+    setItemContextMenuAnchor(null);
+  };
+
+  const handleConfirmMove = async (destFolderPath: string) => {
+    if (!user) return;
+    
+    const currentItems = getCurrentFolderItems();
+    const itemsToMove = selectedItems.size > 0 
+      ? currentItems.filter(item => selectedItems.has(item.id))
+      : selectedItem 
+        ? [selectedItem]
+        : [];
+    
+    if (itemsToMove.length === 0) return;
+    
+    try {
+      for (const item of itemsToMove) {
+        const sourceFolderPath = currentFolderPath;
+        
+        // Don't move if already in the same folder
+        if (sourceFolderPath === destFolderPath) continue;
+        
+        const response = await filesystemAPI.moveItem({
+          user_id: user.id,
+          item_id: item.id,
+          source_folder_path: sourceFolderPath,
+          dest_folder_path: destFolderPath,
+        });
+        
+        if (!response.success) {
+          setError(response.error || 'Failed to move item');
+          return;
+        }
+      }
+      
+      // Reload folder contents
+      await loadFolderContents(currentFolderPath);
+      setSelectedItems(new Set());
+      setSelectedItem(null);
+    } catch (err: any) {
+      setError(err.message || 'Error moving items');
+    }
+    
+    setMoveDialogOpen(false);
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, item: FileSystemItem) => {
+    setDraggedItem(item);
+    // Support multi-select
+    const currentItems = getCurrentFolderItems();
+    const itemsToDrag = selectedItems.has(item.id) && selectedItems.size > 1
+      ? currentItems.filter(i => selectedItems.has(i.id))
+      : [item];
+    
+    const itemIds = itemsToDrag.map(i => i.id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', JSON.stringify(itemIds));
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetItem: FileSystemItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (draggedItem && draggedItem.id !== targetItem.id) {
+      setDragOverItem(targetItem.id);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverItem(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetItem: FileSystemItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!draggedItem || !user || draggedItem.id === targetItem.id) {
+      setDraggedItem(null);
+      setDragOverItem(null);
+      return;
+    }
+
+    try {
+      // Check if we're dragging multiple items
+      const dragData = e.dataTransfer.getData('text/plain');
+      let itemsToMove: FileSystemItem[] = [];
+      
+      try {
+        const parsedIds = JSON.parse(dragData);
+        if (Array.isArray(parsedIds)) {
+          // Multiple items
+          const currentItems = getCurrentFolderItems();
+          itemsToMove = parsedIds.map(id => currentItems.find(item => item.id === id)).filter(Boolean) as FileSystemItem[];
+        } else {
+          // Single item
+          itemsToMove = [draggedItem];
+        }
+      } catch {
+        // Single item (not JSON)
+        itemsToMove = [draggedItem];
+      }
+      
+      if (itemsToMove.length === 0) {
+        setDraggedItem(null);
+        setDragOverItem(null);
+        return;
+      }
+      
+      // Determine destination folder path
+      let destFolderPath: string;
+      if (targetItem.type === 'folder') {
+        // Dropping on a folder - move into that folder
+        destFolderPath = targetItem.id === 'root' ? '' : targetItem.id;
+      } else {
+        // Dropping on a file - move to the same parent folder (current folder)
+        destFolderPath = currentFolderPath;
+      }
+      
+      // Move all items
+      for (const item of itemsToMove) {
+        const sourceFolderPath = currentFolderPath;
+        
+        // Don't move if already in the same folder
+        if (sourceFolderPath === destFolderPath) continue;
+        
+        const response = await filesystemAPI.moveItem({
+          user_id: user.id,
+          item_id: item.id,
+          source_folder_path: sourceFolderPath,
+          dest_folder_path: destFolderPath,
+        });
+        
+        if (!response.success) {
+          setError(response.error || 'Failed to move item');
+          return;
+        }
+      }
+      
+      // Reload folder contents
+      await loadFolderContents(currentFolderPath);
+      
+      // Clear selection
+      setSelectedItems(new Set());
+    } catch (err: any) {
+      setError(err.message || 'Error moving items');
+    }
+    
+    setDraggedItem(null);
+    setDragOverItem(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverItem(null);
   };
 
   // Delete item (supports both single item and multi-select)
@@ -974,6 +1187,12 @@ const FolderTile: React.FC<FolderTileProps> = ({
                   key={folder.id}
                   button
                   disableRipple
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, folder)}
+                  onDragOver={(e) => handleDragOver(e, folder)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, folder)}
+                  onDragEnd={handleDragEnd}
                   onClick={(e) => handleItemClick(folder, index, e)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
@@ -988,7 +1207,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
                   }}
                   sx={{
                     borderBottom: '1px solid #374151',
-                    backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                    backgroundColor: dragOverItem === folder.id ? 'rgba(59, 130, 246, 0.2)' : (isSelected ? 'rgba(16, 185, 129, 0.15)' : 'transparent'),
                     cursor: isSelected ? 'default' : 'pointer',
                     borderLeft: isSelected ? '3px solid #10b981' : 'none',
                     '&:hover': { 
@@ -1040,6 +1259,12 @@ const FolderTile: React.FC<FolderTileProps> = ({
                   key={item.id}
                   button
                   disableRipple
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, item)}
+                  onDragOver={(e) => handleDragOver(e, item)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, item)}
+                  onDragEnd={handleDragEnd}
                   onClick={(e) => handleItemClick(item, itemIndex, e)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
@@ -1063,7 +1288,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
                   }}
                   sx={{
                     borderBottom: '1px solid #374151',
-                    backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                    backgroundColor: dragOverItem === item.id ? 'rgba(59, 130, 246, 0.2)' : (isSelected ? 'rgba(16, 185, 129, 0.15)' : 'transparent'),
                     cursor: isSelected ? 'default' : 'pointer',
                     borderLeft: isSelected ? '3px solid #10b981' : 'none',
                     '&:hover': { 
@@ -1339,6 +1564,42 @@ const FolderTile: React.FC<FolderTileProps> = ({
           Copy {selectedItems.size > 1 ? `${selectedItems.size} items` : ''}
         </MenuItem>
         <MenuItem
+          onClick={handleRenameItem}
+          disabled={!selectedItem || selectedItems.size > 1}
+          sx={{ 
+            color: (!selectedItem || selectedItems.size > 1) ? '#6b7280' : '#ffffff',
+            opacity: (!selectedItem || selectedItems.size > 1) ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: (!selectedItem || selectedItems.size > 1) ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
+        >
+          <RenameIcon sx={{ mr: 1, fontSize: 18, color: (!selectedItem || selectedItems.size > 1) ? '#6b7280' : '#9ca3af' }} />
+          Rename
+        </MenuItem>
+        <MenuItem
+          onClick={handleMoveItem}
+          disabled={!selectedItem && selectedItems.size === 0}
+          sx={{ 
+            color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#ffffff',
+            opacity: (!selectedItem && selectedItems.size === 0) ? 0.5 : 1,
+            '&:hover': { 
+              backgroundColor: (!selectedItem && selectedItems.size === 0) ? 'transparent' : 'rgba(59, 130, 246, 0.2)',
+            },
+            '&.Mui-disabled': {
+              color: '#6b7280',
+              opacity: 0.5,
+            },
+          }}
+        >
+          <MoveIcon sx={{ mr: 1, fontSize: 18, color: (!selectedItem && selectedItems.size === 0) ? '#6b7280' : '#9ca3af' }} />
+          Move
+        </MenuItem>
+        <MenuItem
           onClick={handleDeleteItem}
           disabled={!selectedItem && selectedItems.size === 0}
           sx={{ 
@@ -1366,6 +1627,67 @@ const FolderTile: React.FC<FolderTileProps> = ({
         onSelect={handleFolderSelection}
         allowCreateFolder={false}
         title="Select Folder to View"
+      />
+
+      {/* Rename Dialog */}
+      <Dialog
+        open={renameDialogOpen}
+        onClose={() => setRenameDialogOpen(false)}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+          },
+        }}
+      >
+        <DialogTitle sx={{ color: '#ffffff' }}>Rename Item</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="New Name"
+            fullWidth
+            variant="outlined"
+            value={newItemName}
+            onChange={(e) => setNewItemName(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleConfirmRename();
+              }
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: '#ffffff',
+                '& fieldset': { borderColor: '#374151' },
+              },
+              '& .MuiInputLabel-root': { color: '#9ca3af' },
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setRenameDialogOpen(false)}
+            sx={{ color: '#9ca3af' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmRename}
+            disabled={!newItemName.trim()}
+            sx={{ color: customColor }}
+          >
+            Rename
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Move Dialog */}
+      <FileBrowserDialog
+        open={moveDialogOpen}
+        onClose={() => setMoveDialogOpen(false)}
+        onSelect={handleConfirmMove}
+        allowCreateFolder={true}
+        title="Select Destination Folder"
       />
 
       {/* File Preview Dialog */}

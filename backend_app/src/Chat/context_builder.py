@@ -4,7 +4,14 @@ Builds enriched prompts from context items (tiles, articles, chat sessions)
 """
 
 import json
+import hashlib
+import time
 from typing import List, Dict, Any
+
+# Performance optimization: Cache built contexts
+_context_cache = {}  # {cache_key: (prompt_string, timestamp)}
+_cache_ttl = 300  # 5 minutes TTL for context cache
+_max_cache_size = 100  # Maximum number of cached contexts
 
 
 def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]]) -> str:
@@ -21,38 +28,93 @@ def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]])
     if not context_items:
         return user_message
     
+    # Performance optimization: Check cache first
+    # Create cache key from context items (excluding user message which changes)
+    cache_key_data = {
+        'context_items': sorted([(item.get('type'), item.get('id'), str(item.get('data', {}))) for item in context_items])
+    }
+    cache_key = hashlib.md5(json.dumps(cache_key_data, sort_keys=True).encode()).hexdigest()
+    
+    current_time = time.time()
+    if cache_key in _context_cache:
+        cached_prompt, cached_time = _context_cache[cache_key]
+        if current_time - cached_time < _cache_ttl:
+            # Use cached context, but append user message (which changes)
+            return cached_prompt.replace("{USER_MESSAGE}", user_message)
+        else:
+            # Cache expired, remove it
+            del _context_cache[cache_key]
+    
+    # Build context prompt (parallelize if multiple items)
     prompt_parts = [
         "You are a financial analysis AI assistant with access to real-time market data.",
         "The user has provided the following context for analysis:\n"
     ]
     
-    # Add each context item to prompt
-    for i, item in enumerate(context_items, 1):
-        item_type = item.get('type')
+    # Parallelize context item formatting for better performance
+    if len(context_items) > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        formatted_items = [None] * len(context_items)
         
-        if item_type == 'tile':
-            prompt_parts.append(format_tile_context(i, item))
-        elif item_type == 'article':
-            prompt_parts.append(format_article_context(i, item))
-        elif item_type == 'chat':
-            prompt_parts.append(format_chat_context(i, item))
-        elif item_type == 'stock_data':
-            # Handle stock data from screener
-            prompt_parts.append(format_stock_data(i, item.get('title', 'Stock'), item.get('data', {})))
-        elif item_type == 'custom':
-            # Handle other custom types
-            prompt_parts.append(format_tile_context(i, item))
-        elif item_type == 'file':
-            # Handle uploaded files
-            prompt_parts.append(format_file_context(i, item.get('data', {})))
-        else:
-            prompt_parts.append(f"[Context Item {i}: Unknown Type]")
+        with ThreadPoolExecutor(max_workers=min(len(context_items), 4)) as executor:
+            futures = {
+                executor.submit(_format_context_item, i+1, item): i
+                for i, item in enumerate(context_items)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    formatted_items[index] = future.result()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Error formatting context item {index}: {str(e)}")
+                    formatted_items[index] = f"[Context Item {index+1}: Error formatting]"
+        
+        prompt_parts.extend([item for item in formatted_items if item])
+    else:
+        # Single item, no need for parallelization
+        for i, item in enumerate(context_items, 1):
+            prompt_parts.append(_format_context_item(i, item))
     
-    # Add user's question
-    prompt_parts.append(f"\n\nUser Question: {user_message}")
+    # Add user's question (use placeholder for caching)
+    prompt_parts.append(f"\n\nUser Question: {{USER_MESSAGE}}")
     prompt_parts.append("\nPlease provide a comprehensive analysis based on the context provided above.")
     
-    return "\n".join(prompt_parts)
+    built_prompt = "\n".join(prompt_parts)
+    
+    # Cache the built prompt (with placeholder)
+    _context_cache[cache_key] = (built_prompt, current_time)
+    
+    # Limit cache size
+    if len(_context_cache) > _max_cache_size:
+        # Remove oldest entries
+        sorted_items = sorted(_context_cache.items(), key=lambda x: x[1][1])
+        for key, _ in sorted_items[:20]:  # Remove oldest 20
+            del _context_cache[key]
+    
+    # Replace placeholder with actual user message
+    return built_prompt.replace("{USER_MESSAGE}", user_message)
+
+
+def _format_context_item(index: int, item: Dict[str, Any]) -> str:
+    """Format a single context item (helper for parallelization)"""
+    item_type = item.get('type')
+    
+    if item_type == 'tile':
+        return format_tile_context(index, item)
+    elif item_type == 'article':
+        return format_article_context(index, item)
+    elif item_type == 'chat':
+        return format_chat_context(index, item)
+    elif item_type == 'stock_data':
+        return format_stock_data(index, item.get('title', 'Stock'), item.get('data', {}))
+    elif item_type == 'custom':
+        return format_tile_context(index, item)
+    elif item_type == 'file':
+        return format_file_context(index, item.get('data', {}))
+    else:
+        return f"[Context Item {index}: Unknown Type]"
 
 
 def format_tile_context(index: int, item: Dict[str, Any]) -> str:

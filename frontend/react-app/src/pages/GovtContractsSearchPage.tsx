@@ -35,6 +35,7 @@ import {
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
   Folder as FolderIcon,
+  Info as InfoIcon,
 } from '@mui/icons-material';
 import { 
   govtContractsSearchAPI, 
@@ -871,9 +872,47 @@ const GovtContractsSearchPage: React.FC = () => {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
-        <Typography variant="h4" sx={{ color: '#ffffff', mb: 4, fontWeight: 600 }}>
+        <Typography variant="h4" sx={{ color: '#ffffff', mb: 2, fontWeight: 600 }}>
           Government Contracts Search
         </Typography>
+
+        {/* Disclaimer Alert */}
+        <Alert 
+          severity="info" 
+          icon={<InfoIcon />}
+          sx={{ 
+            mb: 3,
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            color: '#93c5fd',
+            '& .MuiAlert-icon': {
+              color: '#3b82f6',
+            },
+            '& .MuiAlert-message': {
+              color: '#93c5fd',
+            },
+            '& a': {
+              color: '#60a5fa',
+              textDecoration: 'underline',
+              '&:hover': {
+                color: '#93c5fd',
+              },
+            },
+          }}
+        >
+          <Typography variant="body2" component="span">
+            <strong>Note:</strong> This search includes contracts which have been updated in the past year. 
+            For older contract records, please visit{' '}
+            <a 
+              href="https://www.usaspending.gov/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+            >
+              USAspending.gov
+            </a>
+            {' '}to search historical data.
+          </Typography>
+        </Alert>
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
