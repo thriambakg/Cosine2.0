@@ -1,16 +1,33 @@
 import json
-# Set matplotlib to use non-interactive backend (required for Lambda)
-import matplotlib
-matplotlib.use('Agg')  # Must be set before importing pyplot
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from datetime import datetime
-import pandas as pd
 import boto3
 import os
 from io import BytesIO
 import logging
 from typing import Dict, Any
+
+# Lazy import matplotlib to avoid ~19s cold start delay
+# Only import when chart generation is actually needed
+_matplotlib = None
+_plt = None
+_mdates = None
+_pd = None
+
+def _lazy_import_matplotlib():
+    """Lazy import matplotlib and related libraries - only when needed"""
+    global _matplotlib, _plt, _mdates, _pd
+    if _matplotlib is None:
+        # Set matplotlib to use non-interactive backend (required for Lambda)
+        import matplotlib
+        matplotlib.use('Agg')  # Must be set before importing pyplot
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        import pandas as pd
+        _matplotlib = matplotlib
+        _plt = plt
+        _mdates = mdates
+        _pd = pd
+    return _matplotlib, _plt, _mdates, _pd
 
 # Configure logging
 logger = logging.getLogger()
@@ -51,6 +68,7 @@ class UnifiedChartGenerator:
     def __init__(self):
         self.s3_client = boto3.client('s3')
         # Don't set user_id and session_id here - get them dynamically when needed
+        # Matplotlib will be lazy-loaded when needed
     
     def _get_user_id(self):
         """Get user ID dynamically from environment variables"""
@@ -218,6 +236,7 @@ class UnifiedChartGenerator:
 
     def _save_chart_to_s3(self, fig, filename: str, symbol: str, chart_type: str, timeframe: str, data_points: int, asset_type: str) -> str:
         self._validate_env_vars()
+        _, plt, _, _ = _lazy_import_matplotlib()  # Lazy load matplotlib
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
@@ -460,6 +479,9 @@ class UnifiedChartGenerator:
             if not normalized_data:
                 return f"Error: No chart data found for {symbol}"
             
+            # Lazy load matplotlib when actually needed
+            _, plt, mdates, pd = _lazy_import_matplotlib()
+            
             # Create figure with professional styling
             fig, ax = plt.subplots(figsize=(14, 8))
             
@@ -483,6 +505,7 @@ class UnifiedChartGenerator:
                 if normalize:
                     for stock_symbol, stock_data in normalized_data.items():
                         if stock_data and len(stock_data) > 0:
+                            # pd already loaded via _lazy_import_matplotlib() above
                             # Convert to DataFrame to handle date sorting properly
                             temp_df = pd.DataFrame(stock_data)
                             # Convert time to datetime for proper sorting
@@ -504,6 +527,7 @@ class UnifiedChartGenerator:
                     
                     logger.info(f"🔍 DEBUG: Processing {len(stock_data)} data points for {stock_symbol}")
                         
+                    # pd already loaded via _lazy_import_matplotlib() above
                     # Convert to DataFrame
                     df = pd.DataFrame(stock_data)
                     
@@ -551,6 +575,7 @@ class UnifiedChartGenerator:
                 # Handle single stock/crypto
                 logger.info(f"🔍 DEBUG: Processing {len(normalized_data)} data points for single {data_type}")
                 
+                # pd already loaded via _lazy_import_matplotlib() above
                 # Convert to DataFrame
                 df = pd.DataFrame(normalized_data)
                 
@@ -595,6 +620,7 @@ class UnifiedChartGenerator:
                         ax.plot([date, date], [row['low'], row['high']], 
                                color='black', linewidth=0.5)
                         # Open/Close ticks
+                        # pd already loaded via _lazy_import_matplotlib() above
                         ax.plot([date - pd.Timedelta(hours=2), date], [row['open'], row['open']], 
                                color='black', linewidth=1)
                         ax.plot([date, date + pd.Timedelta(hours=2)], [row['close'], row['close']], 
@@ -658,6 +684,7 @@ class UnifiedChartGenerator:
             all_prices = []
             if data_type == 'multiple_stocks':
                 # For multiple stocks, collect prices from all stocks
+                # pd already loaded via _lazy_import_matplotlib() above
                 for stock_symbol, stock_data in normalized_data.items():
                     if stock_data:
                         df_stock = pd.DataFrame(stock_data)

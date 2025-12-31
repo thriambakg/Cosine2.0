@@ -1867,7 +1867,7 @@ resource "aws_lambda_function" "chat_agent" {
   # Reserved concurrency removed - account is at limit (960+ reserved)
   # Provisioned concurrency (8) already protects chat_agent capacity
   # If reserved concurrency is needed, reduce it from less critical functions first
-  # reserved_concurrent_executions = 20
+  reserved_concurrent_executions = 2
 }
 
 # Lambda Alias for Chat Agent (points to latest published version for provisioned concurrency)
@@ -1884,12 +1884,13 @@ resource "aws_lambda_alias" "chat_agent_alias" {
 }
 
 # Provisioned Concurrency for Chat Agent Lambda (Performance Optimization)
-# Keeps 8 containers warm to eliminate cold starts for first 8 concurrent requests
+# Keeps containers warm to eliminate cold starts for concurrent requests
 # Cost: ~$0.015/hour per unit = ~$88/month for 8 units
+# Note: Increased to 8 to match previous optimization, but can be adjusted based on traffic
 resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
   function_name                     = aws_lambda_function.chat_agent.function_name
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
-  provisioned_concurrent_executions = 2 # Increased from 2 to 8 for better cold start handling
+  provisioned_concurrent_executions = 8 # Increased from 2 to 8 for better cold start handling
 
   depends_on = [aws_lambda_alias.chat_agent_alias]
 }
