@@ -1860,23 +1860,18 @@ resource "aws_lambda_function" "chat_agent" {
 
   # Force update when layer changes
   depends_on = [data.terraform_remote_state.base_infra]
+
+  # Publish a new version on each deployment (required for provisioned concurrency)
+  publish = true
 }
 
-# Lambda Version for Chat Agent (required for provisioned concurrency)
-resource "aws_lambda_function_version" "chat_agent_version" {
-  function_name = aws_lambda_function.chat_agent.function_name
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# Lambda Alias for Chat Agent (points to version for provisioned concurrency)
+# Lambda Alias for Chat Agent (points to latest published version for provisioned concurrency)
+# Using the function's version attribute which is set when publish = true
 resource "aws_lambda_alias" "chat_agent_alias" {
   name             = "production"
   description      = "Production alias for chat agent with provisioned concurrency"
   function_name    = aws_lambda_function.chat_agent.function_name
-  function_version = aws_lambda_function_version.chat_agent_version.version
+  function_version = aws_lambda_function.chat_agent.version
 
   lifecycle {
     create_before_destroy = true
@@ -1891,7 +1886,7 @@ resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
   provisioned_concurrent_executions = 2 # Keep 2 containers warm
 
-  depends_on = [aws_lambda_function_version.chat_agent_version, aws_lambda_alias.chat_agent_alias]
+  depends_on = [aws_lambda_alias.chat_agent_alias]
 }
 
 # Note: Provisioned concurrency removed for now due to complexity with $LATEST
