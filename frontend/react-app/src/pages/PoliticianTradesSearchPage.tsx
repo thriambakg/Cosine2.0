@@ -1005,6 +1005,16 @@ const PoliticianTradesSearchPage: React.FC = () => {
       setTotalFound(0);
     }
   }, [filteredResults, currentPage, pageSize, allSearchResults]);
+
+  // Auto-search on mount if no results exist
+  useEffect(() => {
+    // Only auto-search if we have no results and haven't performed a search yet
+    if (allSearchResults.length === 0 && !isSearching && !savedState?.allSearchResults) {
+      console.log('🔄 Politician Trades Search Page: Auto-running initial search on mount');
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
   
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>

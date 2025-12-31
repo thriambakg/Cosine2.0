@@ -1421,13 +1421,67 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     # Identify which filters can use GSIs
     query_configs = identify_queryable_filters(filters)
     
-    # If we have multiple queryable filters, use intersection approach
-    if len(query_configs) > 1:
+    # Special case: If recipient_name has multiple values, always use multi-GSI intersection path
+    # to handle union of all recipient names
+    recipient_names = filters.get('recipient_name', [])
+    has_multiple_recipient_names = isinstance(recipient_names, list) and len(recipient_names) > 1
+    
+    if has_multiple_recipient_names and len(query_configs) == 1 and query_configs[0]['filter_key'] == 'recipient_name':
+        # Force multi-GSI intersection path by treating it as if there are multiple filters
+        # The multi-value recipient_name handling will query each name and union results
+        logger.info(f"Multiple recipient names detected ({len(recipient_names)}), using multi-GSI union approach")
+        # The query_configs already has recipient_name, and the multi-value handling will process all names
+    
+    # If we have multiple queryable filters OR multiple recipient names, use intersection/union approach
+    if len(query_configs) > 1 or (has_multiple_recipient_names and len(query_configs) == 1):
         logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
         
         # Query each GSI to get initial batch of award_ids (to determine shortest list)
         gsi_results = {}
         for config in query_configs:
+            # Special handling for recipient_name with multiple values - query each and union results
+            if config['filter_key'] == 'recipient_name' and filters.get('recipient_name'):
+                recipient_names = filters['recipient_name'] if isinstance(filters['recipient_name'], list) else [filters['recipient_name']]
+                recipient_names = [n for n in recipient_names if n and str(n).strip()]
+                
+                if len(recipient_names) > 1:
+                    logger.info(f"Querying {config['index_name']} for {len(recipient_names)} recipient names (union)")
+                    all_award_ids = set()
+                    all_configs = []
+                    
+                    # Query each recipient name separately and union the results
+                    for recipient_name in recipient_names:
+                        normalized_name = recipient_name.lower().strip()
+                        logger.info(f"Querying {config['index_name']} for recipient_name={normalized_name}")
+                        award_ids, _ = query_gsi_for_award_ids(
+                            index_name=config['index_name'],
+                            hash_key_name=config['hash_key'],
+                            hash_key_value=normalized_name,
+                            range_key_name=config.get('range_key'),
+                            range_key_value=config.get('range_value'),
+                            range_key_condition=config.get('range_condition'),
+                            limit=1000,  # Get first batch
+                            get_all=False
+                        )
+                        all_award_ids.update(award_ids)
+                        # Store config for each recipient name for pagination
+                        all_configs.append({
+                            'config': {**config, 'hash_value': normalized_name},
+                            'last_eval_key': None
+                        })
+                        logger.info(f"Found {len(award_ids)} award_ids for recipient_name={normalized_name}")
+                    
+                    logger.info(f"Union of all recipient names: {len(all_award_ids)} total unique award_ids")
+                    gsi_results[config['filter_key']] = {
+                        'award_ids': all_award_ids,
+                        'config': config,  # Use original config as template
+                        'all_configs': all_configs,  # Store individual configs for pagination
+                        'total_count': len(all_award_ids),
+                        'last_eval_key': None,
+                        'is_multi_value': True  # Flag to indicate this needs special pagination handling
+                    }
+                    continue
+            
             logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
             # Get first batch to determine which is shortest
             award_ids, _ = query_gsi_for_award_ids(
@@ -1444,7 +1498,8 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                 'award_ids': set(award_ids),  # Will be updated during pagination
                 'config': config,
                 'total_count': len(award_ids),
-                'last_eval_key': None  # Will be set during pagination
+                'last_eval_key': None,  # Will be set during pagination
+                'is_multi_value': False
             }
             logger.info(f"Found {len(award_ids)} award_ids from {config['index_name']} (first batch)")
         
@@ -1501,63 +1556,141 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         max_pagination_rounds = 50  # Limit to avoid infinite loops
         pagination_round = 0
         
-        while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
-            pagination_round += 1
+        # Special handling for multi-value recipient_name queries
+        source_result = gsi_results[shortest_key]
+        is_multi_recipient = source_result.get('is_multi_value', False) and shortest_key == 'recipient_name'
+        
+        if is_multi_recipient:
+            # For multiple recipient names, paginate through each one
+            all_configs = source_result.get('all_configs', [])
+            recipient_config_index = 0
             
-            # Query source GSI with pagination
-            source_award_ids_batch, source_last_eval_key = query_gsi_for_award_ids(
-                index_name=source_config['index_name'],
-                hash_key_name=source_config['hash_key'],
-                hash_key_value=source_config['hash_value'],
-                range_key_name=source_config.get('range_key'),
-                range_key_value=source_config.get('range_value'),
-                range_key_condition=source_config.get('range_condition'),
-                limit=1000,
-                exclusive_start_key=source_last_eval_key,
-                get_all=False
-            )
-            
-            if not source_award_ids_batch:
-                logger.info(f"Source GSI {source_config['index_name']} ran out of items")
-                break
-            
-            logger.info(f"Pagination round {pagination_round}: Got {len(source_award_ids_batch)} award_ids from source GSI")
-            
-            # Fetch full items for this batch (no GSI intersection - we'll filter in Python)
-            items_batch = []
-            if source_award_ids_batch:
-                batch_size = 100
-                for i in range(0, len(source_award_ids_batch), batch_size):
-                    batch_ids = source_award_ids_batch[i:i + batch_size]
-                    dynamodb_client = boto3.client('dynamodb')
-                    request_items = {
-                        AWARDS_TABLE_NAME: {
-                            'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+            while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
+                pagination_round += 1
+                
+                # Cycle through recipient names if we've exhausted one
+                if recipient_config_index >= len(all_configs):
+                    break  # All recipient names exhausted
+                
+                recipient_config = all_configs[recipient_config_index]
+                current_config = recipient_config['config']
+                current_last_eval_key = recipient_config.get('last_eval_key')
+                
+                # Query this recipient name with pagination
+                source_award_ids_batch, new_last_eval_key = query_gsi_for_award_ids(
+                    index_name=current_config['index_name'],
+                    hash_key_name=current_config['hash_key'],
+                    hash_key_value=current_config['hash_value'],
+                    range_key_name=current_config.get('range_key'),
+                    range_key_value=current_config.get('range_value'),
+                    range_key_condition=current_config.get('range_condition'),
+                    limit=1000,
+                    exclusive_start_key=current_last_eval_key,
+                    get_all=False
+                )
+                
+                # Update last eval key for this recipient
+                recipient_config['last_eval_key'] = new_last_eval_key
+                
+                # If no more results for this recipient, move to next
+                if not source_award_ids_batch:
+                    recipient_config_index += 1
+                    continue
+                
+                logger.info(f"Pagination round {pagination_round} (recipient {recipient_config_index + 1}/{len(all_configs)}): Got {len(source_award_ids_batch)} award_ids from source GSI")
+                
+                # Fetch full items for this batch (no GSI intersection - we'll filter in Python)
+                items_batch = []
+                if source_award_ids_batch:
+                    batch_size = 100
+                    for i in range(0, len(source_award_ids_batch), batch_size):
+                        batch_ids = source_award_ids_batch[i:i + batch_size]
+                        dynamodb_client = boto3.client('dynamodb')
+                        request_items = {
+                            AWARDS_TABLE_NAME: {
+                                'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                            }
                         }
-                    }
-                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                    batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
-                    deserializer = TypeDeserializer()
-                    for item in batch_items:
-                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                        items_batch.append(converted_item)
-            
-            # Apply remaining filters in Python
-            for item in items_batch:
-                if apply_python_filter(item, remaining_filters):
-                    all_matching_items.append(item)  # Store the full item that matches all filters
-                else:
-                    # Log why item was filtered out
-                    award_id = item.get('award_id', 'unknown')
-                    item_agency_code = item.get('awarding_agency_code', 'missing')
-                    item_agency_name = item.get('awarding_agency_name', 'missing')
-                    logger.info(f"Item {award_id} filtered out: agency_code='{item_agency_code}' (type={type(item.get('awarding_agency_code'))}), agency_name='{item_agency_name}', filter_value={remaining_filters.get('awarding_agency_code')}")
-            
-            logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
-            
-            # Stop if source GSI ran out or we have enough results
-            if not source_last_eval_key or len(all_matching_items) >= limit:
-                break
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            items_batch.append(converted_item)
+                
+                # Apply remaining filters in Python
+                for item in items_batch:
+                    if apply_python_filter(item, remaining_filters):
+                        all_matching_items.append(item)  # Store the full item that matches all filters
+                
+                logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
+                
+                # Move to next recipient if this one is exhausted
+                if not new_last_eval_key:
+                    recipient_config_index += 1
+                
+                # Stop if we have enough results
+                if len(all_matching_items) >= limit:
+                    break
+        else:
+            # Normal single-value pagination
+            while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
+                pagination_round += 1
+                
+                # Query source GSI with pagination
+                source_award_ids_batch, source_last_eval_key = query_gsi_for_award_ids(
+                    index_name=source_config['index_name'],
+                    hash_key_name=source_config['hash_key'],
+                    hash_key_value=source_config['hash_value'],
+                    range_key_name=source_config.get('range_key'),
+                    range_key_value=source_config.get('range_value'),
+                    range_key_condition=source_config.get('range_condition'),
+                    limit=1000,
+                    exclusive_start_key=source_last_eval_key,
+                    get_all=False
+                )
+                
+                if not source_award_ids_batch:
+                    logger.info(f"Source GSI {source_config['index_name']} ran out of items")
+                    break
+                
+                logger.info(f"Pagination round {pagination_round}: Got {len(source_award_ids_batch)} award_ids from source GSI")
+                
+                # Fetch full items for this batch (no GSI intersection - we'll filter in Python)
+                items_batch = []
+                if source_award_ids_batch:
+                    batch_size = 100
+                    for i in range(0, len(source_award_ids_batch), batch_size):
+                        batch_ids = source_award_ids_batch[i:i + batch_size]
+                        dynamodb_client = boto3.client('dynamodb')
+                        request_items = {
+                            AWARDS_TABLE_NAME: {
+                                'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                            }
+                        }
+                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                        batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                        deserializer = TypeDeserializer()
+                        for item in batch_items:
+                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                            items_batch.append(converted_item)
+                
+                # Apply remaining filters in Python
+                for item in items_batch:
+                    if apply_python_filter(item, remaining_filters):
+                        all_matching_items.append(item)  # Store the full item that matches all filters
+                    else:
+                        # Log why item was filtered out
+                        award_id = item.get('award_id', 'unknown')
+                        item_agency_code = item.get('awarding_agency_code', 'missing')
+                        item_agency_name = item.get('awarding_agency_name', 'missing')
+                        logger.info(f"Item {award_id} filtered out: agency_code='{item_agency_code}' (type={type(item.get('awarding_agency_code'))}), agency_name='{item_agency_name}', filter_value={remaining_filters.get('awarding_agency_code')}")
+                
+                logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
+                
+                # Stop if source GSI ran out or we have enough results
+                if not source_last_eval_key or len(all_matching_items) >= limit:
+                    break
         
         # Use the collected items directly (they're already full items)
         items = all_matching_items[:limit]

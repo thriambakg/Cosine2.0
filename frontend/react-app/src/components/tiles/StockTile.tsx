@@ -102,13 +102,37 @@ const StockTile: React.FC<StockTileProps> = ({
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const tileRef = useRef<HTMLDivElement>(null);
 
+  // Helper function to parse ticker from various formats (CSV, displayText, etc.)
+  const parseTicker = useCallback((input: string): string => {
+    if (!input) return '';
+    
+    // Remove leading/trailing whitespace and convert to uppercase
+    const trimmed = input.trim().toUpperCase();
+    
+    // Handle displayText format: "AAPL - Apple Inc. (High Cap)"
+    // Extract ticker before the " - " separator
+    if (trimmed.includes(' - ')) {
+      return trimmed.split(' - ')[0].trim();
+    }
+    
+    // Handle CSV format: "AAPL,Apple Inc." or "AAPL, Apple Inc."
+    if (trimmed.includes(',')) {
+      return trimmed.split(',')[0].trim();
+    }
+    
+    // If it's already just a ticker, return it
+    return trimmed;
+  }, []);
+
   // Get the API hook for fetching data
   const { executeForceRefresh } = useStockData();
   
   // Memoize the fetch function to prevent constant re-renders
+  // Parse ticker from symbol to handle CSV/displayText formats
   const fetchStockData = useCallback(async () => {
-    return await executeForceRefresh({ ticker: symbol, period: timeframe });
-  }, [executeForceRefresh, symbol, timeframe]);
+    const parsedTicker = parseTicker(symbol);
+    return await executeForceRefresh({ ticker: parsedTicker, period: timeframe });
+  }, [executeForceRefresh, symbol, timeframe, parseTicker]);
   
   const { data: stockData, loading: isLoading, error, refresh } = useTileCache(
     id,

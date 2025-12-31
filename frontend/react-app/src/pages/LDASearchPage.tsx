@@ -566,6 +566,16 @@ const LDASearchPage: React.FC = () => {
     }
   };
 
+  // Auto-search on mount if no results exist
+  useEffect(() => {
+    // Only auto-search if we have no results and haven't performed a search yet
+    if (allSearchResults.length === 0 && !isSearching && !savedState?.allSearchResults) {
+      console.log('🔄 LDA Search Page: Auto-running initial search on mount');
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
   // Load more results
   const handleLoadMore = async () => {
     if (!hasMore || !lastEvaluatedKey || isLoadingMore) return;

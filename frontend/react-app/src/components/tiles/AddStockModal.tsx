@@ -135,10 +135,34 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
     onClose();
   };
 
+  // Helper function to parse ticker from various formats
+  const parseTickerFromInput = (input: string): string => {
+    if (!input) return '';
+    
+    // Remove leading/trailing whitespace and convert to uppercase
+    const trimmed = input.trim().toUpperCase();
+    
+    // Handle displayText format: "AAPL - Apple Inc. (High Cap)"
+    // Extract ticker before the " - " separator
+    if (trimmed.includes(' - ')) {
+      return trimmed.split(' - ')[0].trim();
+    }
+    
+    // Handle CSV format: "AAPL,Apple Inc." or "AAPL, Apple Inc."
+    if (trimmed.includes(',')) {
+      return trimmed.split(',')[0].trim();
+    }
+    
+    // If it's already just a ticker, return it
+    return trimmed;
+  };
+
   const handleSecurityChange = (_event: any, newValue: Security | string | null) => {
     if (typeof newValue === 'string') {
       setSelectedSecurity(null);
-      setSelectedSymbol(newValue.toUpperCase());
+      // Parse ticker from input (handles CSV/displayText formats)
+      const parsedTicker = parseTickerFromInput(newValue);
+      setSelectedSymbol(parsedTicker);
     } else {
       setSelectedSecurity(newValue);
       if (newValue) {
@@ -151,6 +175,16 @@ const AddStockModal: React.FC<AddStockModalProps> = ({
 
   const handleInputChange = (_event: any, newInputValue: string) => {
     setAutocompleteInput(newInputValue);
+    
+    // Parse ticker from input and update selectedSymbol if it's a valid ticker format
+    // This handles cases where user types "AAPL - Apple Inc." or "AAPL,Apple Inc."
+    if (newInputValue) {
+      const parsedTicker = parseTickerFromInput(newInputValue);
+      if (parsedTicker && parsedTicker !== selectedSymbol) {
+        setSelectedSymbol(parsedTicker);
+      }
+    }
+    
     if (isSecurityDataLoaded && newInputValue) {
       const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
       // Deduplicate by symbol and filter existing
