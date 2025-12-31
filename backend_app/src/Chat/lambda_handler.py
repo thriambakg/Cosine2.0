@@ -218,6 +218,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             
             def agent_with_streaming_wrapper():
                 """Wrapper to capture streaming output from agent"""
+                # TEMPORARILY DISABLED: Streaming disabled due to chunk handling issues
+                # Using regular invocation instead - will re-enable streaming after fixing
+                logger.info("Streaming temporarily disabled, using regular invocation")
+                response = agent(enhanced_message)
+                return response
+                
+                # Original streaming code (disabled for now):
                 try:
                     # Check if agent has a stream method (Strands may support this)
                     if hasattr(agent, 'stream'):
@@ -238,18 +245,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                         if kill_flag.is_set():
                                             break
                                         if chunk:
-                                            # Handle different chunk types from Strands
-                                            if isinstance(chunk, str):
-                                                chunk_text = chunk
-                                            elif hasattr(chunk, 'text'):
-                                                chunk_text = chunk.text
-                                            elif hasattr(chunk, 'content'):
-                                                chunk_text = chunk.content
-                                            elif isinstance(chunk, dict):
-                                                chunk_text = chunk.get('text', chunk.get('content', str(chunk)))
-                                            else:
+                                            # Simple chunk handling - just convert to string
+                                            try:
                                                 chunk_text = str(chunk)
-                                            full_response += chunk_text
+                                                full_response += chunk_text
+                                            except Exception as e:
+                                                logger.warning(f"Error processing chunk: {str(e)}, skipping chunk")
+                                                continue
                                             accumulated_streaming_content['value'] = full_response
                                             
                                             # Send incremental chunk (only new content)
@@ -289,18 +291,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     if kill_flag.is_set():
                                         break
                                     if chunk:
-                                        # Handle different chunk types from Strands
-                                        if isinstance(chunk, str):
-                                            chunk_text = chunk
-                                        elif hasattr(chunk, 'text'):
-                                            chunk_text = chunk.text
-                                        elif hasattr(chunk, 'content'):
-                                            chunk_text = chunk.content
-                                        elif isinstance(chunk, dict):
-                                            chunk_text = chunk.get('text', chunk.get('content', str(chunk)))
-                                        else:
+                                        # Simple chunk handling - just convert to string
+                                        try:
                                             chunk_text = str(chunk)
-                                        full_response += chunk_text
+                                            full_response += chunk_text
+                                        except Exception as e:
+                                            logger.warning(f"Error processing chunk: {str(e)}, skipping chunk")
+                                            continue
                                         accumulated_streaming_content['value'] = full_response
                                         
                                         # Send incremental chunk (only new content)
