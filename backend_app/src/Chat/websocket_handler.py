@@ -322,7 +322,7 @@ class WebSocketHandler:
                     'body': json_dumps_safe({'error': 'No connection ID'})
                 }
             
-            # Get user ID from connection info
+            # Get user ID and session_id from connection info (stored at connection time from query params)
             connection_info = self.get_connection_info(connection_id)
             if not connection_info:
                 logger.error(f"Connection {connection_id} not found")
@@ -340,23 +340,20 @@ class WebSocketHandler:
             else:
                 message_data = body
             
-            # Get session_id from message data
-            session_id = message_data.get('sessionId')
-            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
+            # Prioritize session_id from connection_info (stored at connection time from query params)
+            # Fallback to message data for backward compatibility
+            session_id = connection_info.get('session_id') or message_data.get('sessionId')
+            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id} (from {'connection_info' if connection_info.get('session_id') else 'message_data'})")
             
             # Session ID is required for all message types except connection_establish
             if not session_id and message_data.get('type') != 'connection_establish':
-                logger.error(f"No sessionId provided in message data")
+                logger.error(f"No sessionId found in connection info or message data")
                 return {
                     'statusCode': 400,
                     'body': json_dumps_safe({'error': 'Session ID required'})
                 }
             
-            # Update connection record with session_id
-            if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
-                self.update_connection_session(connection_id, session_id)
-            
-            # Process the WebSocket message
+            # Process the WebSocket message (session_id already stored at connection time)
             return self._process_message(connection_id, user_id, session_id, message_data)
             
         except Exception as e:
