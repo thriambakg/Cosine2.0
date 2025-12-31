@@ -1863,6 +1863,10 @@ resource "aws_lambda_function" "chat_agent" {
 
   # Publish a new version on each deployment (required for provisioned concurrency)
   publish = true
+
+  # Reserved concurrency to prevent other functions from consuming chat_agent capacity
+  # This ensures chat_agent always has capacity available for WebSocket message processing
+  reserved_concurrent_executions = 50 # Reserve 50 concurrent executions for chat_agent
 }
 
 # Lambda Alias for Chat Agent (points to latest published version for provisioned concurrency)
@@ -1879,12 +1883,12 @@ resource "aws_lambda_alias" "chat_agent_alias" {
 }
 
 # Provisioned Concurrency for Chat Agent Lambda (Performance Optimization)
-# Keeps 2 containers warm to eliminate cold starts for first 2 concurrent requests
-# Cost: ~$0.015/hour per unit = ~$22/month for 2 units
+# Keeps 8 containers warm to eliminate cold starts for first 8 concurrent requests
+# Cost: ~$0.015/hour per unit = ~$88/month for 8 units
 resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
   function_name                     = aws_lambda_function.chat_agent.function_name
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
-  provisioned_concurrent_executions = 2 # Keep 2 containers warm
+  provisioned_concurrent_executions = 8 # Increased from 2 to 8 for better cold start handling
 
   depends_on = [aws_lambda_alias.chat_agent_alias]
 }

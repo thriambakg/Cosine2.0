@@ -16,26 +16,26 @@ resource "aws_apigatewayv2_stage" "this" {
   auto_deploy = true
 
   default_route_settings {
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    throttling_burst_limit = 1000 # Increased from 100 for better scalability
+    throttling_rate_limit  = 500  # Increased from 50 for better scalability
   }
 
   route_settings {
     route_key              = "$default"
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    throttling_burst_limit = 1000 # Increased from 100 for better scalability
+    throttling_rate_limit  = 500  # Increased from 50 for better scalability
   }
 
   route_settings {
     route_key              = "$connect"
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    throttling_burst_limit = 1000 # Increased from 100 for better scalability
+    throttling_rate_limit  = 500  # Increased from 50 for better scalability
   }
 
   route_settings {
     route_key              = "$disconnect"
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    throttling_burst_limit = 1000 # Increased from 100 for better scalability
+    throttling_rate_limit  = 500  # Increased from 50 for better scalability
   }
 
   tags = var.tags

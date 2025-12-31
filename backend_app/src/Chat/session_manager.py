@@ -24,8 +24,18 @@ class SessionManager:
     
     def __init__(self):
         """Initialize the session manager with AWS resources and caching"""
-        self.dynamodb = boto3.resource('dynamodb')
-        self.s3_client = boto3.client('s3')
+        from botocore.config import Config
+        
+        # Configure boto3 for better connection pooling and scalability
+        BOTO3_CONFIG = Config(
+            max_pool_connections=50,  # Increased from default 10 for better concurrency
+            retries={'max_attempts': 3, 'mode': 'adaptive'},
+            connect_timeout=5,
+            read_timeout=10
+        )
+        
+        self.dynamodb = boto3.resource('dynamodb', config=BOTO3_CONFIG)
+        self.s3_client = boto3.client('s3', config=BOTO3_CONFIG)
         
         # Get table names from environment variables
         self.chat_sessions_table_name = os.environ.get('CHAT_SESSIONS_TABLE_NAME')
