@@ -166,20 +166,14 @@ class WebSocketHandler:
             return None
     
     def update_connection_session(self, connection_id: str, session_id: str):
-        """
-        Update connection record with session ID (DEPRECATED)
-        
-        NOTE: This method is kept for backward compatibility but is no longer needed.
-        session_id is now extracted from query params and stored at connection time
-        in the connection_manager during $connect event.
-        """
+        """Update connection record with session ID"""
         try:
             self.chat_connections_table.update_item(
                 Key={'connection_id': connection_id},
                 UpdateExpression='SET session_id = :session_id',
                 ExpressionAttributeValues={':session_id': session_id}
             )
-            logger.debug(f"Updated connection {connection_id} with session_id {session_id} (deprecated - should be set at connection time)")
+            logger.info(f"Updated connection {connection_id} with session_id {session_id}")
         except Exception as e:
             logger.error(f"Error updating connection session: {str(e)}")
     
@@ -328,7 +322,7 @@ class WebSocketHandler:
                     'body': json_dumps_safe({'error': 'No connection ID'})
                 }
             
-            # Get user ID and session_id from connection info (stored at connection time)
+            # Get user ID from connection info
             connection_info = self.get_connection_info(connection_id)
             if not connection_info:
                 logger.error(f"Connection {connection_id} not found")
@@ -339,10 +333,6 @@ class WebSocketHandler:
             
             user_id = connection_info['user_id']
             
-            # Prioritize session_id from connection_info (stored at connection time from query params)
-            # Fallback to message data for backward compatibility
-            session_id = connection_info.get('session_id')
-            
             # Extract message body and parse it
             body = event.get('body', '{}')
             if isinstance(body, str):
@@ -350,21 +340,23 @@ class WebSocketHandler:
             else:
                 message_data = body
             
-            # Fallback to session_id from message data if not in connection_info
-            if not session_id:
-                session_id = message_data.get('sessionId')
-            
-            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id} (from {'connection_info' if connection_info.get('session_id') else 'message_data'})")
+            # Get session_id from message data
+            session_id = message_data.get('sessionId')
+            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
             
             # Session ID is required for all message types except connection_establish
             if not session_id and message_data.get('type') != 'connection_establish':
-                logger.error(f"No sessionId found in connection info or message data")
+                logger.error(f"No sessionId provided in message data")
                 return {
                     'statusCode': 400,
                     'body': json_dumps_safe({'error': 'Session ID required'})
                 }
             
-            # Process the WebSocket message (session_id already stored at connection time)
+            # Update connection record with session_id
+            if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
+                self.update_connection_session(connection_id, session_id)
+            
+            # Process the WebSocket message
             return self._process_message(connection_id, user_id, session_id, message_data)
             
         except Exception as e:
@@ -605,8 +597,13 @@ class WebSocketHandler:
         No Lambda invocation needed!
         """
         try:
-            # Get active connections (session_id already stored at connection time)
+            # Get active connections
             connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
+            
+            # Update connections with session_id if needed
+            if connection_ids:
+                for conn_id in connection_ids:
+                    self.update_connection_session(conn_id, session_id)
             
             # Save user message
             message_id = message.get('id') or f"msg_{int(datetime.now().timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
