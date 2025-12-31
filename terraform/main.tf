@@ -1889,7 +1889,7 @@ resource "aws_lambda_alias" "chat_agent_alias" {
 resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
   function_name                     = aws_lambda_function.chat_agent.function_name
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
-  provisioned_concurrent_executions = 8 # Increased from 2 to 8 for better cold start handling
+  provisioned_concurrent_executions = 2 # Increased from 2 to 8 for better cold start handling
 
   depends_on = [aws_lambda_alias.chat_agent_alias]
 }
