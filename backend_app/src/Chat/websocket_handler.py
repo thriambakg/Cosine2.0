@@ -31,18 +31,8 @@ except ImportError as e:
     def extract_context_summary(context_items):
         return {'total_items': len(context_items) if context_items else 0}
 
-# Initialize AWS clients with connection pooling for scalability
-from botocore.config import Config
-
-# Configure boto3 for better connection pooling and scalability
-BOTO3_CONFIG = Config(
-    max_pool_connections=50,  # Increased from default 10 for better concurrency
-    retries={'max_attempts': 3, 'mode': 'adaptive'},
-    connect_timeout=5,
-    read_timeout=10
-)
-
-dynamodb = boto3.resource('dynamodb', config=BOTO3_CONFIG)
+# Initialize AWS clients
+dynamodb = boto3.resource('dynamodb')
 
 def json_dumps_safe(obj):
     """JSON dumps with Decimal support for DynamoDB"""
@@ -80,27 +70,9 @@ def convert_floats_to_decimal(obj):
 class WebSocketHandler:
     """
     Handles WebSocket message processing and direct message delivery
-    Singleton pattern for connection reuse and scalability
     """
-    _instance = None
-    _lock = None
-    
-    def __new__(cls):
-        """Singleton pattern to reuse connections across invocations"""
-        import threading
-        if cls._lock is None:
-            cls._lock = threading.Lock()
-        
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super(WebSocketHandler, cls).__new__(cls)
-        return cls._instance
     
     def __init__(self):
-        # Skip re-initialization if already initialized (singleton)
-        if hasattr(self, '_initialized'):
-            return
         # Get WebSocket API Gateway endpoint from environment
         websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
         if not websocket_endpoint:
@@ -138,95 +110,44 @@ class WebSocketHandler:
         if websocket_endpoint.startswith('wss://'):
             websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
         
-        # Use connection pooling for API Gateway client
         self.api_gateway = boto3.client(
             'apigatewaymanagementapi',
-            endpoint_url=websocket_endpoint,
-            config=BOTO3_CONFIG
+            endpoint_url=websocket_endpoint
         )
         
         # DynamoDB tables
         self.chat_connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
         self.chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
-        
-        # Performance optimization: Cache for connection info and active connections
-        self._connection_info_cache = {}  # {connection_id: (info, timestamp)}
-        self._active_connections_cache = {}  # {cache_key: (connection_ids, timestamp)}
-        self._connection_cache_ttl = 30  # 30 seconds TTL for connection caches
-        self._max_cache_size = 500  # Maximum cached entries
-        
-        self._initialized = True
     
-    def get_connection_info(self, connection_id: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
-        """Get connection information from DynamoDB (with caching for scalability)"""
-        import time
-        
-        # Check cache first
-        if use_cache and connection_id in self._connection_info_cache:
-            cached_info, cached_time = self._connection_info_cache[connection_id]
-            if time.time() - cached_time < self._connection_cache_ttl:
-                return cached_info
-            else:
-                del self._connection_info_cache[connection_id]
-        
+    def get_connection_info(self, connection_id: str) -> Optional[Dict[str, Any]]:
+        """Get connection information from DynamoDB"""
         try:
             response = self.chat_connections_table.get_item(
                 Key={'connection_id': connection_id}
             )
-            item = response.get('Item')
-            
-            # Cache the result
-            if item and use_cache:
-                self._connection_info_cache[connection_id] = (item, time.time())
-                # Limit cache size
-                if len(self._connection_info_cache) > self._max_cache_size:
-                    # Remove oldest 50 entries
-                    sorted_items = sorted(self._connection_info_cache.items(), key=lambda x: x[1][1])
-                    for key, _ in sorted_items[:50]:
-                        del self._connection_info_cache[key]
-            
-            return item
+            return response.get('Item')
         except Exception as e:
             logger.error(f"Error getting connection info: {str(e)}")
             return None
     
     def update_connection_session(self, connection_id: str, session_id: str):
-        """Update connection record with session ID (invalidates cache)"""
+        """Update connection record with session ID"""
         try:
             self.chat_connections_table.update_item(
                 Key={'connection_id': connection_id},
                 UpdateExpression='SET session_id = :session_id',
                 ExpressionAttributeValues={':session_id': session_id}
             )
-            logger.debug(f"Updated connection {connection_id} with session_id {session_id}")
-            
-            # Invalidate caches for this connection
-            if connection_id in self._connection_info_cache:
-                del self._connection_info_cache[connection_id]
-            # Invalidate active connections cache (will be refreshed on next query)
-            # Clear all active connection caches since session_id changed
-            self._active_connections_cache.clear()
+            logger.info(f"Updated connection {connection_id} with session_id {session_id}")
         except Exception as e:
             logger.error(f"Error updating connection session: {str(e)}")
     
-    def get_active_connections_for_user_session(self, user_id: str, session_id: str, use_cache: bool = True) -> List[str]:
-        """Get active WebSocket connections for a specific user and session (with caching for scalability)"""
-        import time
-        
-        # Check cache first
-        cache_key = f"{user_id}:{session_id}"
-        if use_cache and cache_key in self._active_connections_cache:
-            cached_connections, cached_time = self._active_connections_cache[cache_key]
-            if time.time() - cached_time < self._connection_cache_ttl:
-                return cached_connections
-            else:
-                del self._active_connections_cache[cache_key]
-        
+    def get_active_connections_for_user_session(self, user_id: str, session_id: str) -> List[str]:
+        """Get active WebSocket connections for a specific user and session"""
         try:
             current_time = int(datetime.now().timestamp())
             
             # Query connections for this user and session
-            # Optimized: Use GSI with session_id in key condition if possible, otherwise filter
             response = self.chat_connections_table.query(
                 IndexName='UserConnectionsIndex',
                 KeyConditionExpression=Key('user_id').eq(user_id),
@@ -234,17 +155,7 @@ class WebSocketHandler:
             )
             
             connection_ids = [item['connection_id'] for item in response['Items']]
-            logger.debug(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
-            
-            # Cache the result
-            if use_cache:
-                self._active_connections_cache[cache_key] = (connection_ids, time.time())
-                # Limit cache size
-                if len(self._active_connections_cache) > self._max_cache_size:
-                    # Remove oldest 50 entries
-                    sorted_items = sorted(self._active_connections_cache.items(), key=lambda x: x[1][1])
-                    for key, _ in sorted_items[:50]:
-                        del self._active_connections_cache[key]
+            logger.info(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
             
             return connection_ids
         except Exception as e:
@@ -329,19 +240,12 @@ class WebSocketHandler:
                     'is_complete': is_complete
                 }
                 
-                # Send to all active connections in parallel for better performance
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                with ThreadPoolExecutor(max_workers=min(len(connection_ids), 10)) as executor:
-                    futures = {
-                        executor.submit(self.send_to_client, connection_id, ai_response_chunk): connection_id
-                        for connection_id in connection_ids
-                    }
-                    for future in as_completed(futures):
-                        connection_id = futures[future]
-                        try:
-                            future.result()  # Raise any exceptions
-                        except Exception as e:
-                            logger.warning(f"Failed to send streaming chunk to connection {connection_id}: {str(e)}")
+                # Send to all active connections
+                for connection_id in connection_ids:
+                    try:
+                        self.send_to_client(connection_id, ai_response_chunk)
+                    except Exception as e:
+                        logger.warning(f"Failed to send streaming chunk to connection {connection_id}: {str(e)}")
             else:
                 # Send complete response (backward compatibility)
                 ai_response_message = {
@@ -352,20 +256,13 @@ class WebSocketHandler:
                     'timestamp': timestamp_ms
                 }
                 
-                # Send to all active connections in parallel for better performance
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                with ThreadPoolExecutor(max_workers=min(len(connection_ids), 10)) as executor:
-                    futures = {
-                        executor.submit(self.send_to_client, connection_id, ai_response_message): connection_id
-                        for connection_id in connection_ids
-                    }
-                    for future in as_completed(futures):
-                        connection_id = futures[future]
-                        try:
-                            future.result()  # Raise any exceptions
-                            logger.info(f"✅ Sent chat response to connection {connection_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
+                # Send to all active connections
+                for connection_id in connection_ids:
+                    try:
+                        self.send_to_client(connection_id, ai_response_message)
+                        logger.info(f"✅ Sent chat response to connection {connection_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to send response to connection {connection_id}: {str(e)}")
                     
         except Exception as e:
             logger.error(f"Error sending chat response: {str(e)}")
@@ -408,25 +305,19 @@ class WebSocketHandler:
             else:
                 message_data = body
             
-            # Get session_id from connection info (stored at connection time) or message data
-            session_id = connection_info.get('session_id') or message_data.get('sessionId')
+            # Get session_id from message data
+            session_id = message_data.get('sessionId')
             logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
             
             # Session ID is required for all message types except connection_establish
             if not session_id and message_data.get('type') != 'connection_establish':
-                # Try to get from message data as fallback
-                session_id = message_data.get('sessionId')
-                if not session_id:
-                    logger.error(f"No sessionId found in connection or message data")
-                    return {
-                        'statusCode': 400,
-                        'body': json_dumps_safe({'error': 'Session ID required'})
-                    }
-                # Update connection if session_id was only in message
-                self.update_connection_session(connection_id, session_id)
+                logger.error(f"No sessionId provided in message data")
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'Session ID required'})
+                }
             
-            # Update connection record with session_id if it wasn't set at connection time
-            # (backward compatibility for connections made before this change)
+            # Update connection record with session_id
             if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
                 self.update_connection_session(connection_id, session_id)
             
