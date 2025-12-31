@@ -23,7 +23,7 @@ class SessionManager:
     """
     
     def __init__(self):
-        """Initialize the session manager with AWS resources and caching"""
+        """Initialize the session manager with AWS resources"""
         self.dynamodb = boto3.resource('dynamodb')
         self.s3_client = boto3.client('s3')
         
@@ -38,11 +38,6 @@ class SessionManager:
         self.session_ttl_days = int(os.environ.get('SESSION_TTL_DAYS', '30'))
         self.context_ttl_days = int(os.environ.get('CONTEXT_TTL_DAYS', '7'))
         self.max_context_size = int(os.environ.get('MAX_CONTEXT_SIZE', '100000'))  # 100KB
-        
-        # Performance optimization: In-memory cache for session contexts
-        self._context_cache = {}  # {cache_key: (context_data, timestamp)}
-        self._cache_ttl = 30  # 30 seconds TTL for session context cache
-        self._max_cache_size = 1000  # Maximum number of cached contexts
         
         logger.info(f"SessionManager initialized with table: {self.chat_sessions_table_name}")
     
@@ -99,7 +94,7 @@ class SessionManager:
     
     def get_session_context(self, session_id: str, user_id: str, include_conversation_history: bool = False) -> Optional[Dict[str, Any]]:
         """
-        Retrieve session context with validation and caching
+        Retrieve session context with validation
         
         Args:
             session_id: Unique identifier for the session
@@ -109,19 +104,6 @@ class SessionManager:
         Returns:
             session_context: Complete session context or None if not found
         """
-        # Performance optimization: Check cache first
-        cache_key = f"{user_id}:{session_id}:{include_conversation_history}"
-        current_time = time.time()
-        
-        if cache_key in self._context_cache:
-            cached_data, cached_time = self._context_cache[cache_key]
-            if current_time - cached_time < self._cache_ttl:
-                logger.debug(f"✅ Using cached session context for {session_id} (age: {current_time - cached_time:.2f}s)")
-                return cached_data
-            else:
-                # Cache expired, remove it
-                del self._context_cache[cache_key]
-        
         try:
             # Get complete session data using new schema
             session_response = self.chat_sessions_table.get_item(
@@ -184,18 +166,7 @@ class SessionManager:
             # Update last activity
             self._update_session_activity(session_id, user_id)
             
-            # Cache the context
-            self._context_cache[cache_key] = (session_context, current_time)
-            
-            # Limit cache size (remove oldest entries if over limit)
-            if len(self._context_cache) > self._max_cache_size:
-                # Remove oldest 100 entries
-                sorted_items = sorted(self._context_cache.items(), key=lambda x: x[1][1])
-                for key, _ in sorted_items[:100]:
-                    del self._context_cache[key]
-                logger.debug(f"Cleaned cache: removed 100 oldest entries, {len(self._context_cache)} remaining")
-            
-            logger.info(f"Retrieved context for session {session_id} (cached)")
+            logger.info(f"Retrieved context for session {session_id}")
             return session_context
             
         except Exception as e:

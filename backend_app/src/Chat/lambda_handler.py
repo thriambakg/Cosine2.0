@@ -215,80 +215,27 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                     if hasattr(agent, 'stream'):
                         # Use streaming method if available
                         full_response = ""
-                        last_sent_length = 0
-                        try:
-                            import inspect
-                            import asyncio
-                            
-                            stream_result = agent.stream(enhanced_message)
-                            
-                            # Check if it's an async generator
-                            if inspect.isasyncgen(stream_result):
-                                # Handle async generator
-                                async def process_async_stream():
-                                    nonlocal full_response, last_sent_length
-                                    async for chunk in stream_result:
-                                        if kill_flag.is_set():
-                                            break
-                                        if chunk:
-                                            chunk_text = str(chunk)
-                                            full_response += chunk_text
-                                            accumulated_streaming_content['value'] = full_response
-                                            
-                                            # Send incremental chunk
-                                            if ai_message_id and ws_handler and len(full_response) > last_sent_length:
-                                                new_chunk = full_response[last_sent_length:]
-                                                last_sent_length = len(full_response)
-                                                try:
-                                                    ws_handler.send_chat_response(
-                                                        user_id, session_id, new_chunk, ai_message_id,
-                                                        is_streaming=True, is_complete=False
-                                                    )
-                                                    streaming_used['value'] = True
-                                                except Exception as e:
-                                                    logger.warning(f"Failed to send streaming chunk: {str(e)}")
-                                    return full_response
+                        for chunk in agent.stream(enhanced_message):
+                            if kill_flag.is_set():
+                                break
+                            if chunk:
+                                chunk_text = str(chunk)
+                                full_response += chunk_text
+                                accumulated_streaming_content['value'] = full_response
                                 
-                                # Run async generator in new event loop
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                try:
-                                    full_response = loop.run_until_complete(process_async_stream())
-                                finally:
-                                    loop.close()
-                                
-                                # Create agent response object from streamed content
-                                from strands.types import AgentResult, Message
-                                return AgentResult(message=Message(content=full_response))
-                            else:
-                                # Handle sync generator
-                                for chunk in stream_result:
-                                    if kill_flag.is_set():
-                                        break
-                                    if chunk:
-                                        chunk_text = str(chunk)
-                                        full_response += chunk_text
-                                        accumulated_streaming_content['value'] = full_response
-                                        
-                                        # Send incremental chunk
-                                        if ai_message_id and ws_handler and len(full_response) > last_sent_length:
-                                            new_chunk = full_response[last_sent_length:]
-                                            last_sent_length = len(full_response)
-                                            try:
-                                                ws_handler.send_chat_response(
-                                                    user_id, session_id, new_chunk, ai_message_id,
-                                                    is_streaming=True, is_complete=False
-                                                )
-                                                streaming_used['value'] = True
-                                            except Exception as e:
-                                                logger.warning(f"Failed to send streaming chunk: {str(e)}")
-                                
-                                # Create agent response object from streamed content
-                                from strands.types import AgentResult, Message
-                                return AgentResult(message=Message(content=full_response))
-                        except Exception as stream_error:
-                            logger.warning(f"Agent streaming failed, falling back to regular invocation: {str(stream_error)}")
-                            # Fall through to regular invocation
+                                # Send incremental chunk (only new content)
+                                if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                    new_chunk = full_response[last_sent_length:]
+                                    last_sent_length = len(full_response)
+                                    try:
+                                        ws_handler.send_chat_response(
+                                            user_id, session_id, new_chunk, ai_message_id,
+                                            is_streaming=True, is_complete=False
+                                        )
+                                        streaming_used['value'] = True
+                                    except Exception as e:
+                                        logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                        return full_response
                     else:
                         # Fallback: Try to access underlying model's streaming if available
                         # Check if agent's model has streaming capabilities
