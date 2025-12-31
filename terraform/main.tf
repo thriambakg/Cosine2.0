@@ -1864,10 +1864,10 @@ resource "aws_lambda_function" "chat_agent" {
   # Publish a new version on each deployment (required for provisioned concurrency)
   publish = true
 
-  # Reserved concurrency to prevent other functions from consuming chat_agent capacity
-  # This ensures chat_agent always has capacity available for WebSocket message processing
-  # Reduced from 50 to 20 to ensure account maintains minimum 40 unreserved concurrency
-  reserved_concurrent_executions = 20 # Reserve 20 concurrent executions for chat_agent
+  # Reserved concurrency removed - account is at limit (960+ reserved)
+  # Provisioned concurrency (8) already protects chat_agent capacity
+  # If reserved concurrency is needed, reduce it from less critical functions first
+  # reserved_concurrent_executions = 20
 }
 
 # Lambda Alias for Chat Agent (points to latest published version for provisioned concurrency)

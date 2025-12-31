@@ -76,10 +76,14 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                 registrant_terms = [t for t in registrant_terms if t and str(t).strip()]
                 if registrant_terms:
                     item_name = str(item.get('registrant_name') or '').lower()
+                    # Normalize both sides by removing commas for flexible matching
+                    item_name_normalized = item_name.replace(',', '')
                     matches = False
                     for term in registrant_terms:
                         term_lower = str(term).strip().lower()
-                        if term_lower in item_name:
+                        term_normalized = term_lower.replace(',', '')
+                        # Try both normalized and original matching
+                        if term_normalized in item_name_normalized or term_lower in item_name:
                             matches = True
                             break
                     if not matches:
@@ -92,10 +96,14 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                 client_terms = [t for t in client_terms if t and str(t).strip()]
                 if client_terms:
                     item_name = str(item.get('client_name') or '').lower()
+                    # Normalize both sides by removing commas for flexible matching
+                    item_name_normalized = item_name.replace(',', '')
                     matches = False
                     for term in client_terms:
                         term_lower = str(term).strip().lower()
-                        if term_lower in item_name:
+                        term_normalized = term_lower.replace(',', '')
+                        # Try both normalized and original matching
+                        if term_normalized in item_name_normalized or term_lower in item_name:
                             matches = True
                             break
                     if not matches:
@@ -175,10 +183,14 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         registrant_names = [n for n in registrant_names if n and str(n).strip()]
         if registrant_names:
             item_name = str(item.get('registrant_name') or '').strip()
+            # Normalize both sides by removing commas for flexible matching
+            item_name_normalized = item_name.lower().replace(',', '')
             matches = False
             for name in registrant_names:
                 name_str = str(name).strip()
-                if item_name and name_str.lower() in item_name.lower():
+                name_normalized = name_str.lower().replace(',', '')
+                # Try both normalized and original matching
+                if item_name and (name_normalized in item_name_normalized or name_str.lower() in item_name.lower()):
                     matches = True
                     break
             if not matches:
@@ -190,10 +202,14 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         client_names = [n for n in client_names if n and str(n).strip()]
         if client_names:
             item_name = str(item.get('client_name') or '').strip()
+            # Normalize both sides by removing commas for flexible matching
+            item_name_normalized = item_name.lower().replace(',', '')
             matches = False
             for name in client_names:
                 name_str = str(name).strip()
-                if item_name and name_str.lower() in item_name.lower():
+                name_normalized = name_str.lower().replace(',', '')
+                # Try both normalized and original matching
+                if item_name and (name_normalized in item_name_normalized or name_str.lower() in item_name.lower()):
                     matches = True
                     break
             if not matches:
@@ -385,17 +401,20 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             registrant_terms = general_text_search_fields['registrant']
             if isinstance(registrant_terms, list) and registrant_terms:
                 for registrant_term in registrant_terms:
-                    query_configs.append({
-                        'filter_key': 'registrant_name',
-                        'index_name': 'RegistrantPostedDateIndex',
-                        'hash_key': 'registrant_name',
-                        'hash_value': registrant_term,
-                        'range_key': 'dt_posted',
-                        'range_value': date_from if date_from else None,
-                        'range_condition': 'gte' if date_from else None,
-                        'from_general_text_search': True,  # Mark as coming from general_text_search_fields
-                        'category': 'registrant'  # Group by category for union
-                    })
+                    # Normalize registrant name: strip whitespace and clean quotes for exact GSI match
+                    normalized_registrant = clean_quotes(str(registrant_term).strip()) if registrant_term else None
+                    if normalized_registrant:
+                        query_configs.append({
+                            'filter_key': 'registrant_name',
+                            'index_name': 'RegistrantPostedDateIndex',
+                            'hash_key': 'registrant_name',
+                            'hash_value': normalized_registrant,
+                            'range_key': 'dt_posted',
+                            'range_value': date_from if date_from else None,
+                            'range_condition': 'gte' if date_from else None,
+                            'from_general_text_search': True,  # Mark as coming from general_text_search_fields
+                            'category': 'registrant'  # Group by category for union
+                        })
         
         # Client name from general_text_search_fields
         # Create a query config for each client name (OR logic - union all)
@@ -403,17 +422,20 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             client_terms = general_text_search_fields['client']
             if isinstance(client_terms, list) and client_terms:
                 for client_term in client_terms:
-                    query_configs.append({
-                        'filter_key': 'client_name',
-                        'index_name': 'ClientPostedDateIndex',
-                        'hash_key': 'client_name',
-                        'hash_value': client_term,
-                        'range_key': 'dt_posted',
-                        'range_value': date_from if date_from else None,
-                        'range_condition': 'gte' if date_from else None,
-                        'from_general_text_search': True,  # Mark as coming from general_text_search_fields
-                        'category': 'client'  # Group by category for union
-                    })
+                    # Normalize client name: strip whitespace and clean quotes for exact GSI match
+                    normalized_client = clean_quotes(str(client_term).strip()) if client_term else None
+                    if normalized_client:
+                        query_configs.append({
+                            'filter_key': 'client_name',
+                            'index_name': 'ClientPostedDateIndex',
+                            'hash_key': 'client_name',
+                            'hash_value': normalized_client,
+                            'range_key': 'dt_posted',
+                            'range_value': date_from if date_from else None,
+                            'range_condition': 'gte' if date_from else None,
+                            'from_general_text_search': True,  # Mark as coming from general_text_search_fields
+                            'category': 'client'  # Group by category for union
+                        })
         
         # Lobbyist name from general_text_search_fields - use search index
         # Create a query config for each lobbyist name (OR logic - union all)
@@ -452,17 +474,20 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             # Create a query config for each registrant name (OR within category)
             # They will be unioned together, then intersected with other advanced search fields
             for registrant_name in registrant_names:
-                query_configs.append({
-                    'filter_key': 'registrant_name',
-                    'index_name': 'RegistrantPostedDateIndex',
-                    'hash_key': 'registrant_name',
-                    'hash_value': registrant_name,
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None,
-                    'is_advanced_search': True,  # Mark as advanced search field
-                    'category': 'registrant_name'  # Group by category for OR logic
-                })
+                # Normalize registrant name: strip whitespace and clean quotes for exact GSI match
+                normalized_registrant = clean_quotes(str(registrant_name).strip()) if registrant_name else None
+                if normalized_registrant:
+                    query_configs.append({
+                        'filter_key': 'registrant_name',
+                        'index_name': 'RegistrantPostedDateIndex',
+                        'hash_key': 'registrant_name',
+                        'hash_value': normalized_registrant,
+                        'range_key': 'dt_posted',
+                        'range_value': date_from if date_from else None,
+                        'range_condition': 'gte' if date_from else None,
+                        'is_advanced_search': True,  # Mark as advanced search field
+                        'category': 'registrant_name'  # Group by category for OR logic
+                    })
     
     # Client name filter - use ClientPostedDateIndex (advanced search - AND across categories, OR within)
     if filters.get('client_name'):
@@ -470,17 +495,20 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         if client_names:
             # Create a query config for each client name (OR within category)
             for client_name in client_names:
-                query_configs.append({
-                    'filter_key': 'client_name',
-                    'index_name': 'ClientPostedDateIndex',
-                    'hash_key': 'client_name',
-                    'hash_value': client_name,
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else None,
-                    'range_condition': 'gte' if date_from else None,
-                    'is_advanced_search': True,  # Mark as advanced search field
-                    'category': 'client_name'  # Group by category for OR logic
-                })
+                # Normalize client name: strip whitespace and clean quotes for exact GSI match
+                normalized_client = clean_quotes(str(client_name).strip()) if client_name else None
+                if normalized_client:
+                    query_configs.append({
+                        'filter_key': 'client_name',
+                        'index_name': 'ClientPostedDateIndex',
+                        'hash_key': 'client_name',
+                        'hash_value': normalized_client,
+                        'range_key': 'dt_posted',
+                        'range_value': date_from if date_from else None,
+                        'range_condition': 'gte' if date_from else None,
+                        'is_advanced_search': True,  # Mark as advanced search field
+                        'category': 'client_name'  # Group by category for OR logic
+                    })
     
     # Lobbyist name filter - use search index (advanced search - AND across categories, OR within)
     if filters.get('lobbyist_name'):
@@ -893,6 +921,7 @@ def query_gsi_for_filing_ids(
         
         logger.info(f"Querying GSI {index_name} with hash_key={hash_key_name}, hash_value={hash_key_value} (type: {type(hash_key_value)}), range_key={range_key_name}, range_value={range_key_value}, range_condition={range_key_condition}")
         logger.info(f"KeyConditionExpression: {key_condition}")
+        # Note: GSI hash key queries are case-sensitive. If no results, verify the exact case/spacing of the stored value.
         
         response = filings_table.query(**query_params)
         
@@ -2003,20 +2032,138 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         filtered_items = []
         gsi_last_eval_key = last_evaluated_key
         max_pagination_rounds = 1000  # Safety limit
+        max_consecutive_empty_rounds = 5  # Stop if 5 consecutive rounds return 0 matching items
+        consecutive_empty_rounds = 0
         pagination_round = 0
         batch_size = 100  # Process 100 items at a time
         
         # Special handling for PAC searches - GSI returns CONTRIBUTION items, not FILING items
         is_pac_search = config['filter_key'] == 'pac' and 'general_text_search_fields' in remaining_filters and remaining_filters.get('general_text_search_fields', {}).get('pac')
         
+        # Try case variations for name-based queries if first attempt returns 0 results
+        hash_value_variations = [config['hash_value']]  # Start with original value
+        current_variation_index = 0
+        tried_variations = False
+        
+        if config['hash_key'] in ['client_name', 'registrant_name', 'lobbyist_name']:
+            # Generate case variations for name queries
+            original_value = str(config['hash_value'])
+            variations = [
+                original_value.upper(),  # UPPERCASE
+                original_value.lower(),  # lowercase
+                original_value.title(),   # Title Case
+                original_value.capitalize(),  # First letter uppercase
+            ]
+            # Add unique variations (avoid duplicates)
+            for var in variations:
+                if var not in hash_value_variations and var != original_value:
+                    hash_value_variations.append(var)
+        
+        # On first query, try case variations AND comma variations for name-based queries if original returns 0 results
+        if config['hash_key'] in ['client_name', 'registrant_name', 'lobbyist_name']:
+            # First, test the original value
+            test_ids, _ = query_gsi_for_filing_ids(
+                index_name=config['index_name'],
+                hash_key_name=config['hash_key'],
+                hash_key_value=hash_value_variations[0],  # Original value
+                range_key_name=config.get('range_key'),
+                range_key_value=config.get('range_value'),
+                range_key_condition=config.get('range_condition'),
+                limit=1,  # Just test if any results exist
+                exclusive_start_key=None,
+                get_all=False
+            )
+            
+            if len(test_ids) == 0:
+                # Original didn't work, try comma variations first (autocomplete removes commas)
+                original_value = str(hash_value_variations[0])
+                comma_variations = []
+                
+                # If value has no comma, try adding one before "INC", "LLC", "CORP", etc.
+                if ',' not in original_value:
+                    # Try case-insensitive suffix matching
+                    suffixes = [' INC.', ' LLC', ' CORP', ' LP', ' L.P.', ' LLP', ' INC', ' LLC.', ' CORP.', ' LP.', ' L.P', ' LLP.']
+                    for suffix in suffixes:
+                        # Case-insensitive check
+                        if original_value.upper().endswith(suffix.upper()):
+                            # Find the actual suffix in the original (preserve case)
+                            original_upper = original_value.upper()
+                            suffix_start = len(original_upper) - len(suffix)
+                            actual_suffix = original_value[suffix_start:]
+                            # Try with comma before suffix: "COMPANY INC." -> "COMPANY, INC."
+                            comma_version = original_value.replace(actual_suffix, ',' + actual_suffix)
+                            comma_variations.append(comma_version)
+                            break
+                
+                # If value has comma, try removing it
+                if ',' in original_value:
+                    no_comma_version = original_value.replace(',', '')
+                    comma_variations.append(no_comma_version)
+                
+                # Try comma variations first (most likely to match stored values)
+                for comma_var in comma_variations:
+                    logger.info(f"Trying comma variation for {config['hash_key']}: '{comma_var}'")
+                    test_ids, _ = query_gsi_for_filing_ids(
+                        index_name=config['index_name'],
+                        hash_key_name=config['hash_key'],
+                        hash_key_value=comma_var,
+                        range_key_name=config.get('range_key'),
+                        range_key_value=config.get('range_value'),
+                        range_key_condition=config.get('range_condition'),
+                        limit=1,
+                        exclusive_start_key=None,
+                        get_all=False
+                    )
+                    
+                    if len(test_ids) > 0:
+                        # Found results with comma variation - use it
+                        hash_value_variations.insert(1, comma_var)  # Add to variations list
+                        current_variation_index = 1
+                        config['hash_value'] = comma_var
+                        logger.info(f"Found results with comma variation '{comma_var}' - using this for all queries")
+                        break
+                
+                # If comma variations didn't work, try case variations
+                if len(test_ids) == 0 and len(hash_value_variations) > 1:
+                    logger.info(f"Original value '{hash_value_variations[0]}' returned 0 results, trying case variations...")
+                    for var_idx, variation in enumerate(hash_value_variations[1:], start=1):  # Skip original, already tested
+                        logger.info(f"Trying case variation {var_idx + 1}/{len(hash_value_variations)} for {config['hash_key']}: '{variation}'")
+                        test_ids, _ = query_gsi_for_filing_ids(
+                            index_name=config['index_name'],
+                            hash_key_name=config['hash_key'],
+                            hash_key_value=variation,
+                            range_key_name=config.get('range_key'),
+                            range_key_value=config.get('range_value'),
+                            range_key_condition=config.get('range_condition'),
+                            limit=1,  # Just test if any results exist
+                            exclusive_start_key=None,
+                            get_all=False
+                        )
+                        
+                        if len(test_ids) > 0:
+                            # Found results with this variation - use it for all queries
+                            current_variation_index = var_idx
+                            config['hash_value'] = variation  # Update config for pagination
+                            logger.info(f"Found results with variation '{variation}' - using this for all queries")
+                            break
+                    else:
+                        # No variation returned results
+                        logger.warning(f"All variations returned 0 results for {config['hash_key']}='{config['hash_value']}'")
+            else:
+                # Original value works, use it
+                logger.info(f"Original value '{hash_value_variations[0]}' works - no variation needed")
+        
         while len(filtered_items) < limit and pagination_round < max_pagination_rounds:
             pagination_round += 1
+            
+            # Use the working variation (or original if none worked)
+            current_hash_value = hash_value_variations[current_variation_index] if current_variation_index < len(hash_value_variations) else config['hash_value']
             
             # Query GSI to get a batch of IDs (could be filing IDs or contribution IDs)
             ids_batch, new_last_eval_key = query_gsi_for_filing_ids(
                 index_name=config['index_name'],
                 hash_key_name=config['hash_key'],
-                hash_key_value=config['hash_value'],
+                hash_key_value=current_hash_value,
                 range_key_name=config.get('range_key'),
                 range_key_value=config.get('range_value'),
                 range_key_condition=config.get('range_condition'),
@@ -2150,6 +2297,9 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             
             logger.info(f"Pagination round {pagination_round}: Fetched {len(items_batch)} full items from DynamoDB")
             
+            # Track items before filtering to detect empty rounds
+            items_before_round = len(filtered_items)
+            
             # Apply remaining filters to this batch (for PAC search, PAC name filtering already done)
             if is_pac_search:
                 # For PAC searches, we already filtered by PAC name, so just add all items
@@ -2176,11 +2326,23 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         if len(filtered_items) >= limit:
                             break
             
-            logger.info(f"Pagination round {pagination_round}: {len(filtered_items)} items match all filters so far (need {limit})")
+            items_after_round = len(filtered_items)
+            items_matched_this_round = items_after_round - items_before_round
+            
+            logger.info(f"Pagination round {pagination_round}: {len(filtered_items)} items match all filters so far (need {limit}), matched {items_matched_this_round} this round")
             
             # Stop if we have enough results or GSI ran out
             if len(filtered_items) >= limit or not gsi_last_eval_key:
                 break
+            
+            # Early termination: if multiple consecutive rounds return 0 matching items, stop paginating
+            if items_matched_this_round == 0:
+                consecutive_empty_rounds += 1
+                if consecutive_empty_rounds >= max_consecutive_empty_rounds:
+                    logger.warning(f"Stopping pagination after {consecutive_empty_rounds} consecutive rounds with 0 matching items. This may indicate filters are too restrictive or data mismatch.")
+                    break
+            else:
+                consecutive_empty_rounds = 0  # Reset counter if we found items
         
         logger.info(f"Pagination complete: {len(filtered_items)} items match all filters after {pagination_round} rounds")
         filtered_items = filtered_items[:limit]
