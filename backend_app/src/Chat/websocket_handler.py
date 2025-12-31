@@ -493,16 +493,48 @@ class WebSocketHandler:
                 'messageId': message_id
             }
             
-            # Call chat handler directly (no Lambda invocation!)
-            # Note: handle_chat_message will send the response directly via WebSocket
-            # so we don't need to send it again here
-            try:
-                result = handle_chat_message(event_body, None)
-                
-                # Log the result for debugging
-                if result is None:
-                    logger.warning(f"Chat handler returned None - this should not happen")
-                    # Send error message if handler failed
+            # Process chat message asynchronously to avoid API Gateway timeout (29s)
+            # Return immediately so API Gateway doesn't timeout
+            import threading
+            
+            def process_chat_async():
+                """Process chat message in background thread"""
+                try:
+                    result = handle_chat_message(event_body, None)
+                    
+                    # Log the result for debugging
+                    if result is None:
+                        logger.warning(f"Chat handler returned None - this should not happen")
+                        # Send error message if handler failed
+                        error_timestamp_ms = int(datetime.now().timestamp() * 1000)
+                        error_message = {
+                            'type': 'ai_response',
+                            'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
+                            'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                            'session_id': session_id,
+                            'timestamp': error_timestamp_ms
+                        }
+                        self.send_to_client(connection_id, error_message)
+                    elif result.get('statusCode') != 200:
+                        logger.warning(f"Chat handler returned non-200 status: {result.get('statusCode')}")
+                        # Send error message if handler failed
+                        error_timestamp_ms = int(datetime.now().timestamp() * 1000)
+                        error_message = {
+                            'type': 'ai_response',
+                            'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
+                            'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                            'session_id': session_id,
+                            'timestamp': error_timestamp_ms
+                        }
+                        self.send_to_client(connection_id, error_message)
+                    else:
+                        logger.info(f"✅ Chat handler processed message successfully, response sent via WebSocket")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing with chat agent: {str(e)}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    # Send error message to client
                     error_timestamp_ms = int(datetime.now().timestamp() * 1000)
                     error_message = {
                         'type': 'ai_response',
@@ -512,35 +544,14 @@ class WebSocketHandler:
                         'timestamp': error_timestamp_ms
                     }
                     self.send_to_client(connection_id, error_message)
-                elif result.get('statusCode') != 200:
-                    logger.warning(f"Chat handler returned non-200 status: {result.get('statusCode')}")
-                    # Send error message if handler failed
-                    error_timestamp_ms = int(datetime.now().timestamp() * 1000)
-                    error_message = {
-                        'type': 'ai_response',
-                        'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
-                        'content': "I apologize, but I encountered an error processing your request. Please try again.",
-                        'session_id': session_id,
-                        'timestamp': error_timestamp_ms
-                    }
-                    self.send_to_client(connection_id, error_message)
-                else:
-                    logger.info(f"✅ Chat handler processed message successfully, response sent via WebSocket")
-                
-            except Exception as e:
-                logger.error(f"Error processing with chat agent: {str(e)}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                # Send error message to client
-                error_timestamp_ms = int(datetime.now().timestamp() * 1000)
-                error_message = {
-                    'type': 'ai_response',
-                    'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
-                    'content': "I apologize, but I encountered an error processing your request. Please try again.",
-                    'session_id': session_id,
-                    'timestamp': error_timestamp_ms
-                }
-                self.send_to_client(connection_id, error_message)
+            
+            # Start async processing in background thread
+            thread = threading.Thread(target=process_chat_async, daemon=True)
+            thread.start()
+            
+            # Return immediately to avoid API Gateway timeout
+            # The chat handler will send responses via WebSocket asynchronously
+            logger.info(f"✅ Started async chat processing for message {message_id}, returning immediately")
             
             return {
                 'statusCode': 200,
