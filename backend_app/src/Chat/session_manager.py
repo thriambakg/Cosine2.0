@@ -8,6 +8,7 @@ import os
 import logging
 import uuid
 import time
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 import boto3
@@ -16,6 +17,29 @@ from botocore.exceptions import ClientError
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Singleton pattern for boto3 resources (connection pooling)
+_dynamodb_resource = None
+_s3_client = None
+_resource_lock = threading.Lock()
+
+def get_dynamodb_resource():
+    """Get or create singleton DynamoDB resource for connection pooling"""
+    global _dynamodb_resource
+    if _dynamodb_resource is None:
+        with _resource_lock:
+            if _dynamodb_resource is None:
+                _dynamodb_resource = boto3.resource('dynamodb')
+    return _dynamodb_resource
+
+def get_s3_client():
+    """Get or create singleton S3 client for connection pooling"""
+    global _s3_client
+    if _s3_client is None:
+        with _resource_lock:
+            if _s3_client is None:
+                _s3_client = boto3.client('s3')
+    return _s3_client
+
 class SessionManager:
     """
     Manages multi-session context for chat agents
@@ -23,9 +47,9 @@ class SessionManager:
     """
     
     def __init__(self):
-        """Initialize the session manager with AWS resources"""
-        self.dynamodb = boto3.resource('dynamodb')
-        self.s3_client = boto3.client('s3')
+        """Initialize the session manager with AWS resources (using connection pooling)"""
+        self.dynamodb = get_dynamodb_resource()
+        self.s3_client = get_s3_client()
         
         # Get table names from environment variables
         self.chat_sessions_table_name = os.environ.get('CHAT_SESSIONS_TABLE_NAME')

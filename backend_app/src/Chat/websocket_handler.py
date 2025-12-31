@@ -8,6 +8,7 @@ import json
 import os
 import logging
 import uuid
+import threading
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -31,8 +32,32 @@ except ImportError as e:
     def extract_context_summary(context_items):
         return {'total_items': len(context_items) if context_items else 0}
 
-# Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
+# Singleton pattern for boto3 resources (connection pooling)
+_dynamodb_resource = None
+_dynamodb_lock = None
+
+def _get_dynamodb_lock():
+    """Get or create lock for DynamoDB resource"""
+    global _dynamodb_lock
+    if _dynamodb_lock is None:
+        import threading
+        _dynamodb_lock = threading.Lock()
+    return _dynamodb_lock
+
+def get_dynamodb_resource():
+    """Get or create singleton DynamoDB resource for connection pooling"""
+    global _dynamodb_resource, _dynamodb_lock
+    if _dynamodb_resource is None:
+        if _dynamodb_lock is None:
+            import threading
+            _dynamodb_lock = threading.Lock()
+        with _dynamodb_lock:
+            if _dynamodb_resource is None:
+                _dynamodb_resource = boto3.resource('dynamodb')
+    return _dynamodb_resource
+
+# Initialize AWS clients (using connection pooling)
+dynamodb = get_dynamodb_resource()
 
 def json_dumps_safe(obj):
     """JSON dumps with Decimal support for DynamoDB"""
@@ -110,12 +135,22 @@ class WebSocketHandler:
         if websocket_endpoint.startswith('wss://'):
             websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
         
-        self.api_gateway = boto3.client(
-            'apigatewaymanagementapi',
-            endpoint_url=websocket_endpoint
-        )
+        # Singleton pattern for API Gateway client (connection pooling per endpoint)
+        # Store clients by endpoint URL to support multiple endpoints if needed
+        if not hasattr(WebSocketHandler, '_api_gateway_clients'):
+            WebSocketHandler._api_gateway_clients = {}
+            WebSocketHandler._api_gateway_lock = threading.Lock()
         
-        # DynamoDB tables
+        if websocket_endpoint not in WebSocketHandler._api_gateway_clients:
+            with WebSocketHandler._api_gateway_lock:
+                if websocket_endpoint not in WebSocketHandler._api_gateway_clients:
+                    WebSocketHandler._api_gateway_clients[websocket_endpoint] = boto3.client(
+                        'apigatewaymanagementapi',
+                        endpoint_url=websocket_endpoint
+                    )
+        self.api_gateway = WebSocketHandler._api_gateway_clients[websocket_endpoint]
+        
+        # DynamoDB tables (using pooled resource)
         self.chat_connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
         self.chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
     
