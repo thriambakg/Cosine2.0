@@ -210,7 +210,11 @@ class SessionManager:
                     del self._context_cache[key]
                 logger.debug(f"Cleaned cache: removed 100 oldest entries, {len(self._context_cache)} remaining")
             
-            logger.info(f"Retrieved context for session {session_id} (cached)")
+            # Log at appropriate level - debug for kill signal monitoring (bypass_cache=True), info for normal operations
+            if bypass_cache:
+                logger.debug(f"Retrieved context for session {session_id} (fresh, bypass_cache=True)")
+            else:
+                logger.debug(f"Retrieved context for session {session_id} (cached)")
             return session_context
             
         except Exception as e:
