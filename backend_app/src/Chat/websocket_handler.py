@@ -408,19 +408,25 @@ class WebSocketHandler:
             else:
                 message_data = body
             
-            # Get session_id from message data
-            session_id = message_data.get('sessionId')
+            # Get session_id from connection info (stored at connection time) or message data
+            session_id = connection_info.get('session_id') or message_data.get('sessionId')
             logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
             
             # Session ID is required for all message types except connection_establish
             if not session_id and message_data.get('type') != 'connection_establish':
-                logger.error(f"No sessionId provided in message data")
-                return {
-                    'statusCode': 400,
-                    'body': json_dumps_safe({'error': 'Session ID required'})
-                }
+                # Try to get from message data as fallback
+                session_id = message_data.get('sessionId')
+                if not session_id:
+                    logger.error(f"No sessionId found in connection or message data")
+                    return {
+                        'statusCode': 400,
+                        'body': json_dumps_safe({'error': 'Session ID required'})
+                    }
+                # Update connection if session_id was only in message
+                self.update_connection_session(connection_id, session_id)
             
-            # Update connection record with session_id
+            # Update connection record with session_id if it wasn't set at connection time
+            # (backward compatibility for connections made before this change)
             if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
                 self.update_connection_session(connection_id, session_id)
             

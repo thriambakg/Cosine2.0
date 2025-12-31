@@ -172,9 +172,10 @@ def handle_connect(event, connection_id):
         API Gateway response
     """
     try:
-        # Extract user information from query parameters or headers
+        # Extract user information and session ID from query parameters
         query_params = event.get('queryStringParameters', {}) or {}
         user_id = query_params.get('userId')
+        session_id = query_params.get('sessionId')  # Extract sessionId from query params
         
         if not user_id:
             logger.warning("No user ID provided in connection request")
@@ -183,8 +184,8 @@ def handle_connect(event, connection_id):
                 'body': json.dumps({'error': 'User ID required'})
             }
         
-        # Store connection in DynamoDB without session ID
-        # Session ID will be determined by the messages sent through this connection
+        # Store connection in DynamoDB with session ID (if provided)
+        # Session ID is now extracted from query params at connection time
         connection_item = {
             'connection_id': connection_id,
             'user_id': user_id,
@@ -192,9 +193,14 @@ def handle_connect(event, connection_id):
             'expires_at': int((datetime.now() + timedelta(hours=24)).timestamp())
         }
         
-        chat_connections_table.put_item(Item=connection_item)
+        # Add session_id if provided in query params
+        if session_id:
+            connection_item['session_id'] = session_id
+            logger.info(f"User {user_id} connected with connection ID {connection_id} for session {session_id}")
+        else:
+            logger.info(f"User {user_id} connected with connection ID {connection_id} (no session ID provided)")
         
-        logger.info(f"User {user_id} connected with connection ID {connection_id}")
+        chat_connections_table.put_item(Item=connection_item)
         
         # Don't send immediate welcome message - let the client establish the connection first
         # The client should send a message to trigger the welcome response

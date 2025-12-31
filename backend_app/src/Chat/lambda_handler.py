@@ -238,7 +238,17 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                         if kill_flag.is_set():
                                             break
                                         if chunk:
-                                            chunk_text = str(chunk)
+                                            # Handle different chunk types from Strands
+                                            if isinstance(chunk, str):
+                                                chunk_text = chunk
+                                            elif hasattr(chunk, 'text'):
+                                                chunk_text = chunk.text
+                                            elif hasattr(chunk, 'content'):
+                                                chunk_text = chunk.content
+                                            elif isinstance(chunk, dict):
+                                                chunk_text = chunk.get('text', chunk.get('content', str(chunk)))
+                                            else:
+                                                chunk_text = str(chunk)
                                             full_response += chunk_text
                                             accumulated_streaming_content['value'] = full_response
                                             
@@ -279,7 +289,17 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     if kill_flag.is_set():
                                         break
                                     if chunk:
-                                        chunk_text = str(chunk)
+                                        # Handle different chunk types from Strands
+                                        if isinstance(chunk, str):
+                                            chunk_text = chunk
+                                        elif hasattr(chunk, 'text'):
+                                            chunk_text = chunk.text
+                                        elif hasattr(chunk, 'content'):
+                                            chunk_text = chunk.content
+                                        elif isinstance(chunk, dict):
+                                            chunk_text = chunk.get('text', chunk.get('content', str(chunk)))
+                                        else:
+                                            chunk_text = str(chunk)
                                         full_response += chunk_text
                                         accumulated_streaming_content['value'] = full_response
                                         
