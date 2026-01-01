@@ -878,31 +878,66 @@ class FinancialTools:
 # Note: boto3 timeout configuration moved to top of file (before imports)
 # to ensure it's applied before Strands creates any boto3 clients
 
-# Configure different Bedrock models
-MODELS = {
-    'claude-sonnet-4': BedrockModel(
-        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
-        streaming=True  # Enable streaming for real-time token delivery
-    ),
-    'claude-haiku-4-5': BedrockModel(
-        model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        streaming=True  # Enable streaming for real-time token delivery
-    ),
-    'nova-lite': BedrockModel(
-        model_id="us.amazon.nova-lite-v1:0"
-    ),
-    'gpt-oss-120b': BedrockModel(
-        model_id="openai.gpt-oss-120b-1:0",
-        region="us-east-1"
-    ),
-    'gpt-oss-20b': BedrockModel(
-        model_id="openai.gpt-oss-20b-1:0",
-        region="us-east-1"
-    )
-}
+# Lazy load MODELS dictionary (BedrockModel is now lazy-loaded)
+_MODELS = None
 
-# Default model (for backward compatibility)
-model = MODELS['claude-sonnet-4']
+def get_models():
+    """Lazy load MODELS dictionary only when actually needed"""
+    global _MODELS
+    if _MODELS is None:
+        # Lazy load BedrockModel
+        _, _, _, BedrockModel, _, _, _ = _lazy_load_heavy_imports()
+        
+        _MODELS = {
+            'claude-sonnet-4': BedrockModel(
+                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+                streaming=True  # Enable streaming for real-time token delivery
+            ),
+            'claude-haiku-4-5': BedrockModel(
+                model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                streaming=True  # Enable streaming for real-time token delivery
+            ),
+            'nova-lite': BedrockModel(
+                model_id="us.amazon.nova-lite-v1:0"
+            ),
+            'gpt-oss-120b': BedrockModel(
+                model_id="openai.gpt-oss-120b-1:0",
+                region="us-east-1"
+            ),
+            'gpt-oss-20b': BedrockModel(
+                model_id="openai.gpt-oss-20b-1:0",
+                region="us-east-1"
+            )
+        }
+    return _MODELS
+
+# For backward compatibility, create a property-like accessor
+class ModelsDict:
+    """Wrapper to make MODELS accessible like a dict but lazy-loaded"""
+    def __getitem__(self, key):
+        return get_models()[key]
+    
+    def __contains__(self, key):
+        return key in get_models()
+    
+    def keys(self):
+        return get_models().keys()
+    
+    def values(self):
+        return get_models().values()
+    
+    def items(self):
+        return get_models().items()
+    
+    def get(self, key, default=None):
+        return get_models().get(key, default)
+
+MODELS = ModelsDict()
+
+# Default model (for backward compatibility) - lazy-loaded
+def get_default_model():
+    """Get default model (lazy-loaded)"""
+    return get_models()['claude-sonnet-4']
 
 # Define an enhanced financial analysis system prompt with explicit tool orchestration
 FINANCIAL_ANALYSIS_PROMPT = """
@@ -2410,14 +2445,16 @@ def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
     Returns:
         Agent: Configured financial agent
     """
-    if model_name not in MODELS:
-        logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
-        model_name = 'claude-sonnet-4'
-    
     # Lazy load heavy imports (numpy, pandas, yfinance, strands) - only when actually creating agent
     _, _, Agent, BedrockModel, _, _, _ = _lazy_load_heavy_imports()
     
-    selected_model = MODELS[model_name]
+    # Get MODELS (lazy-loaded)
+    models_dict = get_models()
+    if model_name not in models_dict:
+        logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
+        model_name = 'claude-sonnet-4'
+    
+    selected_model = models_dict[model_name]
     logger.info(f"Creating financial agent with model: {model_name}")
     
     # Lazy load tools (this is where chart_generator and matplotlib get imported)

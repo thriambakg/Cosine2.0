@@ -111,9 +111,11 @@ class ContextAwareAgent:
             
             # Create new agent instance with session context and specified model
             # Lazy load heavy imports
-            from agent import _lazy_load_heavy_imports, MODELS
+            from agent import _lazy_load_heavy_imports, get_models
             _, _, Agent, _, _, _, _ = _lazy_load_heavy_imports()
             
+            # Get MODELS (lazy-loaded)
+            MODELS = get_models()
             if model_name not in MODELS:
                 logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
                 model_name = 'claude-sonnet-4'
