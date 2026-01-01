@@ -1872,30 +1872,20 @@ resource "aws_lambda_function" "chat_agent" {
 
 # Lambda Alias for Chat Agent (points to latest published version for provisioned concurrency)
 # Using the function's version attribute which is set when publish = true
-# IMPORTANT: No routing_config allowed - provisioned concurrency requires a simple alias without weights
-# If the alias already exists with weights, you must delete it first or use: terraform taint aws_lambda_alias.chat_agent_alias
 resource "aws_lambda_alias" "chat_agent_alias" {
   name             = "production"
-  description      = "Production alias for chat agent with provisioned concurrency (no weights allowed)"
+  description      = "Production alias for chat agent with provisioned concurrency"
   function_name    = aws_lambda_function.chat_agent.function_name
   function_version = aws_lambda_function.chat_agent.version
 
-  # Explicitly ensure no routing_config (weights) are set
-  # Provisioned concurrency cannot work with weighted aliases
-  # If you see "Alias with weights can not be used with Provisioned Concurrency" error,
-  # the alias exists in AWS with weights. Delete it manually or taint this resource.
-
   lifecycle {
     create_before_destroy = true
-    # Don't ignore function_version - we want it to update when function updates
-    # ignore_changes = [function_version]  # Removed - we want version to update
   }
 }
 
 # Provisioned Concurrency for Chat Agent Lambda (Performance Optimization)
-# Keeps containers warm to eliminate cold starts for concurrent requests
+# Keeps 8 containers warm to eliminate cold starts for first 8 concurrent requests
 # Cost: ~$0.015/hour per unit = ~$88/month for 8 units
-# Note: Increased to 8 to match previous optimization, but can be adjusted based on traffic
 resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
   function_name                     = aws_lambda_function.chat_agent.function_name
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
