@@ -269,11 +269,12 @@ class ContextAwareAgent:
 - When comparing multiple stocks, ALWAYS call generate_chart_tool ONCE with the COMPLETE result from get_multiple_financial_data
 - DO NOT call generate_chart_tool multiple times for each stock - it creates a single comparison chart automatically
 - DO NOT call read_s3_file_tool before generate_chart_tool - the tool handles S3 keys automatically
-- If get_multiple_financial_data returns data with an s3_key, pass that result directly to generate_chart_tool
-- generate_chart_tool will automatically read from S3 if needed - you don't need to read it first
-- For comparison charts: data = get_multiple_financial_data("SNAP,SPY", "1y") → generate_chart_tool("SNAP vs SPY", data, "line", normalize=True)
+- If get_multiple_financial_data returns data with an s3_key, use the s3_key parameter: generate_chart_tool(symbol, s3_key="users/.../data-files/...")
+- NEVER pass large JSON data in data_json parameter - use s3_key instead to avoid timeouts
+- For small datasets: data = get_multiple_financial_data("SNAP,SPY", "1y") → generate_chart_tool("SNAP vs SPY", data_json=data)
+- For large datasets: result = get_multiple_financial_data("SNAP,SPY", "1y") → if result has s3_key, use generate_chart_tool("SNAP vs SPY", s3_key=result["s3_key"])
 - For normalized comparison charts (showing relative performance), set normalize=True in generate_chart_tool
-- NEVER read large S3 files yourself - let generate_chart_tool handle it
+- NEVER read large S3 files yourself - let generate_chart_tool handle it via s3_key parameter
 - NEVER generate HTML reports when user explicitly asks for a "chart" - use generate_chart_tool instead
 
 📊 HTML REPORT GENERATION RULES:

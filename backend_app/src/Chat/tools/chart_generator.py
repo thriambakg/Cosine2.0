@@ -729,14 +729,15 @@ class UnifiedChartGenerator:
 chart_generator = UnifiedChartGenerator()
 
 @tool
-def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", title: str = None, normalize: bool = False) -> str:
+def generate_chart_tool(symbol: str, data_json: str = None, s3_key: str = None, chart_type: str = "line", title: str = None, normalize: bool = False) -> str:
     """
     Generate a unified chart that works with both stock and cryptocurrency data.
     Automatically detects data type and generates appropriate charts.
     
     Args:
         symbol: Stock ticker or cryptocurrency symbol (or comparison name like "SNAP vs SPY")
-        data_json: JSON string containing data from get_financial_data or get_multiple_financial_data
+        data_json: JSON string containing data from get_financial_data or get_multiple_financial_data (optional if s3_key provided)
+        s3_key: S3 key to read data from (optional, use this for large datasets to avoid passing data in tool arguments)
         chart_type: Type of chart ('line', 'candlestick', 'volume', 'ohlc') - defaults to 'line'
         title: Custom title for the chart (optional)
         normalize: If True and multiple stocks are provided, normalize prices to start at same baseline (100) for comparison - defaults to False
@@ -745,12 +746,30 @@ def generate_chart_tool(symbol: str, data_json: str, chart_type: str = "line", t
         Success message with file details
     
     Note:
+        - For large datasets, use s3_key parameter instead of data_json to avoid timeouts
+        - If get_multiple_financial_data returns an s3_key, pass it directly: generate_chart_tool(symbol, s3_key="users/.../data-files/...")
         - For comparison charts with multiple stocks, pass the COMPLETE result from get_multiple_financial_data
         - Set normalize=True to show relative performance starting from the same baseline
         - The tool automatically detects multiple stocks and creates a single comparison chart
     """
     try:
         agent_logger.info(f"Generating {chart_type} chart for {symbol} (normalize={normalize})")
+        
+        # If s3_key is provided, read data from S3 instead of using data_json
+        if s3_key:
+            logger.info(f"📦 Reading chart data from S3: {s3_key}")
+            try:
+                bucket_name = chart_generator._get_bucket_name()
+                s3_response = chart_generator.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                s3_content = s3_response['Body'].read().decode('utf-8')
+                data_json = s3_content
+                logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
+            except Exception as s3_error:
+                logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
+                return f"Error: Failed to read data from S3: {str(s3_error)}"
+        elif not data_json:
+            return "Error: Either data_json or s3_key must be provided"
+        
         # Debug logging to see what data is being passed
         logger.info(f"🔍 DEBUG: generate_chart_tool called with symbol={symbol}, chart_type={chart_type}, normalize={normalize}")
         logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
