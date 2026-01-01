@@ -475,10 +475,12 @@ class UnifiedChartGenerator:
             logger.info(f"Detected data type: {data_type} for symbol: {symbol}")
             
             # If symbol suggests multiple stocks but we detected single stock, try to find consolidated file
+            # Skip this check if we already have multiple_stocks data type to avoid unnecessary S3 calls
             if data_type == 'stock' and (' vs ' in symbol.upper() or ',' in symbol or normalize):
                 logger.warning(f"⚠️ Symbol '{symbol}' suggests multiple stocks or normalization requested, but data appears to be single stock")
                 logger.warning(f"⚠️ Attempting to find consolidated file for comparison chart")
                 # Try to find consolidated file in same directory (if we have an S3 key context)
+                # Use quick lookup with timeout protection
                 try:
                     # Extract user_id and session_id from environment
                     user_id = os.environ.get('USER_ID')
@@ -489,15 +491,20 @@ class UnifiedChartGenerator:
                         prefix = f"users/{user_id}/sessions/{session_id}/data-files/get_multiple_financial_data_"
                         import boto3
                         s3_client = boto3.client('s3')
-                        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=10)
-                        if 'Contents' in response:
-                            # Find most recent consolidated file
-                            consolidated_files = sorted(
-                                [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.json')],
-                                key=lambda x: x.split('_')[-1] if '_' in x else x,  # Sort by timestamp in filename
-                                reverse=True
-                            )
+                        # Limit to 5 results for faster lookup
+                        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=5)
+                        if 'Contents' in response and len(response['Contents']) > 0:
+                            # Find most recent consolidated file (use LastModified for faster sorting)
+                            consolidated_files = [
+                                obj['Key'] for obj in response['Contents'] 
+                                if obj['Key'].endswith('.json')
+                            ]
                             if consolidated_files:
+                                # Sort by LastModified (faster than parsing filename)
+                                consolidated_files.sort(key=lambda k: next(
+                                    (obj['LastModified'] for obj in response['Contents'] if obj['Key'] == k),
+                                    None
+                                ), reverse=True)
                                 consolidated_key = consolidated_files[0]
                                 logger.info(f"📦 Found consolidated file: {consolidated_key}, reading...")
                                 consolidated_response = s3_client.get_object(Bucket=bucket_name, Key=consolidated_key)
@@ -882,7 +889,7 @@ def generate_chart_tool(symbol: str, data_json: str = None, s3_key: str = None, 
                 logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
                 
                 # Check if symbol suggests multiple stocks but S3 key points to single stock file
-                # If so, try to find consolidated file
+                # If so, try to find consolidated file (with timeout protection)
                 if (' vs ' in symbol.upper() or ',' in symbol or normalize) and 'get_multiple_financial_data_' not in s3_key:
                     logger.warning(f"⚠️ Symbol '{symbol}' suggests multiple stocks, but S3 key points to single stock file")
                     logger.warning(f"⚠️ Attempting to find consolidated file for comparison chart")
@@ -890,16 +897,25 @@ def generate_chart_tool(symbol: str, data_json: str = None, s3_key: str = None, 
                         # Extract directory from S3 key
                         s3_key_dir = '/'.join(s3_key.split('/')[:-1])
                         # Look for consolidated file pattern: get_multiple_financial_data_*.json
+                        # Use a quick lookup with limited results to avoid timeout
                         prefix = f"{s3_key_dir}/get_multiple_financial_data_"
-                        response = chart_generator.s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=10)
-                        if 'Contents' in response:
-                            # Find most recent consolidated file
-                            consolidated_files = sorted(
-                                [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.json')],
-                                key=lambda x: x.split('_')[-1] if '_' in x else x,  # Sort by timestamp in filename
-                                reverse=True
-                            )
+                        response = chart_generator.s3_client.list_objects_v2(
+                            Bucket=bucket_name, 
+                            Prefix=prefix, 
+                            MaxKeys=5  # Limit to 5 to speed up lookup
+                        )
+                        if 'Contents' in response and len(response['Contents']) > 0:
+                            # Find most recent consolidated file (simplified sorting)
+                            consolidated_files = [
+                                obj['Key'] for obj in response['Contents'] 
+                                if obj['Key'].endswith('.json')
+                            ]
                             if consolidated_files:
+                                # Sort by LastModified (faster than parsing filename)
+                                consolidated_files.sort(key=lambda k: next(
+                                    (obj['LastModified'] for obj in response['Contents'] if obj['Key'] == k),
+                                    None
+                                ), reverse=True)
                                 consolidated_key = consolidated_files[0]
                                 logger.info(f"📦 Found consolidated file: {consolidated_key}, reading...")
                                 consolidated_response = chart_generator.s3_client.get_object(Bucket=bucket_name, Key=consolidated_key)

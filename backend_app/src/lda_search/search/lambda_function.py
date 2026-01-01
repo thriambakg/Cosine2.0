@@ -221,10 +221,14 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         lobbyist_names = [n for n in lobbyist_names if n and str(n).strip()]
         if lobbyist_names:
             item_name = str(item.get('lobbyist_name') or '').strip()
+            # Normalize both sides by removing commas for flexible matching
+            item_name_normalized = item_name.lower().replace(',', '')
             matches = False
             for name in lobbyist_names:
                 name_str = str(name).strip()
-                if item_name and name_str.lower() in item_name.lower():
+                name_normalized = name_str.lower().replace(',', '')
+                # Try both normalized and original matching
+                if item_name and (name_normalized in item_name_normalized or name_str.lower() in item_name.lower()):
                     matches = True
                     break
             if not matches:
@@ -1248,7 +1252,8 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                             # If value has no comma, try adding one before "INC", "LLC", "CORP", etc.
                             if ',' not in original_value:
                                 # Try case-insensitive suffix matching
-                                suffixes = [' INC.', ' LLC', ' CORP', ' LP', ' L.P.', ' LLP', ' INC', ' LLC.', ' CORP.', ' LP.', ' L.P', ' LLP.']
+                                # Order matters: check longer suffixes first (e.g., " INC." before " INC")
+                                suffixes = [' INC.', ' LLC.', ' CORP.', ' L.P.', ' LP.', ' LLP.', ' INC', ' LLC', ' CORP', ' LP', ' L.P', ' LLP']
                                 for suffix in suffixes:
                                     # Case-insensitive check
                                     if original_value.upper().endswith(suffix.upper()):
@@ -1259,6 +1264,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                                         # Try with comma before suffix: "COMPANY INC." -> "COMPANY, INC."
                                         comma_version = original_value.replace(actual_suffix, ',' + actual_suffix)
                                         comma_variations.append(comma_version)
+                                        logger.info(f"Generated comma variation for {config['hash_key']}: '{original_value}' -> '{comma_version}'")
                                         break
                             
                             # If value has comma, try removing it
@@ -1417,6 +1423,36 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             if intersection_size >= limit * 2:
                 logger.info(f"Intersection has enough items ({intersection_size} >= {limit * 2}), stopping batch fetching")
                 break
+            
+            # Early termination: If intersection is 0 and ALL queries are exhausted,
+            # we should stop because the intersection will remain 0
+            # However, if some queries still have more results, we should continue paginating
+            # to find the intersection (e.g., if ClientPostedDateIndex is exhausted with 14 IDs,
+            # but ItemTypePostedDateIndex has more, we should continue to find those 14 IDs)
+            if intersection_size == 0:
+                exhausted_queries_with_results = [
+                    key for key, result in accumulated_gsi_results.items()
+                    if query_pagination_keys.get(key) is None and len(result['filing_ids']) > 0
+                ]
+                # Only stop early if ALL queries are exhausted (not just some)
+                all_queries_exhausted_check = all(
+                    query_pagination_keys.get(key) is None
+                    for key in query_pagination_keys.keys()
+                )
+                if exhausted_queries_with_results and all_queries_exhausted_check:
+                    logger.warning(f"Intersection is 0 and all queries are exhausted. "
+                                 f"{len(exhausted_queries_with_results)} exhausted query/queries have results, "
+                                 f"but they don't overlap. Stopping pagination.")
+                    logger.info(f"Exhausted queries with results: {exhausted_queries_with_results}")
+                    # Log the sizes for debugging
+                    for key in exhausted_queries_with_results:
+                        logger.info(f"  {key}: {len(accumulated_gsi_results[key]['filing_ids'])} IDs")
+                    break
+                elif exhausted_queries_with_results:
+                    # Some queries are exhausted but others have more - continue paginating
+                    logger.info(f"Intersection is 0 after batch {batch_iteration}, but some queries still have more results. "
+                              f"Continuing pagination to find intersection. "
+                              f"Exhausted queries with results: {exhausted_queries_with_results}")
             
             # Check if any query has more results
             has_more_results = any(
@@ -2188,7 +2224,8 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 # If value has no comma, try adding one before "INC", "LLC", "CORP", etc.
                 if ',' not in original_value:
                     # Try case-insensitive suffix matching
-                    suffixes = [' INC.', ' LLC', ' CORP', ' LP', ' L.P.', ' LLP', ' INC', ' LLC.', ' CORP.', ' LP.', ' L.P', ' LLP.']
+                    # Order matters: check longer suffixes first (e.g., " INC." before " INC")
+                    suffixes = [' INC.', ' LLC.', ' CORP.', ' L.P.', ' LP.', ' LLP.', ' INC', ' LLC', ' CORP', ' LP', ' L.P', ' LLP']
                     for suffix in suffixes:
                         # Case-insensitive check
                         if original_value.upper().endswith(suffix.upper()):
@@ -2199,6 +2236,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                             # Try with comma before suffix: "COMPANY INC." -> "COMPANY, INC."
                             comma_version = original_value.replace(actual_suffix, ',' + actual_suffix)
                             comma_variations.append(comma_version)
+                            logger.info(f"Generated comma variation for {config['hash_key']}: '{original_value}' -> '{comma_version}'")
                             break
                 
                 # If value has comma, try removing it
