@@ -13,7 +13,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from session_manager import session_manager
-from agent import enhanced_tools, create_financial_agent
+from agent import _get_enhanced_tools, create_financial_agent
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,10 +27,16 @@ class ContextAwareAgent:
     def __init__(self):
         """Initialize the context-aware agent system"""
         self.base_agent = None  # Will be created on demand to avoid import-time creation
-        self.base_tools = enhanced_tools
+        self.base_tools = None  # Will be lazy-loaded when needed
         self.session_agents = {}  # Cache for session-specific agents
         
         logger.debug("ContextAwareAgent system initialized")
+    
+    def _get_base_tools(self):
+        """Lazy load tools only when actually needed"""
+        if self.base_tools is None:
+            self.base_tools = _get_enhanced_tools()
+        return self.base_tools
     
     def get_session_agent(self, session_context: Dict[str, Any], model_name: str = 'claude-sonnet-4') -> Any:
         """
@@ -104,8 +110,9 @@ class ContextAwareAgent:
             session_tools = self._get_session_tools(session_context)
             
             # Create new agent instance with session context and specified model
-            from strands import Agent
-            from agent import MODELS
+            # Lazy load heavy imports
+            from agent import _lazy_load_heavy_imports, MODELS
+            _, _, Agent, _, _, _, _ = _lazy_load_heavy_imports()
             
             if model_name not in MODELS:
                 logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
@@ -523,8 +530,8 @@ Based on the current webpage and user intent, focus on:
             session_variables = session_context.get('context', {}).get('session_variables', {})
             relevant_tools = session_variables.get('relevant_tools', [])
             
-            # Start with base tools
-            session_tools = list(self.base_tools)
+            # Start with base tools (lazy-loaded)
+            session_tools = list(self._get_base_tools())
             
             # Add session-specific tools based on context
             page_type = session_variables.get('page_type', 'unknown')
@@ -535,7 +542,7 @@ Based on the current webpage and user intent, focus on:
             
         except Exception as e:
             logger.error(f"Error getting session tools: {str(e)}")
-            return self.base_tools
+            return self._get_base_tools()
     
     def clear_session_cache(self, session_id: str) -> None:
         """

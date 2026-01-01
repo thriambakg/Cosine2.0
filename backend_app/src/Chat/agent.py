@@ -871,8 +871,9 @@ class FinancialTools:
         except Exception as e:
             return f"Execution error: {str(e)}"
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (lazy - only when needed)
+# Note: load_dotenv is now lazy-loaded via _lazy_load_heavy_imports()
+# If you need to load .env early, call: _, load_dotenv_func, _, _, _, _, _ = _lazy_load_heavy_imports(); load_dotenv_func()
 
 # Note: boto3 timeout configuration moved to top of file (before imports)
 # to ensure it's applied before Strands creates any boto3 clients
