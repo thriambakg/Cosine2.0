@@ -1,15 +1,15 @@
 """
 LDA Autocomplete Lambda Function
-Reads from S3 CSV files to provide autocomplete suggestions for LDA search fields
+Reads from S3 TXT files to provide autocomplete suggestions for LDA search fields
+TXT format preserves commas and special characters as they come from the API
 """
 
 import json
 import os
 import logging
 import boto3
-import csv
+import bisect
 from typing import Dict, List, Any, Optional
-from io import StringIO
 from datetime import datetime
 
 # Configure logging
@@ -24,19 +24,19 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-lda-disclosures-produc
 S3_PREFIX = os.environ.get('S3_PREFIX', 'lists/')
 
 # Field type to S3 key mapping
-# Note: general_issue and government_entity are now handled locally in the frontend via CSV files
+# Note: general_issue and government_entity are now handled locally in the frontend via TXT files
 # They are removed from this mapping since they don't need backend autocomplete
 FIELD_TYPE_TO_S3_KEY = {
-    'registrant': f'{S3_PREFIX}registrant_names.csv',
-    'client': f'{S3_PREFIX}client_names.csv',
-    'lobbyist': f'{S3_PREFIX}lobbyist_names.csv',
-    'pac': f'{S3_PREFIX}pacs.csv',
-    'foreign': f'{S3_PREFIX}countries.csv',  # Foreign entities use countries CSV
-    'country': f'{S3_PREFIX}countries.csv',  # Countries CSV contains country names (not codes)
+    'registrant': f'{S3_PREFIX}registrant_names.txt',
+    'client': f'{S3_PREFIX}client_names.txt',
+    'lobbyist': f'{S3_PREFIX}lobbyist_names.txt',
+    'pac': f'{S3_PREFIX}pacs.txt',
+    'foreign': f'{S3_PREFIX}countries.txt',  # Foreign entities use countries TXT
+    'country': f'{S3_PREFIX}countries.txt',  # Countries TXT contains country names (not codes)
 }
 
-# Cache for CSV data (in-memory, per Lambda instance)
-_csv_cache: Dict[str, List[str]] = {}
+# Cache for TXT file data (in-memory, per Lambda instance)
+_txt_cache: Dict[str, List[str]] = {}
 
 
 def get_cors_headers():
@@ -49,19 +49,20 @@ def get_cors_headers():
     }
 
 
-def load_csv_from_s3(field_type: str) -> List[str]:
+def load_txt_from_s3(field_type: str) -> List[str]:
     """
-    Load CSV file or JSON file from S3 and return list of values
+    Load TXT file from S3 and return list of values (one value per line)
+    Preserves commas and special characters as they come from the API
     
     Args:
-        field_type: Type of field (e.g., 'registrant', 'client', 'lobbyist', 'government_entity')
+        field_type: Type of field (e.g., 'registrant', 'client', 'lobbyist', 'pac')
     
     Returns:
-        List of values from CSV or JSON file
+        List of values from TXT file
     """
     # Check cache first
-    if field_type in _csv_cache:
-        return _csv_cache[field_type]
+    if field_type in _txt_cache:
+        return _txt_cache[field_type]
     
     s3_key = FIELD_TYPE_TO_S3_KEY.get(field_type)
     if not s3_key:
@@ -69,33 +70,25 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         return []
     
     try:
-        logger.info(f"Loading CSV from s3://{S3_BUCKET_NAME}/{s3_key} for field_type={field_type}")
+        logger.info(f"Loading TXT file from s3://{S3_BUCKET_NAME}/{s3_key} for field_type={field_type}")
         response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
         content = response['Body'].read().decode('utf-8')
         
-        # Handle CSV files (all constants are now single-column CSV format with names for autocomplete)
-        # Format: header row with 'value', then one name per row
-        reader = csv.reader(StringIO(content))
+        # Handle TXT files - one value per line
+        # Format: one name per line, preserves commas and special characters
         values = []
+        lines = content.split('\n')
         
-        # Skip header row (should be 'value')
-        header = next(reader, None)
-        if header:
-            logger.debug(f"CSV header: {header}")
-        
-        # Read all values (single column) - these should be names, not codes/IDs
-        row_count = 0
-        for row in reader:
-            row_count += 1
-            if row and len(row) > 0 and row[0]:
-                value = row[0].strip()
-                if value:
-                    values.append(value)
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines and header lines (if present)
+            if line and line.lower() not in ['value', field_type]:
+                values.append(line)
         
         # Cache the results
-        _csv_cache[field_type] = values
+        _txt_cache[field_type] = values
         
-        logger.info(f"Loaded {len(values)} values from s3://{S3_BUCKET_NAME}/{s3_key} (processed {row_count} rows)")
+        logger.info(f"Loaded {len(values)} values from s3://{S3_BUCKET_NAME}/{s3_key} (processed {len(lines)} lines)")
         if values:
             logger.info(f"Sample values (first 5): {values[:5]}")
             logger.info(f"Sample values (last 5): {values[-5:]}")
@@ -111,13 +104,13 @@ def load_csv_from_s3(field_type: str) -> List[str]:
         return []
 
 
-def search_csv_values(values: List[str], query: str, limit: int = 20) -> List[str]:
+def search_txt_values(values: List[str], query: str, limit: int = 20) -> List[str]:
     """
-    Search CSV values for matches using tiered approach (exact -> starts with -> contains)
-    Similar to securities autocomplete logic
+    Search TXT file values for matches using tiered approach (exact -> starts with -> contains)
+    Uses binary search for "starts with" matches since data is sorted alphabetically
     
     Args:
-        values: List of values to search
+        values: List of sorted values to search
         query: Search query
         limit: Maximum number of results
     
@@ -136,18 +129,73 @@ def search_csv_values(values: List[str], query: str, limit: int = 20) -> List[st
     starts_with_matches = []
     contains_matches = []
     
-    for value in values:
-        value_lower = value.lower()
+    # Use binary search for "starts with" matches (data is sorted alphabetically)
+    # Only use binary search for larger lists to avoid overhead
+    if len(values) > 100:
+        # Create lowercase version for binary search
+        lower_values = [v.lower() for v in values]
         
-        # Exact match (highest priority)
-        if value_lower == query_lower:
-            exact_matches.append(value)
-        # Starts with (second priority)
-        elif value_lower.startswith(query_lower):
-            starts_with_matches.append(value)
-        # Contains (fallback)
-        elif query_lower in value_lower:
-            contains_matches.append(value)
+        # Find the insertion point where query would be inserted
+        # This gives us the start of values that start with query
+        left = bisect.bisect_left(lower_values, query_lower)
+        
+        # Find the end of the range: increment last character to get upper bound
+        # This finds the first value that doesn't start with query
+        if query_lower:
+            # Create upper bound by incrementing last character
+            query_chars = list(query_lower)
+            if query_chars:
+                # Increment last character (e.g., "abc" -> "abd")
+                query_chars[-1] = chr(ord(query_chars[-1]) + 1)
+                query_upper = ''.join(query_chars)
+            else:
+                query_upper = query_lower + 'z'
+        else:
+            query_upper = query_lower + 'z'
+        
+        right = bisect.bisect_left(lower_values, query_upper)
+        
+        # Check all values in the range for exact matches and starts_with
+        for i in range(left, min(right, len(values))):
+            value = values[i]
+            value_lower = lower_values[i]
+            
+            # Exact match (highest priority)
+            if value_lower == query_lower:
+                exact_matches.append(value)
+            # Starts with (second priority) - verify with startswith to be safe
+            elif value_lower.startswith(query_lower):
+                starts_with_matches.append(value)
+        
+        # For "contains" matches, do linear search but exclude items that start with
+        # Skip the range we already checked for starts_with, but also verify
+        for i, value in enumerate(values):
+            value_lower = lower_values[i]
+            
+            # Skip if already matched in starts_with range (left <= i < right)
+            # This ensures contains matches don't include items that start with
+            if left <= i < right:
+                continue
+            
+            # Contains (fallback) - but NOT if it starts with (already handled above)
+            # Double-check to ensure contains matches are truly "contains but not starts with"
+            if query_lower in value_lower and not value_lower.startswith(query_lower):
+                contains_matches.append(value)
+    else:
+        # For small lists, use linear search (faster due to binary search overhead)
+        for value in values:
+            value_lower = value.lower()
+            
+            # Exact match (highest priority)
+            if value_lower == query_lower:
+                exact_matches.append(value)
+            # Starts with (second priority) - but NOT exact (already handled above)
+            elif value_lower.startswith(query_lower):
+                starts_with_matches.append(value)
+            # Contains (fallback) - but NOT if it starts with (already handled above)
+            # Double-check to ensure contains matches are truly "contains but not starts with"
+            elif query_lower in value_lower and not value_lower.startswith(query_lower):
+                contains_matches.append(value)
     
     # Combine results in priority order
     all_matches = exact_matches + starts_with_matches + contains_matches
@@ -180,8 +228,8 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
         search_limit = max(limit * 10, 100)  # At least 100 per field type
     
     for field_type in field_types:
-        # Load CSV for this field type
-        values = load_csv_from_s3(field_type)
+        # Load TXT file for this field type
+        values = load_txt_from_s3(field_type)
         
         if not values:
             logger.warning(f"No values loaded for field_type={field_type}")
@@ -190,7 +238,7 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
         logger.info(f"Searching {len(values)} values for field_type={field_type} with query='{query}'")
         
         # Search for matches (get more than needed for pagination)
-        matches = search_csv_values(values, query, search_limit)
+        matches = search_txt_values(values, query, search_limit)
         
         logger.info(f"Found {len(matches)} matches for field_type={field_type}")
         
