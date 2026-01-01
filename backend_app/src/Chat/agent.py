@@ -85,8 +85,10 @@ try:
     from dotenv import load_dotenv
     from strands import Agent
     from strands.models import BedrockModel
-    # yfinance, numpy, and pandas are heavy - import lazily in functions that need them
-    logger.debug("Core imports loaded successfully (numpy/pandas/yfinance will be lazy loaded)")
+    import yfinance as yf
+    import numpy as np
+    import pandas as pd
+    logger.debug("All required imports loaded successfully")
 except ImportError as e:
     # Try to add layer paths to sys.path
     layer_paths = ['/opt/python', '/opt/python/lib/python3.11/site-packages', '/opt/python/lib/python3.11/dist-packages']
@@ -100,7 +102,10 @@ except ImportError as e:
         from dotenv import load_dotenv
         from strands import Agent
         from strands.models import BedrockModel
-        logger.debug("Core imports loaded after adding layer paths (numpy/pandas/yfinance will be lazy loaded)")
+        import yfinance as yf
+        import numpy as np
+        import pandas as pd
+        logger.debug("All required imports loaded after adding layer paths")
     except ImportError as e2:
         logger.error(f"Failed to import required libraries: {e2}")
         raise
@@ -180,11 +185,6 @@ class FinancialTools:
         """
         Calculate portfolio metrics including returns, volatility, and correlations
         """
-        # Lazy import heavy libraries
-        import yfinance as yf
-        import numpy as np
-        import pandas as pd
-        
         try:
             portfolio = json.loads(portfolio_json)
             
@@ -201,7 +201,7 @@ class FinancialTools:
             # Download historical data
             stock_data = yf.download(tickers, period=period)['Close']
             if len(tickers) == 1:
-                stock_data = pd.DataFrame({tickers[0]: stock_data})
+                stock_data = stock_data.to_frame(tickers[0])
             
             # Calculate returns
             returns = stock_data.pct_change().dropna()
@@ -247,11 +247,6 @@ class FinancialTools:
     @staticmethod
     def _fetch_from_yfinance(symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Fetch short-term data using yfinance (original implementation)"""
-        # Lazy import heavy libraries
-        import yfinance as yf
-        import numpy as np
-        import pandas as pd
-        
         try:
             # Create yfinance ticker object
             ticker = yf.Ticker(symbol)
@@ -520,10 +515,6 @@ class FinancialTools:
             period: Time period for analysis ("1y", "6mo", "3mo", etc.)
             risk_free_rate: Annual risk-free rate (default 5%)
         """
-        # Lazy import heavy libraries
-        import yfinance as yf
-        import pandas as pd
-        
         try:
             # Parse portfolio data
             if isinstance(portfolio_data, str):
@@ -613,10 +604,6 @@ class FinancialTools:
         """
         Calculate correlation matrix between stocks
         """
-        # Lazy import heavy libraries
-        import yfinance as yf
-        import pandas as pd
-        
         try:
             # Download data
             stock_data = yf.download(tickers, period=period)['Close']
@@ -642,11 +629,6 @@ class FinancialTools:
         """
         Calculate implied volatility surface for options (using historical volatility as proxy)
         """
-        # Lazy import heavy libraries
-        import yfinance as yf
-        import numpy as np
-        import pandas as pd
-        
         try:
             # Get historical data for different periods to create volatility surface
             ticker = yf.Ticker(symbol)

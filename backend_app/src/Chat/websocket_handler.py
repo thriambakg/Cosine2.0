@@ -8,7 +8,6 @@ import json
 import os
 import logging
 import uuid
-import threading
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -32,32 +31,8 @@ except ImportError as e:
     def extract_context_summary(context_items):
         return {'total_items': len(context_items) if context_items else 0}
 
-# Singleton pattern for boto3 resources (connection pooling)
-_dynamodb_resource = None
-_dynamodb_lock = None
-
-def _get_dynamodb_lock():
-    """Get or create lock for DynamoDB resource"""
-    global _dynamodb_lock
-    if _dynamodb_lock is None:
-        import threading
-        _dynamodb_lock = threading.Lock()
-    return _dynamodb_lock
-
-def get_dynamodb_resource():
-    """Get or create singleton DynamoDB resource for connection pooling"""
-    global _dynamodb_resource, _dynamodb_lock
-    if _dynamodb_resource is None:
-        if _dynamodb_lock is None:
-            import threading
-            _dynamodb_lock = threading.Lock()
-        with _dynamodb_lock:
-            if _dynamodb_resource is None:
-                _dynamodb_resource = boto3.resource('dynamodb')
-    return _dynamodb_resource
-
-# Initialize AWS clients (using connection pooling)
-dynamodb = get_dynamodb_resource()
+# Initialize AWS clients
+dynamodb = boto3.resource('dynamodb')
 
 def json_dumps_safe(obj):
     """JSON dumps with Decimal support for DynamoDB"""
@@ -135,22 +110,12 @@ class WebSocketHandler:
         if websocket_endpoint.startswith('wss://'):
             websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
         
-        # Singleton pattern for API Gateway client (connection pooling per endpoint)
-        # Store clients by endpoint URL to support multiple endpoints if needed
-        if not hasattr(WebSocketHandler, '_api_gateway_clients'):
-            WebSocketHandler._api_gateway_clients = {}
-            WebSocketHandler._api_gateway_lock = threading.Lock()
+        self.api_gateway = boto3.client(
+            'apigatewaymanagementapi',
+            endpoint_url=websocket_endpoint
+        )
         
-        if websocket_endpoint not in WebSocketHandler._api_gateway_clients:
-            with WebSocketHandler._api_gateway_lock:
-                if websocket_endpoint not in WebSocketHandler._api_gateway_clients:
-                    WebSocketHandler._api_gateway_clients[websocket_endpoint] = boto3.client(
-                        'apigatewaymanagementapi',
-                        endpoint_url=websocket_endpoint
-                    )
-        self.api_gateway = WebSocketHandler._api_gateway_clients[websocket_endpoint]
-        
-        # DynamoDB tables (using pooled resource)
+        # DynamoDB tables
         self.chat_connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
         self.chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
     
@@ -182,25 +147,14 @@ class WebSocketHandler:
         try:
             current_time = int(datetime.now().timestamp())
             
-            # Query connections for this user
-            # Note: Filter by session_id if present, but also include connections without session_id
-            # (for backward compatibility and cases where session_id wasn't set at connection time)
+            # Query connections for this user and session
             response = self.chat_connections_table.query(
                 IndexName='UserConnectionsIndex',
                 KeyConditionExpression=Key('user_id').eq(user_id),
-                FilterExpression=Attr('expires_at').gt(current_time)
+                FilterExpression=Attr('session_id').eq(session_id) & Attr('expires_at').gt(current_time)
             )
             
-            # Filter by session_id in Python (more flexible than DynamoDB FilterExpression)
-            # Include connections that either:
-            # 1. Have matching session_id
-            # 2. Don't have session_id set (backward compatibility - will be updated on first message)
-            connection_ids = []
-            for item in response['Items']:
-                item_session_id = item.get('session_id')
-                if item_session_id == session_id or not item_session_id:
-                    connection_ids.append(item['connection_id'])
-            
+            connection_ids = [item['connection_id'] for item in response['Items']]
             logger.info(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
             
             return connection_ids
@@ -333,7 +287,7 @@ class WebSocketHandler:
                     'body': json_dumps_safe({'error': 'No connection ID'})
                 }
             
-            # Get user ID and session_id from connection info (stored at connection time from query params)
+            # Get user ID from connection info
             connection_info = self.get_connection_info(connection_id)
             if not connection_info:
                 logger.error(f"Connection {connection_id} not found")
@@ -351,23 +305,21 @@ class WebSocketHandler:
             else:
                 message_data = body
             
-            # Prioritize session_id from connection_info (stored at connection time from query params)
-            # Fallback to message data for backward compatibility
-            session_id = connection_info.get('session_id') or message_data.get('sessionId')
-            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id} (from {'connection_info' if connection_info.get('session_id') else 'message_data'})")
+            # Get session_id from message data
+            session_id = message_data.get('sessionId')
+            logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
             
             # Session ID is required for all message types except connection_establish
             if not session_id and message_data.get('type') != 'connection_establish':
-                logger.error(f"No sessionId found in connection info or message data")
+                logger.error(f"No sessionId provided in message data")
                 return {
                     'statusCode': 400,
                     'body': json_dumps_safe({'error': 'Session ID required'})
                 }
             
-            # Update connection record with session_id if not already set (critical for streaming to work)
+            # Update connection record with session_id
             if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
                 self.update_connection_session(connection_id, session_id)
-                logger.info(f"Updated connection {connection_id} with session_id {session_id} for streaming")
             
             # Process the WebSocket message
             return self._process_message(connection_id, user_id, session_id, message_data)

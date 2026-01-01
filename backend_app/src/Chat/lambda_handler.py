@@ -27,16 +27,14 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 from agent_logger import get_agent_logger
 
 
-# Lazy import heavy libraries - only import when actually needed
-# numpy and pandas are heavy (~2-3s each) and only used in specific tools
-# requests is lightweight and can stay as eager import if needed elsewhere
+# Simple import test - consolidated logging
 try:
     import requests
-    logger.debug("Lightweight imports loaded successfully")
+    import numpy
+    import pandas
+    logger.debug("All required imports loaded successfully")
 except ImportError as e:
     logger.error(f"Failed to import required libraries: {e}")
-
-# numpy and pandas will be imported lazily in tools that need them
 
 # Global variables for lazy loading and connection pooling
 _financial_agent = None
