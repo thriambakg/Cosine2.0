@@ -22,6 +22,8 @@ import {
   Autocomplete,
   Tooltip,
   CircularProgress,
+  Popover,
+  Container,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -47,6 +49,9 @@ interface PortfolioResults {
   portfolio_expected_return: number;
   portfolio_volatility: number;
   sharpe_ratio: number;
+  cagr?: number;
+  alpha?: number;
+  beta?: number;
   stock_details: {
     [key: string]: {
       weight: number;
@@ -74,6 +79,10 @@ export default function PortfolioRisk() {
   const [compareInputValue, setCompareInputValue] = useState<string>('');
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  
+  // Calculator bubble popover state
+  const [calculatorAnchor, setCalculatorAnchor] = useState<HTMLButtonElement | null>(null);
+  const calculatorOpen = Boolean(calculatorAnchor);
   
   // Use the portfolio analysis hook - updated to use real API with force refresh
   const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
@@ -276,16 +285,20 @@ export default function PortfolioRisk() {
                 chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
               });
               
-              allStockData.forEach((data, idx) => {
-                if (data && data.chart_data && idx < stockSymbols.length) {
-                  const symbol = stockSymbols[idx];
-                  data.chart_data.forEach((point: any) => {
-                    if (chartDataMap[point.time]) {
-                      chartDataMap[point.time][symbol] = point.close;
-                    }
-                  });
-                }
-              });
+        // Use validEntries to ensure symbol extraction matches Line component
+        allStockData.forEach((data, idx) => {
+          if (data && data.chart_data && idx < validEntries.length) {
+            // Extract symbol the same way as in the Line component
+            const entry = validEntries[idx];
+            const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+            const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
+            data.chart_data.forEach((point: any) => {
+              if (chartDataMap[point.time]) {
+                chartDataMap[point.time][symbol] = point.close;
+              }
+            });
+          }
+        });
               
               setChartData(Object.values(chartDataMap).filter(d => Object.keys(d).length > 2));
             }
@@ -379,9 +392,13 @@ export default function PortfolioRisk() {
           chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
         });
         
+        // Use validEntries to ensure symbol extraction matches Line component
         allStockData.forEach((data, idx) => {
-          if (data && data.chart_data && idx < stockSymbols.length) {
-            const symbol = stockSymbols[idx];
+          if (data && data.chart_data && idx < validEntries.length) {
+            // Extract symbol the same way as in the Line component
+            const entry = validEntries[idx];
+            const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+            const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
             data.chart_data.forEach((point: any) => {
               if (chartDataMap[point.time]) {
                 chartDataMap[point.time][symbol] = point.close;
@@ -444,7 +461,10 @@ export default function PortfolioRisk() {
     if (results) {
       loadChartData();
     }
-  }, [results, chartType, compareStock, timeframe, loadChartData]);
+    // Only reload when results, chartType, compareStock, or timeframe change
+    // Not when loadChartData function reference changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, chartType, compareStock, timeframe]);
 
   const getYAxisDomain = useCallback(() => {
     if (!chartData || chartData.length === 0) {
@@ -456,7 +476,9 @@ export default function PortfolioRisk() {
       values = chartData.map(d => d.value).filter(v => v && !isNaN(v));
     } else if (chartType === 'multiple') {
       entries.filter(e => e.stock && e.shares > 0).forEach(entry => {
-        const symbol = entry.stock.trim().toUpperCase();
+        // Extract symbol the same way as in loadChartData
+        const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+        const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
         chartData.forEach(d => {
           if (d[symbol] && !isNaN(d[symbol])) {
             values.push(d[symbol]);
@@ -476,7 +498,8 @@ export default function PortfolioRisk() {
     
     const minVal = Math.min(...values);
     const maxVal = Math.max(...values);
-    const padding = (maxVal - minVal) * 0.20; // 20% padding
+    // Use 10% padding for multiple stock mode, 20% for single and compare modes
+    const padding = chartType === 'multiple' ? (maxVal - minVal) * 0.10 : (maxVal - minVal) * 0.20;
     const domainMin = Math.max(0, minVal - padding); // Ensure min doesn't go below 0
     const domainMax = maxVal + padding;
     return [domainMin, domainMax];
@@ -503,381 +526,417 @@ export default function PortfolioRisk() {
     setTimeframe('1y');
   };
 
+  const handleCalculatorClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setCalculatorAnchor(event.currentTarget);
+  };
+
+  const handleCalculatorClose = () => {
+    setCalculatorAnchor(null);
+  };
+
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
-      <Box sx={{ maxWidth: '1400px', mx: 'auto' }}>
-      {/* Header */}
-      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <Box>
-          <Typography 
-            variant="h4" 
-            sx={{ 
-              color: '#ffffff', 
-              fontWeight: 700, 
-              mb: 1,
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-            }}
-          >
-            Portfolio Risk Analysis
-          </Typography>
-          <Typography 
-            variant="body1" 
-            sx={{ 
-              color: '#9ca3af',
-              fontSize: '1rem',
-            }}
-          >
-            Analyze your portfolio's risk metrics and optimize your investment strategy
-          </Typography>
-        </Box>
-        
-        <Button
-          variant="outlined"
-          onClick={clearSession}
-          sx={{
-            color: '#ef4444',
-            borderColor: '#ef4444',
-            '&:hover': {
-              borderColor: '#dc2626',
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            },
-          }}
-        >
-          Clear Session
-        </Button>
-      </Box>
-
-      {/* Input Section */}
-      <Paper
-        sx={{
-          p: 3,
-          mb: 4,
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          backdropFilter: 'blur(20px)',
-          border: '1px solid #374151',
-          borderRadius: '8px',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-        }}
-      >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              color: '#ffffff', 
-              fontWeight: 600, 
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-            }}
-          >
-            Portfolio Holdings
-          </Typography>
-          
-          <FormControl 
-            sx={{ 
-              minWidth: 120,
-              '& .MuiOutlinedInput-root': {
-                '& fieldset': {
-                  borderColor: '#374151',
-                },
-                '&:hover fieldset': {
-                  borderColor: '#3b82f6',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: '#3b82f6',
-                },
-              },
-              '& .MuiInputLabel-root': {
-                color: '#9ca3af',
-              },
-              '& .MuiSelect-select': {
-                color: '#ffffff',
-              },
-              '& .MuiSvgIcon-root': {
-                color: '#9ca3af',
-              },
-            }}
-          >
-            <InputLabel id="timeframe-label">Timeframe</InputLabel>
-            <Select
-              labelId="timeframe-label"
-              value={timeframe}
-              label="Timeframe"
-              onChange={(e) => setTimeframe(e.target.value)}
-            >
-              <MenuItem value="1d">1 Day</MenuItem>
-              <MenuItem value="5d">5 Days</MenuItem>
-              <MenuItem value="1mo">1 Month</MenuItem>
-              <MenuItem value="3mo">3 Months</MenuItem>
-              <MenuItem value="6mo">6 Months</MenuItem>
-              <MenuItem value="1y">1 Year</MenuItem>
-              <MenuItem value="2y">2 Years</MenuItem>
-              <MenuItem value="5y">5 Years</MenuItem>
-              <MenuItem value="10y">10 Years</MenuItem>
-              <MenuItem value="ytd">Year to Date</MenuItem>
-              <MenuItem value="max">Max</MenuItem>
-            </Select>
-          </FormControl>
-        </Box>
-
-        {entries.map((entry, index) => (
-          <Box 
-            key={index} 
-            sx={{ 
-              display: 'flex', 
-              gap: 2, 
-              mb: 2, 
-              alignItems: 'center',
-              p: 2,
-              backgroundColor: 'rgba(255, 255, 255, 0.02)',
-              borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
-            }}
-          >
-            <Autocomplete
-              value={isSecurityDataLoaded && entry.stock
-                ? securitySuggestionsServiceV2.findBySymbol(entry.stock.toUpperCase()) ?? entry.stock
-                : entry.stock || null}
-              onChange={(_, newValue) => {
-                if (newValue) {
-                  if (typeof newValue === 'string') {
-                    const symbolMatch = newValue.match(/^([A-Z.]+)(?:\s*-|$)/);
-                    const symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
-                    updateEntry(index, 'stock', symbol.toUpperCase());
-                  } else {
-                    updateEntry(index, 'stock', newValue.symbol.toUpperCase());
-                  }
-                }
-              }}
-              onInputChange={(_, newInputValue) => {
-                if (isSecurityDataLoaded && newInputValue) {
-                  const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
-                  const seen = new Set<string>();
-                  const uniqueSuggestions = suggestions.filter(security => {
-                    if (seen.has(security.symbol)) return false;
-                    seen.add(security.symbol);
-                    return true;
-                  });
-                  setSecuritySuggestions(uniqueSuggestions);
-                }
-              }}
-              onBlur={(e) => {
-                const inputValue = (e.target as HTMLInputElement).value;
-                if (inputValue) {
-                  const normalizedSymbol = inputValue.trim().toUpperCase();
-                  if (normalizedSymbol && normalizedSymbol.length > 0) {
-                    updateEntry(index, 'stock', normalizedSymbol);
-                  }
-                }
-              }}
-              options={securitySuggestions}
-              getOptionLabel={(option) => {
-                if (typeof option === 'string') return option;
-                return option.displayText || option.symbol || '';
-              }}
-              isOptionEqualToValue={(option: Security | string, value: Security | string | null) => {
-                if (!value) return false;
-                if (typeof option === 'string' && typeof value === 'string') {
-                  return option.toUpperCase() === value.toUpperCase();
-                }
-                if (typeof option === 'string' && typeof value === 'object' && 'symbol' in value) {
-                  return option.toUpperCase() === (value.symbol?.toUpperCase() || '');
-                }
-                if (typeof value === 'string' && typeof option === 'object' && 'symbol' in option) {
-                  return value.toUpperCase() === (option.symbol?.toUpperCase() || '');
-                }
-                if (typeof option === 'object' && typeof value === 'object' && 'symbol' in option && 'symbol' in value) {
-                  return option.symbol === value.symbol;
-                }
-                return false;
-              }}
-              loading={!isSecurityDataLoaded}
-              renderOption={(props, option) => {
-                if (typeof option === 'string') {
-                  return (
-                    <Box component="li" {...props} key={option} sx={{ py: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
-                        {option}
-                      </Typography>
-                    </Box>
-                  );
-                }
-                const security = option as Security;
-                const capColor = security.marketCap === 'high' ? '#10b981' : security.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
-                const capLabel = security.marketCap === 'high' ? 'High Cap' : security.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
-                const uniqueKey = `${security.symbol}-${security.marketCap}-${security.name}`;
-                return (
-                  <Box component="li" {...props} key={uniqueKey} sx={{ py: 1 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
-                          {security.symbol}
-                        </Typography>
-                        <Chip 
-                          label={capLabel} 
-                          size="small" 
-                          sx={{ 
-                            height: '18px', 
-                            fontSize: '0.65rem',
-                            backgroundColor: capColor,
-                            color: 'white'
-                          }} 
-                        />
-                      </Box>
-                      <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                        {security.name}
-                      </Typography>
-                    </Box>
-                  </Box>
-                );
-              }}
-              freeSolo
-              autoSelect={false}
-              selectOnFocus={false}
-              clearOnBlur={false}
-              autoHighlight={false}
-              disableListWrap={true}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Stock Ticker"
-                  sx={{ 
-                flexGrow: 1,
-                '& .MuiOutlinedInput-root': {
-                  '& fieldset': {
-                    borderColor: '#374151',
-                  },
-                  '&:hover fieldset': {
-                    borderColor: '#3b82f6',
-                  },
-                  '&.Mui-focused fieldset': {
-                    borderColor: '#3b82f6',
-                  },
-                },
-                '& .MuiInputLabel-root': {
-                  color: '#9ca3af',
-                },
-                '& .MuiInputBase-input': {
-                  color: '#ffffff',
-                },
-              }}
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {!isSecurityDataLoaded ? <CircularProgress color="inherit" size={20} /> : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-              sx={{
-                flexGrow: 1,
-                '& .MuiAutocomplete-popper': {
-                  '& .MuiPaper-root': {
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    border: '1px solid #374151',
-                  },
-                },
-              }}
-            />
-                         <TextField
-               type="number"
-               label="Number of Shares"
-               value={entry.shares}
-               onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
-               inputProps={{
-                 inputMode: 'numeric',
-                 pattern: '[0-9]*',
-               }}
-               sx={{ 
-                 flexGrow: 1,
-                 '& .MuiOutlinedInput-root': {
-                   '& fieldset': {
-                     borderColor: '#374151',
-                   },
-                   '&:hover fieldset': {
-                     borderColor: '#3b82f6',
-                   },
-                   '&.Mui-focused fieldset': {
-                     borderColor: '#3b82f6',
-                   },
-                 },
-                 '& .MuiInputLabel-root': {
-                   color: '#9ca3af',
-                 },
-                 '& .MuiInputBase-input': {
-                   color: '#ffffff',
-                 },
-                 '& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button': {
-                   WebkitAppearance: 'none',
-                   margin: 0,
-                 },
-                 '& input[type=number]': {
-                   MozAppearance: 'textfield',
-                 },
-               }}
-             />
-            <IconButton 
-              onClick={() => removeEntry(index)}
-              disabled={entries.length === 1}
-              sx={{
-                color: '#ef4444',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.2)',
-                '&:hover': {
-                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                },
-                '&.Mui-disabled': {
-                  color: '#6b7280',
-                  backgroundColor: 'rgba(107, 114, 128, 0.1)',
-                },
-              }}
-            >
-              <DeleteIcon />
-            </IconButton>
-          </Box>
-        ))}
-
-        <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={addEntry}
+      <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
+        {/* Calculator Bubble Button - Top Left */}
+        <Box sx={{ position: 'relative', mb: 2 }}>
+          <IconButton
+            onClick={handleCalculatorClick}
             sx={{
-              borderColor: '#3b82f6',
+              position: 'absolute',
+              top: -8,
+              left: -8,
+              zIndex: 10,
+              width: 48,
+              height: 48,
+              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              border: '2px solid #3b82f6',
+              borderRadius: '50%',
               color: '#3b82f6',
               '&:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.3)',
                 borderColor: '#2563eb',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
               },
             }}
           >
-            Add Stock
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<CalculateIcon />}
-            onClick={calculateRisk}
-            disabled={isLoading || entries.some(e => !e.stock || e.shares <= 0)}
-            sx={{
-              background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-              color: '#ffffff',
-              fontWeight: 600,
-              '&:hover': {
-                background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
-              },
-              '&.Mui-disabled': {
-                background: 'rgba(107, 114, 128, 0.3)',
-                color: '#6b7280',
+            <CalculateIcon />
+          </IconButton>
+
+          {/* Calculator Popover */}
+          <Popover
+            open={calculatorOpen}
+            anchorEl={calculatorAnchor}
+            onClose={handleCalculatorClose}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'left',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'left',
+            }}
+            PaperProps={{
+              sx: {
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid #374151',
+                borderRadius: '8px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                mt: 1,
+                minWidth: 400,
+                maxWidth: 600,
+                maxHeight: '80vh',
+                overflow: 'auto',
               },
             }}
           >
-            {isLoading ? 'Calculating...' : 'Calculate Risk'}
-          </Button>
+            <Box sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600, 
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  Portfolio Holdings
+                </Typography>
+                
+                <FormControl 
+                  size="small"
+                  sx={{ 
+                    minWidth: 120,
+                    '& .MuiOutlinedInput-root': {
+                      '& fieldset': {
+                        borderColor: '#374151',
+                      },
+                      '&:hover fieldset': {
+                        borderColor: '#3b82f6',
+                      },
+                      '&.Mui-focused fieldset': {
+                        borderColor: '#3b82f6',
+                      },
+                    },
+                    '& .MuiInputLabel-root': {
+                      color: '#9ca3af',
+                    },
+                    '& .MuiSelect-select': {
+                      color: '#ffffff',
+                    },
+                    '& .MuiSvgIcon-root': {
+                      color: '#9ca3af',
+                    },
+                  }}
+                >
+                  <InputLabel id="timeframe-label">Timeframe</InputLabel>
+                  <Select
+                    labelId="timeframe-label"
+                    value={timeframe}
+                    label="Timeframe"
+                    onChange={(e) => setTimeframe(e.target.value)}
+                  >
+                    <MenuItem value="1d">1 Day</MenuItem>
+                    <MenuItem value="5d">5 Days</MenuItem>
+                    <MenuItem value="1mo">1 Month</MenuItem>
+                    <MenuItem value="3mo">3 Months</MenuItem>
+                    <MenuItem value="6mo">6 Months</MenuItem>
+                    <MenuItem value="1y">1 Year</MenuItem>
+                    <MenuItem value="2y">2 Years</MenuItem>
+                    <MenuItem value="5y">5 Years</MenuItem>
+                    <MenuItem value="10y">10 Years</MenuItem>
+                    <MenuItem value="ytd">Year to Date</MenuItem>
+                    <MenuItem value="max">Max</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+
+              {entries.map((entry, index) => (
+                <Box 
+                  key={index} 
+                  sx={{ 
+                    display: 'flex', 
+                    gap: 2, 
+                    mb: 2, 
+                    alignItems: 'center',
+                    p: 2,
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(255, 255, 255, 0.05)',
+                  }}
+                >
+                  <Autocomplete
+                    value={isSecurityDataLoaded && entry.stock
+                      ? securitySuggestionsServiceV2.findBySymbol(entry.stock.toUpperCase()) ?? entry.stock
+                      : entry.stock || null}
+                    onChange={(_, newValue) => {
+                      if (newValue) {
+                        if (typeof newValue === 'string') {
+                          const symbolMatch = newValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                          const symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
+                          updateEntry(index, 'stock', symbol.toUpperCase());
+                        } else {
+                          updateEntry(index, 'stock', newValue.symbol.toUpperCase());
+                        }
+                      }
+                    }}
+                    onInputChange={(_, newInputValue) => {
+                      if (isSecurityDataLoaded && newInputValue) {
+                        const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
+                        const seen = new Set<string>();
+                        const uniqueSuggestions = suggestions.filter(security => {
+                          if (seen.has(security.symbol)) return false;
+                          seen.add(security.symbol);
+                          return true;
+                        });
+                        setSecuritySuggestions(uniqueSuggestions);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const inputValue = (e.target as HTMLInputElement).value;
+                      if (inputValue) {
+                        const normalizedSymbol = inputValue.trim().toUpperCase();
+                        if (normalizedSymbol && normalizedSymbol.length > 0) {
+                          updateEntry(index, 'stock', normalizedSymbol);
+                        }
+                      }
+                    }}
+                    options={securitySuggestions}
+                    getOptionLabel={(option) => {
+                      if (typeof option === 'string') return option;
+                      return option.displayText || option.symbol || '';
+                    }}
+                    isOptionEqualToValue={(option: Security | string, value: Security | string | null) => {
+                      if (!value) return false;
+                      if (typeof option === 'string' && typeof value === 'string') {
+                        return option.toUpperCase() === value.toUpperCase();
+                      }
+                      if (typeof option === 'string' && typeof value === 'object' && 'symbol' in value) {
+                        return option.toUpperCase() === (value.symbol?.toUpperCase() || '');
+                      }
+                      if (typeof value === 'string' && typeof option === 'object' && 'symbol' in option) {
+                        return value.toUpperCase() === (option.symbol?.toUpperCase() || '');
+                      }
+                      if (typeof option === 'object' && typeof value === 'object' && 'symbol' in option && 'symbol' in value) {
+                        return option.symbol === value.symbol;
+                      }
+                      return false;
+                    }}
+                    loading={!isSecurityDataLoaded}
+                    renderOption={(props, option) => {
+                      if (typeof option === 'string') {
+                        return (
+                          <Box component="li" {...props} key={option} sx={{ py: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                              {option}
+                            </Typography>
+                          </Box>
+                        );
+                      }
+                      const security = option as Security;
+                      const capColor = security.marketCap === 'high' ? '#10b981' : security.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
+                      const capLabel = security.marketCap === 'high' ? 'High Cap' : security.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
+                      const uniqueKey = `${security.symbol}-${security.marketCap}-${security.name}`;
+                      return (
+                        <Box component="li" {...props} key={uniqueKey} sx={{ py: 1 }}>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                                {security.symbol}
+                              </Typography>
+                              <Chip 
+                                label={capLabel} 
+                                size="small" 
+                                sx={{ 
+                                  height: '18px', 
+                                  fontSize: '0.65rem',
+                                  backgroundColor: capColor,
+                                  color: 'white'
+                                }} 
+                              />
+                            </Box>
+                            <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                              {security.name}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      );
+                    }}
+                    freeSolo
+                    autoSelect={false}
+                    selectOnFocus={false}
+                    clearOnBlur={false}
+                    autoHighlight={false}
+                    disableListWrap={true}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Stock Ticker"
+                        size="small"
+                        sx={{ 
+                          flexGrow: 1,
+                          '& .MuiOutlinedInput-root': {
+                            '& fieldset': {
+                              borderColor: '#374151',
+                            },
+                            '&:hover fieldset': {
+                              borderColor: '#3b82f6',
+                            },
+                            '&.Mui-focused fieldset': {
+                              borderColor: '#3b82f6',
+                            },
+                          },
+                          '& .MuiInputLabel-root': {
+                            color: '#9ca3af',
+                          },
+                          '& .MuiInputBase-input': {
+                            color: '#ffffff',
+                          },
+                        }}
+                        InputProps={{
+                          ...params.InputProps,
+                          endAdornment: (
+                            <>
+                              {!isSecurityDataLoaded ? <CircularProgress color="inherit" size={20} /> : null}
+                              {params.InputProps.endAdornment}
+                            </>
+                          ),
+                        }}
+                      />
+                    )}
+                    sx={{
+                      flexGrow: 2,
+                      minWidth: 200,
+                      '& .MuiAutocomplete-popper': {
+                        '& .MuiPaper-root': {
+                          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                          border: '1px solid #374151',
+                        },
+                      },
+                    }}
+                  />
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="Shares"
+                    value={entry.shares}
+                    onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
+                    inputProps={{
+                      inputMode: 'numeric',
+                      pattern: '[0-9]*',
+                    }}
+                    sx={{ 
+                      flexGrow: 1,
+                      maxWidth: 120,
+                      '& .MuiOutlinedInput-root': {
+                        '& fieldset': {
+                          borderColor: '#374151',
+                        },
+                        '&:hover fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                        '&.Mui-focused fieldset': {
+                          borderColor: '#3b82f6',
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: '#9ca3af',
+                      },
+                      '& .MuiInputBase-input': {
+                        color: '#ffffff',
+                      },
+                      '& input[type=number]::-webkit-outer-spin-button, & input[type=number]::-webkit-inner-spin-button': {
+                        WebkitAppearance: 'none',
+                        margin: 0,
+                      },
+                      '& input[type=number]': {
+                        MozAppearance: 'textfield',
+                      },
+                    }}
+                  />
+                  <IconButton 
+                    size="small"
+                    onClick={() => removeEntry(index)}
+                    disabled={entries.length === 1}
+                    sx={{
+                      color: '#ef4444',
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      '&:hover': {
+                        backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                      },
+                      '&.Mui-disabled': {
+                        color: '#6b7280',
+                        backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                      },
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              ))}
+
+              <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={addEntry}
+                  sx={{
+                    borderColor: '#3b82f6',
+                    color: '#3b82f6',
+                    '&:hover': {
+                      borderColor: '#2563eb',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                  }}
+                >
+                  Add Stock
+                </Button>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<CalculateIcon />}
+                  onClick={() => {
+                    calculateRisk();
+                    handleCalculatorClose();
+                  }}
+                  disabled={isLoading || entries.some(e => !e.stock || e.shares <= 0)}
+                  sx={{
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                    color: '#ffffff',
+                    fontWeight: 600,
+                    '&:hover': {
+                      background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
+                    },
+                    '&.Mui-disabled': {
+                      background: 'rgba(107, 114, 128, 0.3)',
+                      color: '#6b7280',
+                    },
+                  }}
+                >
+                  {isLoading ? 'Calculating...' : 'Calculate Risk'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={clearSession}
+                  sx={{
+                    color: '#ef4444',
+                    borderColor: '#ef4444',
+                    '&:hover': {
+                      borderColor: '#dc2626',
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    },
+                  }}
+                >
+                  Clear
+                </Button>
+              </Box>
+            </Box>
+          </Popover>
         </Box>
-      </Paper>
+
 
       {/* Error Display */}
       {error && (
@@ -896,41 +955,62 @@ export default function PortfolioRisk() {
         </Alert>
       )}
 
-          {/* Results Section */}
-      {results && (
-        <Paper
-          sx={{
-            p: 3,
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid #374151',
-            borderRadius: '8px',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-          }}
-        >
-          <Typography 
-            variant="h6" 
+        {/* Error Display */}
+        {error && (
+          <Alert 
+            severity="error" 
             sx={{ 
-              color: '#ffffff', 
-              fontWeight: 600, 
               mb: 3,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              '& .MuiAlert-message': {
+                color: '#ef4444',
+              },
             }}
           >
-            Portfolio Analysis Results
-          </Typography>
+            {error}
+          </Alert>
+        )}
 
-          {/* Chart Section */}
-          {entries.some(e => e.stock && e.shares > 0) && (
-            <Box sx={{ mb: 4, position: 'relative', height: '400px', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', p: 1 }}>
+        {/* Results Section - Expanded */}
+        {results && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, height: 'calc(100vh - 200px)' }}>
+            {/* Chart Section - Expanded */}
+            {entries.some(e => e.stock && e.shares > 0) && (
+              <Paper
+                sx={{
+                  p: 3,
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid #374151',
+                  borderRadius: '8px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  flex: '1 1 60%',
+                  minHeight: 500,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600, 
+                    mb: 2,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  Portfolio Performance Chart
+                </Typography>
+                <Box sx={{ position: 'relative', flex: 1, minHeight: 400, backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', p: 2 }}>
               {isLoadingChart ? (
                 <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <CircularProgress size={24} sx={{ color: tileColor }} />
                 </Box>
               ) : chartData && chartData.length > 0 ? (
                 <>
-                  <ResponsiveContainer width="100%" height="85%">
+                  <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
                       <XAxis 
@@ -987,7 +1067,9 @@ export default function PortfolioRisk() {
                         />
                       )}
                       {chartType === 'multiple' && entries.filter(e => e.stock && e.shares > 0).map((entry, idx) => {
-                        const symbol = entry.stock.trim().toUpperCase();
+                        // Extract symbol the same way as in loadChartData
+                        const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+                        const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
                         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#a855f7', '#ec4899', '#06b6d4'];
                         return (
                           <Line 
@@ -998,9 +1080,16 @@ export default function PortfolioRisk() {
                             strokeWidth={2}
                             dot={false}
                             activeDot={{ r: 4 }}
+                            name={symbol}
                           />
                         );
                       })}
+                      {chartType === 'multiple' && (
+                        <Legend 
+                          wrapperStyle={{ fontSize: '11px', color: '#9ca3af' }}
+                          iconType="line"
+                        />
+                      )}
                       {chartType === 'compare' && (
                         <>
                           <Line 
@@ -1186,120 +1275,48 @@ export default function PortfolioRisk() {
                   </Typography>
                 </Box>
               )}
-            </Box>
-          )}
+                </Box>
+              </Paper>
+            )}
 
-          {/* Key Metrics */}
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
+            {/* Bottom Section - Two Tables Side by Side */}
+            <Box sx={{ display: 'flex', gap: 3, flex: '1 1 35%', minHeight: 400 }}>
+              {/* Stock Details Table - Bottom Left */}
+              <Paper
                 sx={{
                   p: 3,
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  border: '1px solid rgba(59, 130, 246, 0.2)',
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid #374151',
                   borderRadius: '8px',
-                  textAlign: 'center',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  flex: '1 1 50%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
                 }}
               >
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                  Total Portfolio Value
-                </Typography>
-                <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 700 }}>
-                  ${results.total_portfolio_value.toLocaleString()}
-                </Typography>
-              </Box>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 3,
-                  backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                  border: '1px solid rgba(34, 197, 94, 0.2)',
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                }}
-              >
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                  Expected Annual Return
-                </Typography>
-                <Typography variant="h5" sx={{ color: '#22c55e', fontWeight: 700 }}>
-                  {results.portfolio_expected_return >= 0 ? '+' : ''}{results.portfolio_expected_return.toFixed(2)}%
-                </Typography>
-              </Box>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 3,
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.2)',
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                }}
-              >
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                  Portfolio Volatility
-                </Typography>
-                <Typography variant="h5" sx={{ color: '#ef4444', fontWeight: 700 }}>
-                  {results.portfolio_volatility.toFixed(2)}%
-                </Typography>
-                <Chip
-                  label={getRiskLevel(results.portfolio_volatility).level}
-                  size="small"
-                  sx={{
-                    backgroundColor: getRiskLevel(results.portfolio_volatility).color,
-                    color: '#ffffff',
-                    fontWeight: 600,
-                    mt: 1,
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600, 
+                    mb: 2,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
                   }}
-                />
-              </Box>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 3,
-                  backgroundColor: 'rgba(168, 85, 247, 0.1)',
-                  border: '1px solid rgba(168, 85, 247, 0.2)',
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                }}
-              >
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                  Sharpe Ratio
+                >
+                  Stock Details
                 </Typography>
-                <Typography variant="h5" sx={{ color: '#a855f7', fontWeight: 700 }}>
-                  {results.sharpe_ratio.toFixed(2)}
-                </Typography>
-              </Box>
-            </Grid>
-          </Grid>
-
-          {/* Stock Details Table */}
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              color: '#ffffff', 
-              fontWeight: 600, 
-              mb: 2,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-            }}
-          >
-            Individual Stock Details
-          </Typography>
-
-          <TableContainer
-            sx={{
-              backgroundColor: 'rgba(255, 255, 255, 0.02)',
-              border: '1px solid #374151',
-              borderRadius: '8px',
-              overflow: 'hidden',
-            }}
-          >
+                <TableContainer
+                  sx={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid #374151',
+                    borderRadius: '8px',
+                    flex: 1,
+                    overflow: 'auto',
+                  }}
+                >
             <Table>
               <TableHead>
                 <TableRow sx={{ backgroundColor: 'rgba(59, 130, 246, 0.1)' }}>
@@ -1345,10 +1362,117 @@ export default function PortfolioRisk() {
                 ))}
               </TableBody>
             </Table>
-          </TableContainer>
-        </Paper>
-      )}
-      </Box>
+              </TableContainer>
+              </Paper>
+
+              {/* Advanced Metrics Table - Bottom Right */}
+              <Paper
+                sx={{
+                  p: 3,
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid #374151',
+                  borderRadius: '8px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  flex: '1 1 50%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                }}
+              >
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600, 
+                    mb: 2,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  Advanced Metrics
+                </Typography>
+                <TableContainer
+                  sx={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid #374151',
+                    borderRadius: '8px',
+                    flex: 1,
+                    overflow: 'auto',
+                  }}
+                >
+                  <Table>
+                    <TableHead>
+                      <TableRow sx={{ backgroundColor: 'rgba(59, 130, 246, 0.1)' }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Metric</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Value</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Total Portfolio Value</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                          ${results.total_portfolio_value.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Expected Annual Return</TableCell>
+                        <TableCell align="right" sx={{ color: '#22c55e', fontWeight: 600 }}>
+                          {results.portfolio_expected_return >= 0 ? '+' : ''}{results.portfolio_expected_return.toFixed(2)}%
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>CAGR</TableCell>
+                        <TableCell align="right" sx={{ color: results.cagr && results.cagr >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                          {results.cagr !== undefined ? `${results.cagr >= 0 ? '+' : ''}${results.cagr.toFixed(2)}%` : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Alpha</TableCell>
+                        <TableCell align="right" sx={{ color: results.alpha && results.alpha >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                          {results.alpha !== undefined ? `${results.alpha >= 0 ? '+' : ''}${results.alpha.toFixed(2)}%` : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Beta</TableCell>
+                        <TableCell align="right" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+                          {results.beta !== undefined ? results.beta.toFixed(2) : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Volatility</TableCell>
+                        <TableCell align="right" sx={{ color: '#ef4444', fontWeight: 600 }}>
+                          {results.portfolio_volatility.toFixed(2)}%
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Sharpe Ratio</TableCell>
+                        <TableCell align="right" sx={{ color: '#a855f7', fontWeight: 600 }}>
+                          {results.sharpe_ratio.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>Risk Level</TableCell>
+                        <TableCell align="right">
+                          <Chip
+                            label={getRiskLevel(results.portfolio_volatility).level}
+                            size="small"
+                            sx={{
+                              backgroundColor: getRiskLevel(results.portfolio_volatility).color,
+                              color: '#ffffff',
+                              fontWeight: 600,
+                            }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            </Box>
+          </Box>
+        )}
+      </Container>
     </Box>
   );
 }

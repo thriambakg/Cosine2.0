@@ -414,11 +414,131 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         risk_free_rate = 0.02
         sharpe_ratio = (portfolio_expected_return/100 - risk_free_rate) / (portfolio_volatility/100) if portfolio_volatility > 0 else 0
         
+        # Calculate CAGR (Compound Annual Growth Rate)
+        # Use the first and last portfolio values from historical data
+        portfolio_cagr = 0.0
+        try:
+            # Calculate portfolio value over time
+            if len(stock_data_dict) > 0:
+                # Get the earliest and latest dates from all stocks
+                all_dates = set()
+                for df in stock_data_dict.values():
+                    all_dates.update(df.index)
+                sorted_dates = sorted(all_dates)
+                
+                if len(sorted_dates) > 1:
+                    # Calculate portfolio value at start and end
+                    start_value = 0
+                    end_value = 0
+                    
+                    for ticker in tickers:
+                        df = stock_data_dict[ticker]
+                        start_price = df['Close'].iloc[0]
+                        end_price = df['Close'].iloc[-1]
+                        shares = next((s for t, s, _ in portfolio_tuples if t == ticker), 0)
+                        start_value += shares * start_price
+                        end_value += shares * end_price
+                    
+                    if start_value > 0:
+                        # Calculate number of years
+                        days_diff = (sorted_dates[-1] - sorted_dates[0]).days
+                        years = days_diff / 365.25
+                        
+                        if years > 0:
+                            # CAGR = (End Value / Start Value)^(1/years) - 1
+                            portfolio_cagr = ((end_value / start_value) ** (1 / years) - 1) * 100
+        except Exception as e:
+            logger.warning(f"CAGR calculation failed: {e}")
+            portfolio_cagr = portfolio_expected_return  # Fallback to expected return
+        
+        # Calculate Beta (portfolio beta vs market, using SPY as benchmark)
+        portfolio_beta = 1.0  # Default to 1.0
+        try:
+            # Fetch SPY data for market benchmark
+            spy = yf.Ticker("SPY")
+            spy_df = spy.history(period=period)
+            
+            if not spy_df.empty and len(stock_data_dict) > 0:
+                # Calculate portfolio returns
+                portfolio_returns = []
+                spy_returns = []
+                
+                # Get common dates
+                all_dates = set(spy_df.index)
+                for df in stock_data_dict.values():
+                    all_dates = all_dates.intersection(set(df.index))
+                
+                sorted_dates = sorted(all_dates)
+                
+                if len(sorted_dates) > 1:
+                    for date in sorted_dates[1:]:  # Skip first date (no previous value)
+                        # Calculate portfolio return for this date
+                        portfolio_value = 0
+                        prev_portfolio_value = 0
+                        
+                        for ticker in tickers:
+                            df = stock_data_dict[ticker]
+                            if date in df.index:
+                                prev_date_idx = df.index.get_loc(date) - 1
+                                if prev_date_idx >= 0:
+                                    prev_price = df['Close'].iloc[prev_date_idx]
+                                    curr_price = df['Close'].loc[date]
+                                    shares = next((s for t, s, _ in portfolio_tuples if t == ticker), 0)
+                                    portfolio_value += shares * curr_price
+                                    prev_portfolio_value += shares * prev_price
+                        
+                        if prev_portfolio_value > 0:
+                            portfolio_ret = (portfolio_value / prev_portfolio_value) - 1
+                            portfolio_returns.append(portfolio_ret)
+                            
+                            # Calculate SPY return
+                            if date in spy_df.index:
+                                prev_date_idx = spy_df.index.get_loc(date) - 1
+                                if prev_date_idx >= 0:
+                                    prev_spy = spy_df['Close'].iloc[prev_date_idx]
+                                    curr_spy = spy_df['Close'].loc[date]
+                                    spy_ret = (curr_spy / prev_spy) - 1
+                                    spy_returns.append(spy_ret)
+                
+                # Calculate beta using covariance/variance
+                if len(portfolio_returns) > 1 and len(spy_returns) > 1:
+                    portfolio_returns = np.array(portfolio_returns)
+                    spy_returns = np.array(spy_returns)
+                    
+                    covariance = np.cov(portfolio_returns, spy_returns)[0][1]
+                    spy_variance = np.var(spy_returns)
+                    
+                    if spy_variance > 0:
+                        portfolio_beta = covariance / spy_variance
+        except Exception as e:
+            logger.warning(f"Beta calculation failed: {e}")
+            portfolio_beta = 1.0  # Default to 1.0
+        
+        # Calculate Alpha (portfolio return - (risk_free_rate + beta * (market_return - risk_free_rate)))
+        portfolio_alpha = 0.0
+        try:
+            # Get market return (SPY return)
+            spy = yf.Ticker("SPY")
+            spy_df = spy.history(period=period)
+            
+            if not spy_df.empty and len(spy_df) > 1:
+                market_return = ((spy_df['Close'].iloc[-1] / spy_df['Close'].iloc[0]) - 1) * 100  # Annualized percentage
+                
+                # Alpha = Portfolio Return - (Risk Free Rate + Beta * (Market Return - Risk Free Rate))
+                # Convert to percentage
+                portfolio_alpha = portfolio_expected_return - (risk_free_rate * 100 + portfolio_beta * (market_return - risk_free_rate * 100))
+        except Exception as e:
+            logger.warning(f"Alpha calculation failed: {e}")
+            portfolio_alpha = 0.0
+        
         return {
             'total_portfolio_value': total_portfolio_value,
             'portfolio_expected_return': portfolio_expected_return,
             'portfolio_volatility': portfolio_volatility,
             'sharpe_ratio': sharpe_ratio,
+            'cagr': portfolio_cagr,
+            'alpha': portfolio_alpha,
+            'beta': portfolio_beta,
             'stock_details': stock_details,
             'individual_stocks': tickers
         }
