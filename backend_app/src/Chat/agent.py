@@ -80,38 +80,81 @@ import logging
 # Standard logger for non-tool logs
 logger = logging.getLogger(__name__)
 
+# Lazy loading for heavy imports - only import when actually needed
+# This significantly improves cold start times
+_heavy_imports_loaded = False
+_yfinance = None
+_numpy = None
+_pandas = None
+_strands_agent = None
+_strands_bedrock = None
+_requests = None
+_dotenv = None
+
+def _lazy_load_heavy_imports():
+    """Lazy load heavy imports only when actually needed"""
+    global _heavy_imports_loaded, _yfinance, _numpy, _pandas, _strands_agent, _strands_bedrock, _requests, _dotenv
+    
+    if not _heavy_imports_loaded:
+        try:
+            import requests as req
+            from dotenv import load_dotenv as ld
+            from strands import Agent as StrandsAgent
+            from strands.models import BedrockModel as BM
+            import yfinance as yf
+            import numpy as np
+            import pandas as pd
+            
+            _requests = req
+            _dotenv = ld
+            _strands_agent = StrandsAgent
+            _strands_bedrock = BM
+            _yfinance = yf
+            _numpy = np
+            _pandas = pd
+            _heavy_imports_loaded = True
+            logger.debug("Heavy imports loaded successfully (lazy)")
+        except ImportError as e:
+            # Try to add layer paths to sys.path
+            layer_paths = ['/opt/python', '/opt/python/lib/python3.11/site-packages', '/opt/python/lib/python3.11/dist-packages']
+            for path in layer_paths:
+                if os.path.exists(path) and path not in sys.path:
+                    sys.path.insert(0, path)
+            
+            # Try importing again
+            try:
+                import requests as req
+                from dotenv import load_dotenv as ld
+                from strands import Agent as StrandsAgent
+                from strands.models import BedrockModel as BM
+                import yfinance as yf
+                import numpy as np
+                import pandas as pd
+                
+                _requests = req
+                _dotenv = ld
+                _strands_agent = StrandsAgent
+                _strands_bedrock = BM
+                _yfinance = yf
+                _numpy = np
+                _pandas = pd
+                _heavy_imports_loaded = True
+                logger.debug("Heavy imports loaded after adding layer paths (lazy)")
+            except ImportError as e2:
+                logger.error(f"Failed to import required libraries: {e2}")
+                raise
+        except Exception as e:
+            logger.error(f"Error importing libraries: {e}")
+            raise
+    
+    return _requests, _dotenv, _strands_agent, _strands_bedrock, _yfinance, _numpy, _pandas
+
+# Lightweight imports that are safe to load at module level
 try:
     import requests
-    from dotenv import load_dotenv
-    from strands import Agent
-    from strands.models import BedrockModel
-    import yfinance as yf
-    import numpy as np
-    import pandas as pd
-    logger.debug("All required imports loaded successfully")
-except ImportError as e:
-    # Try to add layer paths to sys.path
-    layer_paths = ['/opt/python', '/opt/python/lib/python3.11/site-packages', '/opt/python/lib/python3.11/dist-packages']
-    for path in layer_paths:
-        if os.path.exists(path) and path not in sys.path:
-            sys.path.insert(0, path)
-    
-    # Try importing again
-    try:
-        import requests
-        from dotenv import load_dotenv
-        from strands import Agent
-        from strands.models import BedrockModel
-        import yfinance as yf
-        import numpy as np
-        import pandas as pd
-        logger.debug("All required imports loaded after adding layer paths")
-    except ImportError as e2:
-        logger.error(f"Failed to import required libraries: {e2}")
-        raise
-except Exception as e:
-    logger.error(f"Error importing libraries: {e}")
-    raise
+    _requests = requests  # Keep for get_requests_session
+except ImportError:
+    pass
 
 from typing import Dict, Any, List, Optional
 
@@ -133,43 +176,26 @@ def get_requests_session():
         _requests_session.mount('https://', adapter)
     return _requests_session
 
-# Import tools from strands-agents-tools (available in Lambda layer)
-from strands_tools import http_request
-from strands_tools import calculator
+# Lazy load Strands tool decorator and tools (only when creating agent)
+_strands_tool = None
+_strands_tools_http = None
+_strands_tools_calc = None
 
-# Import the tool decorator from Strands (available in Lambda layer)
-from strands import tool
+def _lazy_load_strands_tools():
+    """Lazy load Strands tools only when needed"""
+    global _strands_tool, _strands_tools_http, _strands_tools_calc
+    if _strands_tool is None:
+        from strands import tool
+        from strands_tools import http_request
+        from strands_tools import calculator
+        _strands_tool = tool
+        _strands_tools_http = http_request
+        _strands_tools_calc = calculator
+    return _strands_tool, _strands_tools_http, _strands_tools_calc
 
-# Import our custom financial calculator tool module
-from tools.financial_calculator import python_financial_calculator, EnhancedFinancialCalculator
-
-# Import our custom session database access tool
-from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
-from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
-from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
-from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
-from tools.chart_generator import generate_chart_tool, generate_stock_chart
-from tools.excel_generator import generate_excel_with_charts_tool
-from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
-from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
-from tools.web_scraper import fetch_web_content_tool
-from tools.stock_data_fetcher import (
-    get_financial_data,
-    get_multiple_financial_data,
-    search_financial_news,
-    get_technical_analysis,
-    analyze_portfolio,
-    calculate_stock_correlation,
-    get_volatility_surface,
-    StockDataFetcher
-)
-from tools.congress_bills_search import search_congress_bills
-from tools.govt_contracts_search import search_govt_contracts
-from tools.politician_trades_search import search_politician_trades
-from tools.lda_autocomplete_tool import lda_autocomplete
-from tools.lda_search_tool import lda_search
-from tools.search_autocomplete_tool import search_autocomplete
-from tools.datetime_tool import get_current_datetime, calculate_date_range
+# Tools are now imported lazily in _get_enhanced_tools() to avoid loading heavy dependencies (matplotlib, etc.) at module level
+# This significantly improves cold start times
+# The old imports have been moved to _get_enhanced_tools() function
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -197,6 +223,9 @@ class FinancialTools:
             values = [s * p for s, p in zip(shares, prices)]
             total_value = sum(values)
             weights = [v / total_value for v in values]
+            
+            # Lazy load heavy imports
+            _, _, _, _, yf, np, pd = _lazy_load_heavy_imports()
             
             # Download historical data
             stock_data = yf.download(tickers, period=period)['Close']
@@ -248,6 +277,9 @@ class FinancialTools:
     def _fetch_from_yfinance(symbol: str, timeframe: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Fetch short-term data using yfinance (original implementation)"""
         try:
+            # Lazy load heavy imports
+            _, _, _, _, yf, np, pd = _lazy_load_heavy_imports()
+            
             # Create yfinance ticker object
             ticker = yf.Ticker(symbol)
             
@@ -2272,51 +2304,95 @@ def get_excel_formatting(template_type: str) -> dict:
         "dates": {"number_format": "mm/dd/yyyy"}
     }
 
-# Define the tools list that Strands can automatically detect
-enhanced_tools = [
-    fetch_web_content_tool,  # Web content fetcher for article context items
-    get_financial_data,
-    get_multiple_financial_data,
-    search_financial_news, 
-    get_technical_analysis,
-    analyze_portfolio,  # Portfolio analysis with live yfinance data
-    calculate_stock_correlation,  # Live correlation analysis
-    get_volatility_surface,  # New volatility surface analysis
-    python_financial_calculator,  # Advanced financial calculations
-    http_request,  # Web request tool
-    read_s3_file_tool,  # S3 file reader tool
-    get_session_files_tool,  # Session database access tool
-    generate_agent_file_tool,  # Generate files in agent-files folder
-    generate_excel_file_tool,  # Generate Excel files for financial analysis
-    get_session_context_tool,  # Complete session context tool
-    get_crypto_data_tool,  # Real-time cryptocurrency data tool
-    compare_crypto_tool,  # Cryptocurrency comparison tool
-    read_pdf_tool,  # PDF file reader tool
-    analyze_pdf_content_tool,  # PDF content analysis tool
-    analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
-    get_company_cik,  # Get company CIK from ticker symbol
-    get_company_filings,  # Get SEC filings for a company
-    get_filing_document,  # Get full text of SEC filing
-    search_sec_filings,  # Search SEC filings by criteria
-    get_filing_exhibits,  # Get exhibits for SEC filing
-    download_filing_pdf,  # Download SEC filing as PDF
-    generate_chart_tool,  # Generate unified charts for both stocks and crypto (requires pre-fetched data)
-    generate_stock_chart,  # Convenience tool: fetch stock data and generate chart in one step
-    generate_excel_with_charts_tool,  # Generate Excel (.xlsx) files with embedded charts from financial data
-    get_chat_history_tool,  # Get chat history on-demand with pagination
-    search_chat_history_tool,  # Search chat history for specific terms
-    process_chat_session_context_tool,  # Process chat session context from history sidebar
-    analyze_chat_session_context_tool,  # Analyze chat session context for insights
-    fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
-    search_congress_bills,  # Search congressional bills in DynamoDB
-    search_govt_contracts,  # Search government contracts/awards in DynamoDB
-    search_politician_trades,  # Search politician stock trades in DynamoDB
-    lda_autocomplete,  # LDA autocomplete tool for finding registrants, clients, lobbyists, PACs
-    lda_search,  # LDA search tool for searching lobbying disclosures
-    search_autocomplete,  # Search autocomplete tool for matching natural language to CSV list values (policy areas, general issues, government entities, legislators)
-    get_current_datetime,  # Get current date/time for exact timeframe calculations
-    calculate_date_range,  # Calculate date ranges relative to current date
-]
+# Lazy load tools list (only when creating agent to avoid importing heavy dependencies at module level)
+_enhanced_tools = None
+
+def _get_enhanced_tools():
+    """Lazy load tools list only when actually creating an agent"""
+    global _enhanced_tools
+    if _enhanced_tools is None:
+        # Import tools lazily (this is where chart_generator gets imported, which loads matplotlib)
+        from tools.financial_calculator import python_financial_calculator, EnhancedFinancialCalculator
+        from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
+        from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
+        from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
+        from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
+        from tools.chart_generator import generate_chart_tool, generate_stock_chart
+        from tools.excel_generator import generate_excel_with_charts_tool
+        from tools.chat_history_tool import get_chat_history_tool, search_chat_history_tool
+        from tools.chat_session_context_tool import process_chat_session_context_tool, analyze_chat_session_context_tool
+        from tools.web_scraper import fetch_web_content_tool
+        from tools.stock_data_fetcher import (
+            get_financial_data,
+            get_multiple_financial_data,
+            search_financial_news,
+            get_technical_analysis,
+            analyze_portfolio,
+            calculate_stock_correlation,
+            get_volatility_surface,
+            StockDataFetcher
+        )
+        from tools.congress_bills_search import search_congress_bills
+        from tools.govt_contracts_search import search_govt_contracts
+        from tools.politician_trades_search import search_politician_trades
+        from tools.lda_autocomplete_tool import lda_autocomplete
+        from tools.lda_search_tool import lda_search
+        from tools.search_autocomplete_tool import search_autocomplete
+        from tools.datetime_tool import get_current_datetime, calculate_date_range
+        
+        # Get Strands tools
+        _, http_request, calculator = _lazy_load_strands_tools()
+        
+        # Import S3 and agent file tools (these are defined in this file)
+        # They need to be imported after tools are loaded
+        from tools.s3_file_reader import read_s3_file_tool
+        from tools.s3_historical_data_helper import generate_agent_file_tool, generate_excel_file_tool
+        
+        _enhanced_tools = [
+            fetch_web_content_tool,  # Web content fetcher for article context items
+            get_financial_data,
+            get_multiple_financial_data,
+            search_financial_news, 
+            get_technical_analysis,
+            analyze_portfolio,  # Portfolio analysis with live yfinance data
+            calculate_stock_correlation,  # Live correlation analysis
+            get_volatility_surface,  # New volatility surface analysis
+            python_financial_calculator,  # Advanced financial calculations
+            http_request,  # Web request tool
+            read_s3_file_tool,  # S3 file reader tool
+            get_session_files_tool,  # Session database access tool
+            generate_agent_file_tool,  # Generate files in agent-files folder
+            generate_excel_file_tool,  # Generate Excel files for financial analysis
+            get_session_context_tool,  # Complete session context tool
+            get_crypto_data_tool,  # Real-time cryptocurrency data tool
+            compare_crypto_tool,  # Cryptocurrency comparison tool
+            read_pdf_tool,  # PDF file reader tool
+            analyze_pdf_content_tool,  # PDF content analysis tool
+            analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
+            get_company_cik,  # Get company CIK from ticker symbol
+            get_company_filings,  # Get SEC filings for a company
+            get_filing_document,  # Get full text of SEC filing
+            search_sec_filings,  # Search SEC filings by criteria
+            get_filing_exhibits,  # Get exhibits for SEC filing
+            download_filing_pdf,  # Download SEC filing as PDF
+            generate_chart_tool,  # Generate unified charts for both stocks and crypto (requires pre-fetched data)
+            generate_stock_chart,  # Convenience tool: fetch stock data and generate chart in one step
+            generate_excel_with_charts_tool,  # Generate Excel (.xlsx) files with embedded charts from financial data
+            get_chat_history_tool,  # Get chat history on-demand with pagination
+            search_chat_history_tool,  # Search chat history for specific terms
+            process_chat_session_context_tool,  # Process chat session context from history sidebar
+            analyze_chat_session_context_tool,  # Analyze chat session context for insights
+            fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
+            search_congress_bills,  # Search congressional bills in DynamoDB
+            search_govt_contracts,  # Search government contracts/awards in DynamoDB
+            search_politician_trades,  # Search politician stock trades in DynamoDB
+            lda_autocomplete,  # LDA autocomplete tool for finding registrants, clients, lobbyists, PACs
+            lda_search,  # LDA search tool for searching lobbying disclosures
+            search_autocomplete,  # Search autocomplete tool for matching natural language to CSV list values (policy areas, general issues, government entities, legislators)
+            get_current_datetime,  # Get current date/time for exact timeframe calculations
+            calculate_date_range,  # Calculate date ranges relative to current date
+        ]
+    return _enhanced_tools
 
 # Function to create agents with different models
 def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
@@ -2337,8 +2413,14 @@ def create_financial_agent(model_name: str = 'claude-sonnet-4') -> Agent:
         logger.warning(f"Unknown model '{model_name}', falling back to claude-sonnet-4")
         model_name = 'claude-sonnet-4'
     
+    # Lazy load heavy imports (numpy, pandas, yfinance, strands) - only when actually creating agent
+    _, _, Agent, BedrockModel, _, _, _ = _lazy_load_heavy_imports()
+    
     selected_model = MODELS[model_name]
     logger.info(f"Creating financial agent with model: {model_name}")
+    
+    # Lazy load tools (this is where chart_generator and matplotlib get imported)
+    enhanced_tools = _get_enhanced_tools()
     
     # Wrap Agent creation in timeout to prevent hanging on MetricsClient initialization
     import threading

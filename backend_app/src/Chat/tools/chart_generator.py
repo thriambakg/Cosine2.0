@@ -1,11 +1,27 @@
 import json
-# Set matplotlib to use non-interactive backend (required for Lambda)
-import matplotlib
-matplotlib.use('Agg')  # Must be set before importing pyplot
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from datetime import datetime
-import pandas as pd
+
+# Lazy load matplotlib (very slow import - only load when actually generating charts)
+_matplotlib = None
+_plt = None
+_mdates = None
+_pandas = None
+
+def _lazy_load_matplotlib():
+    """Lazy load matplotlib and pandas only when actually needed"""
+    global _matplotlib, _plt, _mdates, _pandas
+    if _matplotlib is None:
+        # Set matplotlib to use non-interactive backend (required for Lambda)
+        import matplotlib
+        matplotlib.use('Agg')  # Must be set before importing pyplot
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        import pandas as pd
+        _matplotlib = matplotlib
+        _plt = plt
+        _mdates = mdates
+        _pandas = pd
+    return _matplotlib, _plt, _mdates, _pandas
 import boto3
 import os
 from io import BytesIO
@@ -113,6 +129,9 @@ class UnifiedChartGenerator:
         """
         Normalize data from different sources into a consistent format.
         """
+        # Lazy load pandas if needed
+        _, _, _, pd = _lazy_load_matplotlib()
+        
         if data_type == 'multiple_stocks':
             # Handle multiple stocks data from get_multiple_financial_data
             stocks_data = data_dict.get('stocks', [])
@@ -218,6 +237,9 @@ class UnifiedChartGenerator:
 
     def _save_chart_to_s3(self, fig, filename: str, symbol: str, chart_type: str, timeframe: str, data_points: int, asset_type: str) -> str:
         self._validate_env_vars()
+        
+        # Lazy load matplotlib
+        _, plt, _, _ = _lazy_load_matplotlib()
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
@@ -279,6 +301,9 @@ class UnifiedChartGenerator:
         Returns:
             Success message with file details
         """
+        # Lazy load matplotlib and pandas (only when actually generating a chart)
+        _, plt, mdates, pd = _lazy_load_matplotlib()
+        
         # Get environment variables dynamically
         bucket_name, user_id, session_id = self._validate_env_vars()
         
