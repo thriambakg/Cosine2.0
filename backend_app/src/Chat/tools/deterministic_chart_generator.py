@@ -13,24 +13,11 @@ from io import BytesIO
 import numpy as np
 import pandas as pd
 
-# Lazy load matplotlib (very slow import - only load when actually generating charts)
-_matplotlib = None
-_plt = None
-_mdates = None
-
-def _lazy_load_matplotlib():
-    """Lazy load matplotlib only when actually needed"""
-    global _matplotlib, _plt, _mdates
-    if _matplotlib is None:
-        # Set matplotlib to use non-interactive backend (required for Lambda)
-        import matplotlib
-        matplotlib.use('Agg')  # Must be set before importing pyplot
-        import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
-        _matplotlib = matplotlib
-        _plt = plt
-        _mdates = mdates
-    return _matplotlib, _plt, _mdates
+# Set matplotlib to use non-interactive backend (required for Lambda)
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +44,6 @@ class ChartImageGenerator:
         Generate chart image from JSON data.
         
         Args:
-        """
-        # Lazy load matplotlib
-        _, plt, mdates = _lazy_load_matplotlib()
-        
-        """
             data_json: JSON string from get_multiple_financial_data
             chart_type: Type of chart ('line', 'candlestick', 'volume')
             title: Custom title for the chart
