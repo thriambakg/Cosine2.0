@@ -322,6 +322,31 @@ class UnifiedChartGenerator:
                         s3_content = s3_response['Body'].read().decode('utf-8')
                         data_dict = json.loads(s3_content)
                         logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
+                        
+                        # After reading, check if this single stock file actually contains consolidated data
+                        # (This can happen if the agent passes a consolidated S3 key but it was detected as single stock)
+                        if isinstance(data_dict, dict) and 'stocks' in data_dict and isinstance(data_dict['stocks'], list):
+                            logger.info(f"🔍 DEBUG: Single stock S3 file actually contains consolidated data with {len(data_dict['stocks'])} stocks")
+                            # This is actually consolidated data - continue processing as multiple_stocks
+                        elif isinstance(data_dict, dict) and 'total_symbols' in data_dict:
+                            logger.info(f"🔍 DEBUG: S3 file contains consolidated data structure (total_symbols={data_dict.get('total_symbols')})")
+                            # This is consolidated data - ensure it has stocks array
+                            if 'stocks' not in data_dict:
+                                logger.warning(f"⚠️ Consolidated data structure missing 'stocks' array")
+                    except Exception as s3_error:
+                        logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
+                        return f"Error: Failed to read data from S3: {str(s3_error)}"
+            
+            # IMPORTANT: After reading from S3 (via s3_key parameter in generate_chart_tool), 
+            # check if the data is actually consolidated multi-stock data
+            # This handles the case where agent passes a consolidated S3 key but it was read as single stock
+            if isinstance(data_dict, dict) and 'stocks' in data_dict and isinstance(data_dict['stocks'], list) and len(data_dict['stocks']) > 1:
+                # This is consolidated data - ensure it's detected as multiple_stocks
+                if 'total_symbols' not in data_dict:
+                    data_dict['total_symbols'] = len(data_dict['stocks'])
+                if 'successful_symbols' not in data_dict:
+                    data_dict['successful_symbols'] = len([s for s in data_dict['stocks'] if isinstance(s, dict) and s.get('status') == 'success'])
+                logger.info(f"🔍 DEBUG: Detected consolidated data with {data_dict['total_symbols']} stocks after S3 read")
                     except Exception as s3_error:
                         logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
                         return f"Error: Failed to read data from S3: {str(s3_error)}"
@@ -810,6 +835,20 @@ def generate_chart_tool(symbol: str, data_json: str = None, s3_key: str = None, 
                 s3_content = s3_response['Body'].read().decode('utf-8')
                 data_json = s3_content
                 logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
+                
+                # Check filename pattern to detect if this is consolidated data
+                # Consolidated files start with "get_multiple_financial_data_"
+                # Single stock files start with "stock_data_"
+                filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
+                if filename.startswith('get_multiple_financial_data_'):
+                    logger.info(f"🔍 DEBUG: S3 key filename indicates consolidated data: {filename}")
+                    # Parse the JSON to verify it has stocks array
+                    try:
+                        parsed_data = json.loads(data_json)
+                        if isinstance(parsed_data, dict) and 'stocks' in parsed_data:
+                            logger.info(f"🔍 DEBUG: Confirmed consolidated data with {len(parsed_data.get('stocks', []))} stocks")
+                    except:
+                        pass  # Will be parsed again in generate_chart()
             except Exception as s3_error:
                 logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
                 return f"Error: Failed to read data from S3: {str(s3_error)}"

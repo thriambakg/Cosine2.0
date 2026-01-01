@@ -212,33 +212,31 @@ class StockDataFetcher:
         try:
             logger.debug(f"get_stock_data called with symbol={symbol}, timeframe={timeframe}")
             
-            # Large timeframes: check S3 first, then fallback to yfinance
-            # Small timeframes: use yfinance directly
+            # ALWAYS check S3 first for all timeframes, then fallback to yfinance
             large_timeframes = ['1y', '2y', '5y', '10y', 'ytd', 'max']
             is_large_timeframe = timeframe in large_timeframes
             
             result = None
             
-            # For large timeframes, try S3 first
-            if is_large_timeframe:
-                try:
-                    from tools.s3_historical_data_helper import S3HistoricalDataHelper
-                    s3_helper = S3HistoricalDataHelper()
-                    s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority='high')
-                    
+            # Try S3 first for ALL timeframes (user requirement: check S3 first always)
+            try:
+                from tools.s3_historical_data_helper import S3HistoricalDataHelper
+                s3_helper = S3HistoricalDataHelper()
+                s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority='high')
+                
+                if s3_data:
+                    logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: high)")
+                    result = StockDataFetcher._convert_s3_to_standard_format(s3_data, symbol, timeframe)
+                else:
+                    # Try medium priority
+                    s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority='medium')
                     if s3_data:
-                        logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: high)")
+                        logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: medium)")
                         result = StockDataFetcher._convert_s3_to_standard_format(s3_data, symbol, timeframe)
-                    else:
-                        # Try medium priority
-                        s3_data = s3_helper.get_stock_data_from_s3(symbol, timeframe, priority='medium')
-                        if s3_data:
-                            logger.info(f"✅ Loaded {symbol} from S3 historical data (priority: medium)")
-                            result = StockDataFetcher._convert_s3_to_standard_format(s3_data, symbol, timeframe)
-                except Exception as s3_error:
-                    logger.debug(f"S3 lookup failed for {symbol}: {str(s3_error)}, falling back to yfinance")
+            except Exception as s3_error:
+                logger.debug(f"S3 lookup failed for {symbol}: {str(s3_error)}, falling back to yfinance")
             
-            # If S3 didn't work or it's a small timeframe, use yfinance
+            # If S3 didn't work, use yfinance
             if result is None:
                 logger.debug(f"Fetching {symbol} from yfinance (timeframe: {timeframe})")
                 result = StockDataFetcher._fetch_from_yfinance(symbol, timeframe, start_date, end_date)
