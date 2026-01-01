@@ -9,7 +9,6 @@ import os
 import logging
 import uuid
 import threading
-import time
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -251,30 +250,11 @@ class WebSocketHandler:
             is_complete: If True, marks this as the final chunk (only used when is_streaming=True)
         """
         try:
-            # Cache connection IDs for streaming responses to avoid repeated DynamoDB queries
-            cache_key = f"{user_id}_{session_id}"
-            if not hasattr(WebSocketHandler, '_connection_cache'):
-                WebSocketHandler._connection_cache = {}
-                WebSocketHandler._connection_cache_time = {}
-            
-            # For streaming chunks, use cached connection IDs (refresh every 5 seconds)
-            connection_ids = None
-            if is_streaming and cache_key in WebSocketHandler._connection_cache:
-                cache_time = WebSocketHandler._connection_cache_time.get(cache_key, 0)
-                if time.time() - cache_time < 5:  # Cache valid for 5 seconds
-                    connection_ids = WebSocketHandler._connection_cache[cache_key]
-            
-            # If not cached or cache expired, query DynamoDB
-            if connection_ids is None:
-                connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
-                # Cache the result
-                WebSocketHandler._connection_cache[cache_key] = connection_ids
-                WebSocketHandler._connection_cache_time[cache_key] = time.time()
+            # Get active connections
+            connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
             
             if not connection_ids:
-                # Only log once per streaming session to reduce noise
-                if not is_streaming or cache_key not in WebSocketHandler._connection_cache:
-                    logger.info(f"No active connections for user {user_id}, session {session_id}")
+                logger.info(f"No active connections for user {user_id}, session {session_id}")
                 return
             
             # Generate message ID if not provided
