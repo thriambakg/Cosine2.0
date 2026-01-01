@@ -424,6 +424,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           user_id={user_id}
           folder_path={folder_path || ''}
           item_id={item.id}
+          containerSize={size}
           onUpdate={(updatedTile) => {
             // Update local state if needed
             console.log('Tile updated:', updatedTile);
@@ -3058,22 +3059,10 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           <Box
             sx={{
               flex: 1,
-              overflow: 'auto',
+              overflow: 'hidden',
               p: 0,
               mt: 2,
-              '&::-webkit-scrollbar': {
-                width: '12px',
-              },
-              '&::-webkit-scrollbar-track': {
-                backgroundColor: '#1f2937',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                backgroundColor: '#3b82f6',
-                borderRadius: '6px',
-                '&:hover': {
-                  backgroundColor: '#2563eb',
-                },
-              },
+              position: 'relative',
             }}
           >
             {renderPreview()}

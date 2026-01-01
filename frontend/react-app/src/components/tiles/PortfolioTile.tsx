@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -33,6 +34,7 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Calculate as CalculateIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { usePortfolioAnalysis } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
@@ -76,6 +78,7 @@ interface PortfolioTileProps {
     showAllocation: boolean;
     showRiskMetrics: boolean;
     showStockDetails: boolean;
+    showChart: boolean;
   };
   autoRefresh?: boolean;
   isPinned?: boolean;
@@ -109,6 +112,7 @@ const PortfolioTile = ({
     showAllocation: false,
     showRiskMetrics: true,
     showStockDetails: true,
+    showChart: true,
   },
   autoRefresh: _autoRefresh = false,
   isPinned = false,
@@ -129,6 +133,7 @@ const PortfolioTile = ({
   customColor,
   customIcon,
 }: PortfolioTileProps) => {
+  const navigate = useNavigate();
   const [entries, setEntries] = useState<PortfolioEntry[]>(
     portfolioData?.entries || [{ stock: '', shares: 0 }]
   );
@@ -722,6 +727,31 @@ const PortfolioTile = ({
                 </IconButton>
               </Tooltip>
 
+              <Tooltip title="Export to Portfolio Risk Analysis page">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Save portfolio data to sessionStorage for export
+                    const exportData = {
+                      entries: entries.filter(e => e.stock && e.shares > 0),
+                      timeframe: timeframe,
+                    };
+                    sessionStorage.setItem('portfolio-export-data', JSON.stringify(exportData));
+                    navigate('/portfolio-risk');
+                  }}
+                  disabled={!entries.some(e => e.stock && e.shares > 0)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{ 
+                    color: '#9ca3af', 
+                    '&:hover': { color: '#3b82f6' },
+                    '&.Mui-disabled': { color: '#6b7280' },
+                  }}
+                >
+                  <OpenInNewIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+
               <Tooltip title="Clear Data">
                 <IconButton
                   size="small"
@@ -787,7 +817,7 @@ const PortfolioTile = ({
           )}
 
         {/* Chart Section - Always visible at top when results exist (Combined view only) */}
-        {results && entries.some(e => e.stock && e.shares > 0) && (
+        {displayOptions.showChart && results && entries.some(e => e.stock && e.shares > 0) && (
           <Box sx={{ mb: 2, position: 'relative', height: '200px', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', p: 1 }}>
             {isLoadingChart ? (
               <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -864,31 +894,43 @@ const PortfolioTile = ({
                 {/* Info Icon with Tooltip - Bottom Left */}
                 <Box sx={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10 }}>
                   <Tooltip 
-                    title="View more chart options (compare, individual stocks, zoom) on the Portfolio Risk Analysis page"
+                    title="Export to Portfolio Risk Analysis page"
                     arrow
                     placement="top"
                   >
-                    <Box
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        // Save portfolio data to sessionStorage for export
+                        const exportData = {
+                          entries: entries.filter(e => e.stock && e.shares > 0),
+                          timeframe: timeframe,
+                        };
+                        sessionStorage.setItem('portfolio-export-data', JSON.stringify(exportData));
+                        navigate('/portfolio-risk');
+                      }}
+                      disabled={!entries.some(e => e.stock && e.shares > 0)}
                       sx={{
                         width: 20,
                         height: 20,
-                        borderRadius: '50%',
-                        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                        border: '1px solid #374151',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'default',
-                        pointerEvents: 'none',
+                        padding: 0,
+                        color: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        '&:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#2563eb',
+                          borderColor: '#2563eb',
+                        },
+                        '&.Mui-disabled': {
+                          color: '#6b7280',
+                          backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                          borderColor: 'rgba(107, 114, 128, 0.2)',
+                        },
                       }}
                     >
-                      <HelpOutlineIcon 
-                        sx={{ 
-                          fontSize: 14, 
-                          color: '#9ca3af',
-                        }} 
-                      />
-                    </Box>
+                      <OpenInNewIcon sx={{ fontSize: 14 }} />
+                    </IconButton>
                   </Tooltip>
                 </Box>
               </>
@@ -1419,7 +1461,11 @@ const PortfolioTile = ({
                 control={
                   <Checkbox
                     checked={displayOptions.showHoldings}
-                    onChange={(e) => onUpdate?.(id, { displayOptions: { ...displayOptions, showHoldings: e.target.checked } })}
+                    onChange={(e) => {
+                      const newDisplayOptions = { ...displayOptions, showHoldings: e.target.checked };
+                      onUpdate?.(id, { displayOptions: newDisplayOptions });
+                      onSettingsChange?.(id, { displayOptions: newDisplayOptions });
+                    }}
                   />
                 }
                 label="Show Holdings Input"
@@ -1429,7 +1475,11 @@ const PortfolioTile = ({
                 control={
                   <Checkbox
                     checked={displayOptions.showPerformance}
-                    onChange={(e) => onUpdate?.(id, { displayOptions: { ...displayOptions, showPerformance: e.target.checked } })}
+                    onChange={(e) => {
+                      const newDisplayOptions = { ...displayOptions, showPerformance: e.target.checked };
+                      onUpdate?.(id, { displayOptions: newDisplayOptions });
+                      onSettingsChange?.(id, { displayOptions: newDisplayOptions });
+                    }}
                   />
                 }
                 label="Show Performance Metrics"
@@ -1439,7 +1489,11 @@ const PortfolioTile = ({
                 control={
                   <Checkbox
                     checked={displayOptions.showRiskMetrics}
-                    onChange={(e) => onUpdate?.(id, { displayOptions: { ...displayOptions, showRiskMetrics: e.target.checked } })}
+                    onChange={(e) => {
+                      const newDisplayOptions = { ...displayOptions, showRiskMetrics: e.target.checked };
+                      onUpdate?.(id, { displayOptions: newDisplayOptions });
+                      onSettingsChange?.(id, { displayOptions: newDisplayOptions });
+                    }}
                   />
                 }
                 label="Show Risk Metrics"
@@ -1449,10 +1503,28 @@ const PortfolioTile = ({
                 control={
                   <Checkbox
                     checked={displayOptions.showStockDetails}
-                    onChange={(e) => onUpdate?.(id, { displayOptions: { ...displayOptions, showStockDetails: e.target.checked } })}
+                    onChange={(e) => {
+                      const newDisplayOptions = { ...displayOptions, showStockDetails: e.target.checked };
+                      onUpdate?.(id, { displayOptions: newDisplayOptions });
+                      onSettingsChange?.(id, { displayOptions: newDisplayOptions });
+                    }}
                   />
                 }
                 label="Show Stock Details Table"
+                sx={{ color: '#ffffff' }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={displayOptions.showChart}
+                    onChange={(e) => {
+                      const newDisplayOptions = { ...displayOptions, showChart: e.target.checked };
+                      onUpdate?.(id, { displayOptions: newDisplayOptions });
+                      onSettingsChange?.(id, { displayOptions: newDisplayOptions });
+                    }}
+                  />
+                }
+                label="Show Chart"
                 sx={{ color: '#ffffff' }}
               />
             </Box>
@@ -1503,7 +1575,8 @@ const PortfolioTileMemo = memo(PortfolioTile, (prevProps, nextProps) => {
         prevDisplay.showPerformance !== nextDisplay.showPerformance ||
         prevDisplay.showAllocation !== nextDisplay.showAllocation ||
         prevDisplay.showRiskMetrics !== nextDisplay.showRiskMetrics ||
-        prevDisplay.showStockDetails !== nextDisplay.showStockDetails) {
+        prevDisplay.showStockDetails !== nextDisplay.showStockDetails ||
+        prevDisplay.showChart !== nextDisplay.showChart) {
       return false; // Re-render
     }
   }

@@ -129,10 +129,16 @@ const StockTile: React.FC<StockTileProps> = ({
   
   // Memoize the fetch function to prevent constant re-renders
   // Parse ticker from symbol to handle CSV/displayText formats
+  // Use ref for executeForceRefresh to prevent unnecessary re-creations
+  const executeForceRefreshRef = useRef(executeForceRefresh);
+  useEffect(() => {
+    executeForceRefreshRef.current = executeForceRefresh;
+  }, [executeForceRefresh]);
+
   const fetchStockData = useCallback(async () => {
     const parsedTicker = parseTicker(symbol);
-    return await executeForceRefresh({ ticker: parsedTicker, period: timeframe });
-  }, [executeForceRefresh, symbol, timeframe, parseTicker]);
+    return await executeForceRefreshRef.current({ ticker: parsedTicker, period: timeframe });
+  }, [symbol, timeframe, parseTicker]);
   
   const { data: stockData, loading: isLoading, error, refresh } = useTileCache(
     id,

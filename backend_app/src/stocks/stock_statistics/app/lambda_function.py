@@ -373,9 +373,14 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
             annual_returns.append(annual_return)
             volatilities.append(volatility)
             
+            # Calculate variance (volatility squared)
+            variance = volatility ** 2
+            
             # Update stock details
             stock_details[ticker]['annual_return'] = annual_return * 100  # Convert to percentage
             stock_details[ticker]['annual_volatility'] = volatility * 100  # Convert to percentage
+            stock_details[ticker]['variance'] = variance  # Keep as decimal (not percentage squared)
+            stock_details[ticker]['standard_deviation'] = volatility  # Same as volatility, but explicit
         
         # Calculate portfolio metrics
         portfolio_expected_return = sum(weights[ticker] * annual_returns[i] for i, ticker in enumerate(tickers)) * 100
@@ -547,6 +552,19 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
             logger.warning(f"Alpha calculation failed: {e}")
             portfolio_alpha = 0.0
         
+        # Calculate average covariance for each stock with other stocks in portfolio
+        if covariance_dict is not None:
+            for ticker in tickers:
+                if ticker in stock_details:
+                    covariances_with_others = []
+                    for other_ticker in tickers:
+                        if ticker != other_ticker and other_ticker in covariance_dict.get(ticker, {}):
+                            covariances_with_others.append(covariance_dict[ticker][other_ticker])
+                    if covariances_with_others:
+                        stock_details[ticker]['avg_covariance'] = float(np.mean(covariances_with_others))
+                    else:
+                        stock_details[ticker]['avg_covariance'] = 0.0
+        
         # Prepare correlation and covariance data for response
         correlation_data = None
         covariance_data = None
@@ -561,10 +579,21 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
                 'tickers': tickers
             }
         
+        # Portfolio variance is already calculated correctly above (line 418-423 or 429-430)
+        # Don't overwrite it - it's already in decimal form
+        # Portfolio standard deviation = sqrt(variance) = volatility (already calculated)
+        # But we need to ensure portfolio_variance is in decimal form (not percentage squared)
+        # portfolio_variance is already in decimal form from the calculation above
+        
+        # Calculate portfolio standard deviation from variance (should match volatility/100)
+        portfolio_standard_deviation = np.sqrt(portfolio_variance) if portfolio_variance > 0 else 0.0
+        
         return {
             'total_portfolio_value': total_portfolio_value,
             'portfolio_expected_return': portfolio_expected_return,
             'portfolio_volatility': portfolio_volatility,
+            'portfolio_variance': portfolio_variance,  # Already in decimal form
+            'portfolio_standard_deviation': portfolio_standard_deviation,  # In decimal form (sqrt of variance)
             'sharpe_ratio': sharpe_ratio,
             'cagr': portfolio_cagr,
             'alpha': portfolio_alpha,

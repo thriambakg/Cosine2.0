@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -48,15 +48,28 @@ interface PortfolioResults {
   total_portfolio_value: number;
   portfolio_expected_return: number;
   portfolio_volatility: number;
+  portfolio_variance?: number;
+  portfolio_standard_deviation?: number;
   sharpe_ratio: number;
   cagr?: number;
   alpha?: number;
   beta?: number;
+  correlation?: {
+    matrix?: { [key: string]: { [key: string]: number } };
+    tickers?: string[];
+  };
+  covariance?: {
+    matrix?: { [key: string]: { [key: string]: number } };
+    tickers?: string[];
+  };
   stock_details: {
     [key: string]: {
       weight: number;
       annual_return: number;
       annual_volatility: number;
+      variance?: number;
+      standard_deviation?: number;
+      avg_covariance?: number;
       shares: number;
       current_price: number;
       total_value: number;
@@ -79,6 +92,8 @@ export default function PortfolioRisk() {
   const [compareInputValue, setCompareInputValue] = useState<string>('');
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  const [cachedStockData, setCachedStockData] = useState<{ [key: string]: any } | null>(null);
+  const [cachedCompareStockData, setCachedCompareStockData] = useState<any | null>(null);
   
   // Calculator bubble popover state
   const [calculatorAnchor, setCalculatorAnchor] = useState<HTMLButtonElement | null>(null);
@@ -110,10 +125,34 @@ export default function PortfolioRisk() {
   }, []);
 
   // Load session data from localStorage on component mount
+  // Check for exported portfolio data first, then fall back to saved session data
   useEffect(() => {
+    // Check for exported portfolio data (from tile export)
+    const exportedData = sessionStorage.getItem('portfolio-export-data');
+    if (exportedData) {
+      try {
+        const parsed = JSON.parse(exportedData);
+        if (parsed.entries && Array.isArray(parsed.entries) && parsed.entries.length > 0) {
+          setEntries(parsed.entries);
+        }
+        if (parsed.timeframe) {
+          setTimeframe(parsed.timeframe);
+        }
+        // Keep exported data flag to trigger auto-calculation via useEffect
+        // Don't load from localStorage if we loaded from export
+        return;
+      } catch (e) {
+        console.warn('Failed to parse exported portfolio data:', e);
+        sessionStorage.removeItem('portfolio-export-data');
+      }
+    }
+    
+    // Fall back to regular session storage
     const savedEntries = localStorage.getItem('portfolio-entries');
     const savedResults = localStorage.getItem('portfolio-results');
     const savedTimeframe = localStorage.getItem('portfolio-timeframe');
+    const savedChartType = localStorage.getItem('portfolio-chart-type');
+    const savedCompareStock = localStorage.getItem('portfolio-compare-stock');
     
     if (savedEntries) {
       try {
@@ -138,36 +177,143 @@ export default function PortfolioRisk() {
     if (savedTimeframe) {
       setTimeframe(savedTimeframe);
     }
+    
+    if (savedChartType && ['single', 'multiple', 'compare'].includes(savedChartType)) {
+      setChartType(savedChartType as 'single' | 'multiple' | 'compare');
+    }
+    
+    if (savedCompareStock) {
+      setCompareStock(savedCompareStock);
+      setCompareInputValue(savedCompareStock);
+    }
   }, []);
 
-  // Save session data to localStorage whenever entries, results, or timeframe change
-  useEffect(() => {
-    localStorage.setItem('portfolio-entries', JSON.stringify(entries));
-  }, [entries]);
+  // Transform cached stock data into chart format based on chart type
+  // This function must be defined before calculateRisk uses it
+  const transformCachedDataToChart = useCallback((
+    cachedData: { [key: string]: any },
+    compareData: any | null,
+    type: 'single' | 'multiple' | 'compare',
+    validEntries: PortfolioEntry[]
+  ) => {
+    const stockSymbols = validEntries.map(e => {
+      const symbolMatch = e.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+      const symbol = symbolMatch ? symbolMatch[1].trim() : e.stock.trim();
+      return symbol.toUpperCase();
+    });
 
-  useEffect(() => {
-    if (results) {
-      localStorage.setItem('portfolio-results', JSON.stringify(results));
+    const allStockData = stockSymbols.map(symbol => cachedData[symbol] || null).filter(Boolean);
+    
+    if (type === 'single') {
+      const portfolioChartData: any[] = [];
+      const timePoints = new Set<number>();
+
+      allStockData.forEach((data) => {
+        if (data && data.chart_data) {
+          data.chart_data.forEach((point: any) => {
+            timePoints.add(point.time);
+          });
+        }
+      });
+
+      Array.from(timePoints).sort().forEach(time => {
+        let portfolioValue = 0;
+        allStockData.forEach((data, idx) => {
+          if (data && data.chart_data && idx < validEntries.length) {
+            const point = data.chart_data.find((p: any) => p.time === time);
+            if (point) {
+              portfolioValue += point.close * validEntries[idx].shares;
+            }
+          }
+        });
+        if (portfolioValue > 0) {
+          portfolioChartData.push({
+            time,
+            value: portfolioValue,
+            date: new Date(time * 1000).toLocaleDateString(),
+          });
+        }
+      });
+      
+      return portfolioChartData;
+    } else if (type === 'multiple') {
+      const timePoints = new Set<number>();
+      allStockData.forEach((data) => {
+        if (data && data.chart_data) {
+          data.chart_data.forEach((point: any) => {
+            timePoints.add(point.time);
+          });
+        }
+      });
+      
+      const chartDataMap: { [key: number]: any } = {};
+      Array.from(timePoints).sort().forEach(time => {
+        chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
+      });
+      
+      allStockData.forEach((data, idx) => {
+        if (data && data.chart_data && idx < validEntries.length) {
+          const entry = validEntries[idx];
+          const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+          const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
+          data.chart_data.forEach((point: any) => {
+            if (chartDataMap[point.time]) {
+              chartDataMap[point.time][symbol] = point.close;
+            }
+          });
+        }
+      });
+      
+      return Object.values(chartDataMap).filter(d => Object.keys(d).length > 2);
+    } else if (type === 'compare' && compareData) {
+      const portfolioChartData: any[] = [];
+      const timePoints = new Set<number>();
+      
+      allStockData.forEach((data) => {
+        if (data && data.chart_data) {
+          data.chart_data.forEach((point: any) => {
+            timePoints.add(point.time);
+          });
+        }
+      });
+      
+      if (compareData && compareData.chart_data) {
+        compareData.chart_data.forEach((point: any) => {
+          timePoints.add(point.time);
+        });
+      }
+      
+      Array.from(timePoints).sort().forEach(time => {
+        let portfolioValue = 0;
+        let hasPortfolioData = false;
+        
+        allStockData.forEach((data, idx) => {
+          if (data && data.chart_data && idx < validEntries.length) {
+            const point = data.chart_data.find((p: any) => p.time === time);
+            if (point) {
+              portfolioValue += point.close * validEntries[idx].shares;
+              hasPortfolioData = true;
+            }
+          }
+        });
+        
+        const comparePoint = compareData?.chart_data?.find((p: any) => p.time === time);
+        
+        if (hasPortfolioData && comparePoint) {
+          portfolioChartData.push({
+            time,
+            portfolio: portfolioValue,
+            compare: comparePoint.close,
+            date: new Date(time * 1000).toLocaleDateString(),
+          });
+        }
+      });
+      
+      return portfolioChartData;
     }
-  }, [results]);
-
-  useEffect(() => {
-    localStorage.setItem('portfolio-timeframe', timeframe);
-  }, [timeframe]);
-
-  const addEntry = () => {
-    setEntries([...entries, { stock: '', shares: 0 }]);
-  };
-
-  const removeEntry = (index: number) => {
-    setEntries(entries.filter((_, i) => i !== index));
-  };
-
-  const updateEntry = (index: number, field: keyof PortfolioEntry, value: string | number) => {
-    const newEntries = [...entries];
-    newEntries[index] = { ...newEntries[index], [field]: value };
-    setEntries(newEntries);
-  };
+    
+    return [];
+  }, []);
 
   const calculateRisk = async () => {
     setError(null);
@@ -226,7 +372,7 @@ export default function PortfolioRisk() {
             }
           });
           
-          // Store processed chart data for use in loadChartData
+          // Store processed chart data and cache it
           if (Object.keys(processedChartData).length > 0) {
             // Process chart data directly with backend data
             const allStockData = stockSymbols.map(symbol => {
@@ -237,71 +383,24 @@ export default function PortfolioRisk() {
               };
             });
 
-            // Process chart data based on chart type
-            if (chartType === 'single') {
-              const portfolioChartData: any[] = [];
-              const timePoints = new Set<number>();
-
-              allStockData.forEach((data) => {
-                if (data && data.chart_data) {
-                  data.chart_data.forEach((point: any) => {
-                    timePoints.add(point.time);
-                  });
-                }
-              });
-
-              Array.from(timePoints).sort().forEach(time => {
-                let portfolioValue = 0;
-                allStockData.forEach((data, idx) => {
-                  if (data && data.chart_data && idx < validEntries.length) {
-                    const point = data.chart_data.find((p: any) => p.time === time);
-                    if (point) {
-                      portfolioValue += point.close * validEntries[idx].shares;
-                    }
-                  }
-                });
-                if (portfolioValue > 0) {
-                  portfolioChartData.push({
-                    time,
-                    value: portfolioValue,
-                    date: new Date(time * 1000).toLocaleDateString(),
-                  });
-                }
-              });
-              
-              setChartData(portfolioChartData);
-            } else if (chartType === 'multiple') {
-              const timePoints = new Set<number>();
-              allStockData.forEach((data) => {
-                if (data && data.chart_data) {
-                  data.chart_data.forEach((point: any) => {
-                    timePoints.add(point.time);
-                  });
-                }
-              });
-              
-              const chartDataMap: { [key: number]: any } = {};
-              Array.from(timePoints).sort().forEach(time => {
-                chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
-              });
-              
-        // Use validEntries to ensure symbol extraction matches Line component
-        allStockData.forEach((data, idx) => {
-          if (data && data.chart_data && idx < validEntries.length) {
-            // Extract symbol the same way as in the Line component
-            const entry = validEntries[idx];
-            const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
-            const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
-            data.chart_data.forEach((point: any) => {
-              if (chartDataMap[point.time]) {
-                chartDataMap[point.time][symbol] = point.close;
+            // Cache the stock data in session storage
+            const cacheKey = `portfolio-chart-cache-${stockSymbols.sort().join('-')}-${timeframe}`;
+            const dataToCache: { [key: string]: any } = {};
+            stockSymbols.forEach((symbol, idx) => {
+              if (allStockData[idx]) {
+                dataToCache[symbol] = allStockData[idx];
               }
             });
-          }
-        });
-              
-              setChartData(Object.values(chartDataMap).filter(d => Object.keys(d).length > 2));
-            }
+            sessionStorage.setItem(cacheKey, JSON.stringify(dataToCache));
+
+            // Transform to current chart type using cached data
+            const transformedData = transformCachedDataToChart(
+              dataToCache,
+              null,
+              chartType,
+              validEntries
+            );
+            setChartData(transformedData);
             // For compare mode, we still need to fetch the compare stock separately, so fall through to loadChartData
           }
         }
@@ -312,6 +411,65 @@ export default function PortfolioRisk() {
       console.error('Portfolio analysis error:', err);
       setError(apiError || 'An error occurred while analyzing your portfolio. Please try again.');
     }
+  };
+
+  // Auto-calculate when exported data is loaded (after state is set)
+  useEffect(() => {
+    const exportedData = sessionStorage.getItem('portfolio-export-data');
+    const hasValidEntries = entries.some(e => e.stock && e.shares > 0);
+    
+    // If we have exported data and valid entries but no results, trigger calculation
+    if (exportedData && hasValidEntries && !results && !isLoading) {
+      // Clear exported data flag
+      sessionStorage.removeItem('portfolio-export-data');
+      // Trigger calculation after a short delay to ensure state is set
+      const timeoutId = setTimeout(() => {
+        calculateRisk();
+      }, 300);
+      return () => clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, timeframe, results, isLoading]);
+
+  // Save session data to localStorage whenever entries, results, or timeframe change
+  useEffect(() => {
+    localStorage.setItem('portfolio-entries', JSON.stringify(entries));
+  }, [entries]);
+
+  useEffect(() => {
+    if (results) {
+      localStorage.setItem('portfolio-results', JSON.stringify(results));
+    }
+  }, [results]);
+
+  useEffect(() => {
+    localStorage.setItem('portfolio-timeframe', timeframe);
+  }, [timeframe]);
+
+  useEffect(() => {
+    localStorage.setItem('portfolio-chart-type', chartType);
+  }, [chartType]);
+
+  useEffect(() => {
+    if (compareStock) {
+      localStorage.setItem('portfolio-compare-stock', compareStock);
+    } else {
+      localStorage.removeItem('portfolio-compare-stock');
+    }
+  }, [compareStock]);
+
+  const addEntry = () => {
+    setEntries([...entries, { stock: '', shares: 0 }]);
+  };
+
+  const removeEntry = (index: number) => {
+    setEntries(entries.filter((_, i) => i !== index));
+  };
+
+  const updateEntry = (index: number, field: keyof PortfolioEntry, value: string | number) => {
+    const newEntries = [...entries];
+    newEntries[index] = { ...newEntries[index], [field]: value };
+    setEntries(newEntries);
   };
 
   // Load chart data
@@ -330,132 +488,136 @@ export default function PortfolioRisk() {
         const symbol = symbolMatch ? symbolMatch[1].trim() : e.stock.trim();
         return symbol.toUpperCase();
       });
+
+      // Check if we have cached data for portfolio stocks
+      const cacheKey = `portfolio-chart-cache-${stockSymbols.sort().join('-')}-${timeframe}`;
+      const cachedDataStr = sessionStorage.getItem(cacheKey);
+      let allStockData: any[] = [];
+      let shouldCache = false;
+
+      if (cachedDataStr) {
+        // Use cached data
+        try {
+          const cachedData = JSON.parse(cachedDataStr);
+          const portfolioStocksData = stockSymbols.map(symbol => cachedData[symbol] || null).filter(Boolean);
+          
+          // Check if we have all required stocks in cache
+          if (portfolioStocksData.length === stockSymbols.length) {
+            // Check if we need compare stock data
+            if (chartType === 'compare' && compareStock) {
+              const compareSymbol = compareStock.trim().toUpperCase();
+              const compareCacheKey = `portfolio-chart-cache-compare-${compareSymbol}-${timeframe}`;
+              const cachedCompareStr = sessionStorage.getItem(compareCacheKey);
+              
+              if (cachedCompareStr) {
+                // Use cached compare data
+                const compareData = JSON.parse(cachedCompareStr);
+                const transformedData = transformCachedDataToChart(
+                  cachedData,
+                  compareData,
+                  chartType,
+                  validEntries
+                );
+                setChartData(transformedData);
+                setIsLoadingChart(false);
+                return;
+              } else {
+                // Need to fetch compare stock only
+                const compareData = await fetchStockData({ ticker: compareSymbol, period: timeframe });
+                sessionStorage.setItem(compareCacheKey, JSON.stringify(compareData));
+                const transformedData = transformCachedDataToChart(
+                  cachedData,
+                  compareData,
+                  chartType,
+                  validEntries
+                );
+                setChartData(transformedData);
+                setIsLoadingChart(false);
+                return;
+              }
+            } else {
+              // Transform cached data to requested chart type
+              const transformedData = transformCachedDataToChart(
+                cachedData,
+                null,
+                chartType,
+                validEntries
+              );
+              setChartData(transformedData);
+              setIsLoadingChart(false);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse cached chart data:', e);
+          // Fall through to fetch fresh data
+        }
+      }
+
+      // Need to fetch data (either no cache or incomplete cache)
+      shouldCache = true;
       
       // Add compare stock if in compare mode
+      const stocksToFetch = [...stockSymbols];
       if (chartType === 'compare' && compareStock) {
-        stockSymbols.push(compareStock.trim().toUpperCase());
+        stocksToFetch.push(compareStock.trim().toUpperCase());
       }
 
       // Fetch data for all stocks
-      const stockDataPromises = stockSymbols.map(symbol =>
+      const stockDataPromises = stocksToFetch.map(symbol =>
         fetchStockData({ ticker: symbol, period: timeframe })
       );
 
-      const allStockData = await Promise.all(stockDataPromises);
+      allStockData = await Promise.all(stockDataPromises);
 
-      if (chartType === 'single') {
-        const portfolioChartData: any[] = [];
-        const timePoints = new Set<number>();
-
-        // Collect all time points
-        allStockData.slice(0, -1).forEach((data) => {
-          if (data && data.chart_data) {
-            data.chart_data.forEach((point: any) => {
-              timePoints.add(point.time);
-            });
+      // Cache the portfolio stocks data
+      if (shouldCache && allStockData.length > 0) {
+        const dataToCache: { [key: string]: any } = {};
+        stockSymbols.forEach((symbol, idx) => {
+          if (allStockData[idx]) {
+            dataToCache[symbol] = allStockData[idx];
           }
         });
-
-        // For each time point, calculate portfolio value
-        Array.from(timePoints).sort().forEach(time => {
-          let portfolioValue = 0;
-          allStockData.slice(0, -1).forEach((data, idx) => {
-            if (data && data.chart_data && idx < validEntries.length) {
-              const point = data.chart_data.find((p: any) => p.time === time);
-              if (point) {
-                portfolioValue += point.close * validEntries[idx].shares;
-              }
-            }
-          });
-          if (portfolioValue > 0) {
-            portfolioChartData.push({
-              time,
-              value: portfolioValue,
-              date: new Date(time * 1000).toLocaleDateString(),
-            });
-          }
-        });
+        sessionStorage.setItem(cacheKey, JSON.stringify(dataToCache));
         
-        setChartData(portfolioChartData);
-      } else if (chartType === 'multiple') {
-        const timePoints = new Set<number>();
-        allStockData.forEach((data) => {
-          if (data && data.chart_data) {
-            data.chart_data.forEach((point: any) => {
-              timePoints.add(point.time);
-            });
-          }
-        });
-        
-        const chartDataMap: { [key: number]: any } = {};
-        Array.from(timePoints).sort().forEach(time => {
-          chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
-        });
-        
-        // Use validEntries to ensure symbol extraction matches Line component
-        allStockData.forEach((data, idx) => {
-          if (data && data.chart_data && idx < validEntries.length) {
-            // Extract symbol the same way as in the Line component
-            const entry = validEntries[idx];
-            const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
-            const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
-            data.chart_data.forEach((point: any) => {
-              if (chartDataMap[point.time]) {
-                chartDataMap[point.time][symbol] = point.close;
-              }
-            });
-          }
-        });
-        
-        setChartData(Object.values(chartDataMap).filter(d => Object.keys(d).length > 2));
-      } else if (chartType === 'compare' && compareStock) {
-        const portfolioChartData: any[] = [];
-        const compareStockData = allStockData[allStockData.length - 1];
-        const timePoints = new Set<number>();
-        
-        allStockData.forEach((data) => {
-          if (data && data.chart_data) {
-            data.chart_data.forEach((point: any) => {
-              timePoints.add(point.time);
-            });
-          }
-        });
-        
-        Array.from(timePoints).sort().forEach(time => {
-          let portfolioValue = 0;
-          let hasPortfolioData = false;
-          
-          allStockData.slice(0, -1).forEach((data, idx) => {
-            if (data && data.chart_data && idx < validEntries.length) {
-              const point = data.chart_data.find((p: any) => p.time === time);
-              if (point) {
-                portfolioValue += point.close * validEntries[idx].shares;
-                hasPortfolioData = true;
-              }
-            }
-          });
-          
-          const comparePoint = compareStockData?.chart_data?.find((p: any) => p.time === time);
-          
-          if (hasPortfolioData && comparePoint) {
-            portfolioChartData.push({
-              time,
-              portfolio: portfolioValue,
-              compare: comparePoint.close,
-              date: new Date(time * 1000).toLocaleDateString(),
-            });
-          }
-        });
-        
-        setChartData(portfolioChartData);
+        // Cache compare stock if in compare mode
+        if (chartType === 'compare' && compareStock && allStockData.length > stockSymbols.length) {
+          const compareSymbol = compareStock.trim().toUpperCase();
+          const compareData = allStockData[allStockData.length - 1];
+          const compareCacheKey = `portfolio-chart-cache-compare-${compareSymbol}-${timeframe}`;
+          sessionStorage.setItem(compareCacheKey, JSON.stringify(compareData));
+        }
       }
+
+      // Transform the fetched data to the requested chart type
+      const portfolioStocksData = allStockData.slice(0, stockSymbols.length);
+      const compareStockData = chartType === 'compare' && compareStock 
+        ? allStockData[allStockData.length - 1] 
+        : null;
+      
+      // Build cache object for transformation
+      const cacheObj: { [key: string]: any } = {};
+      stockSymbols.forEach((symbol, idx) => {
+        if (portfolioStocksData[idx]) {
+          cacheObj[symbol] = portfolioStocksData[idx];
+        }
+      });
+      
+      const transformedData = transformCachedDataToChart(
+        cacheObj,
+        compareStockData,
+        chartType,
+        validEntries
+      );
+      
+      setChartData(transformedData);
     } catch (error) {
       console.error('Error loading chart data:', error);
       setChartData([]);
     } finally {
       setIsLoadingChart(false);
     }
-  }, [results, timeframe, chartType, compareStock, fetchStockData]);
+  }, [results, timeframe, chartType, compareStock, fetchStockData, transformCachedDataToChart, entries]);
 
   useEffect(() => {
     // Only load chart data when results are set (from calculateRisk), not when entries change
@@ -519,12 +681,24 @@ export default function PortfolioRisk() {
     localStorage.removeItem('portfolio-entries');
     localStorage.removeItem('portfolio-results');
     localStorage.removeItem('portfolio-timeframe');
+    localStorage.removeItem('portfolio-chart-type');
+    localStorage.removeItem('portfolio-compare-stock');
+    
+    // Clear session storage cache
+    Object.keys(sessionStorage).forEach(key => {
+      if (key.startsWith('portfolio-chart-cache-')) {
+        sessionStorage.removeItem(key);
+      }
+    });
     
     // Reset state
     setEntries([{ stock: '', shares: 0 }]);
     setResults(null);
     setError(null);
     setTimeframe('1y');
+    setChartData([]);
+    setCachedStockData(null);
+    setCachedCompareStockData(null);
   };
 
   const handleCalculatorClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -538,14 +712,15 @@ export default function PortfolioRisk() {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
-        {/* Calculator Bubble Button - Top Left */}
+        {/* Calculator Bubble Button - Top Right */}
         <Box sx={{ position: 'relative', mb: 2 }}>
           <IconButton
             onClick={handleCalculatorClick}
+            disabled={isLoading}
             sx={{
               position: 'absolute',
               top: -8,
-              left: -20,
+              right: 0,
               zIndex: 10,
               width: 48,
               height: 48,
@@ -557,9 +732,17 @@ export default function PortfolioRisk() {
                 backgroundColor: 'rgba(59, 130, 246, 0.3)',
                 borderColor: '#2563eb',
               },
+              '&.Mui-disabled': {
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderColor: 'rgba(59, 130, 246, 0.3)',
+              },
             }}
           >
-            <CalculateIcon />
+            {isLoading ? (
+              <CircularProgress size={24} sx={{ color: '#3b82f6' }} />
+            ) : (
+              <CalculateIcon />
+            )}
           </IconButton>
 
           {/* Calculator Popover */}
@@ -569,11 +752,11 @@ export default function PortfolioRisk() {
             onClose={handleCalculatorClose}
             anchorOrigin={{
               vertical: 'bottom',
-              horizontal: 'left',
+              horizontal: 'right',
             }}
             transformOrigin={{
               vertical: 'top',
-              horizontal: 'left',
+              horizontal: 'right',
             }}
             PaperProps={{
               sx: {
@@ -1325,6 +1508,9 @@ export default function PortfolioRisk() {
                   <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Weight</TableCell>
                   <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Annual Return</TableCell>
                   <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Volatility</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Std Dev</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Variance</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Avg Covariance</TableCell>
                   <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Shares</TableCell>
                   <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Current Price</TableCell>
                   <TableCell align="right" sx={{ color: '#ffffff', fontWeight: 600 }}>Total Value</TableCell>
@@ -1349,6 +1535,15 @@ export default function PortfolioRisk() {
                     </TableCell>
                     <TableCell align="right" sx={{ color: '#9ca3af' }}>
                       {details.annual_volatility.toFixed(2)}%
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: '#9ca3af' }}>
+                      {details.standard_deviation !== undefined ? (details.standard_deviation * 100).toFixed(2) + '%' : 'N/A'}
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: '#9ca3af' }}>
+                      {details.variance !== undefined ? details.variance.toFixed(6) : 'N/A'}
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: '#9ca3af' }}>
+                      {details.avg_covariance !== undefined ? details.avg_covariance.toFixed(6) : 'N/A'}
                     </TableCell>
                     <TableCell align="right" sx={{ color: '#9ca3af' }}>
                       {details.shares.toLocaleString()}
@@ -1444,6 +1639,18 @@ export default function PortfolioRisk() {
                         <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Volatility</TableCell>
                         <TableCell align="right" sx={{ color: '#ef4444', fontWeight: 600 }}>
                           {results.portfolio_volatility.toFixed(2)}%
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Standard Deviation</TableCell>
+                        <TableCell align="right" sx={{ color: '#ef4444', fontWeight: 600 }}>
+                          {results.portfolio_standard_deviation !== undefined ? (results.portfolio_standard_deviation * 100).toFixed(2) + '%' : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                        <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Portfolio Variance</TableCell>
+                        <TableCell align="right" sx={{ color: '#ef4444', fontWeight: 600 }}>
+                          {results.portfolio_variance !== undefined ? results.portfolio_variance.toFixed(6) : 'N/A'}
                         </TableCell>
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>

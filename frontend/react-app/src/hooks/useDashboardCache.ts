@@ -307,11 +307,20 @@ export function useFlexibleCache<T>(
   const [lastFetch, setLastFetch] = useState<number | null>(null);
   const fetchFunctionRef = useRef(fetchFunction);
   const hasInitialized = useRef(false);
+  const cacheKeyRef = useRef(cacheKey);
 
-  // Update the ref when fetchFunction changes
+  // Update refs when they change
   useEffect(() => {
     fetchFunctionRef.current = fetchFunction;
   }, [fetchFunction]);
+
+  useEffect(() => {
+    // If cache key changes, reset initialization flag
+    if (cacheKeyRef.current !== cacheKey) {
+      hasInitialized.current = false;
+      cacheKeyRef.current = cacheKey;
+    }
+  }, [cacheKey]);
 
   const fetchData = useCallback(async (bypassCache = false) => {
     if (!enabled) return;
@@ -347,13 +356,15 @@ export function useFlexibleCache<T>(
     }
   }, [cacheKey, ttl, useSessionStorage, version, enabled, forceRefresh]);
 
-  // Initial fetch - only run once when component mounts
+  // Initial fetch - only run once per cache key when component mounts
   useEffect(() => {
-    if (!hasInitialized.current) {
+    if (!hasInitialized.current && enabled) {
       hasInitialized.current = true;
       fetchData(forceRefresh);
     }
-  }, [fetchData, forceRefresh]);
+    // Only depend on cacheKey and forceRefresh, not fetchData to prevent re-runs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, forceRefresh, enabled]);
 
   // Force refresh function
   const refresh = useCallback(() => {

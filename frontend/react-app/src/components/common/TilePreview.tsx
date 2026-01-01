@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { Box } from '@mui/material';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { Box, Typography } from '@mui/material';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -19,6 +19,7 @@ interface TilePreviewProps {
   folder_path: string;
   item_id: string;
   onUpdate: (updatedTile: UnifiedTile) => void;
+  containerSize?: { width: number; height: number }; // Optional container size from dialog
 }
 
 const TilePreview: React.FC<TilePreviewProps> = ({
@@ -27,8 +28,15 @@ const TilePreview: React.FC<TilePreviewProps> = ({
   folder_path,
   item_id,
   onUpdate,
+  containerSize,
 }) => {
   const [currentTile, setCurrentTile] = useState<UnifiedTile>(tile);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // Handle tile updates (from tile data changes like portfolio recalculations)
   const handleTileUpdate = useCallback((_id: string, data: any) => {
@@ -86,13 +94,102 @@ const TilePreview: React.FC<TilePreviewProps> = ({
     });
   }, [user_id, folder_path, item_id, onUpdate]);
 
+  // Calculate tile size based on container or default
+  const tileSize = useMemo(() => {
+    if (containerSize) {
+      // Use container size minus padding, with some margin
+      const padding = 48; // 24px on each side
+      const headerHeight = 80; // Approximate header height
+      const actionsHeight = 80; // Approximate actions height
+      const availableWidth = containerSize.width - padding;
+      const availableHeight = containerSize.height - headerHeight - actionsHeight - padding;
+      // Use the smaller dimension to maintain square-ish aspect, or use available space
+      const size = Math.min(availableWidth, availableHeight, 1200); // Max 1200px
+      return {
+        width: Math.max(400, size), // Min 400px
+        height: Math.max(400, size), // Min 400px
+      };
+    }
+    return {
+      width: 600, // Default size
+      height: 600,
+    };
+  }, [containerSize]);
+
+  // Handle wheel zoom - use native event listener to allow preventDefault
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setZoom(prev => Math.max(0.5, Math.min(3, prev + delta))); // Zoom between 0.5x and 3x
+  }, []);
+
+  // Handle pan start
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Only left mouse button
+    setIsPanning(true);
+    setPanStart({
+      x: e.clientX - pan.x,
+      y: e.clientY - pan.y,
+    });
+  }, [pan]);
+
+  // Handle pan move
+  const handlePanMove = useCallback((e: MouseEvent) => {
+    if (!isPanning) return;
+    setPan({
+      x: e.clientX - panStart.x,
+      y: e.clientY - panStart.y,
+    });
+  }, [isPanning, panStart]);
+
+  // Handle pan end
+  const handlePanEnd = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  // Mouse event listeners for panning
+  useEffect(() => {
+    if (isPanning) {
+      document.addEventListener('mousemove', handlePanMove);
+      document.addEventListener('mouseup', handlePanEnd);
+      document.body.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handlePanMove);
+      document.removeEventListener('mouseup', handlePanEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    return () => {
+      document.removeEventListener('mousemove', handlePanMove);
+      document.removeEventListener('mouseup', handlePanEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isPanning, handlePanMove, handlePanEnd]);
+
+  // Reset zoom and pan when tile changes
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [currentTile.id]);
+
+  // Attach wheel event listener directly to container (non-passive)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [handleWheel]);
+
   // Common props for all tiles (excluding grid-related props)
   const commonProps = useMemo(() => ({
     id: currentTile.id,
-    size: {
-      width: 600, // Fixed size for preview
-      height: 600,
-    },
+    size: tileSize,
     dashboardContext: 'filesystem_preview',
     onRemove: () => {}, // No-op in preview
     onUpdate: handleTileUpdate,
@@ -348,53 +445,81 @@ const TilePreview: React.FC<TilePreviewProps> = ({
 
   return (
     <Box
+      ref={containerRef}
+      onMouseDown={handlePanStart}
       sx={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'flex-start',
-        p: 3,
-        maxHeight: '80vh',
-        overflow: 'auto',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        position: 'relative',
         backgroundColor: 'rgba(15, 23, 42, 0.95)',
-        // Blue scrollbar
-        '&::-webkit-scrollbar': {
-          width: '12px',
-        },
-        '&::-webkit-scrollbar-track': {
-          backgroundColor: '#1f2937',
-        },
-        '&::-webkit-scrollbar-thumb': {
-          backgroundColor: '#3b82f6',
-          borderRadius: '6px',
-          '&:hover': {
-            backgroundColor: '#2563eb',
-          },
-        },
+        cursor: isPanning ? 'grabbing' : zoom > 1 ? 'grab' : 'default',
       }}
     >
-      <Box sx={{ width: '600px', maxWidth: '100%' }}>
-        {currentTile.type === 'crypto' ? (
-          <CryptoTile key={currentTile.id} {...cryptoProps} />
-        ) : currentTile.type === 'stock' ? (
-          <StockTile key={currentTile.id} {...stockProps} />
-        ) : currentTile.type === 'stock_screener' ? (
-          <StockScreenerTile key={currentTile.id} {...stockScreenerProps} />
-        ) : currentTile.type === 'news' ? (
-          <NewsTile key={currentTile.id} {...newsProps} />
-        ) : currentTile.type === 'portfolio' ? (
-          <PortfolioTile key={currentTile.id} {...portfolioProps} />
-        ) : currentTile.type === 'politician_trades' ? (
-          <PoliticianTradesSearchTile key={currentTile.id} {...politicianTradesProps} />
-        ) : currentTile.type === 'sec_search' ? (
-          <SECSearchTile key={currentTile.id} {...secSearchProps} />
-        ) : currentTile.type === 'govt_contracts' ? (
-          <GovtContractsSearchTile key={currentTile.id} {...govtContractsProps} />
-        ) : currentTile.type === 'congress_bills' ? (
-          <CongressBillsSearchTile key={currentTile.id} {...congressBillsProps} />
-        ) : currentTile.type === 'lda_disclosures' ? (
-          <LDASearchTile key={currentTile.id} {...ldaSearchProps} />
-        ) : null}
+      <Box
+        ref={contentRef}
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'flex-start',
+          width: '100%',
+          height: '100%',
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: 'center center',
+          transition: isPanning ? 'none' : 'transform 0.1s ease-out',
+          p: 3,
+        }}
+      >
+        <Box 
+          sx={{ 
+            width: `${tileSize.width}px`,
+            height: `${tileSize.height}px`,
+            flexShrink: 0,
+          }}
+        >
+          {currentTile.type === 'crypto' ? (
+            <CryptoTile key={currentTile.id} {...cryptoProps} />
+          ) : currentTile.type === 'stock' ? (
+            <StockTile key={currentTile.id} {...stockProps} />
+          ) : currentTile.type === 'stock_screener' ? (
+            <StockScreenerTile key={currentTile.id} {...stockScreenerProps} />
+          ) : currentTile.type === 'news' ? (
+            <NewsTile key={currentTile.id} {...newsProps} />
+          ) : currentTile.type === 'portfolio' ? (
+            <PortfolioTile key={currentTile.id} {...portfolioProps} />
+          ) : currentTile.type === 'politician_trades' ? (
+            <PoliticianTradesSearchTile key={currentTile.id} {...politicianTradesProps} />
+          ) : currentTile.type === 'sec_search' ? (
+            <SECSearchTile key={currentTile.id} {...secSearchProps} />
+          ) : currentTile.type === 'govt_contracts' ? (
+            <GovtContractsSearchTile key={currentTile.id} {...govtContractsProps} />
+          ) : currentTile.type === 'congress_bills' ? (
+            <CongressBillsSearchTile key={currentTile.id} {...congressBillsProps} />
+          ) : currentTile.type === 'lda_disclosures' ? (
+            <LDASearchTile key={currentTile.id} {...ldaSearchProps} />
+          ) : null}
+        </Box>
       </Box>
+      {/* Zoom indicator */}
+      {zoom !== 1 && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+            border: '1px solid #374151',
+            borderRadius: '4px',
+            px: 2,
+            py: 1,
+            zIndex: 10,
+          }}
+        >
+          <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+            {Math.round(zoom * 100)}% {isPanning && '(Panning)'}
+          </Typography>
+        </Box>
+      )}
     </Box>
   );
 };
