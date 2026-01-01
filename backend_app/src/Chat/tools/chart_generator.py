@@ -512,6 +512,7 @@ class UnifiedChartGenerator:
                     logger.info(f"🔍 DEBUG: Normalization enabled. Baseline prices: {baseline_prices}")
                 
                 plotted_count = 0
+                plotted_dataframes = {}  # Store DataFrames after normalization for y-axis scaling
                 for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
                     if not stock_data:
                         continue
@@ -550,6 +551,9 @@ class UnifiedChartGenerator:
                             # Normalize: multiply all prices by (100 / baseline) so they start at 100
                             df['close'] = df['close'] * (100.0 / baseline)
                             logger.info(f"🔍 DEBUG: Normalized {stock_symbol} prices (baseline: ${baseline:.2f})")
+                    
+                    # Store DataFrame for y-axis scaling (after normalization)
+                    plotted_dataframes[stock_symbol] = df
                     
                     # Plot line for this stock with professional styling
                     color = colors[i % len(colors)]
@@ -680,17 +684,24 @@ class UnifiedChartGenerator:
             plt.yticks(fontsize=10)
             
             # Scale y-axis based on data: start at minimum value, end at 10% above max
-            # Collect all price values from the plotted data
+            # Collect all price values from the plotted data (AFTER normalization if enabled)
             all_prices = []
             if data_type == 'multiple_stocks':
-                # For multiple stocks, collect prices from all stocks
-                for stock_symbol, stock_data in normalized_data.items():
-                    if stock_data:
-                        df_stock = pd.DataFrame(stock_data)
+                # For multiple stocks, collect prices from plotted DataFrames (already normalized if normalize=True)
+                if 'plotted_dataframes' in locals() and plotted_dataframes:
+                    # Use DataFrames that were already normalized and plotted
+                    for stock_symbol, df_stock in plotted_dataframes.items():
                         if 'close' in df_stock.columns:
                             all_prices.extend(df_stock['close'].tolist())
+                else:
+                    # Fallback: collect from original normalized_data (for non-normalized charts)
+                    for stock_symbol, stock_data in normalized_data.items():
+                        if stock_data:
+                            df_stock = pd.DataFrame(stock_data)
+                            if 'close' in df_stock.columns:
+                                all_prices.extend(df_stock['close'].tolist())
             else:
-                # For single stock, use the df we already have
+                # For single stock, use the df we already have (already normalized if normalize was enabled)
                 if 'close' in df.columns:
                     all_prices = df['close'].tolist()
             
