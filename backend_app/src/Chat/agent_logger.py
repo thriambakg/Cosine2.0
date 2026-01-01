@@ -34,8 +34,10 @@ class AgentLogger(logging.Handler):
     - Session/user isolation
     """
     
-    # Class-level variables for singleton pattern
-    _instance: Optional['AgentLogger'] = None
+    # Class-level variables for per-session instances (not singleton - each session gets its own logger)
+    _instances: Dict[str, 'AgentLogger'] = {}  # Dict: {session_id: AgentLogger instance}
+    _instances_lock = threading.Lock()
+    _instance: Optional['AgentLogger'] = None  # Fallback for cases without session_id
     _lock = threading.Lock()
     
     def __init__(self, session_id: Optional[str] = None, user_id: Optional[str] = None, message_id: Optional[str] = None):
@@ -110,34 +112,44 @@ class AgentLogger(logging.Handler):
     @classmethod
     def get_instance(cls, session_id: Optional[str] = None, user_id: Optional[str] = None, message_id: Optional[str] = None) -> 'AgentLogger':
         """
-        Get or create singleton instance of AgentLogger.
+        Get or create session-specific instance of AgentLogger.
+        Uses session_id as the key to ensure proper session isolation.
         
         Args:
-            session_id: Session ID for WebSocket streaming
+            session_id: Session ID for WebSocket streaming (REQUIRED for proper isolation)
             user_id: User ID for WebSocket streaming
             message_id: Message ID to link logs
             
         Returns:
-            AgentLogger instance
+            AgentLogger instance for the specific session
         """
-        with cls._lock:
-            if cls._instance is None or (session_id and cls._instance.session_id != session_id):
-                cls._instance = cls(session_id, user_id, message_id)
-            elif session_id and cls._instance.session_id != session_id:
-                # Update existing instance with new session context
-                cls._instance.session_id = session_id
-                cls._instance.user_id = user_id
-                cls._instance.message_id = message_id
-                cls._instance.websocket_enabled = bool(session_id and user_id and WEBSOCKET_HANDLER_AVAILABLE)
-                cls._instance.start_time = time.time()
-                # Reinitialize WebSocket handler if needed
-                if cls._instance.websocket_enabled and WEBSOCKET_HANDLER_AVAILABLE and not cls._instance.ws_handler:
-                    try:
-                        cls._instance.ws_handler = WebSocketHandler()
-                    except Exception as e:
-                        cls._instance._internal_logger.warning(f"Failed to reinitialize WebSocket handler: {e}")
-                        cls._instance.websocket_enabled = False
+        # Use session_id as key for proper isolation (not singleton pattern)
+        if not hasattr(cls, '_instances'):
+            cls._instances = {}  # Dict: {session_id: AgentLogger instance}
+            cls._instances_lock = threading.Lock()
+        
+        # If no session_id provided, return a default instance (for backward compatibility)
+        if not session_id:
+            if cls._instance is None:
+                with cls._lock:
+                    if cls._instance is None:
+                        cls._instance = cls(None, user_id, message_id)
             return cls._instance
+        
+        # Use session_id as key for proper isolation
+        with cls._instances_lock:
+            if session_id not in cls._instances:
+                cls._instances[session_id] = cls(session_id, user_id, message_id)
+            else:
+                # Update existing instance if user_id or message_id changed
+                instance = cls._instances[session_id]
+                if user_id and instance.user_id != user_id:
+                    instance.user_id = user_id
+                if message_id and instance.message_id != message_id:
+                    instance.message_id = message_id
+                instance.websocket_enabled = bool(session_id and instance.user_id and WEBSOCKET_HANDLER_AVAILABLE)
+            
+            return cls._instances[session_id]
     
     
     def _send_log_to_websocket(self, log_entry: Dict[str, Any]):
@@ -265,6 +277,20 @@ class AgentLogger(logging.Handler):
                 self._internal_logger.warning(f"Failed to initialize WebSocket handler: {e}")
                 self.websocket_enabled = False
         self.start_time = time.time()
+    
+    @classmethod
+    def clear_session_logger(cls, session_id: str):
+        """
+        Clear logger instance for a specific session (cleanup).
+        Call this when a session ends to prevent memory leaks.
+        
+        Args:
+            session_id: Session ID to clear
+        """
+        if hasattr(cls, '_instances') and session_id in cls._instances:
+            with cls._instances_lock:
+                if session_id in cls._instances:
+                    del cls._instances[session_id]
 
 
 # Global instance getter function for easy access

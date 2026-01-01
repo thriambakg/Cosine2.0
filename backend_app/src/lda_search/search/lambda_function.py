@@ -360,6 +360,7 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     date_to = filters.get('date_to')
     
     # Item type filter - use ItemTypePostedDateIndex
+    has_item_type_with_date = False
     if filters.get('item_type'):
         item_types = filters['item_type'] if isinstance(filters['item_type'], list) else [filters['item_type']]
         item_types = [t.upper() for t in item_types if t and str(t).strip()]
@@ -374,7 +375,15 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_value': date_from if date_from else None,
                 'range_condition': 'gte' if date_from else None
             })
-    if date_from or date_to:
+            # Mark that we have item_type with date filtering
+            if date_from or date_to:
+                has_item_type_with_date = True
+    
+    # Only use YearPostedDateIndex if we don't already have ItemTypePostedDateIndex with date filtering
+    # ItemTypePostedDateIndex already handles date filtering via its range key, so YearPostedDateIndex
+    # would create an unnecessary intersection that could exclude valid results (e.g., if date_from=2007
+    # but earliest data is 2008, YearPostedDateIndex for 2007 would return 0 results)
+    if (date_from or date_to) and not has_item_type_with_date:
         # Extract year from date_from or date_to
         date_str = date_from or date_to
         if date_str:
@@ -1213,7 +1222,104 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     
                 else:
                     # Use GSI query
-                    logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
+                    # On first batch, try comma/case variations for name-based queries if original returns 0 results
+                    current_hash_value = config['hash_value']
+                    if batch_iteration == 1 and config['hash_key'] in ['client_name', 'registrant_name', 'lobbyist_name']:
+                        # Test original value first
+                        test_ids, _ = query_gsi_for_filing_ids(
+                            index_name=config['index_name'],
+                            hash_key_name=config['hash_key'],
+                            hash_key_value=current_hash_value,
+                            range_key_name=config.get('range_key'),
+                            range_key_value=config.get('range_value'),
+                            range_key_condition=config.get('range_condition'),
+                            limit=1,
+                            exclusive_start_key=None,
+                            get_all=False
+                        )
+                        
+                        found_match = len(test_ids) > 0
+                        
+                        if not found_match:
+                            # Original didn't work, try comma variations
+                            original_value = str(current_hash_value)
+                            comma_variations = []
+                            
+                            # If value has no comma, try adding one before "INC", "LLC", "CORP", etc.
+                            if ',' not in original_value:
+                                # Try case-insensitive suffix matching
+                                suffixes = [' INC.', ' LLC', ' CORP', ' LP', ' L.P.', ' LLP', ' INC', ' LLC.', ' CORP.', ' LP.', ' L.P', ' LLP.']
+                                for suffix in suffixes:
+                                    # Case-insensitive check
+                                    if original_value.upper().endswith(suffix.upper()):
+                                        # Find the actual suffix in the original (preserve case)
+                                        original_upper = original_value.upper()
+                                        suffix_start = len(original_upper) - len(suffix)
+                                        actual_suffix = original_value[suffix_start:]
+                                        # Try with comma before suffix: "COMPANY INC." -> "COMPANY, INC."
+                                        comma_version = original_value.replace(actual_suffix, ',' + actual_suffix)
+                                        comma_variations.append(comma_version)
+                                        break
+                            
+                            # If value has comma, try removing it
+                            if ',' in original_value:
+                                no_comma_version = original_value.replace(',', '')
+                                comma_variations.append(no_comma_version)
+                            
+                            # Try comma variations
+                            for comma_var in comma_variations:
+                                logger.info(f"Trying comma variation for {config['hash_key']}: '{comma_var}'")
+                                test_ids, _ = query_gsi_for_filing_ids(
+                                    index_name=config['index_name'],
+                                    hash_key_name=config['hash_key'],
+                                    hash_key_value=comma_var,
+                                    range_key_name=config.get('range_key'),
+                                    range_key_value=config.get('range_value'),
+                                    range_key_condition=config.get('range_condition'),
+                                    limit=1,
+                                    exclusive_start_key=None,
+                                    get_all=False
+                                )
+                                
+                                if len(test_ids) > 0:
+                                    # Found results with comma variation - use it
+                                    current_hash_value = comma_var
+                                    config['hash_value'] = comma_var  # Update config for future queries
+                                    logger.info(f"Found results with comma variation '{comma_var}' - using this for all queries")
+                                    found_match = True
+                                    break
+                            
+                            # If comma variations didn't work, try case variations
+                            if not found_match:
+                                variations = [
+                                    original_value.upper(),
+                                    original_value.lower(),
+                                    original_value.title(),
+                                    original_value.capitalize(),
+                                ]
+                                for variation in variations:
+                                    if variation != original_value:
+                                        logger.info(f"Trying case variation for {config['hash_key']}: '{variation}'")
+                                        test_ids, _ = query_gsi_for_filing_ids(
+                                            index_name=config['index_name'],
+                                            hash_key_name=config['hash_key'],
+                                            hash_key_value=variation,
+                                            range_key_name=config.get('range_key'),
+                                            range_key_value=config.get('range_value'),
+                                            range_key_condition=config.get('range_condition'),
+                                            limit=1,
+                                            exclusive_start_key=None,
+                                            get_all=False
+                                        )
+                                        
+                                        if len(test_ids) > 0:
+                                            current_hash_value = variation
+                                            config['hash_value'] = variation
+                                            logger.info(f"Found results with case variation '{variation}' - using this for all queries")
+                                            found_match = True
+                                            break
+                    
+                    logger.info(f"Querying {config['index_name']} for {config['filter_key']}={current_hash_value}")
                     
                     # Use pagination key from our tracking
                     exclusive_start_key = query_pagination_keys[unique_key]
@@ -1225,7 +1331,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     filing_ids, last_eval_key = query_gsi_for_filing_ids(
                         index_name=config['index_name'],
                         hash_key_name=config['hash_key'],
-                        hash_key_value=config['hash_value'],
+                        hash_key_value=current_hash_value,
                         range_key_name=config.get('range_key'),
                         range_key_value=config.get('range_value'),
                         range_key_condition=config.get('range_condition'),
