@@ -1363,7 +1363,9 @@ export default function PortfolioRisk() {
                         <IconButton
                           size="small"
                           onClick={() => {
-                            setChartType('compare');
+                            if (chartType !== 'compare') {
+                              setChartType('compare');
+                            }
                             setCompareDialogOpen(!compareDialogOpen);
                           }}
                           sx={{
@@ -1398,22 +1400,28 @@ export default function PortfolioRisk() {
                               value={compareInputValue}
                               onChange={(_, newValue) => {
                                 if (newValue) {
+                                  let symbol = '';
                                   if (typeof newValue === 'string') {
                                     const symbolMatch = newValue.match(/^([A-Z.]+)(?:\s*-|$)/);
-                                    const symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
-                                    setCompareStock(symbol.toUpperCase());
-                                    setCompareInputValue(symbol.toUpperCase());
+                                    symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
                                   } else {
-                                    setCompareStock(newValue.symbol.toUpperCase());
-                                    setCompareInputValue(newValue.symbol.toUpperCase());
+                                    symbol = newValue.symbol || '';
                                   }
-                                  setCompareDialogOpen(false);
+                                  symbol = symbol.toUpperCase();
+                                  if (symbol) {
+                                    setCompareStock(symbol);
+                                    setCompareInputValue(symbol);
+                                    setChartType('compare'); // Ensure chart type is set to compare
+                                    setCompareDialogOpen(false);
+                                  }
                                 }
                               }}
                               onInputChange={(_, newInputValue) => {
-                                setCompareInputValue(newInputValue);
-                                if (isSecurityDataLoaded && newInputValue) {
-                                  const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
+                                // Normalize to uppercase as user types
+                                const normalized = newInputValue.toUpperCase();
+                                setCompareInputValue(normalized);
+                                if (isSecurityDataLoaded && normalized) {
+                                  const suggestions = securitySuggestionsServiceV2.getSuggestions(normalized, 50);
                                   const seen = new Set<string>();
                                   const uniqueSuggestions = suggestions.filter(security => {
                                     if (seen.has(security.symbol)) return false;
@@ -1430,11 +1438,35 @@ export default function PortfolioRisk() {
                               }}
                               freeSolo
                               autoSelect={false}
+                              selectOnFocus={false}
+                              clearOnBlur={false}
+                              autoHighlight={false}
+                              disableListWrap={true}
                               renderInput={(params) => (
                                 <TextField
                                   {...params}
-                                  placeholder="Enter ticker"
+                                  placeholder="Enter ticker (press Enter)"
                                   size="small"
+                                  onKeyDown={(e) => {
+                                    // Handle Enter key to submit free text input
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      const inputValue = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                                      if (inputValue) {
+                                        // Extract just the ticker symbol if user entered display text
+                                        const symbolMatch = inputValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                                        const symbol = symbolMatch ? symbolMatch[1].trim() : inputValue.trim();
+                                        if (symbol) {
+                                          setCompareStock(symbol);
+                                          setCompareInputValue(symbol);
+                                          setChartType('compare'); // Ensure chart type is set to compare
+                                          setCompareDialogOpen(false);
+                                        }
+                                      }
+                                    }
+                                    // Allow default behavior for other keys
+                                    params.inputProps?.onKeyDown?.(e);
+                                  }}
                                   sx={{
                                     '& .MuiOutlinedInput-root': {
                                       color: 'white',
@@ -1619,20 +1651,20 @@ export default function PortfolioRisk() {
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
                         <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>CAGR</TableCell>
-                        <TableCell align="right" sx={{ color: results.cagr && results.cagr >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
-                          {results.cagr !== undefined ? `${results.cagr >= 0 ? '+' : ''}${results.cagr.toFixed(2)}%` : 'N/A'}
+                        <TableCell align="right" sx={{ color: (results.cagr !== undefined && results.cagr !== null && results.cagr >= 0) ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                          {(results.cagr !== undefined && results.cagr !== null) ? `${results.cagr >= 0 ? '+' : ''}${results.cagr.toFixed(2)}%` : 'N/A'}
                         </TableCell>
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
                         <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Alpha</TableCell>
-                        <TableCell align="right" sx={{ color: results.alpha && results.alpha >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
-                          {results.alpha !== undefined ? `${results.alpha >= 0 ? '+' : ''}${results.alpha.toFixed(2)}%` : 'N/A'}
+                        <TableCell align="right" sx={{ color: (results.alpha !== undefined && results.alpha !== null && results.alpha >= 0) ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                          {(results.alpha !== undefined && results.alpha !== null) ? `${results.alpha >= 0 ? '+' : ''}${results.alpha.toFixed(2)}%` : 'N/A'}
                         </TableCell>
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
                         <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Beta</TableCell>
                         <TableCell align="right" sx={{ color: '#9ca3af', fontWeight: 600 }}>
-                          {results.beta !== undefined ? results.beta.toFixed(2) : 'N/A'}
+                          {(results.beta !== undefined && results.beta !== null) ? results.beta.toFixed(2) : 'N/A'}
                         </TableCell>
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
@@ -1644,13 +1676,13 @@ export default function PortfolioRisk() {
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
                         <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Standard Deviation</TableCell>
                         <TableCell align="right" sx={{ color: '#ef4444', fontWeight: 600 }}>
-                          {results.portfolio_standard_deviation !== undefined ? (results.portfolio_standard_deviation * 100).toFixed(2) + '%' : 'N/A'}
+                          {(results.portfolio_standard_deviation !== undefined && results.portfolio_standard_deviation !== null) ? (results.portfolio_standard_deviation * 100).toFixed(2) + '%' : 'N/A'}
                         </TableCell>
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
                         <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Portfolio Variance</TableCell>
                         <TableCell align="right" sx={{ color: '#ef4444', fontWeight: 600 }}>
-                          {results.portfolio_variance !== undefined ? results.portfolio_variance.toFixed(6) : 'N/A'}
+                          {(results.portfolio_variance !== undefined && results.portfolio_variance !== null) ? results.portfolio_variance.toFixed(6) : 'N/A'}
                         </TableCell>
                       </TableRow>
                       <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>

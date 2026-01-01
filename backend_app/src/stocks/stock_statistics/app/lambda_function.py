@@ -437,7 +437,7 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         
         # Calculate CAGR (Compound Annual Growth Rate)
         # Use the first and last portfolio values from historical data
-        portfolio_cagr = 0.0
+        portfolio_cagr = None
         try:
             # Calculate portfolio value over time
             if len(stock_data_dict) > 0:
@@ -454,11 +454,12 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
                     
                     for ticker in tickers:
                         df = stock_data_dict[ticker]
-                        start_price = df['Close'].iloc[0]
-                        end_price = df['Close'].iloc[-1]
-                        shares = next((s for t, s, _ in portfolio_tuples if t == ticker), 0)
-                        start_value += shares * start_price
-                        end_value += shares * end_price
+                        if len(df) > 0:
+                            start_price = df['Close'].iloc[0]
+                            end_price = df['Close'].iloc[-1]
+                            shares = next((s for t, s, _ in portfolio_tuples if t == ticker), 0)
+                            start_value += shares * start_price
+                            end_value += shares * end_price
                     
                     if start_value > 0:
                         # Calculate number of years
@@ -468,12 +469,24 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
                         if years > 0:
                             # CAGR = (End Value / Start Value)^(1/years) - 1
                             portfolio_cagr = ((end_value / start_value) ** (1 / years) - 1) * 100
+                            debug_print(f"CAGR calculated: {portfolio_cagr:.2f}% (start: ${start_value:.2f}, end: ${end_value:.2f}, years: {years:.2f})")
         except Exception as e:
             logger.warning(f"CAGR calculation failed: {e}")
-            portfolio_cagr = portfolio_expected_return  # Fallback to expected return
+            debug_print(f"CAGR calculation error: {str(e)}")
+            # Try fallback to expected return if CAGR calculation fails
+            try:
+                portfolio_cagr = portfolio_expected_return
+                debug_print(f"CAGR fallback to expected return: {portfolio_cagr:.2f}%")
+            except:
+                portfolio_cagr = 0.0  # Default to 0.0 instead of None so it displays
+                debug_print(f"CAGR defaulted to 0.0%")
+        
+        # Ensure CAGR is never None
+        if portfolio_cagr is None:
+            portfolio_cagr = 0.0
         
         # Calculate Beta (portfolio beta vs market, using SPY as benchmark)
-        portfolio_beta = 1.0  # Default to 1.0
+        portfolio_beta = None
         try:
             # Fetch SPY data for market benchmark
             spy = yf.Ticker("SPY")
@@ -522,34 +535,55 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
                                     spy_returns.append(spy_ret)
                 
                 # Calculate beta using covariance/variance
-                if len(portfolio_returns) > 1 and len(spy_returns) > 1:
+                if len(portfolio_returns) > 1 and len(spy_returns) > 1 and len(portfolio_returns) == len(spy_returns):
                     portfolio_returns = np.array(portfolio_returns)
                     spy_returns = np.array(spy_returns)
                     
                     covariance = np.cov(portfolio_returns, spy_returns)[0][1]
                     spy_variance = np.var(spy_returns)
                     
-                    if spy_variance > 0:
-                        portfolio_beta = covariance / spy_variance
+                    if spy_variance > 0 and not np.isnan(covariance) and not np.isnan(spy_variance):
+                        portfolio_beta = float(covariance / spy_variance)
+                        debug_print(f"Beta calculated: {portfolio_beta:.4f} (covariance: {covariance:.6f}, spy_variance: {spy_variance:.6f})")
+                    else:
+                        debug_print(f"Beta calculation skipped: spy_variance={spy_variance}, covariance={covariance}")
+                else:
+                    debug_print(f"Beta calculation skipped: insufficient data (portfolio_returns: {len(portfolio_returns)}, spy_returns: {len(spy_returns)})")
+            else:
+                debug_print(f"Beta calculation skipped: spy_df empty or no stock data")
         except Exception as e:
             logger.warning(f"Beta calculation failed: {e}")
-            portfolio_beta = 1.0  # Default to 1.0
+            debug_print(f"Beta calculation error: {str(e)}")
+            portfolio_beta = None  # Don't default to 1.0, let frontend show N/A
+        
+        # Default to 1.0 only if we have no data at all
+        if portfolio_beta is None:
+            portfolio_beta = 1.0
+            debug_print("Beta defaulted to 1.0")
         
         # Calculate Alpha (portfolio return - (risk_free_rate + beta * (market_return - risk_free_rate)))
-        portfolio_alpha = 0.0
+        portfolio_alpha = None
         try:
             # Get market return (SPY return)
             spy = yf.Ticker("SPY")
             spy_df = spy.history(period=period)
             
-            if not spy_df.empty and len(spy_df) > 1:
+            if not spy_df.empty and len(spy_df) > 1 and portfolio_beta is not None:
                 market_return = ((spy_df['Close'].iloc[-1] / spy_df['Close'].iloc[0]) - 1) * 100  # Annualized percentage
                 
                 # Alpha = Portfolio Return - (Risk Free Rate + Beta * (Market Return - Risk Free Rate))
                 # Convert to percentage
                 portfolio_alpha = portfolio_expected_return - (risk_free_rate * 100 + portfolio_beta * (market_return - risk_free_rate * 100))
+                debug_print(f"Alpha calculated: {portfolio_alpha:.2f}% (portfolio_return: {portfolio_expected_return:.2f}%, market_return: {market_return:.2f}%, beta: {portfolio_beta:.4f})")
+            else:
+                debug_print(f"Alpha calculation skipped: spy_df empty or beta is None")
         except Exception as e:
             logger.warning(f"Alpha calculation failed: {e}")
+            debug_print(f"Alpha calculation error: {str(e)}")
+            portfolio_alpha = 0.0  # Default to 0.0 instead of None so it displays
+        
+        # Ensure alpha is never None
+        if portfolio_alpha is None:
             portfolio_alpha = 0.0
         
         # Calculate average covariance for each stock with other stocks in portfolio
@@ -588,16 +622,25 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
         # Calculate portfolio standard deviation from variance (should match volatility/100)
         portfolio_standard_deviation = np.sqrt(portfolio_variance) if portfolio_variance > 0 else 0.0
         
+        # Ensure all values are properly converted to floats (or None) for JSON serialization
+        # This ensures they're always included in the response, even if 0.0
+        debug_print(f"Final metrics before return:")
+        debug_print(f"  CAGR: {portfolio_cagr} (type: {type(portfolio_cagr)})")
+        debug_print(f"  Alpha: {portfolio_alpha} (type: {type(portfolio_alpha)})")
+        debug_print(f"  Beta: {portfolio_beta} (type: {type(portfolio_beta)})")
+        debug_print(f"  Variance: {portfolio_variance} (type: {type(portfolio_variance)})")
+        debug_print(f"  StdDev: {portfolio_standard_deviation} (type: {type(portfolio_standard_deviation)})")
+        
         return {
-            'total_portfolio_value': total_portfolio_value,
-            'portfolio_expected_return': portfolio_expected_return,
-            'portfolio_volatility': portfolio_volatility,
-            'portfolio_variance': portfolio_variance,  # Already in decimal form
-            'portfolio_standard_deviation': portfolio_standard_deviation,  # In decimal form (sqrt of variance)
-            'sharpe_ratio': sharpe_ratio,
-            'cagr': portfolio_cagr,
-            'alpha': portfolio_alpha,
-            'beta': portfolio_beta,
+            'total_portfolio_value': float(total_portfolio_value),
+            'portfolio_expected_return': float(portfolio_expected_return),
+            'portfolio_volatility': float(portfolio_volatility),
+            'portfolio_variance': float(portfolio_variance) if portfolio_variance is not None else None,  # Already in decimal form
+            'portfolio_standard_deviation': float(portfolio_standard_deviation) if portfolio_standard_deviation is not None else None,  # In decimal form (sqrt of variance)
+            'sharpe_ratio': float(sharpe_ratio),
+            'cagr': float(portfolio_cagr),
+            'alpha': float(portfolio_alpha),
+            'beta': float(portfolio_beta),
             'correlation': correlation_data,
             'covariance': covariance_data,
             'stock_details': stock_details,
