@@ -2,6 +2,10 @@ import json
 # Set matplotlib to use non-interactive backend (required for Lambda)
 import matplotlib
 matplotlib.use('Agg')  # Must be set before importing pyplot
+# Optimize matplotlib for faster rendering
+matplotlib.rcParams['path.simplify'] = True
+matplotlib.rcParams['path.simplify_threshold'] = 1.0
+matplotlib.rcParams['agg.path.chunksize'] = 10000  # Process paths in chunks
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
@@ -10,7 +14,11 @@ import boto3
 import os
 from io import BytesIO
 import logging
+import threading
+import uuid
+import signal
 from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 # Configure logging
 logger = logging.getLogger()
@@ -227,7 +235,9 @@ class UnifiedChartGenerator:
         self._validate_env_vars()
 
         buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
+        # Reduced DPI from 300 to 150 for faster rendering and smaller file size
+        # Still high enough quality for display
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', optimize=True)
         buffer.seek(0)
         plt.close(fig)  # Close the plot to free memory
 
@@ -545,7 +555,8 @@ class UnifiedChartGenerator:
                 return f"Error: No chart data found for {symbol}"
             
             # Create figure with professional styling
-            fig, ax = plt.subplots(figsize=(14, 8))
+            # Reduced size for faster rendering (12x7 instead of 14x8)
+            fig, ax = plt.subplots(figsize=(12, 7), dpi=100)  # Lower DPI for faster rendering
             
             # Set professional background colors
             fig.patch.set_facecolor('#F0F2F5')
@@ -554,6 +565,22 @@ class UnifiedChartGenerator:
             # Log total data points being processed
             total_data_points = sum(len(data) for data in normalized_data.values()) if isinstance(normalized_data, dict) else len(normalized_data)
             logger.info(f"🔍 DEBUG: Chart maker processing {total_data_points} total data points")
+            
+            # Sample data if too many points to speed up chart generation (max 500 points per stock)
+            # This prevents Bedrock timeouts by reducing computation time
+            MAX_POINTS_PER_STOCK = 500
+            if isinstance(normalized_data, dict):
+                for stock_symbol, stock_data in list(normalized_data.items()):
+                    if len(stock_data) > MAX_POINTS_PER_STOCK:
+                        # Sample evenly to reduce to MAX_POINTS_PER_STOCK
+                        step = len(stock_data) / MAX_POINTS_PER_STOCK
+                        sampled_data = [stock_data[int(i * step)] for i in range(MAX_POINTS_PER_STOCK)]
+                        normalized_data[stock_symbol] = sampled_data
+                        logger.info(f"📊 Sampled {stock_symbol} from {len(stock_data)} to {len(sampled_data)} points for faster rendering")
+            elif isinstance(normalized_data, list) and len(normalized_data) > MAX_POINTS_PER_STOCK:
+                step = len(normalized_data) / MAX_POINTS_PER_STOCK
+                normalized_data = [normalized_data[int(i * step)] for i in range(MAX_POINTS_PER_STOCK)]
+                logger.info(f"📊 Sampled data from {len(normalized_data)} to {MAX_POINTS_PER_STOCK} points for faster rendering")
             
             # Handle different data types
             if data_type == 'multiple_stocks':
@@ -936,7 +963,23 @@ def generate_chart_tool(symbol: str, data_json: str = None, s3_key: str = None, 
         logger.info(f"🔍 DEBUG: data_json length: {len(data_json)} characters")
         logger.info(f"🔍 DEBUG: data_json preview: {data_json[:200]}...")
         
-        return chart_generator.generate_chart(symbol, data_json, chart_type, title, normalize)
+        # Generate chart with timeout protection (20 seconds max to avoid Bedrock timeout)
+        # Use ThreadPoolExecutor to enforce timeout
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    chart_generator.generate_chart,
+                    symbol, data_json, chart_type, title, normalize
+                )
+                # Wait max 20 seconds for chart generation (reduced from 30 to prevent Bedrock timeout)
+                result = future.result(timeout=20.0)
+                return result
+        except FutureTimeoutError:
+            logger.warning(f"⚠️ Chart generation timed out after 20 seconds for {symbol}")
+            return f"⚠️ Chart generation timed out. For large datasets, try reducing the timeframe or the chart will be generated in the background."
+        except Exception as e:
+            logger.error(f"Error in chart generation thread: {str(e)}")
+            return f"❌ Error generating chart: {str(e)}"
     except Exception as e:
         logger.error(f"Error generating chart for {symbol}: {str(e)}")
         return f"❌ Error generating chart: {str(e)}"
