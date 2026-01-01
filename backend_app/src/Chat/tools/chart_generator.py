@@ -323,30 +323,37 @@ class UnifiedChartGenerator:
                         data_dict = json.loads(s3_content)
                         logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
                         
-                        # After reading, check if this single stock file actually contains consolidated data
-                        # (This can happen if the agent passes a consolidated S3 key but it was detected as single stock)
-                        if isinstance(data_dict, dict) and 'stocks' in data_dict and isinstance(data_dict['stocks'], list):
-                            logger.info(f"🔍 DEBUG: Single stock S3 file actually contains consolidated data with {len(data_dict['stocks'])} stocks")
-                            # This is actually consolidated data - continue processing as multiple_stocks
-                        elif isinstance(data_dict, dict) and 'total_symbols' in data_dict:
-                            logger.info(f"🔍 DEBUG: S3 file contains consolidated data structure (total_symbols={data_dict.get('total_symbols')})")
-                            # This is consolidated data - ensure it has stocks array
-                            if 'stocks' not in data_dict:
-                                logger.warning(f"⚠️ Consolidated data structure missing 'stocks' array")
-                    except Exception as s3_error:
-                        logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
-                        return f"Error: Failed to read data from S3: {str(s3_error)}"
-            
-            # IMPORTANT: After reading from S3 (via s3_key parameter in generate_chart_tool), 
-            # check if the data is actually consolidated multi-stock data
-            # This handles the case where agent passes a consolidated S3 key but it was read as single stock
-            if isinstance(data_dict, dict) and 'stocks' in data_dict and isinstance(data_dict['stocks'], list) and len(data_dict['stocks']) > 1:
-                # This is consolidated data - ensure it's detected as multiple_stocks
-                if 'total_symbols' not in data_dict:
-                    data_dict['total_symbols'] = len(data_dict['stocks'])
-                if 'successful_symbols' not in data_dict:
-                    data_dict['successful_symbols'] = len([s for s in data_dict['stocks'] if isinstance(s, dict) and s.get('status') == 'success'])
-                logger.info(f"🔍 DEBUG: Detected consolidated data with {data_dict['total_symbols']} stocks after S3 read")
+                        # Check if symbol suggests multiple stocks but we only have single stock data
+                        # Try to find consolidated file if symbol contains "vs" or multiple tickers
+                        if ' vs ' in symbol.upper() or ',' in symbol:
+                            logger.warning(f"⚠️ Symbol '{symbol}' suggests multiple stocks, but data appears to be single stock")
+                            logger.warning(f"⚠️ Attempting to find consolidated file for comparison chart")
+                            # Try to find consolidated file in same directory
+                            try:
+                                # Extract directory from S3 key
+                                s3_key_dir = '/'.join(s3_key.split('/')[:-1])
+                                # Look for consolidated file pattern: get_multiple_financial_data_*.json
+                                import boto3
+                                s3_client = boto3.client('s3')
+                                prefix = f"{s3_key_dir}/get_multiple_financial_data_"
+                                response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=10)
+                                if 'Contents' in response:
+                                    # Find most recent consolidated file
+                                    consolidated_files = sorted(
+                                        [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.json')],
+                                        key=lambda x: x.split('_')[-1],  # Sort by timestamp in filename
+                                        reverse=True
+                                    )
+                                    if consolidated_files:
+                                        consolidated_key = consolidated_files[0]
+                                        logger.info(f"📦 Found consolidated file: {consolidated_key}, reading...")
+                                        consolidated_response = s3_client.get_object(Bucket=bucket_name, Key=consolidated_key)
+                                        consolidated_content = consolidated_response['Body'].read().decode('utf-8')
+                                        data_dict = json.loads(consolidated_content)
+                                        logger.info(f"✅ Successfully read consolidated data with {len(consolidated_content)} chars from S3")
+                            except Exception as consolidated_error:
+                                logger.warning(f"⚠️ Could not find consolidated file: {str(consolidated_error)}")
+                                logger.warning(f"⚠️ Will proceed with single stock data - chart may not show comparison")
                     except Exception as s3_error:
                         logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
                         return f"Error: Failed to read data from S3: {str(s3_error)}"
@@ -466,6 +473,44 @@ class UnifiedChartGenerator:
             # Detect data type
             data_type = self._detect_data_type(data_dict)
             logger.info(f"Detected data type: {data_type} for symbol: {symbol}")
+            
+            # If symbol suggests multiple stocks but we detected single stock, try to find consolidated file
+            if data_type == 'stock' and (' vs ' in symbol.upper() or ',' in symbol or normalize):
+                logger.warning(f"⚠️ Symbol '{symbol}' suggests multiple stocks or normalization requested, but data appears to be single stock")
+                logger.warning(f"⚠️ Attempting to find consolidated file for comparison chart")
+                # Try to find consolidated file in same directory (if we have an S3 key context)
+                try:
+                    # Extract user_id and session_id from environment
+                    user_id = os.environ.get('USER_ID')
+                    session_id = os.environ.get('SESSION_ID')
+                    if user_id and session_id:
+                        bucket_name = self._get_bucket_name()
+                        # Look for consolidated file in the data-files directory
+                        prefix = f"users/{user_id}/sessions/{session_id}/data-files/get_multiple_financial_data_"
+                        import boto3
+                        s3_client = boto3.client('s3')
+                        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=10)
+                        if 'Contents' in response:
+                            # Find most recent consolidated file
+                            consolidated_files = sorted(
+                                [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.json')],
+                                key=lambda x: x.split('_')[-1] if '_' in x else x,  # Sort by timestamp in filename
+                                reverse=True
+                            )
+                            if consolidated_files:
+                                consolidated_key = consolidated_files[0]
+                                logger.info(f"📦 Found consolidated file: {consolidated_key}, reading...")
+                                consolidated_response = s3_client.get_object(Bucket=bucket_name, Key=consolidated_key)
+                                consolidated_content = consolidated_response['Body'].read().decode('utf-8')
+                                data_dict = json.loads(consolidated_content)
+                                logger.info(f"✅ Successfully read consolidated data with {len(consolidated_content)} chars from S3")
+                                # Re-detect data type with consolidated data
+                                data_type = self._detect_data_type(data_dict)
+                                logger.info(f"✅ Re-detected data type: {data_type} after reading consolidated file")
+                except Exception as consolidated_error:
+                    logger.warning(f"⚠️ Could not find consolidated file: {str(consolidated_error)}")
+                    if normalize:
+                        logger.warning(f"⚠️ Normalization requested but only single stock data available - normalization will be skipped")
             
             if data_type == 'unknown':
                 logger.error(f"❌ Chart Generation Failed: Data type unknown for {symbol}")
@@ -836,19 +881,34 @@ def generate_chart_tool(symbol: str, data_json: str = None, s3_key: str = None, 
                 data_json = s3_content
                 logger.info(f"✅ Successfully read {len(s3_content)} chars from S3")
                 
-                # Check filename pattern to detect if this is consolidated data
-                # Consolidated files start with "get_multiple_financial_data_"
-                # Single stock files start with "stock_data_"
-                filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
-                if filename.startswith('get_multiple_financial_data_'):
-                    logger.info(f"🔍 DEBUG: S3 key filename indicates consolidated data: {filename}")
-                    # Parse the JSON to verify it has stocks array
+                # Check if symbol suggests multiple stocks but S3 key points to single stock file
+                # If so, try to find consolidated file
+                if (' vs ' in symbol.upper() or ',' in symbol or normalize) and 'get_multiple_financial_data_' not in s3_key:
+                    logger.warning(f"⚠️ Symbol '{symbol}' suggests multiple stocks, but S3 key points to single stock file")
+                    logger.warning(f"⚠️ Attempting to find consolidated file for comparison chart")
                     try:
-                        parsed_data = json.loads(data_json)
-                        if isinstance(parsed_data, dict) and 'stocks' in parsed_data:
-                            logger.info(f"🔍 DEBUG: Confirmed consolidated data with {len(parsed_data.get('stocks', []))} stocks")
-                    except:
-                        pass  # Will be parsed again in generate_chart()
+                        # Extract directory from S3 key
+                        s3_key_dir = '/'.join(s3_key.split('/')[:-1])
+                        # Look for consolidated file pattern: get_multiple_financial_data_*.json
+                        prefix = f"{s3_key_dir}/get_multiple_financial_data_"
+                        response = chart_generator.s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=10)
+                        if 'Contents' in response:
+                            # Find most recent consolidated file
+                            consolidated_files = sorted(
+                                [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.json')],
+                                key=lambda x: x.split('_')[-1] if '_' in x else x,  # Sort by timestamp in filename
+                                reverse=True
+                            )
+                            if consolidated_files:
+                                consolidated_key = consolidated_files[0]
+                                logger.info(f"📦 Found consolidated file: {consolidated_key}, reading...")
+                                consolidated_response = chart_generator.s3_client.get_object(Bucket=bucket_name, Key=consolidated_key)
+                                consolidated_content = consolidated_response['Body'].read().decode('utf-8')
+                                data_json = consolidated_content
+                                logger.info(f"✅ Successfully read consolidated data with {len(consolidated_content)} chars from S3")
+                    except Exception as consolidated_error:
+                        logger.warning(f"⚠️ Could not find consolidated file: {str(consolidated_error)}")
+                        logger.warning(f"⚠️ Will proceed with single stock data - chart may not show comparison")
             except Exception as s3_error:
                 logger.error(f"❌ Failed to read from S3: {str(s3_error)}")
                 return f"Error: Failed to read data from S3: {str(s3_error)}"
