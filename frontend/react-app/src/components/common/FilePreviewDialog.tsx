@@ -26,6 +26,7 @@ import {
   Description as DocumentIcon,
   Warning as WarningIcon,
   InfoOutlined as InfoIcon,
+  Minimize as MinimizeIcon,
 } from '@mui/icons-material';
 import { fileReturnAPI } from '@/services/api';
 import TilePreview from './TilePreview';
@@ -45,6 +46,15 @@ interface FilePreviewDialogProps {
   };
   user_id: string;
   folder_path?: string; // Optional folder path for tile updates
+  // Dialog manager props (optional for backward compatibility)
+  onMinimize?: () => void;
+  dialogId?: string;
+  initialPosition?: { x: number; y: number };
+  initialSize?: { width: number; height: number };
+  onPositionChange?: (position: { x: number; y: number }) => void;
+  onSizeChange?: (size: { width: number; height: number }) => void;
+  onCacheContent?: (content: any) => void;
+  cachedContent?: any;
 }
 
 interface PreviewResponse {
@@ -65,15 +75,23 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   item,
   user_id,
   folder_path = '',
+  onMinimize,
+  dialogId,
+  initialPosition,
+  initialSize,
+  onPositionChange,
+  onSizeChange,
+  onCacheContent,
+  cachedContent,
 }) => {
   const [loading, setLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
-  const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
+  const [previewData, setPreviewData] = useState<PreviewResponse | null>(cachedContent || null);
   const [error, setError] = useState<string | null>(null);
   
   // Resizable and movable state
-  const [position, setPosition] = useState({ x: 100, y: 100 });
-  const [size, setSize] = useState({ width: 900, height: 600 });
+  const [position, setPosition] = useState(initialPosition || { x: 100, y: 100 });
+  const [size, setSize] = useState(initialSize || { width: 900, height: 600 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -86,6 +104,13 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   const previewSizeRef = useRef({ width: 900, height: 600 });
 
   const fetchPreview = useCallback(async () => {
+    // Check cache first
+    if (cachedContent && dialogId) {
+      setPreviewData(cachedContent);
+      setLoading(false);
+      return;
+    }
+
     if (!item.s3_key) {
       setError('No S3 key available for preview');
       setLoading(false);
@@ -109,6 +134,18 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           ...response.data,
           preview_type: response.data.preview_type || 'text',
         };
+        
+        // Cache the content
+        if (onCacheContent) {
+          onCacheContent(previewData);
+        }
+        if (dialogId) {
+          try {
+            sessionStorage.setItem(`dialog-cache-${dialogId}`, JSON.stringify(previewData));
+          } catch (e) {
+            // Ignore
+          }
+        }
         setPreviewData(previewData);
       } else {
         setError(response.error || 'Failed to load preview');
@@ -119,10 +156,33 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [user_id, item.s3_key, item.type]);
+  }, [user_id, item.s3_key, item.type, dialogId, onCacheContent, cachedContent]);
+
+  // Sync position and size with initial values
+  useEffect(() => {
+    if (initialPosition) {
+      setPosition(initialPosition);
+      previewPositionRef.current = initialPosition;
+    }
+  }, [initialPosition?.x, initialPosition?.y]);
+
+  useEffect(() => {
+    if (initialSize) {
+      setSize(initialSize);
+      previewSizeRef.current = initialSize;
+    }
+  }, [initialSize?.width, initialSize?.height]);
 
   useEffect(() => {
     if (open && item) {
+      // Check cache first
+      if (cachedContent) {
+        setPreviewData(cachedContent);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
       // Reset state when opening
       setPreviewData(null);
       setError(null);
@@ -216,7 +276,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
       setError(null);
       setLoading(false);
     }
-  }, [open, item, fetchPreview]);
+  }, [open, item, fetchPreview, cachedContent]);
 
   const handleDownload = async () => {
     // Always make an API call to get the download URL (ensures encrypted .cosine files are downloaded correctly)
@@ -2925,7 +2985,11 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     }
     
     // Apply preview size to actual size when mouse is released
-    setSize(previewSizeRef.current);
+    const newSize = previewSizeRef.current;
+    setSize(newSize);
+    if (onSizeChange) {
+      onSizeChange(newSize);
+    }
     
     // Hide preview outline
     if (previewRef.current) {
@@ -2933,7 +2997,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     }
     
     setIsResizing(false);
-  }, []);
+  }, [onSizeChange]);
 
   // Global mouse event listeners
   useEffect(() => {
@@ -3050,9 +3114,22 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                 {item.name}
               </Typography>
             </Box>
-            <IconButton onClick={onClose} sx={{ color: '#9ca3af' }}>
-              <CloseIcon />
-            </IconButton>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {onMinimize && (
+                <IconButton 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMinimize();
+                  }} 
+                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                >
+                  <MinimizeIcon />
+                </IconButton>
+              )}
+              <IconButton onClick={onClose} sx={{ color: '#9ca3af', '&:hover': { color: '#ef4444' } }}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
           </Box>
 
           {/* Content */}

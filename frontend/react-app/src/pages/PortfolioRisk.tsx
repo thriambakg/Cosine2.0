@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
-  Grid,
   TextField,
   Button,
   Table,
@@ -92,8 +91,6 @@ export default function PortfolioRisk() {
   const [compareInputValue, setCompareInputValue] = useState<string>('');
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
-  const [cachedStockData, setCachedStockData] = useState<{ [key: string]: any } | null>(null);
-  const [cachedCompareStockData, setCachedCompareStockData] = useState<any | null>(null);
   
   // Calculator bubble popover state
   const [calculatorAnchor, setCalculatorAnchor] = useState<HTMLButtonElement | null>(null);
@@ -697,8 +694,6 @@ export default function PortfolioRisk() {
     setError(null);
     setTimeframe('1y');
     setChartData([]);
-    setCachedStockData(null);
-    setCachedCompareStockData(null);
   };
 
   const handleCalculatorClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1465,7 +1460,9 @@ export default function PortfolioRisk() {
                                       }
                                     }
                                     // Allow default behavior for other keys
-                                    params.inputProps?.onKeyDown?.(e);
+                                    if (params.inputProps?.onKeyDown) {
+                                      params.inputProps.onKeyDown(e as any);
+                                    }
                                   }}
                                   sx={{
                                     '& .MuiOutlinedInput-root': {

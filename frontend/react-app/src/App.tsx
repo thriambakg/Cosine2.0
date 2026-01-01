@@ -26,6 +26,7 @@ import StockScreenerSearchPage from './pages/StockScreenerSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import SupportMePage from './pages/SupportMePage';
 import { ConfirmDialog } from './components/tiles/common';
+import { DialogManagerProvider } from './contexts/DialogManagerContext';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -156,8 +157,10 @@ function App() {
   return (
     <Provider store={store}>
       <AuthProvider>
-        <AppContent />
-        <ConfirmDialog />
+        <DialogManagerProvider>
+          <AppContent />
+          <ConfirmDialog />
+        </DialogManagerProvider>
       </AuthProvider>
     </Provider>
   );

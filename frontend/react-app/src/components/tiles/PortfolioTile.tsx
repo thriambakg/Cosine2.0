@@ -44,9 +44,6 @@ import { CircularProgress } from '@mui/material';
 import { securitySuggestionsServiceV2, Security } from '../../services/securitySuggestionsV2';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useStockData } from '../../hooks/useAPI';
-import {
-  HelpOutline as HelpOutlineIcon,
-} from '@mui/icons-material';
 
 interface PortfolioEntry {
   stock: string;
@@ -241,9 +238,6 @@ const PortfolioTile = ({
     }
   }, [portfolioData]);
 
-  // Use ref to track previous data and prevent unnecessary updates
-  const prevDataRef = useRef<any>(null);
-
   // Remove auto-persistence - now only persists on Calculate button click
   // This useEffect is removed to prevent auto-persistence
 
@@ -262,19 +256,6 @@ const PortfolioTile = ({
     });
   }, [entries, results, timeframe, id, onUpdate]);
 
-  const addEntry = useCallback(() => {
-    setEntries([...entries, { stock: '', shares: 0 }]);
-  }, [entries]);
-
-  const removeEntry = useCallback((index: number) => {
-    setEntries(entries.filter((_, i) => i !== index));
-  }, [entries]);
-
-  const updateEntry = useCallback((index: number, field: keyof PortfolioEntry, value: string | number) => {
-    const newEntries = [...entries];
-    newEntries[index] = { ...newEntries[index], [field]: value };
-    setEntries(newEntries);
-  }, [entries]);
 
   const handleStockInputChange = useCallback((_index: number, inputValue: string) => {
     // Only update suggestions based on input, don't update the entry value yet
@@ -305,20 +286,6 @@ const PortfolioTile = ({
     }
   }, [isSecurityDataLoaded]);
 
-  const handleStockChange = useCallback((index: number, value: Security | string | null) => {
-    if (value) {
-      if (typeof value === 'string') {
-        // If it's a string (from freeSolo), extract symbol if it's in display format
-        // Pattern: "SYMBOL - Name (Cap)" or just "SYMBOL"
-        const symbolMatch = value.match(/^([A-Z.]+)(?:\s*-|$)/);
-        const symbol = symbolMatch ? symbolMatch[1].trim() : value.trim();
-        updateEntry(index, 'stock', symbol.toUpperCase());
-      } else {
-        // If it's a Security object, use the symbol
-        updateEntry(index, 'stock', value.symbol);
-      }
-    }
-  }, [updateEntry]);
 
   const calculateRisk = useCallback(async () => {
     setHasPerformedInitialAnalysis(true);
@@ -1188,7 +1155,7 @@ const PortfolioTile = ({
                           }
                         }
                       }}
-                      onInputChange={(_, newInputValue, reason) => {
+                      onInputChange={(_, newInputValue) => {
                         // Only update suggestions, don't update entry value
                         handleStockInputChange(index, newInputValue);
                         // Don't update entry on input - only on selection or blur

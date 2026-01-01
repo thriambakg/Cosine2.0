@@ -25,6 +25,7 @@ import {
   ArrowBack as ArrowBackIcon,
   Dashboard as AddToContextIcon,
   Folder as FolderIcon,
+  Minimize as MinimizeIcon,
 } from '@mui/icons-material';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -70,6 +71,15 @@ interface ItemDetailsDialogProps {
   item_id?: string; // Item ID for tile updates
   // For rendering content only (without Dialog wrapper)
   contentOnly?: boolean; // If true, renders just the content without Dialog
+  // Dialog manager props (optional for backward compatibility)
+  onMinimize?: () => void;
+  dialogId?: string;
+  initialPosition?: { x: number; y: number };
+  initialSize?: { width: number; height: number };
+  onPositionChange?: (position: { x: number; y: number }) => void;
+  onSizeChange?: (size: { width: number; height: number }) => void;
+  onCacheContent?: (content: any) => void;
+  cachedContent?: any;
 }
 
 const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
@@ -86,6 +96,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   parentAward,
   item_id,
   contentOnly = false,
+  onMinimize,
+  dialogId,
+  initialPosition,
+  initialSize,
+  onPositionChange,
+  onSizeChange,
+  onCacheContent,
+  cachedContent,
 }) => {
   const [enrichmentLoading, setEnrichmentLoading] = useState<boolean>(false);
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
@@ -95,8 +113,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   
   const { user } = useAuth();
   // Resizable and movable state
-  const [position, setPosition] = useState({ x: 100, y: 100 });
-  const [size, setSize] = useState({ width: 900, height: 600 });
+  const [position, setPosition] = useState(initialPosition || { x: 100, y: 100 });
+  const [size, setSize] = useState(initialSize || { width: 900, height: 600 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -3387,7 +3405,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     }
     
     // Apply preview position to actual position when mouse is released
-    setPosition(previewPositionRef.current);
+    const newPosition = previewPositionRef.current;
+    setPosition(newPosition);
+    if (onPositionChange) {
+      onPositionChange(newPosition);
+    }
     
     // Hide preview outline
     if (previewRef.current) {
@@ -3395,7 +3417,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     }
     
     setIsDragging(false);
-  }, []);
+  }, [onPositionChange]);
 
   // Resize handlers - use preview outline approach
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -3456,7 +3478,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     }
     
     // Apply preview size to actual size when mouse is released
-    setSize(previewSizeRef.current);
+    const newSize = previewSizeRef.current;
+    setSize(newSize);
+    if (onSizeChange) {
+      onSizeChange(newSize);
+    }
     
     // Hide preview outline
     if (previewRef.current) {
@@ -3464,7 +3490,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     }
     
     setIsResizing(false);
-  }, []);
+  }, [onSizeChange]);
 
   // Global mouse event listeners
   useEffect(() => {
@@ -3508,6 +3534,33 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       document.body.style.userSelect = '';
     };
   }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  // Sync position and size with initial values
+  useEffect(() => {
+    if (initialPosition) {
+      setPosition(initialPosition);
+      previewPositionRef.current = initialPosition;
+    }
+  }, [initialPosition?.x, initialPosition?.y]);
+
+  useEffect(() => {
+    if (initialSize) {
+      setSize(initialSize);
+      previewSizeRef.current = initialSize;
+    }
+  }, [initialSize?.width, initialSize?.height]);
+
+  // Cache content when data changes
+  useEffect(() => {
+    if (data && onCacheContent && dialogId) {
+      onCacheContent(data);
+      try {
+        sessionStorage.setItem(`dialog-cache-${dialogId}`, JSON.stringify(data));
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }, [data, dialogId, onCacheContent]);
 
   if (!open) return null;
 
@@ -3779,11 +3832,27 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </IconButton>
           </Tooltip>
           
+          {/* Minimize Button */}
+          {onMinimize && (
+            <Tooltip title="Minimize">
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMinimize();
+                }}
+                sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+              >
+                <MinimizeIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          
           {/* Close Button */}
           <IconButton
             size="small"
             onClick={onClose}
-            sx={{ color: '#9ca3af', '&:hover': { color: '#ffffff' } }}
+            sx={{ color: '#9ca3af', '&:hover': { color: '#ef4444' } }}
           >
             <CloseIcon fontSize="small" />
           </IconButton>

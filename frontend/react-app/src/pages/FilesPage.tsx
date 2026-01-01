@@ -41,7 +41,7 @@ import {
   ContentPaste as PasteIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
-import FilePreviewDialog from '@/components/common/FilePreviewDialog';
+import { useDialogManagerHelpers } from '@/hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '@/services/api';
 import { addToContext } from '@/components/tiles/common/contextManager';
 
@@ -95,6 +95,7 @@ interface FileItem extends FileSystemItem {
 
 const FilesPage: React.FC = () => {
   const { user } = useAuth();
+  const { openFilePreview } = useDialogManagerHelpers();
   
   // File system state (stored in memory/cache for now)
   const [items, setItems] = useState<Map<string, FileSystemItem>>(new Map());
@@ -122,10 +123,6 @@ const FilesPage: React.FC = () => {
   // Multi-select state
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
-  
-  // Preview dialog
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  const [previewItem, setPreviewItem] = useState<FileSystemItem | null>(null);
   
   // Rename dialog
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -1964,8 +1961,20 @@ const FilesPage: React.FC = () => {
                   onClick={(e) => handleItemClick(file, itemIndex, e)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    setPreviewItem(file);
-                    setPreviewDialogOpen(true);
+                    if (user?.id) {
+                      openFilePreview(
+                        {
+                          id: file.id,
+                          name: file.metadata?.title || file.name,
+                          type: file.type as 'context_item' | 'uploaded_file' | 'agent_file',
+                          s3_key: file.s3_key || '',
+                          metadata: file.metadata,
+                          parentId: file.parentId,
+                        },
+                        user.id,
+                        currentFolderId === 'root' ? '' : currentFolderId || ''
+                      );
+                    }
                   }}
                   onContextMenu={(e) => handleContextMenu(e, file)}
                   onMouseDown={(e) => {
@@ -2022,8 +2031,20 @@ const FilesPage: React.FC = () => {
                       edge="end"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPreviewItem(file);
-                        setPreviewDialogOpen(true);
+                        if (user?.id) {
+                          openFilePreview(
+                            {
+                              id: file.id,
+                              name: file.metadata?.title || file.name,
+                              type: file.type as 'context_item' | 'uploaded_file' | 'agent_file',
+                              s3_key: file.s3_key || '',
+                              metadata: file.metadata,
+                              parentId: file.parentId,
+                            },
+                            user.id,
+                            currentFolderId === 'root' ? '' : currentFolderId || ''
+                          );
+                        }
                       }}
                       sx={{ 
                         color: '#3b82f6',
@@ -2334,8 +2355,20 @@ const FilesPage: React.FC = () => {
         {selectedItem && selectedItem.type !== 'folder' && (
           <MenuItem onClick={() => {
             if (selectedItem) {
-              setPreviewItem(selectedItem);
-              setPreviewDialogOpen(true);
+              if (user?.id && selectedItem.type !== 'folder') {
+                openFilePreview(
+                  {
+                    id: selectedItem.id,
+                    name: selectedItem.metadata?.title || selectedItem.name,
+                    type: selectedItem.type as 'context_item' | 'uploaded_file' | 'agent_file',
+                    s3_key: selectedItem.s3_key || '',
+                    metadata: selectedItem.metadata,
+                    parentId: selectedItem.parentId,
+                  },
+                  user.id,
+                  currentFolderId === 'root' ? '' : currentFolderId || ''
+                );
+              }
             }
             setContextMenuAnchor(null);
           }}>
@@ -2425,26 +2458,6 @@ const FilesPage: React.FC = () => {
         </MenuItem>
       </Menu>
 
-      {/* File Preview Dialog */}
-      {previewItem && (
-        <FilePreviewDialog
-          open={previewDialogOpen}
-          onClose={() => {
-            setPreviewDialogOpen(false);
-            setPreviewItem(null);
-          }}
-          item={{
-            id: previewItem.id,
-            name: previewItem.name,
-            type: previewItem.type as 'context_item' | 'uploaded_file' | 'agent_file',
-            s3_key: previewItem.s3_key || '',
-            metadata: previewItem.metadata,
-            parentId: previewItem.parentId,
-          }}
-          user_id={user?.id || ''}
-          folder_path={currentFolderId === 'root' ? '' : currentFolderId || ''}
-        />
-      )}
 
       {/* Rename Dialog */}
       <Dialog
