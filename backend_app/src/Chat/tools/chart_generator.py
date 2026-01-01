@@ -237,7 +237,7 @@ class UnifiedChartGenerator:
         buffer = BytesIO()
         # Reduced DPI from 300 to 150 for faster rendering and smaller file size
         # Still high enough quality for display
-        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', optimize=True)
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
         buffer.seek(0)
         plt.close(fig)  # Close the plot to free memory
 
