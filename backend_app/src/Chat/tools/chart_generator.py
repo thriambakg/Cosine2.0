@@ -485,63 +485,67 @@ class UnifiedChartGenerator:
                 
                 logger.info(f"🔍 DEBUG: Plotting {len(normalized_data)} stocks: {list(normalized_data.keys())}")
                 
-                # If normalization is requested, calculate baseline prices
+                # First, convert all data to DataFrames and find common date range
+                stock_dataframes = {}
+                for stock_symbol, stock_data in normalized_data.items():
+                    if not stock_data:
+                        continue
+                    df = pd.DataFrame(stock_data)
+                    # Convert time to datetime
+                    try:
+                        if pd.api.types.is_numeric_dtype(df['time']):
+                            df['time'] = pd.to_datetime(df['time'], unit='s')
+                        else:
+                            df['time'] = pd.to_datetime(df['time'])
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error converting time for {stock_symbol}: {str(e)}")
+                        df['time'] = pd.to_datetime(df['time'], errors='coerce')
+                    df = df.sort_values('time')
+                    df = df.dropna(subset=['time', 'close'])
+                    if len(df) > 0:
+                        stock_dataframes[stock_symbol] = df
+                
+                # Find common date range (intersection of all stocks' date ranges)
+                if len(stock_dataframes) > 0:
+                    common_start = max([df['time'].min() for df in stock_dataframes.values()])
+                    common_end = min([df['time'].max() for df in stock_dataframes.values()])
+                    logger.info(f"🔍 DEBUG: Common date range: {common_start} to {common_end}")
+                    
+                    # Filter all stocks to common date range
+                    for stock_symbol in stock_dataframes.keys():
+                        df = stock_dataframes[stock_symbol]
+                        stock_dataframes[stock_symbol] = df[(df['time'] >= common_start) & (df['time'] <= common_end)]
+                        logger.info(f"🔍 DEBUG: Filtered {stock_symbol} to {len(stock_dataframes[stock_symbol])} points in common range")
+                
+                # If normalization is requested, calculate baseline prices from common date range
                 baseline_prices = {}
                 if normalize:
-                    for stock_symbol, stock_data in normalized_data.items():
-                        if stock_data and len(stock_data) > 0:
-                            # Convert to DataFrame to handle date sorting properly
-                            temp_df = pd.DataFrame(stock_data)
-                            # Convert time to datetime for proper sorting
-                            try:
-                                if pd.api.types.is_numeric_dtype(temp_df['time']):
-                                    temp_df['time'] = pd.to_datetime(temp_df['time'], unit='s')
-                                else:
-                                    temp_df['time'] = pd.to_datetime(temp_df['time'])
-                            except Exception as e:
-                                logger.warning(f"⚠️ Error converting time for baseline calculation for {stock_symbol}: {str(e)}")
-                                temp_df['time'] = pd.to_datetime(temp_df['time'], errors='coerce')
-                            # Sort by time and get the first (earliest) price
-                            temp_df = temp_df.sort_values('time')
-                            temp_df = temp_df.dropna(subset=['close'])  # Remove rows with invalid close prices
-                            if len(temp_df) > 0:
-                                first_price = temp_df.iloc[0]['close']
-                                if first_price > 0 and not (isinstance(first_price, float) and first_price != first_price):
-                                    baseline_prices[stock_symbol] = first_price
-                                    logger.info(f"🔍 DEBUG: Baseline for {stock_symbol}: ${first_price:.2f}")
+                    for stock_symbol, df in stock_dataframes.items():
+                        if len(df) > 0:
+                            # Get the first price in the common date range
+                            first_price = df.iloc[0]['close']
+                            if first_price > 0 and not (isinstance(first_price, float) and first_price != first_price):
+                                baseline_prices[stock_symbol] = first_price
+                                logger.info(f"🔍 DEBUG: Baseline for {stock_symbol} (common range): ${first_price:.2f}")
                     logger.info(f"🔍 DEBUG: Normalization enabled. Baseline prices: {baseline_prices}")
                 
                 plotted_count = 0
                 plotted_dataframes = {}  # Store DataFrames after normalization for y-axis scaling
-                for i, (stock_symbol, stock_data) in enumerate(normalized_data.items()):
-                    if not stock_data:
+                for i, stock_symbol in enumerate(stock_dataframes.keys()):
+                    df = stock_dataframes[stock_symbol].copy()
+                    
+                    if len(df) == 0:
+                        logger.warning(f"⚠️ No data points for {stock_symbol} after filtering to common range")
                         continue
                     
-                    logger.info(f"🔍 DEBUG: Processing {len(stock_data)} data points for {stock_symbol}")
-                        
-                    # Convert to DataFrame
-                    df = pd.DataFrame(stock_data)
+                    logger.info(f"🔍 DEBUG: Processing {len(df)} data points for {stock_symbol} (filtered to common range)")
                     
-                    # Convert time to datetime - handle both timestamps and date strings
-                    try:
-                        if pd.api.types.is_numeric_dtype(df['time']):
-                            # Numeric timestamp (seconds since epoch)
-                            df['time'] = pd.to_datetime(df['time'], unit='s')
-                        else:
-                            # Date string (like "2025-11-03")
-                            df['time'] = pd.to_datetime(df['time'])
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error converting time for {stock_symbol}: {str(e)}, trying fallback")
-                        df['time'] = pd.to_datetime(df['time'], errors='coerce')
-                    
-                    # Sort by time to ensure proper ordering
-                    df = df.sort_values('time')
-                    df = df.dropna(subset=['time', 'close'])  # Remove rows with invalid dates or prices
+                    # Set time as index
                     df.set_index('time', inplace=True)
                     
-                    # Verify we have valid data after conversion
-                    if len(df) == 0 or df['close'].isna().all() or (df['close'] == 0).all():
-                        logger.warning(f"⚠️ No valid data points after conversion for {stock_symbol}")
+                    # Verify we have valid data
+                    if df['close'].isna().all() or (df['close'] == 0).all():
+                        logger.warning(f"⚠️ No valid data points for {stock_symbol}")
                         continue
                     
                     # Apply normalization if requested
