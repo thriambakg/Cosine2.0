@@ -40,6 +40,11 @@ import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDial
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import { CircularProgress } from '@mui/material';
 import { securitySuggestionsServiceV2, Security } from '../../services/securitySuggestionsV2';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { useStockData } from '../../hooks/useAPI';
+import {
+  HelpOutline as HelpOutlineIcon,
+} from '@mui/icons-material';
 
 interface PortfolioEntry {
   stock: string;
@@ -141,6 +146,17 @@ const PortfolioTile = ({
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
   
+  // Local state for dialog - only persists on Calculate button click
+  const [dialogEntries, setDialogEntries] = useState<PortfolioEntry[]>([]);
+  const [dialogTimeframe, setDialogTimeframe] = useState<string>('1y');
+  
+  // Chart feature state - tile only shows combined view
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
+  
+  // Stock data hook for fetching individual stock data (handles S3 check internally)
+  const { executeForceRefresh: fetchStockData } = useStockData();
+  
   // Use the portfolio analysis hook
   const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
   
@@ -223,29 +239,8 @@ const PortfolioTile = ({
   // Use ref to track previous data and prevent unnecessary updates
   const prevDataRef = useRef<any>(null);
 
-  // Update tile data when portfolio data changes
-  // Persist entries and timeframe (but not results, which are computed)
-  useEffect(() => {
-    if (!onSettingsChange) return;
-
-    // Only persist entries and timeframe - results are computed and shouldn't be persisted
-    const dataToPersist = {
-      entries: entries.filter(e => e.stock && e.shares > 0),
-      timeframe,
-    };
-
-    // Only update if data has actually changed
-    const hasChanged = !prevDataRef.current || 
-      JSON.stringify(prevDataRef.current) !== JSON.stringify(dataToPersist);
-
-    if (hasChanged) {
-      prevDataRef.current = dataToPersist;
-      // Use onSettingsChange to persist portfolio configuration (entries and timeframe)
-      onSettingsChange(id, {
-        portfolioData: dataToPersist
-      });
-    }
-  }, [entries, timeframe, id, onSettingsChange]);
+  // Remove auto-persistence - now only persists on Calculate button click
+  // This useEffect is removed to prevent auto-persistence
 
   // Also update local state via onUpdate for runtime state (including results)
   useEffect(() => {
@@ -392,6 +387,74 @@ const PortfolioTile = ({
     return { level: 'High', color: '#ef4444' };
   };
 
+  // Fetch chart data for portfolio stocks
+  const loadChartData = useCallback(async () => {
+    if (!results || !entries.some(e => e.stock && e.shares > 0)) {
+      setChartData([]);
+      return;
+    }
+
+    setIsLoadingChart(true);
+    try {
+      const validEntries = entries.filter(e => e.stock && e.shares > 0);
+      const stockSymbols = validEntries.map(e => e.stock.trim().toUpperCase());
+      
+      // Fetch data for all stocks (tile only shows combined view)
+      const stockDataPromises = stockSymbols.map(symbol => 
+        fetchStockData({ ticker: symbol, period: timeframe })
+      );
+      
+      const allStockData = await Promise.all(stockDataPromises);
+      
+      // Tile only shows combined portfolio value
+      const portfolioChartData: any[] = [];
+      const timePoints = new Set<number>();
+      
+      // Collect all time points
+      allStockData.forEach((data) => {
+        if (data && data.chart_data) {
+          data.chart_data.forEach((point: any) => {
+            timePoints.add(point.time);
+          });
+        }
+      });
+      
+      // For each time point, calculate portfolio value
+      Array.from(timePoints).sort().forEach(time => {
+        let portfolioValue = 0;
+        allStockData.forEach((data, idx) => {
+          if (data && data.chart_data && idx < validEntries.length) {
+            const point = data.chart_data.find((p: any) => p.time === time);
+            if (point) {
+              portfolioValue += point.close * validEntries[idx].shares;
+            }
+          }
+        });
+        if (portfolioValue > 0) {
+          portfolioChartData.push({
+            time,
+            value: portfolioValue,
+            date: new Date(time * 1000).toLocaleDateString(),
+          });
+        }
+      });
+      
+      setChartData(portfolioChartData);
+    } catch (error) {
+      console.error('Error loading chart data:', error);
+      setChartData([]);
+    } finally {
+      setIsLoadingChart(false);
+    }
+  }, [results, entries, timeframe, fetchStockData]);
+
+  // Load chart data when results change (tile only shows combined view)
+  useEffect(() => {
+    if (results) {
+      loadChartData();
+    }
+  }, [results, timeframe, loadChartData]);
+
 
   const handleRefresh = useCallback(() => {
     if (results) {
@@ -407,10 +470,16 @@ const PortfolioTile = ({
   }, [clearCache]);
 
   const handleRecalculateDialogOpen = () => {
+    // Initialize dialog state from current entries/timeframe
+    setDialogEntries([...entries]);
+    setDialogTimeframe(timeframe);
     setRecalculateDialogOpen(true);
   };
 
   const handleRecalculateDialogClose = () => {
+    // Reset dialog state when closing without saving
+    setDialogEntries([]);
+    setDialogTimeframe('1y');
     setRecalculateDialogOpen(false);
   };
 
@@ -436,7 +505,52 @@ const PortfolioTile = ({
   };
 
   const handleRecalculate = () => {
-    calculateRisk();
+    // Update main state from dialog state and persist
+    setEntries(dialogEntries);
+    setTimeframe(dialogTimeframe);
+    
+    // Persist to settings
+    if (onSettingsChange) {
+      const dataToPersist = {
+        entries: dialogEntries.filter(e => e.stock && e.shares > 0),
+        timeframe: dialogTimeframe,
+      };
+      onSettingsChange(id, {
+        portfolioData: dataToPersist
+      });
+    }
+    
+    // Calculate with new values
+    const portfolioData = dialogEntries
+      .filter(entry => entry.stock && entry.shares > 0)
+      .map(entry => {
+        const symbol = entry.stock.trim().toUpperCase();
+        return [symbol, entry.shares, 0] as [string, number, number];
+      });
+    
+    if (portfolioData.length === 0) {
+      setError('Please add at least one stock with shares > 0');
+      return;
+    }
+    
+    setHasPerformedInitialAnalysis(true);
+    setError(null);
+    
+    analyzePortfolio({
+      portfolio_data: portfolioData,
+      period: dialogTimeframe,
+      analysis_type: 'standalone'
+    }).then((response) => {
+      if (response && response.success) {
+        setResults(response.portfolio_metrics);
+      } else {
+        setError('Failed to analyze portfolio. Please check your stock tickers.');
+      }
+    }).catch((err) => {
+      console.error('Portfolio analysis error:', err);
+      setError(apiError || 'An error occurred while analyzing your portfolio.');
+    });
+    
     handleRecalculateDialogClose();
   };
 
@@ -672,6 +786,121 @@ const PortfolioTile = ({
             </Box>
           )}
 
+        {/* Chart Section - Always visible at top when results exist (Combined view only) */}
+        {results && entries.some(e => e.stock && e.shares > 0) && (
+          <Box sx={{ mb: 2, position: 'relative', height: '200px', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', p: 1 }}>
+            {isLoadingChart ? (
+              <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CircularProgress size={24} sx={{ color: tileColor }} />
+              </Box>
+            ) : chartData && chartData.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                    <XAxis 
+                      dataKey="time" 
+                      stroke="#9ca3af" 
+                      fontSize={10}
+                      tick={{ fill: '#9ca3af' }}
+                      axisLine={{ stroke: '#374151' }}
+                      label={{ value: 'Date', position: 'insideBottom', offset: -5, fill: '#9ca3af', fontSize: 11 }}
+                      tickFormatter={(value) => {
+                        const dataPoint = chartData.find(d => d.time === value);
+                        return dataPoint?.date || new Date(value * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      }}
+                    />
+                    <YAxis 
+                      stroke="#9ca3af" 
+                      fontSize={10}
+                      tick={{ fill: '#9ca3af' }}
+                      axisLine={{ stroke: '#374151' }}
+                      label={{ value: 'Portfolio Value ($)', angle: -90, position: 'insideLeft', fill: '#9ca3af', fontSize: 11 }}
+                      domain={(() => {
+                        // Calculate Y-axis domain: +/- 20% of highest/lowest point
+                        if (chartData.length === 0) return ['auto', 'auto'];
+                        const values = chartData.map(d => d.value).filter(v => v != null && !isNaN(v));
+                        if (values.length === 0) return ['auto', 'auto'];
+                        const minValue = Math.min(...values);
+                        const maxValue = Math.max(...values);
+                        const range = maxValue - minValue;
+                        const padding = range * 0.2; // 20% padding
+                        return [Math.max(0, minValue - padding), maxValue + padding];
+                      })()}
+                      tickFormatter={(value) => {
+                        if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+                        if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+                        return `$${value.toFixed(0)}`;
+                      }}
+                    />
+                    <RechartsTooltip
+                      contentStyle={{
+                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                        border: '1px solid #374151',
+                        borderRadius: '4px',
+                        color: 'white'
+                      }}
+                      labelFormatter={(value) => {
+                        const dataPoint = chartData.find(d => d.time === value);
+                        return dataPoint?.date || new Date(value * 1000).toLocaleDateString();
+                      }}
+                      formatter={(value: any) => {
+                        if (typeof value === 'number') {
+                          return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                        }
+                        return value;
+                      }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke={tileColor} 
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4, fill: tileColor }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+                {/* Info Icon with Tooltip - Bottom Left */}
+                <Box sx={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10 }}>
+                  <Tooltip 
+                    title="View more chart options (compare, individual stocks, zoom) on the Portfolio Risk Analysis page"
+                    arrow
+                    placement="top"
+                  >
+                    <Box
+                      sx={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                        border: '1px solid #374151',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'default',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      <HelpOutlineIcon 
+                        sx={{ 
+                          fontSize: 14, 
+                          color: '#9ca3af',
+                        }} 
+                      />
+                    </Box>
+                  </Tooltip>
+                </Box>
+              </>
+            ) : (
+              <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                  No chart data available
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        )}
 
         {/* Results Section */}
         {results && (
@@ -861,9 +1090,9 @@ const PortfolioTile = ({
               <FormControl size="small" sx={{ minWidth: 100, mb: 2 }}>
                 <InputLabel sx={{ color: '#9ca3af' }}>Timeframe</InputLabel>
                 <Select
-                  value={timeframe}
+                  value={dialogTimeframe}
                   label="Timeframe"
-                  onChange={(e) => setTimeframe(e.target.value)}
+                  onChange={(e) => setDialogTimeframe(e.target.value)}
                   sx={{
                     color: '#ffffff',
                     '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
@@ -882,44 +1111,56 @@ const PortfolioTile = ({
                 </Select>
               </FormControl>
 
-              {entries.map((entry, index) => {
+              {dialogEntries.map((entry, index) => {
                 // Find security object for current entry
                 const currentSecurity = isSecurityDataLoaded && entry.stock
-                  ? securitySuggestionsServiceV2.findBySymbol(entry.stock)
+                  ? securitySuggestionsServiceV2.findBySymbol(entry.stock.toUpperCase())
                   : null;
                 
                 // For freeSolo, use the string value if no security object is found
                 // This allows manually typed symbols (like ETFs) to display correctly
                 const autocompleteValue = currentSecurity ?? (entry.stock || null);
+                
+                // Use unique key combining stock and index to prevent React from removing elements
+                const entryKey = `${entry.stock || 'empty'}-${index}`;
 
                 return (
-                  <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
+                  <Box key={entryKey} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
                     <Autocomplete
                       value={autocompleteValue}
-                      onChange={(_, newValue) => handleStockChange(index, newValue)}
-                      onInputChange={(_, newInputValue, reason) => {
-                        handleStockInputChange(index, newInputValue);
-                        // Only update entry on user input, not when autocomplete selects or clears
-                        // This prevents auto-selection from overwriting manual typing
-                        if (reason === 'input' && newInputValue) {
-                          // Extract symbol if it's in display format: "SYMBOL - Name (Cap)" or just "SYMBOL"
-                          const symbolMatch = newInputValue.match(/^([A-Z.]+)(?:\s*-|$)/);
-                          const symbol = symbolMatch ? symbolMatch[1].trim() : newInputValue.trim();
-                          // Only update if it's a valid symbol (not empty, not just whitespace)
-                          if (symbol && symbol.length > 0) {
-                            updateEntry(index, 'stock', symbol.toUpperCase());
+                      onChange={(_, newValue) => {
+                        // Only update when user explicitly selects from dropdown
+                        if (newValue) {
+                          if (typeof newValue === 'string') {
+                            // Extract symbol if it's in display format
+                            const symbolMatch = newValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                            const symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
+                            const newEntries = [...dialogEntries];
+                            newEntries[index] = { ...newEntries[index], stock: symbol.toUpperCase() };
+                            setDialogEntries(newEntries);
+                          } else {
+                            // Security object selected
+                            const newEntries = [...dialogEntries];
+                            newEntries[index] = { ...newEntries[index], stock: newValue.symbol.toUpperCase() };
+                            setDialogEntries(newEntries);
                           }
                         }
                       }}
+                      onInputChange={(_, newInputValue, reason) => {
+                        // Only update suggestions, don't update entry value
+                        handleStockInputChange(index, newInputValue);
+                        // Don't update entry on input - only on selection or blur
+                      }}
                       onBlur={(e) => {
-                        // On blur, ensure the current input value is saved (for freeSolo entries not in autocomplete)
+                        // On blur, normalize and save the current input value (for freeSolo entries)
                         const inputValue = (e.target as HTMLInputElement).value;
                         if (inputValue && !currentSecurity) {
-                          // Extract symbol if it's in display format or use as-is
-                          const symbolMatch = inputValue.match(/^([A-Z.]+)(?:\s*-|$)/);
-                          const symbol = symbolMatch ? symbolMatch[1].trim() : inputValue.trim();
-                          if (symbol && symbol.length > 0) {
-                            updateEntry(index, 'stock', symbol.toUpperCase());
+                          // Normalize to uppercase
+                          const normalizedSymbol = inputValue.trim().toUpperCase();
+                          if (normalizedSymbol && normalizedSymbol.length > 0) {
+                            const newEntries = [...dialogEntries];
+                            newEntries[index] = { ...newEntries[index], stock: normalizedSymbol };
+                            setDialogEntries(newEntries);
                           }
                         }
                       }}
@@ -1070,13 +1311,19 @@ const PortfolioTile = ({
                       autoSelect={false}
                       selectOnFocus={false}
                       clearOnBlur={false}
+                      autoHighlight={false}
+                      disableListWrap={true}
                     />
                     <TextField
                       size="small"
                       type="number"
                       label="Shares"
                       value={entry.shares}
-                      onChange={(e) => updateEntry(index, 'shares', parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const newEntries = [...dialogEntries];
+                        newEntries[index] = { ...newEntries[index], shares: parseFloat(e.target.value) || 0 };
+                        setDialogEntries(newEntries);
+                      }}
                       sx={{ 
                         flexGrow: 1,
                         '& .MuiOutlinedInput-root': {
@@ -1098,8 +1345,15 @@ const PortfolioTile = ({
                     />
                     <IconButton
                       size="small"
-                      onClick={() => removeEntry(index)}
-                      disabled={entries.length === 1}
+                      onClick={() => {
+                        const newEntries = dialogEntries.filter((_, i) => i !== index);
+                        if (newEntries.length === 0) {
+                          setDialogEntries([{ stock: '', shares: 0 }]);
+                        } else {
+                          setDialogEntries(newEntries);
+                        }
+                      }}
+                      disabled={dialogEntries.length === 1}
                       sx={{ color: '#ef4444' }}
                     >
                       <DeleteIcon fontSize="small" />
@@ -1112,7 +1366,9 @@ const PortfolioTile = ({
                 <Button
                   size="small"
                   startIcon={<AddIcon />}
-                  onClick={addEntry}
+                  onClick={() => {
+                    setDialogEntries([...dialogEntries, { stock: '', shares: 0 }]);
+                  }}
                   sx={{ color: '#3b82f6' }}
                 >
                   Add Stock
@@ -1129,7 +1385,7 @@ const PortfolioTile = ({
             onClick={handleRecalculate}
             variant="contained"
             startIcon={<CalculateIcon />}
-            disabled={isLoading || entries.some(e => !e.stock || e.shares <= 0)}
+            disabled={isLoading || dialogEntries.some(e => !e.stock || e.shares <= 0)}
             sx={{ backgroundColor: '#3b82f6' }}
           >
             {isLoading ? 'Calculating...' : 'Calculate'}

@@ -657,6 +657,7 @@ def lambda_handler(event, context):
         portfolio_data = body.get('portfolio_data')
         period = body.get('period', '1y')
         analysis_type = body.get('analysis_type', 'standalone')  # 'robinhood' or 'standalone'
+        source = body.get('source', 'tile')  # 'tile' or 'page' - determines if chart_data should be included
         
         # Validate period
         valid_periods = ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']
@@ -840,6 +841,46 @@ def lambda_handler(event, context):
         else:
             response_data['source'] = 'standalone_tool'
             response_data['positions_count'] = len(portfolio_tuples)
+        
+        # If source is 'page', generate chart data for all stocks
+        if source == 'page':
+            logger.info("Generating chart data for page source")
+            try:
+                chart_data = {}
+                tickers = [ticker for ticker, _, _ in portfolio_tuples]
+                
+                # Fetch historical data for chart generation
+                for ticker in tickers:
+                    try:
+                        stock = yf.Ticker(ticker)
+                        df = stock.history(period=period)
+                        
+                        if not df.empty:
+                            # Convert to chart_data format (same as stock-data endpoint)
+                            chart_points = []
+                            for idx, row in df.iterrows():
+                                chart_points.append({
+                                    'time': int(idx.timestamp()),
+                                    'open': float(row['Open']),
+                                    'high': float(row['High']),
+                                    'low': float(row['Low']),
+                                    'close': float(row['Close']),
+                                    'volume': int(row['Volume']) if 'Volume' in row else 0
+                                })
+                            chart_data[ticker] = chart_points
+                            logger.info(f"Generated {len(chart_points)} chart points for {ticker}")
+                        else:
+                            logger.warning(f"Empty data for {ticker}, skipping chart data")
+                    except Exception as chart_error:
+                        logger.error(f"Error generating chart data for {ticker}: {chart_error}")
+                        # Continue with other tickers even if one fails
+                
+                if chart_data:
+                    response_data['chart_data'] = chart_data
+                    logger.info(f"Successfully generated chart data for {len(chart_data)} stocks")
+            except Exception as e:
+                logger.error(f"Error generating chart data: {e}", exc_info=True)
+                # Don't fail the request if chart data generation fails
         
         logger.info(f"Response prepared successfully for {analysis_type} analysis")
         logger.info(f"Total portfolio value: ${portfolio_metrics['total_portfolio_value']:,.2f}")

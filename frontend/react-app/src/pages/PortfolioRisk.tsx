@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -19,13 +19,21 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  Autocomplete,
+  Tooltip,
+  CircularProgress,
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
   Add as AddIcon,
   Calculate as CalculateIcon,
+  Timeline as TimelineIcon,
+  ShowChart as ShowChartIcon,
+  CompareArrows as CompareArrowsIcon,
 } from '@mui/icons-material';
-import { usePortfolioAnalysis } from '../hooks/useAPI';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, Brush } from 'recharts';
+import { usePortfolioAnalysis, useStockData } from '../hooks/useAPI';
+import { securitySuggestionsServiceV2, Security } from '../services/securitySuggestionsV2';
 
 // Force refresh - updated at 2025-01-10T00:00:00.000Z
 
@@ -57,8 +65,40 @@ export default function PortfolioRisk() {
   const [error, setError] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<string>('1y');
   
+  // Chart state
+  const [chartType, setChartType] = useState<'single' | 'multiple' | 'compare'>('single');
+  const [compareStock, setCompareStock] = useState<string>('');
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
+  const [compareInputValue, setCompareInputValue] = useState<string>('');
+  const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
+  const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  
   // Use the portfolio analysis hook - updated to use real API with force refresh
   const { executeForceRefresh: analyzePortfolio, loading: isLoading, error: apiError } = usePortfolioAnalysis();
+  const { executeForceRefresh: fetchStockData } = useStockData();
+
+  // Load security data
+  useEffect(() => {
+    const loadSecurityData = async () => {
+      try {
+        await securitySuggestionsServiceV2.loadSecurities();
+        setIsSecurityDataLoaded(true);
+        const allSecurities = securitySuggestionsServiceV2.getAllSecurities();
+        const seen = new Set<string>();
+        const uniqueSecurities = allSecurities.filter(security => {
+          if (seen.has(security.symbol)) return false;
+          seen.add(security.symbol);
+          return true;
+        });
+        setSecuritySuggestions(uniqueSecurities.slice(0, 50));
+      } catch (error) {
+        console.error('Failed to load security suggestions:', error);
+      }
+    };
+    loadSecurityData();
+  }, []);
 
   // Load session data from localStorage on component mount
   useEffect(() => {
@@ -127,24 +167,131 @@ export default function PortfolioRisk() {
       // Prepare portfolio data for API call
       const portfolioData = entries
         .filter(entry => entry.stock && entry.shares > 0)
-        .map(entry => [entry.stock, entry.shares, 0] as [string, number, number]); // Price will be fetched by API
+        .map(entry => {
+          // Extract just the ticker symbol (handle cases where it might be "AAPL - APPLE INC. (HIGH CAP)" or just "AAPL")
+          const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+          const symbol = symbolMatch ? symbolMatch[1].trim() : entry.stock.trim();
+          return [symbol.toUpperCase(), entry.shares, 0] as [string, number, number]; // Price will be fetched by API
+        });
       
       if (portfolioData.length === 0) {
         setError('Please add at least one stock with shares > 0');
         return;
       }
       
-      // Call the portfolio analysis API
+      // Call the portfolio analysis API with source='page' to get chart data
       const response = await analyzePortfolio({
         portfolio_data: portfolioData,
         period: timeframe,
-        analysis_type: 'standalone'
+        analysis_type: 'standalone',
+        source: 'page'
       });
       
       console.log('Portfolio analysis response:', response);
       
       if (response && response.success) {
         setResults(response.portfolio_metrics);
+        
+        // If chart_data is included in response, use it instead of fetching separately
+        if ((response as any).chart_data) {
+          // Process chart data from backend response
+          const validEntries = entries.filter(e => e.stock && e.shares > 0);
+          const stockSymbols = validEntries.map(e => {
+            const symbolMatch = e.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+            const symbol = symbolMatch ? symbolMatch[1].trim() : e.stock.trim();
+            return symbol.toUpperCase();
+          });
+          
+          // Convert backend chart_data format to frontend format
+          const processedChartData: { [key: string]: any[] } = {};
+          stockSymbols.forEach(symbol => {
+            if ((response as any).chart_data[symbol]) {
+              processedChartData[symbol] = (response as any).chart_data[symbol].map((point: any) => ({
+                time: point.time,
+                close: point.close,
+                open: point.open,
+                high: point.high,
+                low: point.low,
+                volume: point.volume
+              }));
+            }
+          });
+          
+          // Store processed chart data for use in loadChartData
+          if (Object.keys(processedChartData).length > 0) {
+            // Process chart data directly with backend data
+            const allStockData = stockSymbols.map(symbol => {
+              const chartPoints = processedChartData[symbol] || [];
+              return {
+                symbol,
+                chart_data: chartPoints
+              };
+            });
+
+            // Process chart data based on chart type
+            if (chartType === 'single') {
+              const portfolioChartData: any[] = [];
+              const timePoints = new Set<number>();
+
+              allStockData.forEach((data) => {
+                if (data && data.chart_data) {
+                  data.chart_data.forEach((point: any) => {
+                    timePoints.add(point.time);
+                  });
+                }
+              });
+
+              Array.from(timePoints).sort().forEach(time => {
+                let portfolioValue = 0;
+                allStockData.forEach((data, idx) => {
+                  if (data && data.chart_data && idx < validEntries.length) {
+                    const point = data.chart_data.find((p: any) => p.time === time);
+                    if (point) {
+                      portfolioValue += point.close * validEntries[idx].shares;
+                    }
+                  }
+                });
+                if (portfolioValue > 0) {
+                  portfolioChartData.push({
+                    time,
+                    value: portfolioValue,
+                    date: new Date(time * 1000).toLocaleDateString(),
+                  });
+                }
+              });
+              
+              setChartData(portfolioChartData);
+            } else if (chartType === 'multiple') {
+              const timePoints = new Set<number>();
+              allStockData.forEach((data) => {
+                if (data && data.chart_data) {
+                  data.chart_data.forEach((point: any) => {
+                    timePoints.add(point.time);
+                  });
+                }
+              });
+              
+              const chartDataMap: { [key: number]: any } = {};
+              Array.from(timePoints).sort().forEach(time => {
+                chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
+              });
+              
+              allStockData.forEach((data, idx) => {
+                if (data && data.chart_data && idx < stockSymbols.length) {
+                  const symbol = stockSymbols[idx];
+                  data.chart_data.forEach((point: any) => {
+                    if (chartDataMap[point.time]) {
+                      chartDataMap[point.time][symbol] = point.close;
+                    }
+                  });
+                }
+              });
+              
+              setChartData(Object.values(chartDataMap).filter(d => Object.keys(d).length > 2));
+            }
+            // For compare mode, we still need to fetch the compare stock separately, so fall through to loadChartData
+          }
+        }
       } else {
         setError('Failed to analyze portfolio. Please check your stock tickers.');
       }
@@ -154,11 +301,194 @@ export default function PortfolioRisk() {
     }
   };
 
+  // Load chart data
+  const loadChartData = useCallback(async () => {
+    if (!results || !entries.some(e => e.stock && e.shares > 0)) {
+      setChartData([]);
+      return;
+    }
+
+    setIsLoadingChart(true);
+    try {
+      const validEntries = entries.filter(e => e.stock && e.shares > 0);
+      // Extract just the ticker symbol from each entry
+      const stockSymbols = validEntries.map(e => {
+        const symbolMatch = e.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+        const symbol = symbolMatch ? symbolMatch[1].trim() : e.stock.trim();
+        return symbol.toUpperCase();
+      });
+      
+      // Add compare stock if in compare mode
+      if (chartType === 'compare' && compareStock) {
+        stockSymbols.push(compareStock.trim().toUpperCase());
+      }
+
+      // Fetch data for all stocks
+      const stockDataPromises = stockSymbols.map(symbol =>
+        fetchStockData({ ticker: symbol, period: timeframe })
+      );
+
+      const allStockData = await Promise.all(stockDataPromises);
+
+      if (chartType === 'single') {
+        const portfolioChartData: any[] = [];
+        const timePoints = new Set<number>();
+
+        // Collect all time points
+        allStockData.slice(0, -1).forEach((data) => {
+          if (data && data.chart_data) {
+            data.chart_data.forEach((point: any) => {
+              timePoints.add(point.time);
+            });
+          }
+        });
+
+        // For each time point, calculate portfolio value
+        Array.from(timePoints).sort().forEach(time => {
+          let portfolioValue = 0;
+          allStockData.slice(0, -1).forEach((data, idx) => {
+            if (data && data.chart_data && idx < validEntries.length) {
+              const point = data.chart_data.find((p: any) => p.time === time);
+              if (point) {
+                portfolioValue += point.close * validEntries[idx].shares;
+              }
+            }
+          });
+          if (portfolioValue > 0) {
+            portfolioChartData.push({
+              time,
+              value: portfolioValue,
+              date: new Date(time * 1000).toLocaleDateString(),
+            });
+          }
+        });
+        
+        setChartData(portfolioChartData);
+      } else if (chartType === 'multiple') {
+        const timePoints = new Set<number>();
+        allStockData.forEach((data) => {
+          if (data && data.chart_data) {
+            data.chart_data.forEach((point: any) => {
+              timePoints.add(point.time);
+            });
+          }
+        });
+        
+        const chartDataMap: { [key: number]: any } = {};
+        Array.from(timePoints).sort().forEach(time => {
+          chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
+        });
+        
+        allStockData.forEach((data, idx) => {
+          if (data && data.chart_data && idx < stockSymbols.length) {
+            const symbol = stockSymbols[idx];
+            data.chart_data.forEach((point: any) => {
+              if (chartDataMap[point.time]) {
+                chartDataMap[point.time][symbol] = point.close;
+              }
+            });
+          }
+        });
+        
+        setChartData(Object.values(chartDataMap).filter(d => Object.keys(d).length > 2));
+      } else if (chartType === 'compare' && compareStock) {
+        const portfolioChartData: any[] = [];
+        const compareStockData = allStockData[allStockData.length - 1];
+        const timePoints = new Set<number>();
+        
+        allStockData.forEach((data) => {
+          if (data && data.chart_data) {
+            data.chart_data.forEach((point: any) => {
+              timePoints.add(point.time);
+            });
+          }
+        });
+        
+        Array.from(timePoints).sort().forEach(time => {
+          let portfolioValue = 0;
+          let hasPortfolioData = false;
+          
+          allStockData.slice(0, -1).forEach((data, idx) => {
+            if (data && data.chart_data && idx < validEntries.length) {
+              const point = data.chart_data.find((p: any) => p.time === time);
+              if (point) {
+                portfolioValue += point.close * validEntries[idx].shares;
+                hasPortfolioData = true;
+              }
+            }
+          });
+          
+          const comparePoint = compareStockData?.chart_data?.find((p: any) => p.time === time);
+          
+          if (hasPortfolioData && comparePoint) {
+            portfolioChartData.push({
+              time,
+              portfolio: portfolioValue,
+              compare: comparePoint.close,
+              date: new Date(time * 1000).toLocaleDateString(),
+            });
+          }
+        });
+        
+        setChartData(portfolioChartData);
+      }
+    } catch (error) {
+      console.error('Error loading chart data:', error);
+      setChartData([]);
+    } finally {
+      setIsLoadingChart(false);
+    }
+  }, [results, entries, timeframe, chartType, compareStock, fetchStockData]);
+
+  useEffect(() => {
+    if (results) {
+      loadChartData();
+    }
+  }, [results, chartType, compareStock, timeframe, loadChartData]);
+
+  const getYAxisDomain = useCallback(() => {
+    if (!chartData || chartData.length === 0) {
+      return ['auto', 'auto'];
+    }
+    
+    let values: number[] = [];
+    if (chartType === 'single') {
+      values = chartData.map(d => d.value).filter(v => v && !isNaN(v));
+    } else if (chartType === 'multiple') {
+      entries.filter(e => e.stock && e.shares > 0).forEach(entry => {
+        const symbol = entry.stock.trim().toUpperCase();
+        chartData.forEach(d => {
+          if (d[symbol] && !isNaN(d[symbol])) {
+            values.push(d[symbol]);
+          }
+        });
+      });
+    } else if (chartType === 'compare') {
+      chartData.forEach(d => {
+        if (d.portfolio && !isNaN(d.portfolio)) values.push(d.portfolio);
+        if (d.compare && !isNaN(d.compare)) values.push(d.compare);
+      });
+    }
+    
+    if (values.length === 0) {
+      return ['auto', 'auto'];
+    }
+    
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const padding = (maxVal - minVal) * 0.20; // 20% padding
+    const domainMin = Math.max(0, minVal - padding); // Ensure min doesn't go below 0
+    const domainMax = maxVal + padding;
+    return [domainMin, domainMax];
+  }, [chartData, chartType, entries]);
+
   const getRiskLevel = (volatility: number) => {
     if (volatility < 10) return { level: 'Low', color: '#22c55e' };
     if (volatility < 20) return { level: 'Medium', color: '#f59e0b' };
     return { level: 'High', color: '#ef4444' };
   };
+
+  const tileColor = '#3b82f6';
 
   const clearSession = () => {
     // Clear localStorage
@@ -174,7 +504,8 @@ export default function PortfolioRisk() {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: '1400px', mx: 'auto', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh' }}>
+    <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
+      <Box sx={{ maxWidth: '1400px', mx: 'auto' }}>
       {/* Header */}
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Box>
@@ -303,11 +634,114 @@ export default function PortfolioRisk() {
               border: '1px solid rgba(255, 255, 255, 0.05)',
             }}
           >
-            <TextField
-              label="Stock Ticker"
-              value={entry.stock}
-              onChange={(e) => updateEntry(index, 'stock', e.target.value.toUpperCase())}
-              sx={{ 
+            <Autocomplete
+              value={isSecurityDataLoaded && entry.stock
+                ? securitySuggestionsServiceV2.findBySymbol(entry.stock.toUpperCase()) ?? entry.stock
+                : entry.stock || null}
+              onChange={(_, newValue) => {
+                if (newValue) {
+                  if (typeof newValue === 'string') {
+                    const symbolMatch = newValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                    const symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
+                    updateEntry(index, 'stock', symbol.toUpperCase());
+                  } else {
+                    updateEntry(index, 'stock', newValue.symbol.toUpperCase());
+                  }
+                }
+              }}
+              onInputChange={(_, newInputValue) => {
+                if (isSecurityDataLoaded && newInputValue) {
+                  const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
+                  const seen = new Set<string>();
+                  const uniqueSuggestions = suggestions.filter(security => {
+                    if (seen.has(security.symbol)) return false;
+                    seen.add(security.symbol);
+                    return true;
+                  });
+                  setSecuritySuggestions(uniqueSuggestions);
+                }
+              }}
+              onBlur={(e) => {
+                const inputValue = (e.target as HTMLInputElement).value;
+                if (inputValue) {
+                  const normalizedSymbol = inputValue.trim().toUpperCase();
+                  if (normalizedSymbol && normalizedSymbol.length > 0) {
+                    updateEntry(index, 'stock', normalizedSymbol);
+                  }
+                }
+              }}
+              options={securitySuggestions}
+              getOptionLabel={(option) => {
+                if (typeof option === 'string') return option;
+                return option.displayText || option.symbol || '';
+              }}
+              isOptionEqualToValue={(option: Security | string, value: Security | string | null) => {
+                if (!value) return false;
+                if (typeof option === 'string' && typeof value === 'string') {
+                  return option.toUpperCase() === value.toUpperCase();
+                }
+                if (typeof option === 'string' && typeof value === 'object' && 'symbol' in value) {
+                  return option.toUpperCase() === (value.symbol?.toUpperCase() || '');
+                }
+                if (typeof value === 'string' && typeof option === 'object' && 'symbol' in option) {
+                  return value.toUpperCase() === (option.symbol?.toUpperCase() || '');
+                }
+                if (typeof option === 'object' && typeof value === 'object' && 'symbol' in option && 'symbol' in value) {
+                  return option.symbol === value.symbol;
+                }
+                return false;
+              }}
+              loading={!isSecurityDataLoaded}
+              renderOption={(props, option) => {
+                if (typeof option === 'string') {
+                  return (
+                    <Box component="li" {...props} key={option} sx={{ py: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                        {option}
+                      </Typography>
+                    </Box>
+                  );
+                }
+                const security = option as Security;
+                const capColor = security.marketCap === 'high' ? '#10b981' : security.marketCap === 'mid' ? '#f59e0b' : '#ef4444';
+                const capLabel = security.marketCap === 'high' ? 'High Cap' : security.marketCap === 'mid' ? 'Mid Cap' : 'Low Cap';
+                const uniqueKey = `${security.symbol}-${security.marketCap}-${security.name}`;
+                return (
+                  <Box component="li" {...props} key={uniqueKey} sx={{ py: 1 }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: '#3b82f6' }}>
+                          {security.symbol}
+                        </Typography>
+                        <Chip 
+                          label={capLabel} 
+                          size="small" 
+                          sx={{ 
+                            height: '18px', 
+                            fontSize: '0.65rem',
+                            backgroundColor: capColor,
+                            color: 'white'
+                          }} 
+                        />
+                      </Box>
+                      <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                        {security.name}
+                      </Typography>
+                    </Box>
+                  </Box>
+                );
+              }}
+              freeSolo
+              autoSelect={false}
+              selectOnFocus={false}
+              clearOnBlur={false}
+              autoHighlight={false}
+              disableListWrap={true}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Stock Ticker"
+                  sx={{ 
                 flexGrow: 1,
                 '& .MuiOutlinedInput-root': {
                   '& fieldset': {
@@ -325,6 +759,26 @@ export default function PortfolioRisk() {
                 },
                 '& .MuiInputBase-input': {
                   color: '#ffffff',
+                },
+              }}
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {!isSecurityDataLoaded ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+              sx={{
+                flexGrow: 1,
+                '& .MuiAutocomplete-popper': {
+                  '& .MuiPaper-root': {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    border: '1px solid #374151',
+                  },
                 },
               }}
             />
@@ -442,7 +896,7 @@ export default function PortfolioRisk() {
         </Alert>
       )}
 
-      {/* Results Section */}
+          {/* Results Section */}
       {results && (
         <Paper
           sx={{
@@ -466,6 +920,274 @@ export default function PortfolioRisk() {
           >
             Portfolio Analysis Results
           </Typography>
+
+          {/* Chart Section */}
+          {entries.some(e => e.stock && e.shares > 0) && (
+            <Box sx={{ mb: 4, position: 'relative', height: '400px', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', p: 1 }}>
+              {isLoadingChart ? (
+                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <CircularProgress size={24} sx={{ color: tileColor }} />
+                </Box>
+              ) : chartData && chartData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height="85%">
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                      <XAxis 
+                        dataKey="time" 
+                        stroke="#9ca3af" 
+                        fontSize={10}
+                        tick={{ fill: '#9ca3af' }}
+                        axisLine={{ stroke: '#374151' }}
+                        label={{ value: 'Date', position: 'insideBottom', offset: -5, fill: '#9ca3af', fontSize: 11 }}
+                        tickFormatter={(value) => {
+                          const dataPoint = chartData.find(d => d.time === value);
+                          return dataPoint?.date || new Date(value * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        }}
+                      />
+                      <YAxis 
+                        stroke="#9ca3af" 
+                        fontSize={10}
+                        tick={{ fill: '#9ca3af' }}
+                        axisLine={{ stroke: '#374151' }}
+                        label={{ value: chartType === 'single' ? 'Portfolio Value ($)' : 'Price ($)', angle: -90, position: 'insideLeft', fill: '#9ca3af', fontSize: 11 }}
+                        domain={getYAxisDomain()}
+                        tickFormatter={(value) => {
+                          if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+                          if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+                          return `$${value.toFixed(0)}`;
+                        }}
+                      />
+                      <RechartsTooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                          border: '1px solid #374151',
+                          borderRadius: '4px',
+                          color: 'white'
+                        }}
+                        labelFormatter={(value) => {
+                          const dataPoint = chartData.find(d => d.time === value);
+                          return dataPoint?.date || new Date(value * 1000).toLocaleDateString();
+                        }}
+                        formatter={(value: any) => {
+                          if (typeof value === 'number') {
+                            return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          }
+                          return value;
+                        }}
+                      />
+                      {chartType === 'single' && (
+                        <Line 
+                          type="monotone" 
+                          dataKey="value" 
+                          stroke={tileColor} 
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 4, fill: tileColor }}
+                        />
+                      )}
+                      {chartType === 'multiple' && entries.filter(e => e.stock && e.shares > 0).map((entry, idx) => {
+                        const symbol = entry.stock.trim().toUpperCase();
+                        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#a855f7', '#ec4899', '#06b6d4'];
+                        return (
+                          <Line 
+                            key={symbol}
+                            type="monotone" 
+                            dataKey={symbol} 
+                            stroke={colors[idx % colors.length]} 
+                            strokeWidth={2}
+                            dot={false}
+                            activeDot={{ r: 4 }}
+                          />
+                        );
+                      })}
+                      {chartType === 'compare' && (
+                        <>
+                          <Line 
+                            type="monotone" 
+                            dataKey="portfolio" 
+                            stroke={tileColor} 
+                            strokeWidth={2}
+                            dot={false}
+                            activeDot={{ r: 4 }}
+                            name="Portfolio"
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="compare" 
+                            stroke="#f59e0b" 
+                            strokeWidth={2}
+                            dot={false}
+                            activeDot={{ r: 4 }}
+                            name={compareStock || 'Comparison'}
+                          />
+                          <Legend 
+                            wrapperStyle={{ fontSize: '11px', color: '#9ca3af' }}
+                            iconType="line"
+                          />
+                        </>
+                      )}
+                      <Brush
+                        dataKey="time"
+                        height={30}
+                        stroke="#3b82f6"
+                        fill="rgba(59, 130, 246, 0.1)"
+                        tickFormatter={(value) => {
+                          const dataPoint = chartData.find(d => d.time === value);
+                          return dataPoint?.date || new Date(value * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  {/* Chart Type Icon Selector - Bottom Left */}
+                  <Box sx={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10, display: 'flex', gap: 0.5 }}>
+                    <Tooltip title="Combined Portfolio">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setChartType('single');
+                          setCompareDialogOpen(false);
+                        }}
+                        sx={{
+                          backgroundColor: chartType === 'single' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(15, 23, 42, 0.9)',
+                          color: chartType === 'single' ? tileColor : '#9ca3af',
+                          border: `1px solid ${chartType === 'single' ? tileColor : '#374151'}`,
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                            borderColor: tileColor,
+                          },
+                          width: 32,
+                          height: 32,
+                        }}
+                      >
+                        <TimelineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="All Stocks">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setChartType('multiple');
+                          setCompareDialogOpen(false);
+                        }}
+                        sx={{
+                          backgroundColor: chartType === 'multiple' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(15, 23, 42, 0.9)',
+                          color: chartType === 'multiple' ? tileColor : '#9ca3af',
+                          border: `1px solid ${chartType === 'multiple' ? tileColor : '#374151'}`,
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                            borderColor: tileColor,
+                          },
+                          width: 32,
+                          height: 32,
+                        }}
+                      >
+                        <ShowChartIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Compare with Stock">
+                      <Box sx={{ position: 'relative' }}>
+                        <IconButton
+                          size="small"
+                          onClick={() => {
+                            setChartType('compare');
+                            setCompareDialogOpen(!compareDialogOpen);
+                          }}
+                          sx={{
+                            backgroundColor: chartType === 'compare' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(15, 23, 42, 0.9)',
+                            color: chartType === 'compare' ? tileColor : '#9ca3af',
+                            border: `1px solid ${chartType === 'compare' ? tileColor : '#374151'}`,
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                              borderColor: tileColor,
+                            },
+                            width: 32,
+                            height: 32,
+                          }}
+                        >
+                          <CompareArrowsIcon fontSize="small" />
+                        </IconButton>
+                        {compareDialogOpen && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              bottom: 40,
+                              left: 0,
+                              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                              border: '1px solid #374151',
+                              borderRadius: '4px',
+                              p: 1,
+                              zIndex: 1000,
+                              minWidth: 200,
+                            }}
+                          >
+                            <Autocomplete
+                              value={compareInputValue}
+                              onChange={(_, newValue) => {
+                                if (newValue) {
+                                  if (typeof newValue === 'string') {
+                                    const symbolMatch = newValue.match(/^([A-Z.]+)(?:\s*-|$)/);
+                                    const symbol = symbolMatch ? symbolMatch[1].trim() : newValue.trim();
+                                    setCompareStock(symbol.toUpperCase());
+                                    setCompareInputValue(symbol.toUpperCase());
+                                  } else {
+                                    setCompareStock(newValue.symbol.toUpperCase());
+                                    setCompareInputValue(newValue.symbol.toUpperCase());
+                                  }
+                                  setCompareDialogOpen(false);
+                                }
+                              }}
+                              onInputChange={(_, newInputValue) => {
+                                setCompareInputValue(newInputValue);
+                                if (isSecurityDataLoaded && newInputValue) {
+                                  const suggestions = securitySuggestionsServiceV2.getSuggestions(newInputValue, 50);
+                                  const seen = new Set<string>();
+                                  const uniqueSuggestions = suggestions.filter(security => {
+                                    if (seen.has(security.symbol)) return false;
+                                    seen.add(security.symbol);
+                                    return true;
+                                  });
+                                  setSecuritySuggestions(uniqueSuggestions);
+                                }
+                              }}
+                              options={securitySuggestions}
+                              getOptionLabel={(option) => {
+                                if (typeof option === 'string') return option;
+                                return option.displayText || option.symbol || '';
+                              }}
+                              freeSolo
+                              autoSelect={false}
+                              renderInput={(params) => (
+                                <TextField
+                                  {...params}
+                                  placeholder="Enter ticker"
+                                  size="small"
+                                  sx={{
+                                    '& .MuiOutlinedInput-root': {
+                                      color: 'white',
+                                      '& fieldset': {
+                                        borderColor: '#374151',
+                                      },
+                                    },
+                                  }}
+                                />
+                              )}
+                            />
+                          </Box>
+                        )}
+                      </Box>
+                    </Tooltip>
+                  </Box>
+                </>
+              ) : (
+                <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                    No chart data available
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          )}
 
           {/* Key Metrics */}
           <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -626,6 +1348,7 @@ export default function PortfolioRisk() {
           </TableContainer>
         </Paper>
       )}
+      </Box>
     </Box>
   );
 }

@@ -76,14 +76,10 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                 registrant_terms = [t for t in registrant_terms if t and str(t).strip()]
                 if registrant_terms:
                     item_name = str(item.get('registrant_name') or '').lower()
-                    # Normalize both sides by removing commas for flexible matching
-                    item_name_normalized = item_name.replace(',', '')
                     matches = False
                     for term in registrant_terms:
                         term_lower = str(term).strip().lower()
-                        term_normalized = term_lower.replace(',', '')
-                        # Try both normalized and original matching
-                        if term_normalized in item_name_normalized or term_lower in item_name:
+                        if term_lower in item_name:
                             matches = True
                             break
                     if not matches:
@@ -96,14 +92,10 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
                 client_terms = [t for t in client_terms if t and str(t).strip()]
                 if client_terms:
                     item_name = str(item.get('client_name') or '').lower()
-                    # Normalize both sides by removing commas for flexible matching
-                    item_name_normalized = item_name.replace(',', '')
                     matches = False
                     for term in client_terms:
                         term_lower = str(term).strip().lower()
-                        term_normalized = term_lower.replace(',', '')
-                        # Try both normalized and original matching
-                        if term_normalized in item_name_normalized or term_lower in item_name:
+                        if term_lower in item_name:
                             matches = True
                             break
                     if not matches:
@@ -183,14 +175,10 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         registrant_names = [n for n in registrant_names if n and str(n).strip()]
         if registrant_names:
             item_name = str(item.get('registrant_name') or '').strip()
-            # Normalize both sides by removing commas for flexible matching
-            item_name_normalized = item_name.lower().replace(',', '')
             matches = False
             for name in registrant_names:
                 name_str = str(name).strip()
-                name_normalized = name_str.lower().replace(',', '')
-                # Try both normalized and original matching
-                if item_name and (name_normalized in item_name_normalized or name_str.lower() in item_name.lower()):
+                if item_name and name_str.lower() in item_name.lower():
                     matches = True
                     break
             if not matches:
@@ -202,14 +190,10 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         client_names = [n for n in client_names if n and str(n).strip()]
         if client_names:
             item_name = str(item.get('client_name') or '').strip()
-            # Normalize both sides by removing commas for flexible matching
-            item_name_normalized = item_name.lower().replace(',', '')
             matches = False
             for name in client_names:
                 name_str = str(name).strip()
-                name_normalized = name_str.lower().replace(',', '')
-                # Try both normalized and original matching
-                if item_name and (name_normalized in item_name_normalized or name_str.lower() in item_name.lower()):
+                if item_name and name_str.lower() in item_name.lower():
                     matches = True
                     break
             if not matches:
@@ -221,14 +205,10 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         lobbyist_names = [n for n in lobbyist_names if n and str(n).strip()]
         if lobbyist_names:
             item_name = str(item.get('lobbyist_name') or '').strip()
-            # Normalize both sides by removing commas for flexible matching
-            item_name_normalized = item_name.lower().replace(',', '')
             matches = False
             for name in lobbyist_names:
                 name_str = str(name).strip()
-                name_normalized = name_str.lower().replace(',', '')
-                # Try both normalized and original matching
-                if item_name and (name_normalized in item_name_normalized or name_str.lower() in item_name.lower()):
+                if item_name and name_str.lower() in item_name.lower():
                     matches = True
                     break
             if not matches:
@@ -1226,7 +1206,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     
                 else:
                     # Use GSI query
-                    # On first batch, try comma/case variations for name-based queries if original returns 0 results
+                    # On first batch, try case variations for name-based queries if original returns 0 results
                     current_hash_value = config['hash_value']
                     if batch_iteration == 1 and config['hash_key'] in ['client_name', 'registrant_name', 'lobbyist_name']:
                         # Test original value first
@@ -1244,86 +1224,36 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         
                         found_match = len(test_ids) > 0
                         
+                        # If original didn't work, try case variations
                         if not found_match:
-                            # Original didn't work, try comma variations
                             original_value = str(current_hash_value)
-                            comma_variations = []
-                            
-                            # If value has no comma, try adding one before "INC", "LLC", "CORP", etc.
-                            if ',' not in original_value:
-                                # Try case-insensitive suffix matching
-                                # Order matters: check longer suffixes first (e.g., " INC." before " INC")
-                                suffixes = [' INC.', ' LLC.', ' CORP.', ' L.P.', ' LP.', ' LLP.', ' INC', ' LLC', ' CORP', ' LP', ' L.P', ' LLP']
-                                for suffix in suffixes:
-                                    # Case-insensitive check
-                                    if original_value.upper().endswith(suffix.upper()):
-                                        # Find the actual suffix in the original (preserve case)
-                                        original_upper = original_value.upper()
-                                        suffix_start = len(original_upper) - len(suffix)
-                                        actual_suffix = original_value[suffix_start:]
-                                        # Try with comma before suffix: "COMPANY INC." -> "COMPANY, INC."
-                                        comma_version = original_value.replace(actual_suffix, ',' + actual_suffix)
-                                        comma_variations.append(comma_version)
-                                        logger.info(f"Generated comma variation for {config['hash_key']}: '{original_value}' -> '{comma_version}'")
+                            variations = [
+                                original_value.upper(),
+                                original_value.lower(),
+                                original_value.title(),
+                                original_value.capitalize(),
+                            ]
+                            for variation in variations:
+                                if variation != original_value:
+                                    logger.info(f"Trying case variation for {config['hash_key']}: '{variation}'")
+                                    test_ids, _ = query_gsi_for_filing_ids(
+                                        index_name=config['index_name'],
+                                        hash_key_name=config['hash_key'],
+                                        hash_key_value=variation,
+                                        range_key_name=config.get('range_key'),
+                                        range_key_value=config.get('range_value'),
+                                        range_key_condition=config.get('range_condition'),
+                                        limit=1,
+                                        exclusive_start_key=None,
+                                        get_all=False
+                                    )
+                                    
+                                    if len(test_ids) > 0:
+                                        current_hash_value = variation
+                                        config['hash_value'] = variation
+                                        logger.info(f"Found results with case variation '{variation}' - using this for all queries")
+                                        found_match = True
                                         break
-                            
-                            # If value has comma, try removing it
-                            if ',' in original_value:
-                                no_comma_version = original_value.replace(',', '')
-                                comma_variations.append(no_comma_version)
-                            
-                            # Try comma variations
-                            for comma_var in comma_variations:
-                                logger.info(f"Trying comma variation for {config['hash_key']}: '{comma_var}'")
-                                test_ids, _ = query_gsi_for_filing_ids(
-                                    index_name=config['index_name'],
-                                    hash_key_name=config['hash_key'],
-                                    hash_key_value=comma_var,
-                                    range_key_name=config.get('range_key'),
-                                    range_key_value=config.get('range_value'),
-                                    range_key_condition=config.get('range_condition'),
-                                    limit=1,
-                                    exclusive_start_key=None,
-                                    get_all=False
-                                )
-                                
-                                if len(test_ids) > 0:
-                                    # Found results with comma variation - use it
-                                    current_hash_value = comma_var
-                                    config['hash_value'] = comma_var  # Update config for future queries
-                                    logger.info(f"Found results with comma variation '{comma_var}' - using this for all queries")
-                                    found_match = True
-                                    break
-                            
-                            # If comma variations didn't work, try case variations
-                            if not found_match:
-                                variations = [
-                                    original_value.upper(),
-                                    original_value.lower(),
-                                    original_value.title(),
-                                    original_value.capitalize(),
-                                ]
-                                for variation in variations:
-                                    if variation != original_value:
-                                        logger.info(f"Trying case variation for {config['hash_key']}: '{variation}'")
-                                        test_ids, _ = query_gsi_for_filing_ids(
-                                            index_name=config['index_name'],
-                                            hash_key_name=config['hash_key'],
-                                            hash_key_value=variation,
-                                            range_key_name=config.get('range_key'),
-                                            range_key_value=config.get('range_value'),
-                                            range_key_condition=config.get('range_condition'),
-                                            limit=1,
-                                            exclusive_start_key=None,
-                                            get_all=False
-                                        )
-                                        
-                                        if len(test_ids) > 0:
-                                            current_hash_value = variation
-                                            config['hash_value'] = variation
-                                            logger.info(f"Found results with case variation '{variation}' - using this for all queries")
-                                            found_match = True
-                                            break
                     
                     logger.info(f"Querying {config['index_name']} for {config['filter_key']}={current_hash_value}")
                     
@@ -2201,7 +2131,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 if var not in hash_value_variations and var != original_value:
                     hash_value_variations.append(var)
         
-        # On first query, try case variations AND comma variations for name-based queries if original returns 0 results
+        # On first query, try case variations for name-based queries if original returns 0 results
         if config['hash_key'] in ['client_name', 'registrant_name', 'lobbyist_name']:
             # First, test the original value
             test_ids, _ = query_gsi_for_filing_ids(
@@ -2217,82 +2147,31 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             )
             
             if len(test_ids) == 0:
-                # Original didn't work, try comma variations first (autocomplete removes commas)
-                original_value = str(hash_value_variations[0])
-                comma_variations = []
-                
-                # If value has no comma, try adding one before "INC", "LLC", "CORP", etc.
-                if ',' not in original_value:
-                    # Try case-insensitive suffix matching
-                    # Order matters: check longer suffixes first (e.g., " INC." before " INC")
-                    suffixes = [' INC.', ' LLC.', ' CORP.', ' L.P.', ' LP.', ' LLP.', ' INC', ' LLC', ' CORP', ' LP', ' L.P', ' LLP']
-                    for suffix in suffixes:
-                        # Case-insensitive check
-                        if original_value.upper().endswith(suffix.upper()):
-                            # Find the actual suffix in the original (preserve case)
-                            original_upper = original_value.upper()
-                            suffix_start = len(original_upper) - len(suffix)
-                            actual_suffix = original_value[suffix_start:]
-                            # Try with comma before suffix: "COMPANY INC." -> "COMPANY, INC."
-                            comma_version = original_value.replace(actual_suffix, ',' + actual_suffix)
-                            comma_variations.append(comma_version)
-                            logger.info(f"Generated comma variation for {config['hash_key']}: '{original_value}' -> '{comma_version}'")
-                            break
-                
-                # If value has comma, try removing it
-                if ',' in original_value:
-                    no_comma_version = original_value.replace(',', '')
-                    comma_variations.append(no_comma_version)
-                
-                # Try comma variations first (most likely to match stored values)
-                for comma_var in comma_variations:
-                    logger.info(f"Trying comma variation for {config['hash_key']}: '{comma_var}'")
+                # Original didn't work, try case variations
+                logger.info(f"Original value '{hash_value_variations[0]}' returned 0 results, trying case variations...")
+                for var_idx, variation in enumerate(hash_value_variations[1:], start=1):  # Skip original, already tested
+                    logger.info(f"Trying case variation {var_idx + 1}/{len(hash_value_variations)} for {config['hash_key']}: '{variation}'")
                     test_ids, _ = query_gsi_for_filing_ids(
                         index_name=config['index_name'],
                         hash_key_name=config['hash_key'],
-                        hash_key_value=comma_var,
+                        hash_key_value=variation,
                         range_key_name=config.get('range_key'),
                         range_key_value=config.get('range_value'),
                         range_key_condition=config.get('range_condition'),
-                        limit=1,
+                        limit=1,  # Just test if any results exist
                         exclusive_start_key=None,
                         get_all=False
                     )
                     
                     if len(test_ids) > 0:
-                        # Found results with comma variation - use it
-                        hash_value_variations.insert(1, comma_var)  # Add to variations list
-                        current_variation_index = 1
-                        config['hash_value'] = comma_var
-                        logger.info(f"Found results with comma variation '{comma_var}' - using this for all queries")
+                        # Found results with this variation - use it for all queries
+                        current_variation_index = var_idx
+                        config['hash_value'] = variation  # Update config for pagination
+                        logger.info(f"Found results with variation '{variation}' - using this for all queries")
                         break
-                
-                # If comma variations didn't work, try case variations
-                if len(test_ids) == 0 and len(hash_value_variations) > 1:
-                    logger.info(f"Original value '{hash_value_variations[0]}' returned 0 results, trying case variations...")
-                    for var_idx, variation in enumerate(hash_value_variations[1:], start=1):  # Skip original, already tested
-                        logger.info(f"Trying case variation {var_idx + 1}/{len(hash_value_variations)} for {config['hash_key']}: '{variation}'")
-                        test_ids, _ = query_gsi_for_filing_ids(
-                            index_name=config['index_name'],
-                            hash_key_name=config['hash_key'],
-                            hash_key_value=variation,
-                            range_key_name=config.get('range_key'),
-                            range_key_value=config.get('range_value'),
-                            range_key_condition=config.get('range_condition'),
-                            limit=1,  # Just test if any results exist
-                            exclusive_start_key=None,
-                            get_all=False
-                        )
-                        
-                        if len(test_ids) > 0:
-                            # Found results with this variation - use it for all queries
-                            current_variation_index = var_idx
-                            config['hash_value'] = variation  # Update config for pagination
-                            logger.info(f"Found results with variation '{variation}' - using this for all queries")
-                            break
-                    else:
-                        # No variation returned results
-                        logger.warning(f"All variations returned 0 results for {config['hash_key']}='{config['hash_value']}'")
+                else:
+                    # No variation returned results
+                    logger.warning(f"All variations returned 0 results for {config['hash_key']}='{config['hash_value']}'")
             else:
                 # Original value works, use it
                 logger.info(f"Original value '{hash_value_variations[0]}' works - no variation needed")
