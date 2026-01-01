@@ -455,14 +455,15 @@ export default function PortfolioRisk() {
     } finally {
       setIsLoadingChart(false);
     }
-  }, [results, entries, timeframe, chartType, compareStock, fetchStockData]);
+  }, [results, timeframe, chartType, compareStock, fetchStockData]);
 
   useEffect(() => {
+    // Only load chart data when results are set (from calculateRisk), not when entries change
     if (results) {
       loadChartData();
     }
     // Only reload when results, chartType, compareStock, or timeframe change
-    // Not when loadChartData function reference changes
+    // Not when loadChartData function reference changes or entries change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results, chartType, compareStock, timeframe]);
 
@@ -544,7 +545,7 @@ export default function PortfolioRisk() {
             sx={{
               position: 'absolute',
               top: -8,
-              left: -8,
+              left: -20,
               zIndex: 10,
               width: 48,
               height: 48,
@@ -1465,6 +1466,54 @@ export default function PortfolioRisk() {
                           />
                         </TableCell>
                       </TableRow>
+                      {results.correlation && results.correlation.matrix && results.correlation.tickers && results.correlation.tickers.length > 1 && (
+                        <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                          <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Avg Correlation</TableCell>
+                          <TableCell align="right" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+                            {(() => {
+                              const tickers = results.correlation!.tickers!;
+                              const matrix = results.correlation!.matrix!;
+                              let sum = 0;
+                              let count = 0;
+                              for (let i = 0; i < tickers.length; i++) {
+                                for (let j = i + 1; j < tickers.length; j++) {
+                                  const corr = matrix[tickers[i]]?.[tickers[j]];
+                                  if (corr !== undefined && !isNaN(corr)) {
+                                    sum += corr;
+                                    count++;
+                                  }
+                                }
+                              }
+                              const avg = count > 0 ? sum / count : 0;
+                              return avg.toFixed(3);
+                            })()}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {results.covariance && results.covariance.matrix && results.covariance.tickers && results.covariance.tickers.length > 1 && (
+                        <TableRow sx={{ '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.05)' } }}>
+                          <TableCell sx={{ color: '#ffffff', fontWeight: 600 }}>Avg Covariance</TableCell>
+                          <TableCell align="right" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+                            {(() => {
+                              const tickers = results.covariance!.tickers!;
+                              const matrix = results.covariance!.matrix!;
+                              let sum = 0;
+                              let count = 0;
+                              for (let i = 0; i < tickers.length; i++) {
+                                for (let j = i + 1; j < tickers.length; j++) {
+                                  const cov = matrix[tickers[i]]?.[tickers[j]];
+                                  if (cov !== undefined && !isNaN(cov)) {
+                                    sum += Math.abs(cov);
+                                    count++;
+                                  }
+                                }
+                              }
+                              const avg = count > 0 ? sum / count : 0;
+                              return avg.toFixed(6);
+                            })()}
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </TableContainer>
