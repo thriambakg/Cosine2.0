@@ -144,8 +144,15 @@ class UnifiedChartGenerator:
                     for point in historical_data:
                         if not isinstance(point, dict):
                             continue
+                        # Handle date field - can be timestamp (int), date string, or date key
+                        time_value = point.get('timestamp')
+                        if time_value is None:
+                            time_value = point.get('date')
+                        if time_value is None:
+                            continue  # Skip if no time/date field
+                        
                         stock_normalized.append({
-                            'time': point.get('timestamp', point.get('date', 0)),
+                            'time': time_value,  # Keep as-is (will be converted to datetime later)
                             'close': point.get('close', 0),
                             'open': point.get('open', point.get('close', 0)),
                             'high': point.get('high', point.get('close', 0)),
@@ -486,15 +493,22 @@ class UnifiedChartGenerator:
                             # Convert to DataFrame to handle date sorting properly
                             temp_df = pd.DataFrame(stock_data)
                             # Convert time to datetime for proper sorting
-                            if temp_df['time'].dtype == 'int64':
-                                temp_df['time'] = pd.to_datetime(temp_df['time'], unit='s')
-                            else:
-                                temp_df['time'] = pd.to_datetime(temp_df['time'])
+                            try:
+                                if pd.api.types.is_numeric_dtype(temp_df['time']):
+                                    temp_df['time'] = pd.to_datetime(temp_df['time'], unit='s')
+                                else:
+                                    temp_df['time'] = pd.to_datetime(temp_df['time'])
+                            except Exception as e:
+                                logger.warning(f"⚠️ Error converting time for baseline calculation for {stock_symbol}: {str(e)}")
+                                temp_df['time'] = pd.to_datetime(temp_df['time'], errors='coerce')
                             # Sort by time and get the first (earliest) price
                             temp_df = temp_df.sort_values('time')
-                            first_price = temp_df.iloc[0]['close']
-                            if first_price > 0:
-                                baseline_prices[stock_symbol] = first_price
+                            temp_df = temp_df.dropna(subset=['close'])  # Remove rows with invalid close prices
+                            if len(temp_df) > 0:
+                                first_price = temp_df.iloc[0]['close']
+                                if first_price > 0 and not (isinstance(first_price, float) and first_price != first_price):
+                                    baseline_prices[stock_symbol] = first_price
+                                    logger.info(f"🔍 DEBUG: Baseline for {stock_symbol}: ${first_price:.2f}")
                     logger.info(f"🔍 DEBUG: Normalization enabled. Baseline prices: {baseline_prices}")
                 
                 plotted_count = 0
@@ -507,15 +521,27 @@ class UnifiedChartGenerator:
                     # Convert to DataFrame
                     df = pd.DataFrame(stock_data)
                     
-                    # Convert time to datetime
-                    if df['time'].dtype == 'int64':
-                        df['time'] = pd.to_datetime(df['time'], unit='s')
-                    else:
-                        df['time'] = pd.to_datetime(df['time'])
+                    # Convert time to datetime - handle both timestamps and date strings
+                    try:
+                        if pd.api.types.is_numeric_dtype(df['time']):
+                            # Numeric timestamp (seconds since epoch)
+                            df['time'] = pd.to_datetime(df['time'], unit='s')
+                        else:
+                            # Date string (like "2025-11-03")
+                            df['time'] = pd.to_datetime(df['time'])
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error converting time for {stock_symbol}: {str(e)}, trying fallback")
+                        df['time'] = pd.to_datetime(df['time'], errors='coerce')
                     
                     # Sort by time to ensure proper ordering
                     df = df.sort_values('time')
+                    df = df.dropna(subset=['time', 'close'])  # Remove rows with invalid dates or prices
                     df.set_index('time', inplace=True)
+                    
+                    # Verify we have valid data after conversion
+                    if len(df) == 0 or df['close'].isna().all() or (df['close'] == 0).all():
+                        logger.warning(f"⚠️ No valid data points after conversion for {stock_symbol}")
+                        continue
                     
                     # Apply normalization if requested
                     if normalize and stock_symbol in baseline_prices:
@@ -669,19 +695,24 @@ class UnifiedChartGenerator:
                     all_prices = df['close'].tolist()
             
             if all_prices and len(all_prices) > 0:
-                min_price = min(all_prices)
-                max_price = max(all_prices)
-                # Set y-axis: start at minimum value, end at 10% above max
-                # Handle edge case where min and max are the same
-                if min_price == max_price:
-                    # If all prices are the same, add some padding
-                    y_min = min_price * 0.99
-                    y_max = max_price * 1.01
+                # Filter out invalid prices (NaN, None, 0, negative)
+                valid_prices = [p for p in all_prices if p is not None and not (isinstance(p, float) and (p != p or p <= 0))]
+                if valid_prices:
+                    min_price = min(valid_prices)
+                    max_price = max(valid_prices)
+                    # Set y-axis: start at minimum value, end at 10% above max
+                    # Handle edge case where min and max are the same
+                    if min_price == max_price:
+                        # If all prices are the same, add some padding
+                        y_min = min_price * 0.99
+                        y_max = max_price * 1.01
+                    else:
+                        y_min = min_price
+                        y_max = max_price * 1.1
+                    ax.set_ylim(y_min, y_max)
+                    logger.info(f"📊 Y-axis scaled: {y_min:.2f} to {y_max:.2f} (data range: {min_price:.2f} to {max_price:.2f})")
                 else:
-                    y_min = min_price
-                    y_max = max_price * 1.1
-                ax.set_ylim(y_min, y_max)
-                logger.info(f"📊 Y-axis scaled: {y_min:.2f} to {y_max:.2f} (data range: {min_price:.2f} to {max_price:.2f})")
+                    logger.warning(f"⚠️ No valid prices found for y-axis scaling")
             
             # Add legend for single stock charts
             if data_type != 'multiple_stocks':
