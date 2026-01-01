@@ -182,14 +182,25 @@ class WebSocketHandler:
         try:
             current_time = int(datetime.now().timestamp())
             
-            # Query connections for this user and session
+            # Query connections for this user
+            # Note: Filter by session_id if present, but also include connections without session_id
+            # (for backward compatibility and cases where session_id wasn't set at connection time)
             response = self.chat_connections_table.query(
                 IndexName='UserConnectionsIndex',
                 KeyConditionExpression=Key('user_id').eq(user_id),
-                FilterExpression=Attr('session_id').eq(session_id) & Attr('expires_at').gt(current_time)
+                FilterExpression=Attr('expires_at').gt(current_time)
             )
             
-            connection_ids = [item['connection_id'] for item in response['Items']]
+            # Filter by session_id in Python (more flexible than DynamoDB FilterExpression)
+            # Include connections that either:
+            # 1. Have matching session_id
+            # 2. Don't have session_id set (backward compatibility - will be updated on first message)
+            connection_ids = []
+            for item in response['Items']:
+                item_session_id = item.get('session_id')
+                if item_session_id == session_id or not item_session_id:
+                    connection_ids.append(item['connection_id'])
+            
             logger.info(f"Found {len(connection_ids)} active connections for user {user_id}, session {session_id}")
             
             return connection_ids
@@ -353,7 +364,12 @@ class WebSocketHandler:
                     'body': json_dumps_safe({'error': 'Session ID required'})
                 }
             
-            # Process the WebSocket message (session_id already stored at connection time)
+            # Update connection record with session_id if not already set (critical for streaming to work)
+            if session_id and ('session_id' not in connection_info or not connection_info.get('session_id')):
+                self.update_connection_session(connection_id, session_id)
+                logger.info(f"Updated connection {connection_id} with session_id {session_id} for streaming")
+            
+            # Process the WebSocket message
             return self._process_message(connection_id, user_id, session_id, message_data)
             
         except Exception as e:
