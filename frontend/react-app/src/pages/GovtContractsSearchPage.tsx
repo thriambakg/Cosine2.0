@@ -1335,6 +1335,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     onSearch={() => []}
                     renderItem={(zipCode) => zipCode}
                     placeholder="Enter zip codes..."
+                    disableAutocomplete={true}
                   />
 
                   {/* NAICS Code - Direct search, no autocomplete */}
@@ -1348,6 +1349,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     onSearch={() => []}
                     renderItem={(code) => code}
                     placeholder="Enter NAICS codes..."
+                    disableAutocomplete={true}
                   />
 
                   {/* PSC Code - Direct search, no autocomplete */}
@@ -1361,6 +1363,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     onSearch={() => []}
                     renderItem={(code) => code}
                     placeholder="Enter PSC codes..."
+                    disableAutocomplete={true}
                   />
 
                   {/* CFDA Number - Direct search, no autocomplete */}
@@ -1374,6 +1377,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     onSearch={() => []}
                     renderItem={(number) => number}
                     placeholder="Enter CFDA numbers..."
+                    disableAutocomplete={true}
                   />
 
                   </Box>

@@ -1335,6 +1335,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               helperText="Add keywords for search"
               allowCustomInput={true}
               isLoading={false}
+              disableAutocomplete={true}
             />
           </Box>
 

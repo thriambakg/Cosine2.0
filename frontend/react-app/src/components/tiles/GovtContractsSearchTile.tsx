@@ -2169,6 +2169,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               onSearch={() => []}
               renderItem={(zipCode) => zipCode}
               placeholder="Enter zip codes..."
+              disableAutocomplete={true}
             />
 
             {/* NAICS Code */}
@@ -2182,6 +2183,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               onSearch={() => []}
               renderItem={(code) => code}
               placeholder="Enter NAICS codes..."
+              disableAutocomplete={true}
             />
 
             {/* PSC Code */}
@@ -2195,6 +2197,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               onSearch={() => []}
               renderItem={(code) => code}
               placeholder="Enter PSC codes..."
+              disableAutocomplete={true}
             />
 
             {/* CFDA Number */}
@@ -2208,6 +2211,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               onSearch={() => []}
               renderItem={(number) => number}
               placeholder="Enter CFDA numbers..."
+              disableAutocomplete={true}
             />
           </Box>
         </DialogContent>

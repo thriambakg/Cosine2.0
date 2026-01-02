@@ -1211,6 +1211,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             renderItem={(keyword) => keyword}
             placeholder="Enter keywords to search..."
             helperText="Search by keywords in article titles (e.g., AI, technology, politics)"
+            disableAutocomplete={true}
           />
 
           {/* Sources Search Field */}

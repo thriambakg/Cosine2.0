@@ -589,6 +589,7 @@ const NewsSearchPage: React.FC = () => {
                     renderItem={(keyword) => keyword}
                     placeholder="Enter keywords to search..."
                     allowCustomInput={true}
+                    disableAutocomplete={true}
                   />
 
                   {/* Date Range Preset */}

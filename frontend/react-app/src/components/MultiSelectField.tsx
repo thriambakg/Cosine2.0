@@ -36,6 +36,7 @@ interface MultiSelectFieldProps<T> {
   maxChipsShown?: number;
   allowCustomInput?: boolean;
   isLoading?: boolean;
+  disableAutocomplete?: boolean; // When true, disables autocomplete dropdown and only allows text input
   onSearch?: (query: string, offset?: number) => T[] | Promise<T[]> | { results: T[]; has_more?: boolean } | Promise<{ results: T[]; has_more?: boolean }>; // Callback for dynamic search that returns results (sync or async) or paginated response
 }
 
@@ -52,6 +53,7 @@ function MultiSelectField<T = string>({
   maxChipsShown = 3,
   allowCustomInput = true,
   isLoading = false,
+  disableAutocomplete = false,
   onSearch,
 }: MultiSelectFieldProps<T>) {
   const [inputValue, setInputValue] = useState('');
@@ -121,6 +123,14 @@ function MultiSelectField<T = string>({
 
   // Debounced search effect - prevent excessive API calls
   useEffect(() => {
+    // Skip search if autocomplete is disabled
+    if (disableAutocomplete) {
+      setDynamicSuggestions([]);
+      setHasMore(false);
+      setCurrentQuery('');
+      return;
+    }
+    
     if (!onSearch) {
       setDynamicSuggestions([]);
       setHasMore(false);
@@ -200,7 +210,7 @@ function MultiSelectField<T = string>({
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [inputValue, onSearch, isDropdownOpen]);
+  }, [inputValue, onSearch, isDropdownOpen, disableAutocomplete]);
 
   const handleAddItem = (newItem: T | string) => {
     if (!newItem) return;
@@ -223,6 +233,184 @@ function MultiSelectField<T = string>({
 
   const availableOptions = dynamicSuggestions.length > 0 ? dynamicSuggestions : (suggestions || []);
 
+
+  // If autocomplete is disabled, render a simple text input instead
+  if (disableAutocomplete) {
+    return (
+      <Box>
+        <TextField
+          label={label}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          placeholder={placeholder}
+          variant="outlined"
+          fullWidth
+          helperText={helperText}
+          InputProps={{
+            endAdornment: (
+              allowCustomInput && inputValue.trim() && (
+                <IconButton
+                  onClick={() => handleAddItem(inputValue.trim())}
+                  disabled={!inputValue.trim()}
+                  size="small"
+                  sx={{ 
+                    color: inputValue.trim() ? '#3b82f6' : '#6b7280',
+                    '&:hover': { color: '#2563eb' },
+                  }}
+                >
+                  <AddIcon fontSize="small" />
+                </IconButton>
+              )
+            ),
+          }}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              '& fieldset': { 
+                borderColor: '#374151',
+                borderWidth: '1px'
+              },
+              '&:hover fieldset': { borderColor: '#3b82f6' },
+              '&.Mui-focused fieldset': { borderColor: '#3b82f6', borderWidth: '2px' },
+            },
+            '& .MuiInputLabel-root': { 
+              color: '#9ca3af'
+            },
+            '& .MuiInputBase-input': { color: '#ffffff' },
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && inputValue.trim()) {
+              e.preventDefault();
+              handleAddItem(inputValue.trim());
+            }
+          }}
+        />
+        
+        {/* Selected items chips */}
+        {selectedItems.length > 0 && (
+          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+            {selectedItems.slice(0, maxChipsShown).map((item) => (
+              <Chip
+                key={getItemKey(item)}
+                label={renderItem(item)}
+                size="small"
+                onDelete={() => handleRemoveItem(item)}
+                sx={{
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                  color: '#93c5fd',
+                  border: '1px solid #3b82f6',
+                  '& .MuiChip-deleteIcon': { color: '#93c5fd' },
+                }}
+              />
+            ))}
+            {selectedItems.length > maxChipsShown && (
+              <Chip
+                label={`+${selectedItems.length - maxChipsShown} more`}
+                size="small"
+                onClick={() => setShowAllItemsDialog(true)}
+                sx={{
+                  backgroundColor: 'rgba(107, 114, 128, 0.2)',
+                  color: '#9ca3af',
+                  border: '1px solid #6b7280',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    backgroundColor: 'rgba(107, 114, 128, 0.3)',
+                  },
+                }}
+              />
+            )}
+          </Box>
+        )}
+        
+        {/* Dialog to show all selected items */}
+        <Dialog
+          open={showAllItemsDialog}
+          onClose={() => setShowAllItemsDialog(false)}
+          maxWidth="sm"
+          fullWidth
+          PaperProps={{
+            sx: {
+              backgroundColor: '#1f2937',
+              border: '1px solid #374151',
+            },
+          }}
+        >
+          <DialogTitle sx={{ color: '#ffffff', borderBottom: '1px solid #374151' }}>
+            All Selected {label}
+            <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5, fontWeight: 'normal' }}>
+              {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected
+            </Typography>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <List sx={{ 
+              maxHeight: '400px', 
+              overflow: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: '#3b82f6',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: '#2563eb',
+              },
+            }}>
+              {selectedItems.map((item) => (
+                <ListItem
+                  key={getItemKey(item)}
+                  sx={{
+                    borderBottom: '1px solid #374151',
+                    '&:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    },
+                  }}
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      onClick={() => {
+                        handleRemoveItem(item);
+                        if (selectedItems.length === 1) {
+                          setShowAllItemsDialog(false);
+                        }
+                      }}
+                      sx={{ color: '#ef4444' }}
+                      size="small"
+                    >
+                      <CloseIcon />
+                    </IconButton>
+                  }
+                >
+                  <ListItemText
+                    primary={renderItem(item)}
+                    primaryTypographyProps={{
+                      sx: { color: '#ffffff' },
+                    }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </DialogContent>
+          <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+            <Button
+              onClick={() => setShowAllItemsDialog(false)}
+              sx={{
+                color: '#9ca3af',
+                '&:hover': {
+                  backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                },
+              }}
+            >
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </Box>
+    );
+  }
 
   return (
     <Box>

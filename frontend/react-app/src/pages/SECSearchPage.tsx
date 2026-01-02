@@ -1973,6 +1973,7 @@ const SECSearchPage: React.FC = () => {
                 placeholder="Type keyword and press Enter to add..."
                 allowCustomInput={true}
                 isLoading={false}
+                disableAutocomplete={true}
               />
 
               {/* Form Types - Button to open modal */}
