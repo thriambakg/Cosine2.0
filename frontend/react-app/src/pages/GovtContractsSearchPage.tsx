@@ -132,6 +132,7 @@ const GovtContractsSearchPage: React.FC = () => {
       recipient_id: Array.isArray(saved?.recipient_id) ? saved.recipient_id : [],
       recipient_name: Array.isArray(saved?.recipient_name) ? saved.recipient_name : [],
       recipient_location_state: Array.isArray(saved?.recipient_location_state) ? saved.recipient_location_state : [],
+      recipient_zip_code: Array.isArray(saved?.recipient_zip_code) ? saved.recipient_zip_code : [],
       recipient_location_country: Array.isArray(saved?.recipient_location_country) ? saved.recipient_location_country : [],
       naics_code: Array.isArray(saved?.naics_code) ? saved.naics_code : [],
       psc_code: Array.isArray(saved?.psc_code) ? saved.psc_code : [],
@@ -1321,6 +1322,19 @@ const GovtContractsSearchPage: React.FC = () => {
                     suggestions={US_STATES}
                     renderItem={(state) => state}
                     placeholder="Select states..."
+                  />
+
+                  {/* Zip Code */}
+                  <MultiSelectField<string>
+                    label="Recipient Zip Code"
+                    selectedItems={searchParams.recipient_zip_code || []}
+                    onItemsChange={(zipCodes) => {
+                      setSearchParams((prev) => ({ ...prev, recipient_zip_code: zipCodes }));
+                    }}
+                    suggestions={[]}
+                    onSearch={() => []}
+                    renderItem={(zipCode) => zipCode}
+                    placeholder="Enter zip codes..."
                   />
 
                   {/* NAICS Code - Direct search, no autocomplete */}

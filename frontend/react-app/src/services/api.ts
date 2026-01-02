@@ -1043,6 +1043,7 @@ export interface GovtContractsSearchFilters {
   recipient_id?: string[];
   recipient_name?: string[];
   recipient_location_state?: string[];
+  recipient_zip_code?: string[];
   recipient_location_country?: string[];
   naics_code?: string[];
   psc_code?: string[];

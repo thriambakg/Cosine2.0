@@ -140,6 +140,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     funding_agency_name: [],
     recipient_name: [],
     recipient_location_state: [],
+    recipient_zip_code: [],
     naics_code: [],
     psc_code: [],
     cfda_number: [],
@@ -2157,6 +2158,19 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Select states..."
             />
 
+            {/* Zip Code */}
+            <MultiSelectField<string>
+              label="Recipient Zip Code"
+              selectedItems={currentSearchParams.recipient_zip_code || []}
+              onItemsChange={(zipCodes) => {
+                setCurrentSearchParams((prev) => ({ ...prev, recipient_zip_code: zipCodes }));
+              }}
+              suggestions={[]}
+              onSearch={() => []}
+              renderItem={(zipCode) => zipCode}
+              placeholder="Enter zip codes..."
+            />
+
             {/* NAICS Code */}
             <MultiSelectField<string>
               label="NAICS Code"
@@ -2208,6 +2222,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 recipient_id: [],
                 recipient_name: [],
                 recipient_location_state: [],
+                recipient_zip_code: [],
                 recipient_location_country: [],
                 naics_code: [],
                 psc_code: [],

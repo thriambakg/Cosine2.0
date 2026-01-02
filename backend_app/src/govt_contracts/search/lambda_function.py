@@ -270,6 +270,12 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         if not item_state or item_state not in states:
             return False
     
+    if filters.get('recipient_zip_code'):
+        zip_codes = filters['recipient_zip_code'] if isinstance(filters['recipient_zip_code'], list) else [filters['recipient_zip_code']]
+        item_zip = item.get('recipient_zip_code')
+        if not item_zip or item_zip not in zip_codes:
+            return False
+    
     if filters.get('recipient_location_country'):
         countries = filters['recipient_location_country'] if isinstance(filters['recipient_location_country'], list) else [filters['recipient_location_country']]
         item_country = item.get('recipient_location_country')
@@ -553,6 +559,13 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
         else:
             conditions.append(Attr('recipient_location_state').is_in(states))
     
+    if filters.get('recipient_zip_code'):
+        zip_codes = filters['recipient_zip_code'] if isinstance(filters['recipient_zip_code'], list) else [filters['recipient_zip_code']]
+        if len(zip_codes) == 1:
+            conditions.append(Attr('recipient_zip_code').eq(zip_codes[0]))
+        else:
+            conditions.append(Attr('recipient_zip_code').is_in(zip_codes))
+    
     if filters.get('recipient_location_country'):
         countries = filters['recipient_location_country'] if isinstance(filters['recipient_location_country'], list) else [filters['recipient_location_country']]
         if len(countries) == 1:
@@ -713,6 +726,33 @@ def determine_query_method(filters: Dict[str, Any]) -> tuple[str, Optional[str],
             'range_key': None  # No range key filter
         }
         return ('query', 'StateFiscalYearIndex', key_condition)
+    
+    # ZipCodeFiscalYearIndex: hash_key=recipient_zip_code, range_key=fiscal_year
+    if filters.get('recipient_zip_code') and filters.get('fiscal_year'):
+        zip_code = filters['recipient_zip_code']
+        if isinstance(zip_code, list):
+            zip_code = zip_code[0]  # Use first zip code for hash key
+        fiscal_year = filters['fiscal_year']
+        if isinstance(fiscal_year, list):
+            fiscal_year = fiscal_year[0]  # Use first fiscal year for range key
+        
+        key_condition = {
+            'hash_key': ('recipient_zip_code', zip_code),
+            'range_key': ('fiscal_year', fiscal_year)
+        }
+        return ('query', 'ZipCodeFiscalYearIndex', key_condition)
+    
+    # ZipCodeFiscalYearIndex with just zip_code (no fiscal_year filter)
+    if filters.get('recipient_zip_code') and not filters.get('fiscal_year'):
+        zip_code = filters['recipient_zip_code']
+        if isinstance(zip_code, list):
+            zip_code = zip_code[0]
+        
+        key_condition = {
+            'hash_key': ('recipient_zip_code', zip_code),
+            'range_key': None  # No range key filter
+        }
+        return ('query', 'ZipCodeFiscalYearIndex', key_condition)
     
     # RecipientNameFiscalYearIndex: hash_key=recipient_name_normalized, range_key=fiscal_year
     if filters.get('recipient_name'):
