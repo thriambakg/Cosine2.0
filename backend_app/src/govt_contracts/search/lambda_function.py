@@ -986,6 +986,28 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': None
             })
     
+    # ZipCodeFiscalYearIndex: hash_key=recipient_zip_code, range_key=fiscal_year
+    if filters.get('recipient_zip_code'):
+        zip_codes = filters['recipient_zip_code'] if isinstance(filters['recipient_zip_code'], list) else [filters['recipient_zip_code']]
+        zip_codes = [z for z in zip_codes if z and str(z).strip()]  # Filter out empty strings
+        if zip_codes:
+            zip_code = zip_codes[0]  # Use first zip code for hash key (multi-value handled via union in multi-GSI path)
+            fiscal_year = None
+            if filters.get('fiscal_year'):
+                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
+                if fiscal_years:
+                    fiscal_year = fiscal_years[0]
+            
+            query_configs.append({
+                'filter_key': 'recipient_zip_code',
+                'index_name': 'ZipCodeFiscalYearIndex',
+                'hash_key': 'recipient_zip_code',
+                'hash_value': zip_code,
+                'range_key': 'fiscal_year' if fiscal_year else None,
+                'range_value': fiscal_year,
+                'range_condition': None
+            })
+    
     # AwardTypeFiscalYearIndex: hash_key=award_type, range_key=fiscal_year
     if filters.get('award_type'):
         award_types = filters['award_type'] if isinstance(filters['award_type'], list) else [filters['award_type']]
@@ -1363,13 +1385,18 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     Args:
         filters: Dictionary of filter fields
         limit: Maximum number of results to return
-        last_evaluated_key: Pagination token from previous request (not used in new approach)
+        last_evaluated_key: Pagination token from previous request
     
     Returns:
         Dictionary with search results and pagination info
     """
     if not awards_table:
         raise Exception("DynamoDB awards table not initialized")
+    
+    if last_evaluated_key:
+        logger.info(f"search_awards: Received last_evaluated_key: {json.dumps(last_evaluated_key, default=str)}")
+    else:
+        logger.info(f"search_awards: No last_evaluated_key provided")
     
     # Check if this is an obligation-only search (no fiscal_year, no other GSI hash keys)
     has_obligation_filter = filters.get('min_obligation') is not None or filters.get('max_obligation') is not None
@@ -1522,6 +1549,49 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     }
                     continue
             
+            # Special handling for recipient_zip_code with multiple values - query each and union results
+            if config['filter_key'] == 'recipient_zip_code' and filters.get('recipient_zip_code'):
+                zip_codes = filters['recipient_zip_code'] if isinstance(filters['recipient_zip_code'], list) else [filters['recipient_zip_code']]
+                zip_codes = [z for z in zip_codes if z and str(z).strip()]
+                
+                if len(zip_codes) > 1:
+                    logger.info(f"Querying {config['index_name']} for {len(zip_codes)} zip codes (union)")
+                    all_award_ids = set()
+                    all_configs = []
+                    
+                    # Query each zip code separately and union the results
+                    for zip_code in zip_codes:
+                        zip_code_str = str(zip_code).strip()
+                        logger.info(f"Querying {config['index_name']} for recipient_zip_code={zip_code_str}")
+                        award_ids, _ = query_gsi_for_award_ids(
+                            index_name=config['index_name'],
+                            hash_key_name=config['hash_key'],
+                            hash_key_value=zip_code_str,
+                            range_key_name=config.get('range_key'),
+                            range_key_value=config.get('range_value'),
+                            range_key_condition=config.get('range_condition'),
+                            limit=1000,  # Get first batch
+                            get_all=False
+                        )
+                        all_award_ids.update(award_ids)
+                        # Store config for each zip code for pagination
+                        all_configs.append({
+                            'config': {**config, 'hash_value': zip_code_str},
+                            'last_eval_key': None
+                        })
+                        logger.info(f"Found {len(award_ids)} award_ids for recipient_zip_code={zip_code_str}")
+                    
+                    logger.info(f"Union of all zip codes: {len(all_award_ids)} total unique award_ids")
+                    gsi_results[config['filter_key']] = {
+                        'award_ids': all_award_ids,
+                        'config': config,  # Use original config as template
+                        'all_configs': all_configs,  # Store individual configs for pagination
+                        'total_count': len(all_award_ids),
+                        'last_eval_key': None,
+                        'is_multi_value': True  # Flag to indicate this needs special pagination handling
+                    }
+                    continue
+            
             logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
             # Get first batch to determine which is shortest
             award_ids, _ = query_gsi_for_award_ids(
@@ -1562,6 +1632,8 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             del remaining_filters['recipient_name']
         elif shortest_key == 'recipient_location_state':
             del remaining_filters['recipient_location_state']
+        elif shortest_key == 'recipient_zip_code':
+            del remaining_filters['recipient_zip_code']
         elif shortest_key == 'award_type':
             del remaining_filters['award_type']
         elif shortest_key == 'fiscal_year_obligation':
@@ -1596,27 +1668,29 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         max_pagination_rounds = 50  # Limit to avoid infinite loops
         pagination_round = 0
         
-        # Special handling for multi-value recipient_name queries
+        # Special handling for multi-value recipient_name and recipient_zip_code queries
         source_result = gsi_results[shortest_key]
         is_multi_recipient = source_result.get('is_multi_value', False) and shortest_key == 'recipient_name'
+        is_multi_zip = source_result.get('is_multi_value', False) and shortest_key == 'recipient_zip_code'
         
-        if is_multi_recipient:
-            # For multiple recipient names, paginate through each one
+        if is_multi_recipient or is_multi_zip:
+            # For multiple recipient names or zip codes, paginate through each one
             all_configs = source_result.get('all_configs', [])
-            recipient_config_index = 0
+            config_index = 0
+            item_type = 'recipient' if is_multi_recipient else 'zip code'
             
             while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
                 pagination_round += 1
                 
-                # Cycle through recipient names if we've exhausted one
-                if recipient_config_index >= len(all_configs):
-                    break  # All recipient names exhausted
+                # Cycle through configs if we've exhausted one
+                if config_index >= len(all_configs):
+                    break  # All configs exhausted
                 
-                recipient_config = all_configs[recipient_config_index]
-                current_config = recipient_config['config']
-                current_last_eval_key = recipient_config.get('last_eval_key')
+                current_item_config = all_configs[config_index]
+                current_config = current_item_config['config']
+                current_last_eval_key = current_item_config.get('last_eval_key')
                 
-                # Query this recipient name with pagination
+                # Query this item with pagination
                 source_award_ids_batch, new_last_eval_key = query_gsi_for_award_ids(
                     index_name=current_config['index_name'],
                     hash_key_name=current_config['hash_key'],
@@ -1629,15 +1703,15 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     get_all=False
                 )
                 
-                # Update last eval key for this recipient
-                recipient_config['last_eval_key'] = new_last_eval_key
+                # Update last eval key for this config
+                current_item_config['last_eval_key'] = new_last_eval_key
                 
-                # If no more results for this recipient, move to next
+                # If no more results for this config, move to next
                 if not source_award_ids_batch:
-                    recipient_config_index += 1
+                    config_index += 1
                     continue
                 
-                logger.info(f"Pagination round {pagination_round} (recipient {recipient_config_index + 1}/{len(all_configs)}): Got {len(source_award_ids_batch)} award_ids from source GSI")
+                logger.info(f"Pagination round {pagination_round} ({item_type} {config_index + 1}/{len(all_configs)}): Got {len(source_award_ids_batch)} award_ids from source GSI")
                 
                 # Fetch full items for this batch (no GSI intersection - we'll filter in Python)
                 items_batch = []
@@ -1665,9 +1739,9 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                 
                 logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
                 
-                # Move to next recipient if this one is exhausted
+                # Move to next config if this one is exhausted
                 if not new_last_eval_key:
-                    recipient_config_index += 1
+                    config_index += 1
                 
                 # Stop if we have enough results
                 if len(all_matching_items) >= limit:
@@ -1833,13 +1907,44 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         if enriched_results:
             logger.info(f"Enriched {len(enriched_results)} award(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
         
+        # Determine if there are more results
+        # Check if source GSI still has more items to paginate
+        has_more = False
+        last_eval_key = None
+        
+        if is_multi_recipient or is_multi_zip:
+            # For multi-value queries, check if any config still has more items
+            all_configs = source_result.get('all_configs', [])
+            for config_item in all_configs:
+                if config_item.get('last_eval_key'):
+                    has_more = True
+                    # Use the last eval key from the current config being paginated
+                    # For simplicity, use the first non-null last_eval_key
+                    if not last_eval_key:
+                        last_eval_key = config_item.get('last_eval_key')
+                    break
+        else:
+            # For single-value queries, check if source GSI has more items
+            if source_last_eval_key:
+                has_more = True
+                last_eval_key = source_last_eval_key
+        
+        # Convert last_eval_key to serializable format
+        serializable_last_key = None
+        if last_eval_key:
+            try:
+                serializable_last_key = convert_decimal_to_float(last_eval_key)
+            except Exception as e:
+                logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
+                serializable_last_key = None
+        
         # Return results for multi-GSI intersection
         return {
             'success': True,
             'results': enriched_results,
             'count': len(enriched_results),
-            'has_more': False,  # Multi-GSI intersection doesn't support pagination yet
-            'last_evaluated_key': None,
+            'has_more': has_more,
+            'last_evaluated_key': serializable_last_key,
             'method': method,
             'index_used': index_name
         }
@@ -1873,6 +1978,10 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             # Remove recipient_location_state from filters since we're using it as hash key
             if 'recipient_location_state' in filter_filters:
                 del filter_filters['recipient_location_state']
+        elif hash_key_name == 'recipient_zip_code':
+            # Remove recipient_zip_code from filters since we're using it as hash key
+            if 'recipient_zip_code' in filter_filters:
+                del filter_filters['recipient_zip_code']
         elif hash_key_name == 'award_type':
             # Remove award_type from filters since we're using it as hash key
             if 'award_type' in filter_filters:
@@ -1978,6 +2087,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         
         # Validate and use last_evaluated_key for pagination
         # For GSI queries, the key must include the GSI's hash key and range key (if applicable)
+        logger.info(f"Checking last_evaluated_key for pagination: {last_evaluated_key is not None}, hash_key_name: {hash_key_name}, index_name: {index_name}")
         if last_evaluated_key:
             try:
                 # Validate that the last_evaluated_key has the correct structure for this GSI
@@ -1988,29 +2098,36 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     has_hash_key = hash_key_name in last_evaluated_key
                     
                     if key_condition.get('range_key'):
+                        # We're using a range key in the query, so last_evaluated_key should have both
                         range_key_name = key_condition['range_key'][0]
                         has_range_key = range_key_name in last_evaluated_key
                         if has_hash_key and has_range_key:
                             params['ExclusiveStartKey'] = last_evaluated_key
+                            logger.info(f"Using last_evaluated_key for pagination (with range key {range_key_name})")
                         else:
-                            logger.warning(f"last_evaluated_key structure doesn't match GSI {index_name} (hash_key={hash_key_name}, range_key={range_key_name}), ignoring pagination")
+                            logger.warning(f"last_evaluated_key structure doesn't match GSI {index_name} (hash_key={hash_key_name}, range_key={range_key_name}), ignoring pagination. Key has: {list(last_evaluated_key.keys())}")
                     else:
-                        # No range key, just need hash key
+                        # No range key in query condition, but GSI might still have a range key
+                        # Accept last_evaluated_key if it has the hash key (range key presence is OK)
                         if has_hash_key:
                             params['ExclusiveStartKey'] = last_evaluated_key
+                            logger.info(f"Using last_evaluated_key for pagination (hash key only: {hash_key_name})")
                         else:
-                            logger.warning(f"last_evaluated_key missing hash key {hash_key_name} for GSI {index_name}, ignoring pagination")
+                            logger.warning(f"last_evaluated_key missing hash key {hash_key_name} for GSI {index_name}, ignoring pagination. Key has: {list(last_evaluated_key.keys())}")
                 else:
-                    logger.warning(f"last_evaluated_key is not a dict, ignoring pagination")
+                    logger.warning(f"last_evaluated_key is not a dict (type: {type(last_evaluated_key)}), ignoring pagination")
             except Exception as e:
-                logger.warning(f"Error validating last_evaluated_key: {e}, ignoring pagination")
+                logger.warning(f"Error validating last_evaluated_key: {e}, ignoring pagination", exc_info=True)
         
-        logger.info(f"Querying {index_name} with hash_key={hash_key_name}={hash_key_value}")
+        logger.info(f"Querying {index_name} with hash_key={hash_key_name}={hash_key_value}, Limit={params.get('Limit', 'default')}, ExclusiveStartKey: {params.get('ExclusiveStartKey') is not None}")
         response = awards_table.query(**params)
         
         # Store last_evaluated_key for potential pagination
         last_eval_key = response.get('LastEvaluatedKey')
         initial_last_eval_key = last_eval_key  # Store for pagination
+        logger.info(f"Initial query returned {len(response.get('Items', []))} items, LastEvaluatedKey: {last_eval_key is not None}")
+        if params.get('ExclusiveStartKey'):
+            logger.info(f"Query used ExclusiveStartKey for pagination (continuing from previous page)")
     
     else:
         # Use table scan
@@ -2275,14 +2392,31 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             logger.warning(f"All {len(items)} items were filtered out. Sample filtered items: {json.dumps(list(filter_failures.values())[:3], default=str)}")
         
         # If we don't have enough filtered results, continue querying with pagination (only for queries, not scans)
-        if len(filtered_items) < limit and method == 'query' and index_name and 'initial_last_eval_key' in locals() and initial_last_eval_key:
-            logger.info(f"Only found {len(filtered_items)} matching items, need {limit}. Continuing query with pagination...")
-            max_pagination_rounds = 10  # Limit pagination to avoid infinite loops
+        # Continue pagination if:
+        # 1. We have fewer filtered items than the limit, AND
+        # 2. We have an initial_last_eval_key (meaning there might be more items), OR
+        # 3. We got exactly query_limit items from the first query (suggesting there might be more)
+        should_continue_pagination = (
+            len(filtered_items) < limit and 
+            method == 'query' and 
+            index_name and 
+            'initial_last_eval_key' in locals() and
+            (initial_last_eval_key is not None or len(items) >= query_limit)
+        )
+        
+        if should_continue_pagination:
+            logger.info(f"Only found {len(filtered_items)} matching items, need {limit}. Continuing query with pagination... (initial_last_eval_key: {initial_last_eval_key is not None})")
+            max_pagination_rounds = 50  # Increased limit for queries that might have many results (like zip codes)
             pagination_round = 0
             current_last_eval_key = initial_last_eval_key
             
             while len(filtered_items) < limit and pagination_round < max_pagination_rounds:
                 pagination_round += 1
+                
+                # If we don't have a last_eval_key from previous round, we can't continue
+                if current_last_eval_key is None:
+                    logger.info(f"No LastEvaluatedKey from previous query, stopping pagination")
+                    break
                 
                 # Continue querying from where we left off
                 continuation_params = params.copy()
@@ -2580,6 +2714,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 limit = 1000  # Cap at 1000
             if limit < 1:
                 limit = 100
+            
+            if last_evaluated_key:
+                logger.info(f"Received last_evaluated_key for pagination: {json.dumps(last_evaluated_key, default=str)}")
+            else:
+                logger.info(f"No last_evaluated_key provided - starting from beginning")
             
             logger.info(f"Searching awards with filters: {json.dumps(filters, default=str)}, limit: {limit}")
             

@@ -15,7 +15,6 @@ import {
   TableHead,
   TableRow,
   CircularProgress,
-  Checkbox,
   FormControl,
   InputLabel,
   Select,
@@ -44,6 +43,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
+import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -136,11 +136,12 @@ const NewsSearchPage: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
   
   // Dialog state for article details
-  // const { openItemDetails } = useDialogManagerHelpers(); // Unused for now
+  const { openItemDetails } = useDialogManagerHelpers();
   
   // Selection state
   const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Filter state (client-side filtering)
@@ -431,18 +432,12 @@ const NewsSearchPage: React.FC = () => {
       setIsLoadingMore(false);
     }
   };
-  
-  const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    setContextMenuAnchor(event.currentTarget);
-  };
-
   const handleContextMenuClose = () => {
-    setContextMenuAnchor(null);
+    setContextMenuPosition(null);
   };
 
   const handleAddToContext = () => {
-    const selectedArticleObjects = currentResults.filter(article => 
+    const selectedArticleObjects = paginatedResults.filter(article => 
       selectedArticles.has(article.id)
     );
 
@@ -482,7 +477,7 @@ const NewsSearchPage: React.FC = () => {
     if (!user || selectedArticles.size === 0) return;
     
     try {
-      const selectedArticleObjects = currentResults.filter(article => 
+      const selectedArticleObjects = paginatedResults.filter(article => 
         selectedArticles.has(article.id)
       );
 
@@ -511,16 +506,97 @@ const NewsSearchPage: React.FC = () => {
     }
   };
   
-  const toggleArticleSelection = (articleId: string) => {
+  // Handle article click for multi-select
+  const handleArticleClick = (e: React.MouseEvent, articleId: string, index: number) => {
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
     setSelectedArticles(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(articleId)) {
-        newSet.delete(articleId);
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const articlesToSelect = paginatedResults.slice(start, end + 1);
+        articlesToSelect.forEach(article => newSelected.add(article.id));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(articleId)) {
+          newSelected.delete(articleId);
+        } else {
+          newSelected.add(articleId);
+        }
+        setLastSelectedIndex(index);
       } else {
-        newSet.add(articleId);
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(articleId)) {
+          newSelected.delete(articleId);
+        } else {
+          newSelected.clear();
+          newSelected.add(articleId);
+        }
+        setLastSelectedIndex(index);
       }
-      return newSet;
+      
+      return newSelected;
     });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, articleId: string) => {
+    e.stopPropagation();
+    
+    // Determine which articles to drag
+    const articlesToDrag = selectedArticles.has(articleId) ? selectedArticles : new Set([articleId]);
+    
+    // Set drag data
+    const selectedArticleObjects = paginatedResults.filter(article => 
+      articlesToDrag.has(article.id)
+    );
+    
+    if (selectedArticleObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'news_articles',
+        articles: selectedArticleObjects
+      }));
+      
+      // Also set data for sidebar context addition
+      e.dataTransfer.setData('application/json', JSON.stringify({
+        type: 'news_articles',
+        articles: selectedArticleObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedArticleObjects.length} article${selectedArticleObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, articleId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this article is not selected, select only it
+    if (!selectedArticles.has(articleId)) {
+      setSelectedArticles(new Set([articleId]));
+    }
+    
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
   };
 
   const formatDate = (dateStr: string | undefined) => {
@@ -775,7 +851,7 @@ const NewsSearchPage: React.FC = () => {
                         <span>
                           <IconButton
                             size="small"
-                            onClick={handleContextMenuClick}
+                            onClick={handleAddToContext}
                             disabled={selectedArticles.size === 0}
                             sx={{ 
                               color: selectedArticles.size > 0 ? '#10b981' : '#9ca3af', 
@@ -936,36 +1012,16 @@ const NewsSearchPage: React.FC = () => {
                         }}>
                           <TableHead>
                             <TableRow>
+                              {/* Empty cell to maintain alignment */}
                               <TableCell sx={{ 
                                 color: '#9ca3af', 
                                 fontWeight: 600, 
                                 fontSize: '0.875rem',
-                                width: 50,
-                                minWidth: 50,
-                                maxWidth: 50,
-                              }}>
-                                <Checkbox
-                                  size="small"
-                                  indeterminate={selectedArticles.size > 0 && selectedArticles.size < paginatedResults.length}
-                                  checked={paginatedResults.length > 0 && selectedArticles.size === paginatedResults.length}
-                                  onChange={() => {
-                                    if (selectedArticles.size === paginatedResults.length) {
-                                      const newSelected = new Set(selectedArticles);
-                                      paginatedResults.forEach(article => newSelected.delete(article.id));
-                                      setSelectedArticles(newSelected);
-                                    } else {
-                                      const newSelected = new Set(selectedArticles);
-                                      paginatedResults.forEach(article => newSelected.add(article.id));
-                                      setSelectedArticles(newSelected);
-                                    }
-                                  }}
-                                  sx={{ 
-                                    color: '#9ca3af', 
-                                    '&.Mui-checked': { color: '#10b981' }, 
-                                    '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
-                                  }}
-                                />
-                              </TableCell>
+                                width: 40,
+                                minWidth: 40,
+                                maxWidth: 40,
+                                padding: '8px 4px',
+                              }} />
                               <TableCell sx={{ 
                                 color: '#9ca3af', 
                                 fontWeight: 600, 
@@ -997,34 +1053,40 @@ const NewsSearchPage: React.FC = () => {
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {paginatedResults.map((article) => (
+                            {paginatedResults.map((article, index) => (
                               <TableRow
                                 key={article.id}
+                                onClick={(e) => handleArticleClick(e, article.id, index)}
+                                onContextMenu={(e) => handleRowContextMenu(e, article.id)}
+                                draggable={selectedArticles.has(article.id)}
+                                onDragStart={(e) => handleDragStart(e, article.id)}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  if (user?.id) {
+                                    openItemDetails(
+                                      'news_article',
+                                      article,
+                                      article.title || 'News Article',
+                                      { user_id: user.id }
+                                    );
+                                  }
+                                }}
                                 sx={{
                                   backgroundColor: selectedArticles.has(article.id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                                   '&:hover': {
                                     backgroundColor: selectedArticles.has(article.id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                                   },
                                   cursor: 'pointer',
+                                  userSelect: 'none',
                                 }}
-                                onClick={() => toggleArticleSelection(article.id)}
                               >
+                                {/* Empty cell to maintain alignment */}
                                 <TableCell sx={{ 
-                                  padding: '8px 12px',
-                                  width: 50,
-                                  minWidth: 50,
-                                  maxWidth: 50,
-                                }}>
-                                  <Checkbox
-                                    size="small"
-                                    checked={selectedArticles.has(article.id)}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      toggleArticleSelection(article.id);
-                                    }}
-                                    sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                                  />
-                                </TableCell>
+                                  width: 40,
+                                  minWidth: 40,
+                                  maxWidth: 40,
+                                  padding: '8px 4px',
+                                }} />
                                 <TableCell sx={{ 
                                   color: '#ffffff', 
                                   fontSize: '0.875rem',
@@ -1778,9 +1840,14 @@ const NewsSearchPage: React.FC = () => {
 
       {/* Context Menu */}
       <Menu
-        anchorEl={contextMenuAnchor}
-        open={Boolean(contextMenuAnchor)}
+        open={contextMenuPosition !== null}
         onClose={handleContextMenuClose}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenuPosition !== null
+            ? { top: contextMenuPosition.y, left: contextMenuPosition.x }
+            : undefined
+        }
         PaperProps={{
           sx: {
             backgroundColor: '#334155',
@@ -1794,11 +1861,11 @@ const NewsSearchPage: React.FC = () => {
       >
         <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
           <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
-          Add to Context
+          Add to Context {selectedArticles.size > 1 ? `(${selectedArticles.size} items)` : ''}
         </MenuItem>
         <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
           <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />
-          Add to Files
+          Add to Files {selectedArticles.size > 1 ? `(${selectedArticles.size} items)` : ''}
         </MenuItem>
       </Menu>
 
