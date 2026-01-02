@@ -209,13 +209,25 @@ export default function PortfolioRisk() {
       return symbol.toUpperCase();
     });
 
-    const allStockData = stockSymbols.map(symbol => cachedData[symbol] || null).filter(Boolean);
+    // Map stock symbols to their corresponding entries to ensure correct order and shares
+    const symbolToEntryMap = new Map<string, PortfolioEntry>();
+    validEntries.forEach(entry => {
+      const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+      const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
+      symbolToEntryMap.set(symbol, entry);
+    });
+    
+    // Get stock data in the same order as stockSymbols, ensuring we match entries correctly
+    const allStockData = stockSymbols.map(symbol => {
+      const data = cachedData[symbol] || null;
+      return { symbol, data };
+    }).filter(item => item.data !== null);
     
     if (type === 'single') {
       const portfolioChartData: any[] = [];
       const timePoints = new Set<number>();
 
-      allStockData.forEach((data) => {
+      allStockData.forEach(({ data }) => {
         if (data && data.chart_data) {
           data.chart_data.forEach((point: any) => {
             timePoints.add(point.time);
@@ -223,29 +235,54 @@ export default function PortfolioRisk() {
         }
       });
 
-      Array.from(timePoints).sort().forEach(time => {
+      const sortedTimes = Array.from(timePoints).sort();
+      const expectedStockCount = allStockData.length;
+      
+      sortedTimes.forEach((time, timeIdx) => {
         let portfolioValue = 0;
-        allStockData.forEach((data, idx) => {
-          if (data && data.chart_data && idx < validEntries.length) {
+        let stocksWithData = 0;
+        
+        allStockData.forEach(({ symbol, data }) => {
+          const entry = symbolToEntryMap.get(symbol);
+          if (entry && data && data.chart_data) {
             const point = data.chart_data.find((p: any) => p.time === time);
             if (point) {
-              portfolioValue += point.close * validEntries[idx].shares;
+              const shares = entry.shares;
+              const stockValue = point.close * shares;
+              portfolioValue += stockValue;
+              stocksWithData++;
+              // Debug log for first and last time points
+              if (timeIdx === 0 || timeIdx === sortedTimes.length - 1) {
+                console.log(`📊 Portfolio calculation [${timeIdx === 0 ? 'first' : 'last'}]: ${symbol} - Price: $${point.close.toFixed(2)}, Shares: ${shares}, Value: $${stockValue.toFixed(2)}`);
+              }
             }
           }
         });
-        if (portfolioValue > 0) {
+        
+        // Only add data point if we have data for ALL stocks (to ensure accurate portfolio value)
+        if (portfolioValue > 0 && stocksWithData === expectedStockCount) {
           portfolioChartData.push({
             time,
             value: portfolioValue,
             date: new Date(time * 1000).toLocaleDateString(),
           });
+          // Debug log for first and last data points
+          if (portfolioChartData.length === 1) {
+            console.log(`📊 First portfolio value: $${portfolioValue.toFixed(2)} (${stocksWithData}/${expectedStockCount} stocks)`);
+          }
+          if (timeIdx === sortedTimes.length - 1) {
+            console.log(`📊 Last portfolio value: $${portfolioValue.toFixed(2)} (${stocksWithData}/${expectedStockCount} stocks)`);
+          }
+        } else if (timeIdx === sortedTimes.length - 1) {
+          // Log warning if last point is missing data
+          console.warn(`⚠️ Last time point missing data: portfolioValue=${portfolioValue}, stocksWithData=${stocksWithData}/${expectedStockCount}`);
         }
       });
       
       return portfolioChartData;
     } else if (type === 'multiple') {
       const timePoints = new Set<number>();
-      allStockData.forEach((data) => {
+      allStockData.forEach(({ data }) => {
         if (data && data.chart_data) {
           data.chart_data.forEach((point: any) => {
             timePoints.add(point.time);
@@ -258,11 +295,8 @@ export default function PortfolioRisk() {
         chartDataMap[time] = { time, date: new Date(time * 1000).toLocaleDateString() };
       });
       
-      allStockData.forEach((data, idx) => {
-        if (data && data.chart_data && idx < validEntries.length) {
-          const entry = validEntries[idx];
-          const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
-          const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
+      allStockData.forEach(({ symbol, data }) => {
+        if (data && data.chart_data) {
           data.chart_data.forEach((point: any) => {
             if (chartDataMap[point.time]) {
               chartDataMap[point.time][symbol] = point.close;
@@ -276,7 +310,7 @@ export default function PortfolioRisk() {
       const portfolioChartData: any[] = [];
       const timePoints = new Set<number>();
       
-      allStockData.forEach((data) => {
+      allStockData.forEach(({ data }) => {
         if (data && data.chart_data) {
           data.chart_data.forEach((point: any) => {
             timePoints.add(point.time);
@@ -290,31 +324,83 @@ export default function PortfolioRisk() {
         });
       }
       
-      Array.from(timePoints).sort().forEach(time => {
+      const sortedTimes = Array.from(timePoints).sort();
+      const expectedStockCount = allStockData.length;
+      
+      // First pass: calculate initial portfolio value and first compare price for normalization
+      let initialPortfolioValue: number | null = null;
+      let firstComparePrice: number | null = null;
+      
+      for (const time of sortedTimes) {
         let portfolioValue = 0;
-        let hasPortfolioData = false;
+        let stocksWithData = 0;
         
-        allStockData.forEach((data, idx) => {
-          if (data && data.chart_data && idx < validEntries.length) {
+        allStockData.forEach(({ symbol, data }) => {
+          const entry = symbolToEntryMap.get(symbol);
+          if (entry && data && data.chart_data) {
             const point = data.chart_data.find((p: any) => p.time === time);
             if (point) {
-              portfolioValue += point.close * validEntries[idx].shares;
-              hasPortfolioData = true;
+              const shares = entry.shares;
+              const stockValue = point.close * shares;
+              portfolioValue += stockValue;
+              stocksWithData++;
             }
           }
         });
         
         const comparePoint = compareData?.chart_data?.find((p: any) => p.time === time);
         
-        if (hasPortfolioData && comparePoint) {
+        // Get initial values from first valid data point
+        if (stocksWithData === expectedStockCount && comparePoint && initialPortfolioValue === null) {
+          initialPortfolioValue = portfolioValue;
+          firstComparePrice = comparePoint.close;
+          break;
+        }
+      }
+      
+      // Calculate normalization factor
+      const normalizationFactor = (initialPortfolioValue !== null && firstComparePrice !== null && firstComparePrice > 0)
+        ? initialPortfolioValue / firstComparePrice
+        : 1;
+      
+      // Second pass: build chart data with normalized compare values
+      sortedTimes.forEach((time) => {
+        let portfolioValue = 0;
+        let stocksWithData = 0;
+        
+        allStockData.forEach(({ symbol, data }) => {
+          const entry = symbolToEntryMap.get(symbol);
+          if (entry && data && data.chart_data) {
+            const point = data.chart_data.find((p: any) => p.time === time);
+            if (point) {
+              const shares = entry.shares;
+              const stockValue = point.close * shares;
+              portfolioValue += stockValue;
+              stocksWithData++;
+            }
+          }
+        });
+        
+        const comparePoint = compareData?.chart_data?.find((p: any) => p.time === time);
+        
+        // Only add data point if we have portfolio data for ALL stocks AND compare data
+        if (stocksWithData === expectedStockCount && comparePoint) {
+          // Normalize compare stock to match initial portfolio value
+          const normalizedCompareValue = comparePoint.close * normalizationFactor;
+          
           portfolioChartData.push({
             time,
             portfolio: portfolioValue,
-            compare: comparePoint.close,
+            compare: normalizedCompareValue,
             date: new Date(time * 1000).toLocaleDateString(),
           });
         }
       });
+      
+      // Log if no data points were created
+      if (portfolioChartData.length === 0) {
+        console.warn('⚠️ No compare chart data points created. Portfolio stocks:', expectedStockCount, 'Compare data points:', compareData?.chart_data?.length || 0);
+      }
       
       return portfolioChartData;
     }
@@ -341,6 +427,26 @@ export default function PortfolioRisk() {
         return;
       }
       
+      // Clear old chart cache for this portfolio before new calculation
+      const validEntries = entries.filter(e => e.stock && e.shares > 0);
+      const stockSymbols = validEntries.map(e => {
+        const symbolMatch = e.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+        const symbol = symbolMatch ? symbolMatch[1].trim() : e.stock.trim();
+        return symbol.toUpperCase();
+      });
+      const oldCacheKey = `portfolio-chart-cache-${stockSymbols.sort().join('-')}-${timeframe}`;
+      sessionStorage.removeItem(oldCacheKey);
+      console.log('🗑️ Cleared old chart cache:', oldCacheKey);
+      
+      // Also clear any compare stock caches
+      const compareCacheKeys = Object.keys(sessionStorage).filter(key => 
+        key.startsWith('portfolio-chart-cache-compare-')
+      );
+      compareCacheKeys.forEach(key => sessionStorage.removeItem(key));
+      if (compareCacheKeys.length > 0) {
+        console.log('🗑️ Cleared compare stock caches:', compareCacheKeys.length);
+      }
+      
       // Call the portfolio analysis API with source='page' to get chart data
       const response = await analyzePortfolio({
         portfolio_data: portfolioData,
@@ -353,6 +459,11 @@ export default function PortfolioRisk() {
       
       if (response && response.success) {
         setResults(response.portfolio_metrics);
+        
+        // Reset chart type to 'single' (total portfolio) for fresh calculations
+        setChartType('single');
+        setCompareStock('');
+        setCompareInputValue('');
         
         // If chart_data is included in response, use it instead of fetching separately
         if ((response as any).chart_data) {
@@ -529,29 +640,68 @@ export default function PortfolioRisk() {
               const compareCacheKey = `portfolio-chart-cache-compare-${compareSymbol}-${timeframe}`;
               const cachedCompareStr = sessionStorage.getItem(compareCacheKey);
               
+              let compareData: any = null;
+              
               if (cachedCompareStr) {
                 // Use cached compare data
-                const compareData = JSON.parse(cachedCompareStr);
+                try {
+                  compareData = JSON.parse(cachedCompareStr);
+                  console.log('✅ Using cached compare stock data:', compareSymbol);
+                } catch (e) {
+                  console.warn('Failed to parse cached compare data:', e);
+                }
+              }
+              
+              // If no cached data or invalid cached data, fetch compare stock only
+              if (!compareData || !compareData.chart_data || compareData.chart_data.length === 0) {
+                console.log('📥 Fetching compare stock data:', compareSymbol);
+                try {
+                  compareData = await fetchStockData({ ticker: compareSymbol, period: timeframe });
+                  if (compareData && compareData.chart_data && compareData.chart_data.length > 0) {
+                    sessionStorage.setItem(compareCacheKey, JSON.stringify(compareData));
+                    console.log('✅ Cached compare stock data:', compareSymbol, `(${compareData.chart_data.length} points)`);
+                  } else {
+                    console.error('Compare stock data missing chart_data or is empty');
+                    setError(`No chart data available for comparison stock: ${compareSymbol}`);
+                    setIsLoadingChart(false);
+                    return;
+                  }
+                } catch (error) {
+                  console.error('Failed to fetch compare stock data:', error);
+                  setError(`Failed to fetch data for comparison stock: ${compareSymbol}`);
+                  setIsLoadingChart(false);
+                  return;
+                }
+              }
+              
+              // Transform with portfolio cache and compare data
+              if (compareData && compareData.chart_data && compareData.chart_data.length > 0) {
                 const transformedData = transformCachedDataToChart(
                   cachedData,
                   compareData,
                   chartType,
                   validEntries
                 );
-                setChartData(transformedData);
-                setIsLoadingChart(false);
-                return;
+                console.log('✅ Compare chart data transformed:', {
+                  dataPoints: transformedData.length,
+                  firstPortfolio: transformedData[0]?.portfolio,
+                  firstCompare: transformedData[0]?.compare,
+                  lastPortfolio: transformedData[transformedData.length - 1]?.portfolio,
+                  lastCompare: transformedData[transformedData.length - 1]?.compare
+                });
+                if (transformedData.length > 0) {
+                  setChartData(transformedData);
+                  setIsLoadingChart(false);
+                  return;
+                } else {
+                  console.warn('Transformed compare chart data is empty');
+                  setError('No overlapping time points between portfolio and comparison stock');
+                  setIsLoadingChart(false);
+                  return;
+                }
               } else {
-                // Need to fetch compare stock only
-                const compareData = await fetchStockData({ ticker: compareSymbol, period: timeframe });
-                sessionStorage.setItem(compareCacheKey, JSON.stringify(compareData));
-                const transformedData = transformCachedDataToChart(
-                  cachedData,
-                  compareData,
-                  chartType,
-                  validEntries
-                );
-                setChartData(transformedData);
+                console.error('Compare stock data is missing chart_data or is empty');
+                setError(`No chart data available for comparison stock: ${compareSymbol}`);
                 setIsLoadingChart(false);
                 return;
               }
@@ -563,7 +713,16 @@ export default function PortfolioRisk() {
                 chartType,
                 validEntries
               );
-              console.log('✅ Using cached chart data, transformed:', transformedData.length, 'points');
+              const lastDataPoint = transformedData[transformedData.length - 1];
+              console.log('✅ Using cached chart data, transformed:', {
+                dataPoints: transformedData.length,
+                firstValue: transformedData[0]?.value,
+                lastValue: lastDataPoint?.value,
+                lastDataPointFull: lastDataPoint,
+                sampleData: transformedData.slice(0, 3),
+                lastThreeDataPoints: transformedData.slice(-3),
+                validEntries: validEntries.map(e => ({ stock: e.stock, shares: e.shares }))
+              });
               setChartData(transformedData);
               setIsLoadingChart(false);
               return;
@@ -631,6 +790,17 @@ export default function PortfolioRisk() {
         validEntries
       );
       
+      console.log('📊 Transformed chart data from fetch:', {
+        dataPoints: transformedData.length,
+        firstValue: transformedData[0]?.value || transformedData[0]?.portfolio,
+        lastValue: transformedData[transformedData.length - 1]?.value || transformedData[transformedData.length - 1]?.portfolio,
+        lastDataPoint: transformedData[transformedData.length - 1],
+        sampleData: transformedData.slice(0, 3),
+        lastThreeDataPoints: transformedData.slice(-3),
+        chartType,
+        validEntries: validEntries.map(e => ({ stock: e.stock, shares: e.shares }))
+      });
+      
       setChartData(transformedData);
     } catch (error) {
       console.error('Error loading chart data:', error);
@@ -671,6 +841,7 @@ export default function PortfolioRisk() {
     }
     
     // Only load chart data when results are set (from calculateRisk or restored from localStorage)
+    // DO NOT include entries in dependencies - we only want to reload when results change (after Calculate is clicked)
     if (results && entries.some(e => e.stock && e.shares > 0)) {
       console.log('🔄 useEffect: Triggering chart data load', { 
         hasResults: !!results, 
@@ -703,10 +874,10 @@ export default function PortfolioRisk() {
         hasEntries: entries.some(e => e.stock && e.shares > 0) 
       });
     }
-    // Only reload when results, chartType, compareStock, timeframe, or entries change
-    // Not when loadChartData function reference changes
+    // Only reload when results, chartType, compareStock, or timeframe change
+    // NOT when entries change - we only want to reload after Calculate is clicked (which sets results)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, chartType, compareStock, timeframe, entries]);
+  }, [results, chartType, compareStock, timeframe]);
 
   const getYAxisDomain = useCallback(() => {
     if (!chartData || chartData.length === 0) {
@@ -1709,6 +1880,19 @@ export default function PortfolioRisk() {
                     borderRadius: '8px',
                     flex: 1,
                     overflow: 'auto',
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    },
                   }}
                 >
                   <Table>

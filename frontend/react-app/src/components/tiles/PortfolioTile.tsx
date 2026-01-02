@@ -369,7 +369,20 @@ const PortfolioTile = ({
     setIsLoadingChart(true);
     try {
       const validEntries = entries.filter(e => e.stock && e.shares > 0);
-      const stockSymbols = validEntries.map(e => e.stock.trim().toUpperCase());
+      
+      // Extract symbols properly (handle cases where it might be "AAPL - APPLE INC. (HIGH CAP)" or just "AAPL")
+      const stockSymbols = validEntries.map(e => {
+        const symbolMatch = e.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+        return symbolMatch ? symbolMatch[1].trim().toUpperCase() : e.stock.trim().toUpperCase();
+      });
+      
+      // Map stock symbols to their corresponding entries to ensure correct order and shares
+      const symbolToEntryMap = new Map<string, PortfolioEntry>();
+      validEntries.forEach(entry => {
+        const symbolMatch = entry.stock.match(/^([A-Z.]+)(?:\s*-|$)/);
+        const symbol = symbolMatch ? symbolMatch[1].trim().toUpperCase() : entry.stock.trim().toUpperCase();
+        symbolToEntryMap.set(symbol, entry);
+      });
       
       // Fetch data for all stocks (tile only shows combined view)
       const stockDataPromises = stockSymbols.map(symbol => 
@@ -378,12 +391,18 @@ const PortfolioTile = ({
       
       const allStockData = await Promise.all(stockDataPromises);
       
+      // Get stock data in the same order as stockSymbols, ensuring we match entries correctly
+      const allStockDataWithSymbols = stockSymbols.map((symbol, idx) => {
+        const data = allStockData[idx] || null;
+        return { symbol, data };
+      }).filter(item => item.data !== null);
+      
       // Tile only shows combined portfolio value
       const portfolioChartData: any[] = [];
       const timePoints = new Set<number>();
       
       // Collect all time points
-      allStockData.forEach((data) => {
+      allStockDataWithSymbols.forEach(({ data }) => {
         if (data && data.chart_data) {
           data.chart_data.forEach((point: any) => {
             timePoints.add(point.time);
@@ -391,18 +410,29 @@ const PortfolioTile = ({
         }
       });
       
+      const sortedTimes = Array.from(timePoints).sort();
+      const expectedStockCount = allStockDataWithSymbols.length;
+      
       // For each time point, calculate portfolio value
-      Array.from(timePoints).sort().forEach(time => {
+      sortedTimes.forEach((time) => {
         let portfolioValue = 0;
-        allStockData.forEach((data, idx) => {
-          if (data && data.chart_data && idx < validEntries.length) {
+        let stocksWithData = 0;
+        
+        allStockDataWithSymbols.forEach(({ symbol, data }) => {
+          const entry = symbolToEntryMap.get(symbol);
+          if (entry && data && data.chart_data) {
             const point = data.chart_data.find((p: any) => p.time === time);
             if (point) {
-              portfolioValue += point.close * validEntries[idx].shares;
+              const shares = entry.shares;
+              const stockValue = point.close * shares;
+              portfolioValue += stockValue;
+              stocksWithData++;
             }
           }
         });
-        if (portfolioValue > 0) {
+        
+        // Only add data point if we have data for ALL stocks (to ensure accurate portfolio value)
+        if (portfolioValue > 0 && stocksWithData === expectedStockCount) {
           portfolioChartData.push({
             time,
             value: portfolioValue,
