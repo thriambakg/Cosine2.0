@@ -10,7 +10,6 @@ import GlobalChatSidebar from './GlobalChatSidebar';
 import ContextSessionHandler from './ContextSessionHandler';
 import ContextSuccessNotification from '../common/ContextSuccessNotification';
 import FilesystemSuccessNotification from '../common/FilesystemSuccessNotification';
-import MinimizedDialogsBubble from '../common/MinimizedDialogsBubble';
 import ManagedDialogRenderer from '../common/ManagedDialogRenderer';
 import { ClockProvider } from '../../contexts/ClockContext';
 // import { WebSocketProvider } from '../../contexts/WebSocketContext'; // COMMENTED OUT: Replaced by UnifiedMessageHandler
@@ -60,9 +59,6 @@ const AppLayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
       
       {/* Global Chat Sidebar */}
       <GlobalChatSidebar />
-      
-      {/* Minimized Dialogs Bubble */}
-      <MinimizedDialogsBubble />
       
       {/* Managed Dialog Renderer */}
       <ManagedDialogRenderer />

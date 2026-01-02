@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useDialogManager, DialogType } from '../contexts/DialogManagerContext';
+import { useDialogManager } from '../contexts/DialogManagerContext';
 
 export const useDialogManagerHelpers = () => {
   const { openDialog } = useDialogManager();
@@ -24,6 +24,7 @@ export const useDialogManagerHelpers = () => {
         user_id,
         folder_path: folder_path || '',
       },
+      props: {},
     });
   }, [openDialog]);
 
@@ -50,6 +51,7 @@ export const useDialogManagerHelpers = () => {
         title,
         ...options,
       },
+      props: {},
     });
   }, [openDialog]);
 

@@ -53,8 +53,8 @@ const MinimizedDialogsBubble: React.FC = () => {
     <Box
       sx={{
         position: 'fixed',
-        bottom: 16,
-        right: 16,
+        top: 16,
+        left: 16,
         zIndex: 9999,
       }}
     >
@@ -96,8 +96,8 @@ const MinimizedDialogsBubble: React.FC = () => {
             mt: 1,
           },
         }}
-        transformOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-        anchorOrigin={{ horizontal: 'right', vertical: 'top' }}
+        transformOrigin={{ horizontal: 'left', vertical: 'top' }}
+        anchorOrigin={{ horizontal: 'left', vertical: 'bottom' }}
       >
         {minimizedDialogs.length > 0 && (
           <>

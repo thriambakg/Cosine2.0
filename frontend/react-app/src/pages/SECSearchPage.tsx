@@ -16,7 +16,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   CircularProgress,
   Checkbox,
   FormControlLabel,
@@ -53,7 +52,7 @@ import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI, filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { addFilingToContext, addMultipleFilingsToContext } from '../components/tiles/common';
-import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 
 // Custom styled components
@@ -686,6 +685,7 @@ const LOCATION_OPTIONS = [
 const SECSearchPage: React.FC = () => {
   // Get user and session info for authenticated downloads
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
@@ -843,12 +843,13 @@ const SECSearchPage: React.FC = () => {
   const fetchProgress = searchState.isSearching 
     ? { currentPage: searchState.currentPage, totalPages: searchState.totalPages }
     : null;
-  const [selectedFiling, setSelectedFiling] = useState<SECSearchResult | null>(null);
   const [isRestoringState] = useState<boolean>(false); // Set to false since we initialize from storage
   
   // Selection state for adding to context
   const [selectedFilings, setSelectedFilings] = useState<Set<number>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
 
   // Log state restoration (state is already initialized from sessionStorage above)
@@ -1610,15 +1611,42 @@ const SECSearchPage: React.FC = () => {
   }, [filteredFormTypes, searchParams.formTypes]);
 
   // Handler functions for filing selection and context
-  const handleFilingSelect = (index: number) => {
+  const handleFilingClick = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
     setSelectedFilings(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(index)) {
-        newSet.delete(index);
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        for (let i = start; i <= end; i++) {
+          newSelected.add(i);
+        }
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(index)) {
+          newSelected.delete(index);
+        } else {
+          newSelected.add(index);
+        }
+        setLastSelectedIndex(index);
       } else {
-        newSet.add(index);
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(index)) {
+          newSelected.delete(index);
+        } else {
+          newSelected.clear();
+          newSelected.add(index);
+        }
+        setLastSelectedIndex(index);
       }
-      return newSet;
+      
+      return newSelected;
     });
   };
 
@@ -1631,8 +1659,57 @@ const SECSearchPage: React.FC = () => {
     }
   };
 
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    e.stopPropagation();
+    
+    // Determine which filings to drag
+    const filingsToDrag = selectedFilings.has(index) ? selectedFilings : new Set([index]);
+    
+    // Set drag data
+    const selectedFilingObjects = currentResults.filter((_, idx) => 
+      filingsToDrag.has(idx)
+    );
+    
+    if (selectedFilingObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'sec_filings',
+        filings: selectedFilingObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedFilingObjects.length} filing${selectedFilingObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this filing is not selected, select only it
+    if (!selectedFilings.has(index)) {
+      setSelectedFilings(new Set([index]));
+    }
+    
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
+  };
+
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+    setContextMenuPosition(null);
   };
 
   const handleAddToFiles = () => {
@@ -2587,86 +2664,92 @@ const SECSearchPage: React.FC = () => {
 
                 {currentResults.length > 0 ? (
                   <TableContainer 
-                component={Paper} 
-                sx={{ 
-                  backgroundColor: 'rgba(15, 23, 42, 0.8)', 
-                  border: '1px solid #374151',
-                  '&::-webkit-scrollbar': {
-                    width: '6px',
-                  },
-                  '&::-webkit-scrollbar-track': {
-                    backgroundColor: 'rgba(55, 65, 81, 0.3)',
-                  },
-                  '&::-webkit-scrollbar-thumb': {
-                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
-                    borderRadius: '3px',
-                  },
-                  '&::-webkit-scrollbar-thumb:hover': {
-                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
-                  },
-                }}
-              >
-                <Table>
+                    sx={{ 
+                      backgroundColor: 'transparent',
+                      borderRadius: 0,
+                      boxShadow: 'none',
+                      border: 'none',
+                      overflow: 'auto',
+                      width: '100%',
+                      '&::-webkit-scrollbar': {
+                        width: '8px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '4px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}
+                  >
+                    <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell padding="checkbox" sx={{ width: '48px', borderColor: '#374151' }}>
+                      <TableCell padding="none" sx={{ width: 40, padding: '8px 4px', color: '#94a3b8', borderColor: '#374151' }}>
                         <Checkbox
                           size="small"
                           checked={selectedFilings.size === currentResults.length && currentResults.length > 0}
                           indeterminate={selectedFilings.size > 0 && selectedFilings.size < currentResults.length}
                           onChange={(e) => handleSelectAllFilings(e.target.checked)}
                           sx={{
-                            color: '#9ca3af',
-                            '&.Mui-checked': { color: '#10b981' },
-                            '&.MuiCheckbox-indeterminate': { color: '#10b981' },
+                            color: '#64748b',
+                            '&.Mui-checked': { color: '#3b82f6' },
+                            '&.MuiCheckbox-indeterminate': { color: '#3b82f6' },
                           }}
                         />
                       </TableCell>
                       {shouldShowColumn('Form & File') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Form & File</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Form & File</TableCell>
                       )}
                       {shouldShowColumn('Filed') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Filed</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Filed</TableCell>
                       )}
                       {shouldShowColumn('Filing entity/person') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Filing entity/person</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Filing entity/person</TableCell>
                       )}
                       {shouldShowColumn('CIK') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>CIK</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>CIK</TableCell>
                       )}
                       {shouldShowColumn('Located') && (
-                        <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Located</TableCell>
+                        <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Located</TableCell>
                       )}
-                      <TableCell sx={{ color: '#9ca3af', fontWeight: 600, borderColor: '#374151' }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {currentResults.map((result, index) => (
                       <TableRow 
-                        key={index} 
-                        hover
-                        selected={selectedFilings.has(index)}
+                        key={index}
+                        onClick={(e) => handleFilingClick(e, index)}
+                        onContextMenu={(e) => handleRowContextMenu(e, index)}
+                        draggable={selectedFilings.has(index)}
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          if (user?.id) {
+                            openItemDetails(
+                              'sec_filing',
+                              result,
+                              `Filing Details: ${result.form} - ${result.filingEntity}`,
+                              { user_id: user.id }
+                            );
+                          }
+                        }}
                         sx={{ 
-                          '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
-                          '&.Mui-selected': {
-                            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                          backgroundColor: selectedFilings.has(index) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                          '&:hover': {
+                            backgroundColor: selectedFilings.has(index) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                           },
-                          '&.Mui-selected:hover': {
-                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                          },
+                          cursor: 'pointer',
+                          userSelect: 'none',
                         }}
                       >
-                        <TableCell padding="checkbox">
-                          <Checkbox
-                            size="small"
-                            checked={selectedFilings.has(index)}
-                            onChange={() => handleFilingSelect(index)}
-                            sx={{
-                              color: '#9ca3af',
-                              '&.Mui-checked': { color: '#10b981' },
-                            }}
-                          />
-                        </TableCell>
+                        {/* Empty cell to maintain alignment */}
+                        <TableCell sx={{ width: 40, padding: '8px 4px', borderColor: '#374151' }} />
                         {shouldShowColumn('Form & File') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Form & File')}</TableCell>
                         )}
@@ -2685,23 +2768,6 @@ const SECSearchPage: React.FC = () => {
                         {shouldShowColumn('Located') && (
                           <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>{getColumnValue(result, 'Located')}</TableCell>
                         )}
-                        <TableCell sx={{ color: '#ffffff', borderColor: '#374151' }}>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => setSelectedFiling(result)}
-                            sx={{
-                              color: '#3b82f6',
-                              borderColor: '#3b82f6',
-                              '&:hover': {
-                                borderColor: '#60a5fa',
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                              },
-                            }}
-                          >
-                            View Filing
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -3482,20 +3548,13 @@ const SECSearchPage: React.FC = () => {
         </Box>
       </Container>
 
-      {/* Filing Details Dialog */}
-      <ItemDetailsDialog
-        open={selectedFiling !== null}
-        onClose={() => setSelectedFiling(null)}
-        itemType="sec_filing"
-        data={selectedFiling}
-        title={selectedFiling ? `Filing Details: ${selectedFiling.form} - ${selectedFiling.filingEntity}` : 'Filing Details'}
-        user_id={user?.id}
-      />
 
       {/* Context Target Menu */}
       <Menu
         anchorEl={contextMenuAnchor}
-        open={Boolean(contextMenuAnchor)}
+        anchorPosition={contextMenuPosition ? { top: contextMenuPosition.y, left: contextMenuPosition.x } : undefined}
+        anchorReference={contextMenuPosition ? 'anchorPosition' : 'anchorEl'}
+        open={Boolean(contextMenuAnchor || contextMenuPosition)}
         onClose={handleContextMenuClose}
         PaperProps={{
           sx: {
@@ -3505,13 +3564,21 @@ const SECSearchPage: React.FC = () => {
           },
         }}
       >
-        <MenuItem onClick={handleAddToContext}>
+        <MenuItem 
+          onClick={handleAddToContext}
+          disabled={selectedFilings.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Context
+          Add to Context {selectedFilings.size > 0 ? `(${selectedFilings.size} item${selectedFilings.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
-        <MenuItem onClick={handleAddToFiles}>
+        <MenuItem 
+          onClick={handleAddToFiles}
+          disabled={selectedFilings.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
           <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
-          Add to Files
+          Add to Files {selectedFilings.size > 0 ? `(${selectedFilings.size} item${selectedFilings.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
       </Menu>
 

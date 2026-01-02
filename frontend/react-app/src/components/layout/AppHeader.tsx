@@ -11,6 +11,7 @@ import {
   Breadcrumbs,
   Link,
   useTheme,
+  Badge,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -18,6 +19,7 @@ import {
   AccessTime as ClockIcon,
   Chat as ChatIcon,
   ViewColumn as DualScreenIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -25,6 +27,8 @@ import { toggleSidebar } from '../../store/slices/navigationSlice';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
+import { useDialogManager } from '../../contexts/DialogManagerContext';
+import WindowsIcon from '../common/WindowsIcon';
 
 export default function AppHeader() {
   const theme = useTheme();
@@ -34,8 +38,10 @@ export default function AppHeader() {
   const { user, logout } = useAuth();
   const { isVisible: isGlobalChatVisible, toggle: toggleGlobalChat } = useGlobalChat();
   const { isDualScreenMode, toggleDualScreenMode } = useDualScreenMode();
+  const { dialogs, restoreDialog, closeDialog } = useDialogManager();
   
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [windowsMenuAnchor, setWindowsMenuAnchor] = useState<null | HTMLElement>(null);
   const [isClockVisible, setIsClockVisible] = useState<boolean>(() => {
     const saved = localStorage.getItem('floating-clock-visible');
     return saved ? JSON.parse(saved) : false; // Default to hidden
@@ -92,6 +98,32 @@ export default function AppHeader() {
       detail: { isVisible: newVisibility } 
     }));
   };
+
+  const handleWindowsMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setWindowsMenuAnchor(event.currentTarget);
+  };
+
+  const handleWindowsMenuClose = () => {
+    setWindowsMenuAnchor(null);
+  };
+
+  const handleRestoreDialog = (id: string) => {
+    restoreDialog(id);
+    handleWindowsMenuClose();
+  };
+
+  const handleCloseDialog = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    closeDialog(id);
+    const minimizedDialogs = dialogs.filter(d => d.isMinimized);
+    if (minimizedDialogs.length === 1) {
+      handleWindowsMenuClose();
+    }
+  };
+
+  const minimizedDialogs = dialogs.filter(d => d.isMinimized);
+  const activeDialogs = dialogs.filter(d => !d.isMinimized);
+  const totalDialogCount = dialogs.length;
 
   return (
     <>
@@ -233,8 +265,126 @@ export default function AppHeader() {
             </Box>
           </Box>
 
-          {/* Right Section - Clock + Notifications + Profile */}
+          {/* Right Section - Windows + Clock + Notifications + Profile */}
           <Box display="flex" alignItems="center" gap={1}>
+            {/* Windows Menu Button */}
+            {totalDialogCount > 0 && (
+              <>
+                <IconButton
+                  color="inherit"
+                  onClick={handleWindowsMenuOpen}
+                  sx={{
+                    color: windowsMenuAnchor ? '#3b82f6' : '#8b8b8b',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    width: 44,
+                    height: 44,
+                    borderRadius: '8px',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#3b82f6',
+                      transform: 'translateY(-1px)',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                    },
+                  }}
+                >
+                  <Badge badgeContent={totalDialogCount} color="primary" max={99}>
+                    <WindowsIcon fontSize="medium" />
+                  </Badge>
+                </IconButton>
+
+                <Menu
+                  anchorEl={windowsMenuAnchor}
+                  open={Boolean(windowsMenuAnchor)}
+                  onClose={handleWindowsMenuClose}
+                  transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+                  anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+                  PaperProps={{
+                    sx: {
+                      mt: 1,
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      border: '1px solid #374151',
+                      borderRadius: '8px',
+                      minWidth: 250,
+                      maxWidth: 400,
+                      maxHeight: 500,
+                      overflow: 'auto',
+                    },
+                  }}
+                >
+                  {minimizedDialogs.length > 0 && (
+                    <>
+                      <MenuItem disabled sx={{ color: '#9ca3af', fontSize: '0.75rem', fontWeight: 600 }}>
+                      Minimized ({minimizedDialogs.length})
+                    </MenuItem>
+                      {minimizedDialogs.map((dialog) => (
+                        <MenuItem
+                          key={dialog.id}
+                          onClick={() => handleRestoreDialog(dialog.id)}
+                          sx={{
+                            color: '#ffffff',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {dialog.title}
+                          </Typography>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => handleCloseDialog(dialog.id, e)}
+                            sx={{
+                              color: '#ef4444',
+                              ml: 1,
+                              '&:hover': {
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                              },
+                            }}
+                          >
+                            <CloseIcon fontSize="small" />
+                          </IconButton>
+                        </MenuItem>
+                      ))}
+                      {activeDialogs.length > 0 && <Box sx={{ borderTop: '1px solid #374151', my: 0.5 }} />}
+                    </>
+                  )}
+                  
+                  {activeDialogs.length > 0 && (
+                    <>
+                      <MenuItem disabled sx={{ color: '#9ca3af', fontSize: '0.75rem', fontWeight: 600 }}>
+                        Active ({activeDialogs.length})
+                      </MenuItem>
+                      {activeDialogs.map((dialog) => (
+                        <MenuItem
+                          key={dialog.id}
+                          disabled
+                          sx={{
+                            color: '#9ca3af',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {dialog.title}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: '#6b7280', ml: 1 }}>
+                            Open
+                          </Typography>
+                        </MenuItem>
+                      ))}
+                    </>
+                  )}
+                </Menu>
+              </>
+            )}
+
             <IconButton
               color="inherit"
               onClick={toggleGlobalChat}

@@ -38,7 +38,6 @@ import {
   Launch as LaunchIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
-  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
@@ -47,7 +46,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
-import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../services/api';
 
 // Minimum date for date filters (January 1, 2025)
@@ -125,6 +124,7 @@ interface ExpandedFiltersState {
 
 const PoliticianTradesSearchPage: React.FC = () => {
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'politician-trades-search-page-state';
@@ -178,10 +178,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
     'Transaction Date',
     'Filing Date',
     'Amount',
-    'Details',
   ] as const;
   
-  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount', 'Details'];
+  const DEFAULT_VISIBLE_COLUMNS = ['Politician', 'Position', 'Party', 'Security', 'Transaction', 'Transaction Date', 'Amount'];
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
     savedState?.visibleColumns || DEFAULT_VISIBLE_COLUMNS
   );
@@ -192,8 +191,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
     savedState?.allSearchResults || []
   );
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>([]);
-  const [selectedTradeForDetails, setSelectedTradeForDetails] = useState<PoliticianTrade | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [isSearching, setIsSearching] = useState<boolean>(savedState?.isSearching || false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
@@ -212,7 +209,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
   
   // Selection state
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Filter state
@@ -602,33 +601,121 @@ const PoliticianTradesSearchPage: React.FC = () => {
     setCurrentPage(newPage);
   };
   
-  // Toggle trade selection
-  const toggleTradeSelection = (tradeId: string) => {
-    setSelectedTrades(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(tradeId)) {
-        newSet.delete(tradeId);
-      } else {
-        newSet.add(tradeId);
-      }
-      return newSet;
-    });
-  };
+  // Toggle trade selection - unused, selection handled by handleTradeClick
+  // const toggleTradeSelection = (tradeId: string) => {
+  //   setSelectedTrades(prev => {
+  //     const newSet = new Set(prev);
+  //     if (newSet.has(tradeId)) {
+  //       newSet.delete(tradeId);
+  //     } else {
+  //       newSet.add(tradeId);
+  //     }
+  //     return newSet;
+  //   });
+  // };
   
-  // Select all trades on current page
-  const selectAllTrades = () => {
-    const allIds = new Set(currentResults.map(trade => trade.tradeId));
-    setSelectedTrades(allIds);
-  };
+  // Select all trades on current page - unused, handled by header checkbox
+  // const selectAllTrades = () => {
+  //   const allIds = new Set(currentResults.map(trade => trade.tradeId));
+  //   setSelectedTrades(allIds);
+  // };
   
-  // Deselect all trades
-  const deselectAllTrades = () => {
-    setSelectedTrades(new Set());
-  };
+  // Deselect all trades - unused
+  // const deselectAllTrades = () => {
+  //   setSelectedTrades(new Set());
+  // };
   
   // Handle context menu close
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+    setContextMenuPosition(null);
+  };
+
+  // Handle trade click (single, Ctrl+click, Shift+click)
+  const handleTradeClick = (e: React.MouseEvent, tradeId: string, index: number) => {
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
+    setSelectedTrades(prev => {
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const tradesToSelect = currentResults.slice(start, end + 1);
+        tradesToSelect.forEach(trade => newSelected.add(trade.tradeId));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(tradeId)) {
+          newSelected.delete(tradeId);
+        } else {
+          newSelected.add(tradeId);
+        }
+        setLastSelectedIndex(index);
+      } else {
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(tradeId)) {
+          newSelected.delete(tradeId);
+        } else {
+          newSelected.clear();
+          newSelected.add(tradeId);
+        }
+        setLastSelectedIndex(index);
+      }
+      
+      return newSelected;
+    });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, tradeId: string) => {
+    e.stopPropagation();
+    
+    // Determine which trades to drag
+    const tradesToDrag = selectedTrades.has(tradeId) ? selectedTrades : new Set([tradeId]);
+    
+    // Set drag data
+    const selectedTradeObjects = currentResults.filter(trade => 
+      tradesToDrag.has(trade.tradeId)
+    );
+    
+    if (selectedTradeObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'politician_trades',
+        trades: selectedTradeObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedTradeObjects.length} trade${selectedTradeObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, tradeId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this trade is not selected, select only it
+    if (!selectedTrades.has(tradeId)) {
+      setSelectedTrades(new Set([tradeId]));
+    }
+    
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
   };
 
   const handleAddToFiles = () => {
@@ -1890,8 +1977,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 {/* Context Menu */}
                 <Menu
                   anchorEl={contextMenuAnchor}
-                  open={Boolean(contextMenuAnchor)}
-                  onClose={() => setContextMenuAnchor(null)}
+                  anchorPosition={contextMenuPosition ? { top: contextMenuPosition.y, left: contextMenuPosition.x } : undefined}
+                  anchorReference={contextMenuPosition ? 'anchorPosition' : 'anchorEl'}
+                  open={Boolean(contextMenuAnchor || contextMenuPosition)}
+                  onClose={handleContextMenuClose}
                   PaperProps={{
                     sx: {
                       backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1901,17 +1990,19 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 >
                   <MenuItem
                     onClick={handleAddToContext}
+                    disabled={selectedTrades.size === 0}
                     sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
                   >
                     <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-                    Add to Context
+                    Add to Context {selectedTrades.size > 0 ? `(${selectedTrades.size} item${selectedTrades.size > 1 ? 's' : ''})` : ''}
                   </MenuItem>
                   <MenuItem
                     onClick={handleAddToFiles}
+                    disabled={selectedTrades.size === 0}
                     sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
                   >
                     <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
-                    Add to Files
+                    Add to Files {selectedTrades.size > 0 ? `(${selectedTrades.size} item${selectedTrades.size > 1 ? 's' : ''})` : ''}
                   </MenuItem>
                 </Menu>
                 
@@ -2011,23 +2102,16 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     }}>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ 
-                            color: '#9ca3af', 
-                            fontWeight: 600, 
-                            fontSize: '0.875rem',
-                            width: 50,
-                            minWidth: 50,
-                            maxWidth: 50,
-                          }}>
+                          <TableCell padding="none" sx={{ width: 40, padding: '8px 4px', color: '#9ca3af', fontWeight: 600 }}>
                             <Checkbox
                               size="small"
                               indeterminate={selectedTrades.size > 0 && selectedTrades.size < currentResults.length}
                               checked={currentResults.length > 0 && selectedTrades.size === currentResults.length}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  selectAllTrades();
+                                  setSelectedTrades(new Set(currentResults.map(t => t.tradeId)));
                                 } else {
-                                  deselectAllTrades();
+                                  setSelectedTrades(new Set());
                                 }
                               }}
                               sx={{ 
@@ -2100,42 +2184,39 @@ const PoliticianTradesSearchPage: React.FC = () => {
                               fontSize: '0.875rem',
                             }}>Amount</TableCell>
                           )}
-                          {visibleColumns.includes('Details') && (
-                            <TableCell sx={{ 
-                              color: '#9ca3af', 
-                              fontWeight: 600, 
-                              fontSize: '0.875rem',
-                            }}>Details</TableCell>
-                          )}
+                          {/* Details column removed - use double-click to open details */}
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {currentResults.map((trade) => (
+                        {currentResults.map((trade, index) => (
                           <TableRow
                             key={trade.tradeId}
+                            onClick={(e) => handleTradeClick(e, trade.tradeId, index)}
+                            onContextMenu={(e) => handleRowContextMenu(e, trade.tradeId)}
+                            draggable={selectedTrades.has(trade.tradeId)}
+                            onDragStart={(e) => handleDragStart(e, trade.tradeId)}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              if (user?.id) {
+                                openItemDetails(
+                                  'politician_trade',
+                                  trade,
+                                  `${trade.politicianName || 'Politician'} - ${trade.securityName || trade.securitySymbol || 'Trade'}`,
+                                  { user_id: user.id }
+                                );
+                              }
+                            }}
                             sx={{
                               backgroundColor: selectedTrades.has(trade.tradeId) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                               '&:hover': {
                                 backgroundColor: selectedTrades.has(trade.tradeId) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                               },
                               cursor: 'pointer',
+                              userSelect: 'none',
                             }}
-                            onClick={() => toggleTradeSelection(trade.tradeId)}
                           >
-                            <TableCell sx={{ 
-                              padding: '8px 12px',
-                              width: 50,
-                              minWidth: 50,
-                              maxWidth: 50,
-                            }}>
-                              <Checkbox
-                                size="small"
-                                checked={selectedTrades.has(trade.tradeId)}
-                                onChange={() => toggleTradeSelection(trade.tradeId)}
-                                onClick={(e) => e.stopPropagation()}
-                                sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                              />
-                            </TableCell>
+                            {/* Empty cell to maintain alignment */}
+                            <TableCell sx={{ width: 40, padding: '8px 4px' }} />
                             {visibleColumns.includes('Politician') && (
                               <TableCell sx={{ 
                                 color: '#ffffff', 
@@ -2256,29 +2337,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                                 {formatAmountRange(trade)}
                               </TableCell>
                             )}
-                            {visibleColumns.includes('Details') && (
-                              <TableCell sx={{ 
-                                fontSize: '0.875rem',
-                                padding: '12px',
-                              }}>
-                                <IconButton
-                                  size="small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedTradeForDetails(trade);
-                                    setDetailsDialogOpen(true);
-                                  }}
-                                  sx={{
-                                    color: '#3b82f6',
-                                    '&:hover': {
-                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                    },
-                                  }}
-                                >
-                                  <VisibilityIcon fontSize="small" />
-                                </IconButton>
-                              </TableCell>
-                            )}
+                            {/* Details column removed - use double-click to open details */}
                           </TableRow>
                         ))}
                       </TableBody>
@@ -3429,17 +3488,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
         </Box>
       </Container>
 
-      {/* Trade Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-        }}
-        itemType="politician_trade"
-        data={selectedTradeForDetails}
-        title="Trade Details"
-        user_id={user?.id}
-      />
     </Box>
   );
 };

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -77,20 +77,67 @@ interface PortfolioResults {
 }
 
 export default function PortfolioRisk() {
-  const [entries, setEntries] = useState<PortfolioEntry[]>([{ stock: '', shares: 0 }]);
-  const [results, setResults] = useState<PortfolioResults | null>(null);
+  // Initialize state from localStorage if available, otherwise use defaults
+  const getInitialEntries = (): PortfolioEntry[] => {
+    try {
+      const savedEntries = localStorage.getItem('portfolio-entries');
+      if (savedEntries) {
+        const parsed = JSON.parse(savedEntries);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load initial entries from localStorage:', e);
+    }
+    return [{ stock: '', shares: 0 }];
+  };
+
+  const getInitialResults = (): PortfolioResults | null => {
+    try {
+      const savedResults = localStorage.getItem('portfolio-results');
+      if (savedResults) {
+        return JSON.parse(savedResults);
+      }
+    } catch (e) {
+      console.warn('Failed to load initial results from localStorage:', e);
+    }
+    return null;
+  };
+
+  const getInitialTimeframe = (): string => {
+    return localStorage.getItem('portfolio-timeframe') || '1y';
+  };
+
+  const getInitialChartType = (): 'single' | 'multiple' | 'compare' => {
+    const saved = localStorage.getItem('portfolio-chart-type');
+    if (saved && ['single', 'multiple', 'compare'].includes(saved)) {
+      return saved as 'single' | 'multiple' | 'compare';
+    }
+    return 'single';
+  };
+
+  const getInitialCompareStock = (): string => {
+    return localStorage.getItem('portfolio-compare-stock') || '';
+  };
+
+  const [entries, setEntries] = useState<PortfolioEntry[]>(getInitialEntries);
+  const [results, setResults] = useState<PortfolioResults | null>(getInitialResults);
   const [error, setError] = useState<string | null>(null);
-  const [timeframe, setTimeframe] = useState<string>('1y');
+  const [timeframe, setTimeframe] = useState<string>(getInitialTimeframe);
   
   // Chart state
-  const [chartType, setChartType] = useState<'single' | 'multiple' | 'compare'>('single');
-  const [compareStock, setCompareStock] = useState<string>('');
+  const [chartType, setChartType] = useState<'single' | 'multiple' | 'compare'>(getInitialChartType);
+  const [compareStock, setCompareStock] = useState<string>(getInitialCompareStock);
+  const [compareInputValue, setCompareInputValue] = useState<string>(getInitialCompareStock);
   const [chartData, setChartData] = useState<any[]>([]);
   const [isLoadingChart, setIsLoadingChart] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
-  const [compareInputValue, setCompareInputValue] = useState<string>('');
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  
+  // Track if this is the initial mount with restored state
+  const initialMountRef = useRef(true);
   
   // Calculator bubble popover state
   const [calculatorAnchor, setCalculatorAnchor] = useState<HTMLButtonElement | null>(null);
@@ -121,8 +168,8 @@ export default function PortfolioRisk() {
     loadSecurityData();
   }, []);
 
-  // Load session data from localStorage on component mount
-  // Check for exported portfolio data first, then fall back to saved session data
+  // Load exported portfolio data on component mount (if present)
+  // This takes priority over localStorage initialization
   useEffect(() => {
     // Check for exported portfolio data (from tile export)
     const exportedData = sessionStorage.getItem('portfolio-export-data');
@@ -144,45 +191,8 @@ export default function PortfolioRisk() {
       }
     }
     
-    // Fall back to regular session storage
-    const savedEntries = localStorage.getItem('portfolio-entries');
-    const savedResults = localStorage.getItem('portfolio-results');
-    const savedTimeframe = localStorage.getItem('portfolio-timeframe');
-    const savedChartType = localStorage.getItem('portfolio-chart-type');
-    const savedCompareStock = localStorage.getItem('portfolio-compare-stock');
-    
-    if (savedEntries) {
-      try {
-        const parsedEntries = JSON.parse(savedEntries);
-        if (Array.isArray(parsedEntries) && parsedEntries.length > 0) {
-          setEntries(parsedEntries);
-        }
-      } catch (e) {
-        console.warn('Failed to parse saved portfolio entries:', e);
-      }
-    }
-    
-    if (savedResults) {
-      try {
-        const parsedResults = JSON.parse(savedResults);
-        setResults(parsedResults);
-      } catch (e) {
-        console.warn('Failed to parse saved portfolio results:', e);
-      }
-    }
-    
-    if (savedTimeframe) {
-      setTimeframe(savedTimeframe);
-    }
-    
-    if (savedChartType && ['single', 'multiple', 'compare'].includes(savedChartType)) {
-      setChartType(savedChartType as 'single' | 'multiple' | 'compare');
-    }
-    
-    if (savedCompareStock) {
-      setCompareStock(savedCompareStock);
-      setCompareInputValue(savedCompareStock);
-    }
+    // If state was initialized from localStorage, the initialMountRef useEffect will handle chart loading
+    // No need to do anything here since state is already initialized from localStorage
   }, []);
 
   // Transform cached stock data into chart format based on chart type
@@ -472,9 +482,20 @@ export default function PortfolioRisk() {
   // Load chart data
   const loadChartData = useCallback(async () => {
     if (!results || !entries.some(e => e.stock && e.shares > 0)) {
+      console.log('⚠️ loadChartData: Missing requirements', { 
+        hasResults: !!results, 
+        hasValidEntries: entries.some(e => e.stock && e.shares > 0) 
+      });
       setChartData([]);
       return;
     }
+
+    console.log('📊 Loading chart data...', { 
+      hasResults: !!results, 
+      entriesCount: entries.filter(e => e.stock && e.shares > 0).length,
+      chartType,
+      timeframe 
+    });
 
     setIsLoadingChart(true);
     try {
@@ -491,6 +512,8 @@ export default function PortfolioRisk() {
       const cachedDataStr = sessionStorage.getItem(cacheKey);
       let allStockData: any[] = [];
       let shouldCache = false;
+
+      console.log('🔍 Checking for cached chart data:', { cacheKey, hasCache: !!cachedDataStr, stockSymbols });
 
       if (cachedDataStr) {
         // Use cached data
@@ -540,6 +563,7 @@ export default function PortfolioRisk() {
                 chartType,
                 validEntries
               );
+              console.log('✅ Using cached chart data, transformed:', transformedData.length, 'points');
               setChartData(transformedData);
               setIsLoadingChart(false);
               return;
@@ -616,15 +640,73 @@ export default function PortfolioRisk() {
     }
   }, [results, timeframe, chartType, compareStock, fetchStockData, transformCachedDataToChart, entries]);
 
+  // Handle initial chart load when state is restored from localStorage on mount
   useEffect(() => {
-    // Only load chart data when results are set (from calculateRisk), not when entries change
-    if (results) {
-      loadChartData();
+    if (initialMountRef.current && results && entries.some(e => e.stock && e.shares > 0) && chartData.length === 0) {
+      console.log('🔄 Initial mount with restored state, loading chart data', {
+        hasResults: !!results,
+        entriesCount: entries.filter(e => e.stock && e.shares > 0).length,
+        chartType,
+        timeframe
+      });
+      initialMountRef.current = false;
+      // Use a delay to ensure all state is ready
+      const timeoutId = setTimeout(() => {
+        if (results && entries.some(e => e.stock && e.shares > 0)) {
+          console.log('⏰ Initial mount timeout: Calling loadChartData');
+          loadChartData();
+        }
+      }, 400);
+      return () => clearTimeout(timeoutId);
+    } else if (initialMountRef.current) {
+      initialMountRef.current = false;
     }
-    // Only reload when results, chartType, compareStock, or timeframe change
-    // Not when loadChartData function reference changes or entries change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, chartType, compareStock, timeframe]);
+  }, []);
+
+  useEffect(() => {
+    // Skip on initial mount (handled by the effect above)
+    if (initialMountRef.current) {
+      return;
+    }
+    
+    // Only load chart data when results are set (from calculateRisk or restored from localStorage)
+    if (results && entries.some(e => e.stock && e.shares > 0)) {
+      console.log('🔄 useEffect: Triggering chart data load', { 
+        hasResults: !!results, 
+        entries: entries.filter(e => e.stock && e.shares > 0).length,
+        chartType,
+        timeframe 
+      });
+      // Use a delay to ensure all state is set when restoring from localStorage
+      // Increase delay to ensure entries are fully restored
+      const timeoutId = setTimeout(() => {
+        // Double-check that we have valid entries before loading chart
+        if (results && entries.some(e => e.stock && e.shares > 0)) {
+          console.log('⏰ Timeout: Calling loadChartData');
+          loadChartData();
+        } else {
+          console.log('⚠️ Timeout: Conditions not met for chart load', {
+            hasResults: !!results,
+            hasValidEntries: entries.some(e => e.stock && e.shares > 0)
+          });
+        }
+      }, 300);
+      return () => clearTimeout(timeoutId);
+    } else if (results && !entries.some(e => e.stock && e.shares > 0)) {
+      // If we have results but no valid entries, clear chart data
+      console.log('⚠️ useEffect: Has results but no valid entries, clearing chart');
+      setChartData([]);
+    } else {
+      console.log('⚠️ useEffect: Not loading chart', { 
+        hasResults: !!results, 
+        hasEntries: entries.some(e => e.stock && e.shares > 0) 
+      });
+    }
+    // Only reload when results, chartType, compareStock, timeframe, or entries change
+    // Not when loadChartData function reference changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, chartType, compareStock, timeframe, entries]);
 
   const getYAxisDomain = useCallback(() => {
     if (!chartData || chartData.length === 0) {
@@ -693,6 +775,9 @@ export default function PortfolioRisk() {
     setResults(null);
     setError(null);
     setTimeframe('1y');
+    setChartType('single');
+    setCompareStock('');
+    setCompareInputValue('');
     setChartData([]);
   };
 

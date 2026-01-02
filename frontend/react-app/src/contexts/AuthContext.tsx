@@ -383,6 +383,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       
       const currentUser = user;
+      
+      // Force clear all dialogs and their cached data from sessionStorage
+      try {
+        // Clear dialog manager data
+        sessionStorage.removeItem('dialog-manager-dialogs');
+        
+        // Clear ALL dialog-related entries (they follow patterns like dialog-cache-{id}, dialog-data-{id})
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && (key.startsWith('dialog-cache-') || key.startsWith('dialog-data-') || key.startsWith('dialog-manager-'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => {
+          try {
+            sessionStorage.removeItem(key);
+          } catch (e) {
+            // Ignore individual removal errors
+          }
+        });
+        
+        // Dispatch event to notify DialogManagerProvider to clear state
+        window.dispatchEvent(new CustomEvent('user-logout', { detail: { clearDialogs: true } }));
+      } catch (e) {
+        console.warn('Failed to clear dialogs on logout:', e);
+      }
+      
       await signOut();
       setUser(null);
       

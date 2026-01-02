@@ -42,7 +42,7 @@ import {
   Folder as FolderIcon,
 } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
-import ItemDetailsDialog from '../common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '../../contexts/AuthContext';
 import { filesystemAPI } from '../../services/api';
 import { 
@@ -188,6 +188,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   // const { activeSessionId } = useGlobalChat();
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
@@ -195,8 +196,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
-  const [selectedBillForDetails, setSelectedBillForDetails] = useState<CongressBill | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   
   // Search state - initialize with default values if searchParams is not provided
@@ -258,6 +257,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   });
   
   const [selectedBills, setSelectedBills] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   
   // Display options state
   const localDisplayOptions = useMemo(() => ({
@@ -905,13 +906,10 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     }
   };
   
+  // Legacy context menu handler (kept for backward compatibility)
   const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     setContextMenuAnchor(event.currentTarget);
-  };
-  
-  const handleContextMenuClose = () => {
-    setContextMenuAnchor(null);
   };
   
   const handleAddToFiles = () => {
@@ -954,9 +952,10 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     }
   };
 
-  const handleAddToContext = () => {
+  const handleAddToContext = (billIds?: Set<string>) => {
+    const billsToAdd = billIds || selectedBills;
     const selectedBillObjects = filteredResults.filter(bill => 
-      selectedBills.has(bill.bill_id)
+      billsToAdd.has(bill.bill_id)
     );
     
     if (selectedBillObjects.length === 0) return;
@@ -969,6 +968,60 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     
     setSelectedBills(new Set());
     handleContextMenuClose();
+  };
+  
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, billId: string) => {
+    e.stopPropagation();
+    
+    // Determine which bills to drag
+    const billsToDrag = selectedBills.has(billId) ? selectedBills : new Set([billId]);
+    
+    // Set drag data
+    const selectedBillObjects = filteredResults.filter(bill => 
+      billsToDrag.has(bill.bill_id)
+    );
+    
+    if (selectedBillObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'congress_bills',
+        bills: selectedBillObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedBillObjects.length} bill${selectedBillObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+  
+  // Drag end is handled automatically by the browser
+  
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, billId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this bill is not selected, select only it
+    if (!selectedBills.has(billId)) {
+      setSelectedBills(new Set([billId]));
+    }
+    
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
+  };
+  
+  const handleContextMenuClose = () => {
+    setContextMenuPosition(null);
   };
   
   
@@ -1132,15 +1185,48 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     };
   }, [allResults]);
   
-  const toggleBillSelection = (billId: string) => {
+  // Handle bill selection with single click, Ctrl+click, and Shift+click
+  const handleBillClick = (e: React.MouseEvent, billId: string, index: number) => {
+    // Don't handle if clicking on interactive elements (buttons, links, etc.)
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea, [role="button"]')) {
+      return;
+    }
+    
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
     setSelectedBills(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(billId)) {
-        newSet.delete(billId);
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const billsToSelect = currentPageResults.slice(start, end + 1);
+        billsToSelect.forEach(bill => newSelected.add(bill.bill_id));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(billId)) {
+          newSelected.delete(billId);
+        } else {
+          newSelected.add(billId);
+        }
+        setLastSelectedIndex(index);
       } else {
-        newSet.add(billId);
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(billId)) {
+          newSelected.delete(billId);
+        } else {
+          newSelected.clear();
+          newSelected.add(billId);
+        }
+        setLastSelectedIndex(index);
       }
-      return newSet;
+      
+      return newSelected;
     });
   };
   
@@ -1497,7 +1583,17 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
             }}>
               <TableHead>
                 <TableRow>
-                  <TableCell padding="checkbox" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+                  <TableCell 
+                    padding="none" 
+                    sx={{ 
+                      color: '#9ca3af', 
+                      fontWeight: 600,
+                      width: '40px',
+                      minWidth: '40px',
+                      maxWidth: '40px',
+                      padding: '8px 4px',
+                    }}
+                  >
                     <Checkbox
                       size="small"
                       indeterminate={selectedBills.size > 0 && selectedBills.size < currentPageResults.length}
@@ -1549,29 +1645,46 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                   {visibleColumns.includes('policy_area') && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Policy Area</TableCell>
                   )}
-                  {/* Details column is always visible (not selectable) */}
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Details</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {currentPageResults.map((bill) => (
+                {currentPageResults.map((bill, index) => (
                   <TableRow
                     key={bill.bill_id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, bill.bill_id)}
+                    onClick={(e) => handleBillClick(e, bill.bill_id, index)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (user?.id) {
+                        openItemDetails(
+                          'congress_bill',
+                          bill,
+                          bill.bill_title,
+                          { user_id: user.id }
+                        );
+                      }
+                    }}
+                    onContextMenu={(e) => handleRowContextMenu(e, bill.bill_id)}
                     sx={{
                       backgroundColor: selectedBills.has(bill.bill_id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                      cursor: 'pointer',
+                      userSelect: 'none',
                       '&:hover': {
                         backgroundColor: selectedBills.has(bill.bill_id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                       },
                     }}
                   >
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        size="small"
-                        checked={selectedBills.has(bill.bill_id)}
-                        onChange={() => toggleBillSelection(bill.bill_id)}
-                        sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                      />
-                    </TableCell>
+                    {/* Empty cell to maintain row height and alignment with header checkbox */}
+                    <TableCell 
+                      padding="none"
+                      sx={{ 
+                        width: '40px',
+                        minWidth: '40px',
+                        maxWidth: '40px',
+                        padding: '8px 4px',
+                      }}
+                    />
                     {visibleColumns.includes('bill_title') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                         {bill.bill_title || 'N/A'}
@@ -1627,31 +1740,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                         {bill.policy_area || 'N/A'}
                       </TableCell>
                     )}
-                    {/* Details column is always visible (not selectable) */}
-                    <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedBillForDetails(bill);
-                          setDetailsDialogOpen(true);
-                        }}
-                        sx={{
-                          color: '#3b82f6',
-                          borderColor: '#3b82f6',
-                          fontSize: '0.75rem',
-                          py: 0.5,
-                          px: 1.5,
-                          '&:hover': {
-                            borderColor: '#60a5fa',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                          },
-                        }}
-                      >
-                        View Details
-                      </Button>
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -2780,24 +2868,12 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         })}
       </Menu>
 
-      {/* Bill Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-          setSelectedBillForDetails(null);
-        }}
-        itemType="congress_bill"
-        data={selectedBillForDetails}
-        title={selectedBillForDetails?.bill_title}
-        user_id={user?.id}
-      />
 
-      {/* Context Menu */}
+      {/* Legacy Context Menu (for tile-level actions) */}
       <Menu
         anchorEl={contextMenuAnchor}
         open={Boolean(contextMenuAnchor)}
-        onClose={handleContextMenuClose}
+        onClose={() => setContextMenuAnchor(null)}
         PaperProps={{
           sx: {
             backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -2806,7 +2882,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         }}
       >
         <MenuItem
-          onClick={handleAddToContext}
+          onClick={() => handleAddToContext()}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
@@ -2818,6 +2894,43 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         >
           <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
           Add to Files
+        </MenuItem>
+      </Menu>
+      
+      {/* Row Context Menu (right-click on bills) */}
+      <Menu
+        open={contextMenuPosition !== null}
+        onClose={handleContextMenuClose}
+        anchorReference="anchorPosition"
+        anchorPosition={contextMenuPosition ? { top: contextMenuPosition.y, left: contextMenuPosition.x } : undefined}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+          }
+        }}
+      >
+        <MenuItem
+          onClick={() => {
+            handleAddToContext();
+            handleContextMenuClose();
+          }}
+          disabled={selectedBills.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' }, '&.Mui-disabled': { color: '#6b7280' } }}
+        >
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add {selectedBills.size > 1 ? `${selectedBills.size} bills` : 'bill'} to Context
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            handleAddToFiles();
+            handleContextMenuClose();
+          }}
+          disabled={selectedBills.size === 0 || !user}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' }, '&.Mui-disabled': { color: '#6b7280' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add {selectedBills.size > 1 ? `${selectedBills.size} bills` : 'bill'} to Files
         </MenuItem>
       </Menu>
       

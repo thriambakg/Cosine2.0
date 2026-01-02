@@ -55,6 +55,7 @@ import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleT
 import MultiSelectField from '../MultiSelectField';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 
 interface NewsTileProps {
   id: string;
@@ -159,6 +160,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   
   // Filter state for client-side filtering - restore from props if available
   const [allResults, setAllResults] = useState<NewsArticle[]>(() => {
@@ -192,6 +194,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   });
 
   const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1006,16 +1009,97 @@ const NewsTile: React.FC<NewsTileProps> = ({
     };
   }, [allResults]);
 
-  const toggleArticleSelection = (articleId: string) => {
+  // Handle article selection with single click, Ctrl+click, and Shift+click
+  const handleArticleClick = (e: React.MouseEvent, articleId: string, index: number) => {
+    // Don't handle if clicking on interactive elements (buttons, links, etc.)
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea, [role="button"]')) {
+      return;
+    }
+    
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
     setSelectedArticles(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(articleId)) {
-        newSet.delete(articleId);
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const articlesToSelect = currentPageResults.slice(start, end + 1);
+        articlesToSelect.forEach(article => newSelected.add(article.id));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(articleId)) {
+          newSelected.delete(articleId);
+        } else {
+          newSelected.add(articleId);
+        }
+        setLastSelectedIndex(index);
       } else {
-        newSet.add(articleId);
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(articleId)) {
+          newSelected.delete(articleId);
+        } else {
+          newSelected.clear();
+          newSelected.add(articleId);
+        }
+        setLastSelectedIndex(index);
       }
-      return newSet;
+      
+      return newSelected;
     });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, articleId: string) => {
+    e.stopPropagation();
+    
+    // Determine which articles to drag
+    const articlesToDrag = selectedArticles.has(articleId) ? selectedArticles : new Set([articleId]);
+    
+    // Set drag data
+    const selectedArticleObjects = currentResults.filter(article => 
+      articlesToDrag.has(article.id)
+    );
+    
+    if (selectedArticleObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'news_articles',
+        articles: selectedArticleObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedArticleObjects.length} article${selectedArticleObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, articleId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this article is not selected, select only it
+    if (!selectedArticles.has(articleId)) {
+      setSelectedArticles(new Set([articleId]));
+    }
+    
+    setContextMenuAnchor(e.currentTarget as HTMLElement);
   };
 
   const formatDate = (dateStr: string | undefined) => {
@@ -1675,34 +1759,43 @@ const NewsTile: React.FC<NewsTileProps> = ({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {currentPageResults.map((article) => (
+                {currentPageResults.map((article, index) => (
                   <TableRow
                     key={article.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, article.id)}
+                    onClick={(e) => handleArticleClick(e, article.id, index)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (user?.id) {
+                        openItemDetails(
+                          'news_article',
+                          article,
+                          article.title,
+                          { user_id: user.id }
+                        );
+                      }
+                    }}
+                    onContextMenu={(e) => handleRowContextMenu(e, article.id)}
                     sx={{
                       backgroundColor: selectedArticles.has(article.id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                      cursor: 'pointer',
+                      userSelect: 'none',
                       '&:hover': {
                         backgroundColor: selectedArticles.has(article.id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                       },
-                      cursor: 'pointer',
                     }}
-                    onClick={() => toggleArticleSelection(article.id)}
                   >
-                    <TableCell sx={{ 
-                      padding: '8px 12px',
-                      width: columnWidths.checkbox || 50,
-                      minWidth: columnWidths.checkbox || 50,
-                      maxWidth: columnWidths.checkbox || 50,
-                    }}>
-                      <Checkbox
-                        size="small"
-                        checked={selectedArticles.has(article.id)}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          toggleArticleSelection(article.id);
-                        }}
-                        sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                      />
-                    </TableCell>
+                    {/* Empty cell to maintain row height and alignment with header checkbox */}
+                    <TableCell 
+                      padding="none"
+                      sx={{ 
+                        width: '40px',
+                        minWidth: '40px',
+                        maxWidth: '40px',
+                        padding: '8px 4px',
+                      }}
+                    />
                     {visibleColumns.title && (
                       <TableCell sx={{ 
                         color: '#ffffff', 

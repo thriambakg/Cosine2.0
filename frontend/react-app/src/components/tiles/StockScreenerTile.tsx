@@ -45,13 +45,12 @@ import {
   ViewColumn as ViewColumnIcon,
   ExpandMore as ExpandMoreIcon,
   Folder as FolderIcon,
-  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import FileBrowserDialog from '../common/FileBrowserDialog';
-import ItemDetailsDialog from '../common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../../services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -205,13 +204,13 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   // Store all results for client-side filtering
   const [allResults, setAllResults] = useState<StockResult[]>(results || []);
   const [filteredResults, setFilteredResults] = useState<StockResult[]>(results || []);
-  const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
+  const [selectedStocks, setSelectedStocks] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
-  const [selectedStockForDetails, setSelectedStockForDetails] = useState<StockResult | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   // Pagination state
   const [hasMore, setHasMore] = useState<boolean>(false);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
@@ -240,7 +239,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     priceChange: localDisplayOptions.showPriceChange,
     peRatio: localDisplayOptions.showPERatio,
     dividendYield: localDisplayOptions.showDividendYield,
-    details: true, // Details column visible by default
+    details: false, // Details column removed - use double-click instead
   });
 
   // Sync visibleColumns with localDisplayOptions when it changes
@@ -252,7 +251,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       priceChange: localDisplayOptions.showPriceChange,
       peRatio: localDisplayOptions.showPERatio,
       dividendYield: localDisplayOptions.showDividendYield,
-      details: true, // Details column always visible
+      details: false, // Details column removed - use double-click instead
     });
   }, [localDisplayOptions.showIndustry, localDisplayOptions.showMarketCap, localDisplayOptions.showVolatility, localDisplayOptions.showPriceChange, localDisplayOptions.showPERatio, localDisplayOptions.showDividendYield]);
 
@@ -865,16 +864,106 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     }
   };
 
-  const handleStockSelect = (symbol: string) => {
-    setSelectedStocks(prev => 
-      prev.includes(symbol) 
-        ? prev.filter(s => s !== symbol)
-        : [...prev, symbol]
+  // Handle stock selection with single click, Ctrl+click, and Shift+click
+  const handleStockClick = (e: React.MouseEvent, symbol: string, index: number) => {
+    // Don't handle if clicking on interactive elements (buttons, links, etc.)
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea, [role="button"]')) {
+      return;
+    }
+    
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
+    setSelectedStocks(prev => {
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const stocksToSelect = currentResults.slice(start, end + 1);
+        stocksToSelect.forEach((stock: any) => newSelected.add(stock.symbol));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(symbol)) {
+          newSelected.delete(symbol);
+        } else {
+          newSelected.add(symbol);
+        }
+        setLastSelectedIndex(index);
+      } else {
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(symbol)) {
+          newSelected.delete(symbol);
+        } else {
+          newSelected.clear();
+          newSelected.add(symbol);
+        }
+        setLastSelectedIndex(index);
+      }
+      
+      return newSelected;
+    });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, symbol: string) => {
+    e.stopPropagation();
+    
+    // Determine which stocks to drag
+    const stocksToDrag = selectedStocks.has(symbol) ? selectedStocks : new Set([symbol]);
+    
+    // Set drag data - use filteredResults to get all matching stocks
+    const selectedStockObjects = filteredResults.filter(stock => 
+      stocksToDrag.has(stock.symbol)
     );
+    
+    if (selectedStockObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      // Include timeframe in the drag data for proper context formatting
+      const stocksWithTimeframe = selectedStockObjects.map(stock => ({
+        ...stock,
+        timeframe: localCriteria.timeframe
+      }));
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'stocks',
+        stocks: stocksWithTimeframe
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedStockObjects.length} stock${selectedStockObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, symbol: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this stock is not selected, select only it
+    if (!selectedStocks.has(symbol)) {
+      setSelectedStocks(new Set([symbol]));
+    }
+    
+    setContextMenuAnchor(e.currentTarget as HTMLElement);
   };
 
   const handleAddToContextClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    if (selectedStocks.length === 0) {
+    if (selectedStocks.size === 0) {
       alert('Please select at least one stock to add to context');
       return;
     }
@@ -886,17 +975,17 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   };
 
   const handleAddToFiles = () => {
-    if (selectedStocks.length === 0 || !user) return;
+    if (selectedStocks.size === 0 || !user) return;
     setFileBrowserOpen(true);
     handleContextMenuClose();
   };
 
   const handleFileBrowserSelect = async (folderPath: string) => {
-    if (!user || selectedStocks.length === 0) return;
+    if (!user || selectedStocks.size === 0) return;
     
     try {
       const selectedStockObjects = allResults.filter(stock => 
-        selectedStocks.includes(stock.symbol)
+        selectedStocks.has(stock.symbol)
       );
 
       // Save each stock to the filesystem with FULL data
@@ -918,18 +1007,18 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       }
       
       console.log(`✅ Saved ${selectedStockObjects.length} stock(s) to filesystem`);
-      setSelectedStocks([]);
+      setSelectedStocks(new Set());
     } catch (error) {
       console.error('Error saving stocks to filesystem:', error);
     }
   };
 
   const handleAddToContext = () => {
-    if (selectedStocks.length === 0) return;
+    if (selectedStocks.size === 0) return;
     
     // Get the selected stock objects from filteredResults state
     const selectedStockObjects = filteredResults.filter(stock => 
-      selectedStocks.includes(stock.symbol)
+      selectedStocks.has(stock.symbol)
     );
     
     console.log(`📦 Adding ${selectedStockObjects.length} stock(s) to context`);
@@ -982,7 +1071,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     }
     
     // Clear selection and close menu
-    setSelectedStocks([]);
+    setSelectedStocks(new Set());
     handleContextMenuClose();
   };
 
@@ -1309,8 +1398,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
           }}
           contextButton={{
             onClick: handleAddToContextClick,
-            disabled: selectedStocks.length === 0,
-            tooltip: `Add ${selectedStocks.length > 0 ? `${selectedStocks.length} stock(s)` : 'selected stocks'} to context`,
+            disabled: selectedStocks.size === 0,
+            tooltip: `Add ${selectedStocks.size > 0 ? `${selectedStocks.size} stock(s)` : 'selected stocks'} to context`,
             icon: <AddToContextIcon sx={{ fontSize: 18 }} />,
           }}
           customizeButton={{
@@ -1543,13 +1632,13 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                   <TableCell padding="checkbox" sx={{ width: '48px' }}>
                     <Checkbox
                       size="small"
-                      checked={selectedStocks.length === currentResults.length && currentResults.length > 0}
-                      indeterminate={selectedStocks.length > 0 && selectedStocks.length < currentResults.length}
+                      checked={selectedStocks.size === currentResults.length && currentResults.length > 0}
+                      indeterminate={selectedStocks.size > 0 && selectedStocks.size < currentResults.length}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedStocks(currentResults.map(s => s.symbol));
+                          setSelectedStocks(new Set(currentResults.map(s => s.symbol)));
                         } else {
-                          setSelectedStocks([]);
+                          setSelectedStocks(new Set());
                         }
                       }}
                       sx={{
@@ -1579,13 +1668,10 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                   {visibleColumns.dividendYield && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Div Yield</TableCell>
                   )}
-                  {visibleColumns.details && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>Details</TableCell>
-                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
-                {currentResults.map((stock) => {
+                {currentResults.map((stock, index) => {
                   // Safe accessors with defaults - type assertion for backend compatibility
                   const stockData = stock as any;
                   const price = stock.price ?? stockData.current_price ?? 0;
@@ -1598,38 +1684,41 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                   
                   return (
                     <TableRow 
-                      key={stock.symbol} 
-                      hover
-                      selected={selectedStocks.includes(stock.symbol)}
-                      onClick={(e) => {
-                        // Don't select if clicking on checkbox (checkbox handles its own selection)
-                        if ((e.target as HTMLElement).closest('input[type="checkbox"]') || (e.target as HTMLElement).closest('span.MuiCheckbox-root')) {
-                          return;
+                      key={stock.symbol}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, stock.symbol)}
+                      onClick={(e) => handleStockClick(e, stock.symbol, index)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (user?.id) {
+                          openItemDetails(
+                            'stock_result',
+                            stock,
+                            stock.name,
+                            { user_id: user.id }
+                          );
                         }
-                        // Single click = select for context addition
-                        handleStockSelect(stock.symbol);
                       }}
+                      onContextMenu={(e) => handleRowContextMenu(e, stock.symbol)}
                       sx={{
+                        backgroundColor: selectedStocks.has(stock.symbol) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                         cursor: 'pointer',
-                        '&.Mui-selected': {
-                          backgroundColor: 'rgba(16, 185, 129, 0.08)',
-                        },
-                        '&.Mui-selected:hover': {
-                          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        userSelect: 'none',
+                        '&:hover': {
+                          backgroundColor: selectedStocks.has(stock.symbol) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                         },
                       }}
                     >
-                      <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          size="small"
-                          checked={selectedStocks.includes(stock.symbol)}
-                          onChange={() => handleStockSelect(stock.symbol)}
-                          sx={{
-                            color: '#9ca3af',
-                            '&.Mui-checked': { color: '#10b981' },
-                          }}
-                        />
-                      </TableCell>
+                      {/* Empty cell to maintain row height and alignment with header checkbox */}
+                      <TableCell 
+                        padding="none"
+                        sx={{ 
+                          width: '40px',
+                          minWidth: '40px',
+                          maxWidth: '40px',
+                          padding: '8px 4px',
+                        }}
+                      />
                       <TableCell sx={{ color: 'white', fontWeight: 600, fontSize: '0.875rem' }}>{stock.symbol}</TableCell>
                       {visibleColumns.industry && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>{industry}</TableCell>
@@ -1662,27 +1751,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
                       {visibleColumns.dividendYield && (
                         <TableCell sx={{ color: '#9ca3af', fontSize: '0.875rem' }}>
                           {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : 'N/A'}
-                        </TableCell>
-                      )}
-                      {visibleColumns.details && (
-                        <TableCell>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedStockForDetails(stock);
-                              setDetailsDialogOpen(true);
-                            }}
-                            sx={{
-                              color: '#3b82f6',
-                              '&:hover': {
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                color: '#60a5fa',
-                              },
-                            }}
-                          >
-                            <VisibilityIcon fontSize="small" />
-                          </IconButton>
                         </TableCell>
                       )}
                     </TableRow>
@@ -2558,18 +2626,6 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         currentIcon={customIcon}
       />
 
-      {/* Stock Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-          setSelectedStockForDetails(null);
-        }}
-        itemType="stock_result"
-        data={selectedStockForDetails}
-        title={selectedStockForDetails?.name}
-        user_id={user?.id}
-      />
     </Box>
   );
 };

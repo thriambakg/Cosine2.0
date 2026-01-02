@@ -49,7 +49,7 @@ import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
 import { addAwardToContext, addMultipleAwardsToContext } from '../components/tiles/common';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
-import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -99,6 +99,7 @@ interface ExpandedFiltersState {
 
 const GovtContractsSearchPage: React.FC = () => {
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   const {} = useGlobalChat();
   
   // Session persistence key
@@ -150,11 +151,10 @@ const GovtContractsSearchPage: React.FC = () => {
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(savedState?.lastEvaluatedKey || null);
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedAwards, setSelectedAwards] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
-  const [selectedAwardForDetails, setSelectedAwardForDetails] = useState<GovtContractAward | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
-  const [parentAwardForDetails, setParentAwardForDetails] = useState<GovtContractAward | null>(null);  // Store parent when viewing child
   
   // Column visibility state
   // Note: 'actions' is always visible and not selectable (like SEC tile)
@@ -809,6 +809,94 @@ const GovtContractsSearchPage: React.FC = () => {
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+    setContextMenuPosition(null);
+  };
+
+  // Handle award click (single, Ctrl+click, Shift+click)
+  const handleAwardClick = (e: React.MouseEvent, awardId: string, index: number) => {
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
+    setSelectedAwards(prev => {
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const awardsToSelect = paginatedResults.slice(start, end + 1);
+        awardsToSelect.forEach(award => newSelected.add(award.award_id));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(awardId)) {
+          newSelected.delete(awardId);
+        } else {
+          newSelected.add(awardId);
+        }
+        setLastSelectedIndex(index);
+      } else {
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(awardId)) {
+          newSelected.delete(awardId);
+        } else {
+          newSelected.clear();
+          newSelected.add(awardId);
+        }
+        setLastSelectedIndex(index);
+      }
+      
+      return newSelected;
+    });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, awardId: string) => {
+    e.stopPropagation();
+    
+    // Determine which awards to drag
+    const awardsToDrag = selectedAwards.has(awardId) ? selectedAwards : new Set([awardId]);
+    
+    // Set drag data
+    const selectedAwardObjects = currentResults.filter(award => 
+      awardsToDrag.has(award.award_id)
+    );
+    
+    if (selectedAwardObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'govt_contracts',
+        awards: selectedAwardObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedAwardObjects.length} award${selectedAwardObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, awardId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this award is not selected, select only it
+    if (!selectedAwards.has(awardId)) {
+      setSelectedAwards(new Set([awardId]));
+    }
+    
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
   };
 
   const handleAddToFiles = () => {
@@ -1571,14 +1659,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         }}>
                           <TableHead>
                             <TableRow>
-                              <TableCell sx={{ 
-                                color: '#9ca3af', 
-                                fontWeight: 600, 
-                                fontSize: '0.875rem',
-                                width: 50,
-                                minWidth: 50,
-                                maxWidth: 50,
-                              }}>
+                              <TableCell padding="none" sx={{ width: 40, padding: '8px 4px', color: '#9ca3af', fontWeight: 600 }}>
                                 <Checkbox
                                   size="small"
                                   indeterminate={selectedAwards.size > 0 && selectedAwards.size < paginatedResults.length}
@@ -1664,48 +1745,40 @@ const GovtContractsSearchPage: React.FC = () => {
                                   fontSize: '0.875rem',
                                 }}>Last Updated</TableCell>
                               )}
-                              {/* Actions column is always visible (not selectable) */}
-                              <TableCell sx={{ 
-                                color: '#9ca3af', 
-                                fontWeight: 600, 
-                                fontSize: '0.875rem',
-                              }}>Actions</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {paginatedResults.map((award) => (
+                            {paginatedResults.map((award, index) => (
                               <TableRow
                                 key={award.award_id}
+                                onClick={(e) => handleAwardClick(e, award.award_id, index)}
+                                onContextMenu={(e) => handleRowContextMenu(e, award.award_id)}
+                                draggable={selectedAwards.has(award.award_id)}
+                                onDragStart={(e) => handleDragStart(e, award.award_id)}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  if (user?.id) {
+                                    openItemDetails(
+                                      'govt_contract',
+                                      award,
+                                      award.recipient_name 
+                                        ? `Government Contract - ${award.recipient_name}${award.awarding_agency_name ? ` / ${award.awarding_agency_name}` : ''}`
+                                        : `Government Contract ${award.award_id || ''}`,
+                                      { user_id: user.id }
+                                    );
+                                  }
+                                }}
                                 sx={{
                                   backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                                   '&:hover': {
                                     backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                                   },
                                   cursor: 'pointer',
+                                  userSelect: 'none',
                                 }}
                               >
-                                <TableCell sx={{ 
-                                  padding: '8px 12px',
-                                  width: 50,
-                                  minWidth: 50,
-                                  maxWidth: 50,
-                                }}>
-                                  <Checkbox
-                                    size="small"
-                                    checked={selectedAwards.has(award.award_id)}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      const newSet = new Set(selectedAwards);
-                                      if (e.target.checked) {
-                                        newSet.add(award.award_id);
-                                      } else {
-                                        newSet.delete(award.award_id);
-                                      }
-                                      setSelectedAwards(newSet);
-                                    }}
-                                    sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                                  />
-                                </TableCell>
+                                {/* Empty cell to maintain alignment */}
+                                <TableCell sx={{ width: 40, padding: '8px 4px' }} />
                                 {visibleColumns.includes('recipient') && (
                                   <TableCell sx={{ 
                                     color: '#ffffff', 
@@ -1791,33 +1864,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                     {formatLastUpdated(award.last_updated)}
                                   </TableCell>
                                 )}
-                                {/* Actions column is always visible (not selectable) */}
-                                <TableCell sx={{ 
-                                  fontSize: '0.875rem',
-                                  padding: '12px',
-                                }}>
-                                  <Button
-                                    variant="outlined"
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedAwardForDetails(award);
-                                      setParentAwardForDetails(null);
-                                      setDetailsDialogOpen(true);
-                                    }}
-                                    sx={{
-                                      borderColor: '#3b82f6',
-                                      color: '#3b82f6',
-                                      fontSize: '0.7rem',
-                                      '&:hover': {
-                                        borderColor: '#60a5fa',
-                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                      },
-                                    }}
-                                  >
-                                    View More
-                                  </Button>
-                                </TableCell>
+                                {/* Actions column removed - use double-click to open details */}
                               </TableRow>
                             ))}
                           </TableBody>
@@ -3144,41 +3191,13 @@ const GovtContractsSearchPage: React.FC = () => {
         </Box>
       </Container>
 
-      {/* Award Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-          setParentAwardForDetails(null);  // Clear parent when closing
-        }}
-        itemType="govt_contract"
-        data={selectedAwardForDetails}
-        title={selectedAwardForDetails?.award_title || 'Award Details'}
-        user_id={user?.id}
-        parentAward={parentAwardForDetails}
-        onEnrich={(enrichedData) => {
-          setSelectedAwardForDetails(enrichedData);
-          // Update the award in the search results list
-          setAllSearchResults((prevResults) =>
-            prevResults.map((award) =>
-              award.award_id === enrichedData.award_id ? enrichedData : award
-            )
-          );
-        }}
-        onNavigateToChild={(childAward) => {
-          setParentAwardForDetails(selectedAwardForDetails);
-          setSelectedAwardForDetails(childAward);
-        }}
-        onNavigateToParent={(parentAward) => {
-          setSelectedAwardForDetails(parentAward);
-          setParentAwardForDetails(null);
-        }}
-      />
 
       {/* Context Menu */}
       <Menu
         anchorEl={contextMenuAnchor}
-        open={Boolean(contextMenuAnchor)}
+        anchorPosition={contextMenuPosition ? { top: contextMenuPosition.y, left: contextMenuPosition.x } : undefined}
+        anchorReference={contextMenuPosition ? 'anchorPosition' : 'anchorEl'}
+        open={Boolean(contextMenuAnchor || contextMenuPosition)}
         onClose={handleContextMenuClose}
         PaperProps={{
           sx: {
@@ -3189,17 +3208,19 @@ const GovtContractsSearchPage: React.FC = () => {
       >
         <MenuItem
           onClick={handleAddToContext}
+          disabled={selectedAwards.size === 0}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Context
+          Add to Context {selectedAwards.size > 0 ? `(${selectedAwards.size} item${selectedAwards.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
         <MenuItem
           onClick={handleAddToFiles}
+          disabled={selectedAwards.size === 0}
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
-          Add to Files
+          Add to Files {selectedAwards.size > 0 ? `(${selectedAwards.size} item${selectedAwards.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
       </Menu>
 

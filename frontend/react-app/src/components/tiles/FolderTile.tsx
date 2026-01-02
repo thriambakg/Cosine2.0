@@ -42,7 +42,7 @@ import { filesystemAPI } from '@/services/api';
 import { addToContext } from './common/contextManager';
 import { TileHeaderActions, TileCustomizationDialog, confirmDialog, useTilePinning, getIconByName, getDefaultIconForTileType } from './common';
 import FileBrowserDialog from '../common/FileBrowserDialog';
-import FilePreviewDialog from '../common/FilePreviewDialog';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 
 interface FileSystemItem {
   id: string;
@@ -102,6 +102,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
   onSelectionChange,
 }) => {
   const { user } = useAuth();
+  const { openFilePreview } = useDialogManagerHelpers();
   
   // Clipboard helpers (must be defined before state initialization)
   const CLIPBOARD_STORAGE_KEY = 'filesystem_clipboard';
@@ -164,9 +165,6 @@ const FolderTile: React.FC<FolderTileProps> = ({
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
   const [folderSelectionDialogOpen, setFolderSelectionDialogOpen] = useState(false);
   
-  // Preview dialog
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  const [previewItem, setPreviewItem] = useState<FileSystemItem | null>(null);
   
   // Multi-select state
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -643,15 +641,34 @@ const FolderTile: React.FC<FolderTileProps> = ({
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent, item: FileSystemItem) => {
     setDraggedItem(item);
-    // Support multi-select
+    // Support multi-select - if item is selected and there are multiple selections, drag all selected items
     const currentItems = getCurrentFolderItems();
-    const itemsToDrag = selectedItems.has(item.id) && selectedItems.size > 1
-      ? currentItems.filter(i => selectedItems.has(i.id))
-      : [item];
+    let itemsToDrag: FileSystemItem[];
     
+    if (selectedItems.has(item.id) && selectedItems.size > 1) {
+      // Item is part of a multi-selection, drag all selected items
+      itemsToDrag = currentItems.filter(i => selectedItems.has(i.id));
+    } else if (selectedItems.size > 1 && !selectedItems.has(item.id)) {
+      // Multiple items are selected but this item isn't one of them - still drag all selected items
+      itemsToDrag = currentItems.filter(i => selectedItems.has(i.id));
+    } else {
+      // Single item drag
+      itemsToDrag = [item];
+    }
+    
+    // Set up data for both internal moves (item IDs) and sidebar drops (full objects with type)
     const itemIds = itemsToDrag.map(i => i.id);
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.effectAllowed = 'copyMove'; // Allow both copy (to sidebar) and move (within folder)
+    
+    // Set data for internal folder moves (legacy format)
     e.dataTransfer.setData('text/plain', JSON.stringify(itemIds));
+    
+    // Set data for sidebar drops (new format with type and full objects)
+    e.dataTransfer.setData('application/json', JSON.stringify({
+      type: 'filesystem_items',
+      items: itemsToDrag,
+      folderPath: currentFolderPath
+    }));
   };
 
   const handleDragOver = (e: React.DragEvent, targetItem: FileSystemItem) => {
@@ -809,6 +826,12 @@ const FolderTile: React.FC<FolderTileProps> = ({
     e.preventDefault(); // Prevent browser context menu
     e.stopPropagation(); // Prevent GridDashboard context menu
     setSelectedItem(item);
+    // Also add to selectedItems if not already selected
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      newSet.add(item.id);
+      return newSet;
+    });
     setItemContextMenuPosition({ x: e.clientX, y: e.clientY });
     setItemContextMenuAnchor(e.currentTarget as HTMLElement);
   };
@@ -830,40 +853,55 @@ const FolderTile: React.FC<FolderTileProps> = ({
 
   // Add to context (handles multiple selected items)
   const handleAddToContext = async (target: 'new' | 'sidebar') => {
-    if (selectedItems.size === 0 || !user) return;
+    if (!user) return;
     
     const currentItems = getCurrentFolderItems();
-    const selectedItemObjects = currentItems.filter(item => selectedItems.has(item.id));
     
-    if (selectedItemObjects.length === 0) return;
+    // If a single item is selected via right-click, include it
+    let itemsToAdd = currentItems.filter(item => selectedItems.has(item.id));
+    
+    // If no items in selectedItems but selectedItem is set, use that
+    if (itemsToAdd.length === 0 && selectedItem) {
+      itemsToAdd = [selectedItem];
+    }
+    
+    if (itemsToAdd.length === 0) return;
     
     try {
-      for (const item of selectedItemObjects) {
-        const contextItem = {
-          id: item.id,
-          type: 'filesystem' as const,
-          title: item.metadata?.title || item.name,
-          subtitle: item.metadata?.subtitle || item.type,
-          timestamp: item.created_at,
-          data: {
-            filesystem_type: item.type === 'folder' ? 'folder' : 'item',
-            item_id: item.id,
-            folder_path: currentFolderPath,
-            s3_key: item.s3_key,
-            ...item.metadata?.data,
-          },
-        };
-        
-        if (target === 'sidebar') {
-          // Add to current sidebar session's context
-          const event = new CustomEvent('add-to-sidebar-context', {
-            detail: contextItem
+      // Prepare all context items
+      const contextItems = itemsToAdd.map(item => ({
+        id: item.id,
+        type: 'filesystem' as const,
+        title: item.metadata?.title || item.name,
+        subtitle: item.metadata?.subtitle || item.type,
+        timestamp: item.created_at,
+        data: {
+          filesystem_type: item.type === 'folder' ? 'folder' : 'item',
+          item_id: item.id,
+          folder_path: currentFolderPath,
+          s3_key: item.s3_key,
+          ...item.metadata?.data,
+        },
+      }));
+      
+      if (target === 'sidebar') {
+        // Use batch addition for multiple items, single event for one item
+        if (contextItems.length > 1) {
+          const event = new CustomEvent('add-multiple-to-sidebar-context', {
+            detail: contextItems
           });
           window.dispatchEvent(event);
         } else {
-          // Add to new chat
-          addToContext(contextItem);
+          const event = new CustomEvent('add-to-sidebar-context', {
+            detail: contextItems[0]
+          });
+          window.dispatchEvent(event);
         }
+      } else {
+        // Add to new chat - dispatch each item separately for new chat context
+        contextItems.forEach(contextItem => {
+          addToContext(contextItem);
+        });
       }
       
       setSelectedItems(new Set());
@@ -1276,8 +1314,24 @@ const FolderTile: React.FC<FolderTileProps> = ({
                       hasMetadata: !!item.metadata,
                       metadataKeys: item.metadata ? Object.keys(item.metadata) : [],
                     });
-                    setPreviewItem(item);
-                    setPreviewDialogOpen(true);
+                    if (user?.id) {
+                      const itemType = item.type === 'context_item' || item.type === 'uploaded_file' || item.type === 'agent_file' 
+                        ? item.type 
+                        : 'context_item' as 'context_item' | 'uploaded_file' | 'agent_file';
+                      const s3Key = item.s3_key || '';
+                      openFilePreview(
+                        {
+                          id: item.id,
+                          name: item.metadata?.title || item.name,
+                          type: itemType,
+                          parentId: item.parentId,
+                          metadata: item.metadata,
+                          s3_key: s3Key,
+                        },
+                        user.id,
+                        currentFolderPath
+                      );
+                    }
                   }}
                   onContextMenu={(e) => handleItemContextMenu(e, item)}
                   onMouseDown={(e) => {
@@ -1492,7 +1546,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
           sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
         >
           <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-          Add to Context
+          Add to Context {selectedItems.size > 0 ? `(${selectedItems.size} item${selectedItems.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
       </Menu>
 
@@ -1542,7 +1596,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
             }}
           >
             <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: (selectedItems.size === 0 && !selectedItem) ? '#6b7280' : '#3b82f6' }} />
-            Add to Context
+            Add to Context {selectedItems.size > 0 ? `(${selectedItems.size} item${selectedItems.size > 1 ? 's' : ''})` : selectedItem ? '(1 item)' : ''}
           </MenuItem>
         )}
         <MenuItem
@@ -1690,56 +1744,6 @@ const FolderTile: React.FC<FolderTileProps> = ({
         title="Select Destination Folder"
       />
 
-      {/* File Preview Dialog */}
-      {previewItem && previewItem.type !== 'folder' && user?.id && (() => {
-        // Type guard: we know previewItem.type is not 'folder' at this point
-        const itemType = previewItem.type === 'context_item' || previewItem.type === 'uploaded_file' || previewItem.type === 'agent_file' 
-          ? previewItem.type 
-          : 'context_item' as 'context_item' | 'uploaded_file' | 'agent_file';
-        
-        // Log preview item data for debugging
-        console.log('📁 FolderTile: Opening preview for item:', {
-          id: previewItem.id,
-          name: previewItem.name,
-          type: itemType,
-          s3_key: previewItem.s3_key,
-          hasMetadata: !!previewItem.metadata,
-          metadataKeys: previewItem.metadata ? Object.keys(previewItem.metadata) : [],
-          fullItem: previewItem,
-        });
-        
-        // Ensure s3_key is available - FileSystemItem has s3_key directly
-        const s3Key = previewItem.s3_key || '';
-        
-        if (!s3Key) {
-          console.error('❌ FolderTile: No s3_key available for preview:', {
-            itemId: previewItem.id,
-            itemName: previewItem.name,
-            itemType: previewItem.type,
-            hasS3Key: !!previewItem.s3_key,
-          });
-        }
-        
-        return (
-          <FilePreviewDialog
-            open={previewDialogOpen}
-            onClose={() => {
-              setPreviewDialogOpen(false);
-              setPreviewItem(null);
-            }}
-            item={{
-              id: previewItem.id,
-              name: previewItem.metadata?.title || previewItem.name,
-              type: itemType,
-              parentId: previewItem.parentId,
-              metadata: previewItem.metadata,
-              s3_key: s3Key, // Use the resolved s3_key
-            }}
-            user_id={user.id}
-            folder_path={currentFolderPath}
-          />
-        );
-      })()}
 
       {/* Tile Customization Dialog */}
       <TileCustomizationDialog

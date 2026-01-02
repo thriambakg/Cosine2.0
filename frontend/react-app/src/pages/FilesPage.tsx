@@ -1005,18 +1005,39 @@ const FilesPage: React.FC = () => {
 
   // Drag and drop handlers
   const handleDragStart = (event: React.DragEvent, item: FileSystemItem) => {
-    // If multiple items are selected and this is one of them, drag all selected
-    if (selectedItems.size > 1 && selectedItems.has(item.id)) {
-      // Store all selected items for multi-drag
-      const selectedItemsArray = Array.from(selectedItems).map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
-      event.dataTransfer.setData('text/plain', JSON.stringify(selectedItemsArray.map(i => i.id)));
-      // Use the first item as the primary dragged item for visual feedback
-      setDraggedItem(selectedItemsArray[0]);
+    const currentItems = getCurrentFolderItems();
+    let itemsToDrag: FileSystemItem[];
+    
+    // Support multi-select - if item is selected and there are multiple selections, drag all selected items
+    if (selectedItems.has(item.id) && selectedItems.size > 1) {
+      // Item is part of a multi-selection, drag all selected items
+      itemsToDrag = currentItems.filter(i => selectedItems.has(i.id));
+    } else if (selectedItems.size > 1 && !selectedItems.has(item.id)) {
+      // Multiple items are selected but this item isn't one of them - still drag all selected items
+      itemsToDrag = currentItems.filter(i => selectedItems.has(i.id));
     } else {
-      setDraggedItem(item);
-      event.dataTransfer.setData('text/plain', item.id);
+      // Single item drag
+      itemsToDrag = [item];
     }
-    event.dataTransfer.effectAllowed = 'move';
+    
+    // Set up data for both internal moves (item IDs) and sidebar drops (full objects with type)
+    const itemIds = itemsToDrag.map(i => i.id);
+    event.dataTransfer.effectAllowed = 'copyMove'; // Allow both copy (to sidebar) and move (within folder)
+    
+    // Set data for internal folder moves (legacy format)
+    event.dataTransfer.setData('text/plain', JSON.stringify(itemIds));
+    
+    // Set data for sidebar drops (new format with type and full objects)
+    // Include folder path for context
+    const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+    event.dataTransfer.setData('application/json', JSON.stringify({
+      type: 'filesystem_items',
+      items: itemsToDrag,
+      folderPath: folderPath
+    }));
+    
+    // Use the first item as the primary dragged item for visual feedback
+    setDraggedItem(itemsToDrag[0]);
   };
 
   const handleDragOver = (event: React.DragEvent, itemId: string, isFolder: boolean) => {
@@ -1880,7 +1901,7 @@ const FilesPage: React.FC = () => {
                   key={folder.id}
                   button
                   disableRipple
-                  draggable
+                  draggable={selectedItems.has(folder.id) || selectedItems.size === 0}
                   onDragStart={(e) => handleDragStart(e, folder)}
                   onDragOver={(e) => handleDragOver(e, folder.id, true)}
                   onDragLeave={handleDragLeave}
@@ -1952,7 +1973,7 @@ const FilesPage: React.FC = () => {
                   key={file.id}
                   button
                   disableRipple
-                  draggable
+                  draggable={selectedItems.has(file.id) || selectedItems.size === 0}
                   onDragStart={(e) => handleDragStart(e, file)}
                   onDragOver={(e) => handleDragOver(e, file.id, false)}
                   onDragLeave={handleDragLeave}

@@ -40,7 +40,7 @@ import {
   Folder as FolderIcon,
 } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
-import ItemDetailsDialog from '../common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '../../contexts/AuthContext';
 import { filesystemAPI } from '../../services/api';
 import { 
@@ -163,6 +163,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   const paginationState = initialPaginationState;
   
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
   // const { activeSessionId } = useGlobalChat();
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
@@ -171,8 +172,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
-  const [selectedFilingForDetails, setSelectedFilingForDetails] = useState<LDAFiling | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   
   // General issues and government entities loaded from local CSV files
   const [generalIssues, setGeneralIssues] = useState<string[]>([]);
@@ -198,6 +197,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   });
 
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1390,16 +1390,101 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     };
   }, [allResults]);
 
-  const toggleFilingSelection = (filingId: string) => {
+  // Handle filing selection with single click, Ctrl+click, and Shift+click
+  const handleFilingClick = (e: React.MouseEvent, filingId: string, index: number) => {
+    // Don't handle if clicking on interactive elements (buttons, links, etc.)
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea, [role="button"]')) {
+      return;
+    }
+    
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
     setSelectedFilings(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(filingId)) {
-        newSet.delete(filingId);
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const filingsToSelect = currentPageResults.slice(start, end + 1);
+        filingsToSelect.forEach(filing => {
+          const id = filing.id || filing.filing_uuid || filing.PK || '';
+          if (id) newSelected.add(id);
+        });
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(filingId)) {
+          newSelected.delete(filingId);
+        } else {
+          newSelected.add(filingId);
+        }
+        setLastSelectedIndex(index);
       } else {
-        newSet.add(filingId);
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(filingId)) {
+          newSelected.delete(filingId);
+        } else {
+          newSelected.clear();
+          newSelected.add(filingId);
+        }
+        setLastSelectedIndex(index);
       }
-      return newSet;
+      
+      return newSelected;
     });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, filingId: string) => {
+    e.stopPropagation();
+    
+    // Determine which filings to drag
+    const filingsToDrag = selectedFilings.has(filingId) ? selectedFilings : new Set([filingId]);
+    
+    // Set drag data
+    const selectedFilingObjects = currentResults.filter(filing => {
+      const id = filing.id || filing.filing_uuid || filing.PK || '';
+      return filingsToDrag.has(id);
+    });
+    
+    if (selectedFilingObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'lda_filings',
+        filings: selectedFilingObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedFilingObjects.length} filing${selectedFilingObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, filingId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this filing is not selected, select only it
+    if (!selectedFilings.has(filingId)) {
+      setSelectedFilings(new Set([filingId]));
+    }
+    
+    setContextMenuAnchor(e.currentTarget as HTMLElement);
   };
 
   const formatCurrency = (amount: number | string | undefined) => {
@@ -1828,31 +1913,48 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                   {visibleColumns.includes('state') && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>State</TableCell>
                   )}
-                  {/* Actions column is always visible (not selectable) */}
-                  <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {currentPageResults.map((filing) => {
-                  const filingId = filing.id || filing.filing_uuid || '';
+                {currentPageResults.map((filing, index) => {
+                  const filingId = filing.id || filing.filing_uuid || filing.PK || '';
                   return (
                   <TableRow
                     key={filingId}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, filingId)}
+                    onClick={(e) => handleFilingClick(e, filingId, index)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (user?.id) {
+                        openItemDetails(
+                          'lda_disclosure',
+                          filing,
+                          'Filing Details',
+                          { user_id: user.id }
+                        );
+                      }
+                    }}
+                    onContextMenu={(e) => handleRowContextMenu(e, filingId)}
                     sx={{
                       backgroundColor: selectedFilings.has(filingId) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                      cursor: 'pointer',
+                      userSelect: 'none',
                       '&:hover': {
                         backgroundColor: selectedFilings.has(filingId) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                       },
                     }}
                   >
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        size="small"
-                        checked={selectedFilings.has(filingId)}
-                        onChange={() => toggleFilingSelection(filingId)}
-                        sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                      />
-                    </TableCell>
+                    {/* Empty cell to maintain row height and alignment with header checkbox */}
+                    <TableCell 
+                      padding="none"
+                      sx={{ 
+                        width: '40px',
+                        minWidth: '40px',
+                        maxWidth: '40px',
+                        padding: '8px 4px',
+                      }}
+                    />
                     {visibleColumns.includes('filing_type') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                         {filing.report_type_display || filing.filing_type_display || filing.report_type || filing.filing_type || 'N/A'}
@@ -1893,31 +1995,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                         {filing.state || 'N/A'}
                       </TableCell>
                     )}
-                    {/* Actions column is always visible (not selectable) */}
-                    <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedFilingForDetails(filing);
-                          setDetailsDialogOpen(true);
-                        }}
-                        sx={{
-                          color: '#3b82f6',
-                          borderColor: '#3b82f6',
-                          fontSize: '0.75rem',
-                          py: 0.5,
-                          px: 1.5,
-                          '&:hover': {
-                            borderColor: '#60a5fa',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                          },
-                        }}
-                      >
-                        View More
-                      </Button>
-                    </TableCell>
                   </TableRow>
                   );
                 })}
@@ -3069,17 +3146,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           })}
       </Menu>
 
-      {/* Filing Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-        }}
-        itemType="lda_disclosure"
-        data={selectedFilingForDetails}
-        title="Filing Details"
-        user_id={user?.id}
-      />
 
       {/* Context Menu */}
       <Menu

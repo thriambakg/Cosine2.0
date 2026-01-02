@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
 import FileBrowserDialog from './FileBrowserDialog';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
@@ -80,6 +81,8 @@ interface ItemDetailsDialogProps {
   onSizeChange?: (size: { width: number; height: number }) => void;
   onCacheContent?: (content: any) => void;
   cachedContent?: any;
+  zIndex?: number;
+  onBringToFront?: () => void;
 }
 
 const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
@@ -103,7 +106,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   onPositionChange,
   onSizeChange,
   onCacheContent,
-  cachedContent,
+  zIndex = 1000,
+  onBringToFront,
 }) => {
   const [enrichmentLoading, setEnrichmentLoading] = useState<boolean>(false);
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
@@ -112,6 +116,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [fileBrowserOpen, setFileBrowserOpen] = useState<boolean>(false);
   
   const { user } = useAuth();
+  
+  // Dialog manager for minimize functionality (only use if not already managed)
+  const safeDialogManager = useSafeDialogManager();
+  const dialogManager = (!dialogId && safeDialogManager) ? safeDialogManager : undefined;
+  
   // Resizable and movable state
   const [position, setPosition] = useState(initialPosition || { x: 100, y: 100 });
   const [size, setSize] = useState(initialSize || { width: 900, height: 600 });
@@ -125,6 +134,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   // Preview values stored in refs to avoid re-renders during drag/resize
   const previewPositionRef = useRef({ x: 100, y: 100 });
   const previewSizeRef = useRef({ width: 900, height: 600 });
+  const cachedDataRef = useRef<any>(null); // Track what we've cached to prevent infinite loops
 
   // Utility functions
   const formatDate = (dateString?: string): string => {
@@ -3550,17 +3560,31 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     }
   }, [initialSize?.width, initialSize?.height]);
 
-  // Cache content when data changes
+  // Cache content when data changes (only once per data change) - non-blocking
   useEffect(() => {
     if (data && onCacheContent && dialogId) {
-      onCacheContent(data);
-      try {
-        sessionStorage.setItem(`dialog-cache-${dialogId}`, JSON.stringify(data));
-      } catch (e) {
-        // Ignore
+      // Check if we've already cached this data to prevent infinite loops
+      const dataString = JSON.stringify(data);
+      if (cachedDataRef.current !== dataString) {
+        cachedDataRef.current = dataString;
+        onCacheContent(data);
+        // Save to sessionStorage asynchronously to avoid blocking
+        const saveCache = () => {
+          try {
+            sessionStorage.setItem(`dialog-cache-${dialogId}`, dataString);
+          } catch (e) {
+            // Ignore
+          }
+        };
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(saveCache, { timeout: 1000 });
+        } else {
+          setTimeout(saveCache, 0);
+        }
       }
     }
-  }, [data, dialogId, onCacheContent]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, dialogId]); // Don't include onCacheContent to prevent infinite loops
 
   if (!open) return null;
 
@@ -3590,13 +3614,37 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 1100,
+          zIndex: zIndex,
           pointerEvents: 'none',
+        }}
+        onMouseDown={(e) => {
+          // Bring dialog to front when clicking anywhere on the backdrop
+          if (onBringToFront && e.target === e.currentTarget) {
+            // Use requestAnimationFrame to avoid blocking
+            requestAnimationFrame(() => {
+              onBringToFront();
+            });
+          }
         }}
       >
         <Paper
           ref={paperRef}
           elevation={8}
+          onMouseDown={(e) => {
+            // Only bring to front when clicking on the title bar or empty space, not on buttons/interactive elements
+            const target = e.target as HTMLElement;
+            const isInteractiveElement = target.closest('button, a, input, select, textarea, [role="button"], [onClick]');
+            const isTitleBar = target.closest('[data-title-bar]');
+            
+            // Only bring to front if clicking on title bar or non-interactive area
+            if (onBringToFront && (isTitleBar || !isInteractiveElement)) {
+              // Use requestAnimationFrame to avoid blocking
+              requestAnimationFrame(() => {
+                onBringToFront();
+              });
+            }
+            // Don't prevent default - allow drag to work
+          }}
           sx={{
             position: 'fixed',
             left: `${position.x}px`,
@@ -3611,10 +3659,12 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             overflow: 'hidden',
             pointerEvents: 'auto',
             cursor: isDragging ? 'move' : 'default',
+            zIndex: zIndex,
           }}
         >
           {/* Title bar - draggable */}
           <Box
+            data-title-bar
             onMouseDown={handleDragStart}
             sx={{
               color: '#ffffff',
@@ -3833,20 +3883,43 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           </Tooltip>
           
           {/* Minimize Button */}
-          {onMinimize && (
-            <Tooltip title="Minimize">
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
+          <Tooltip title="Minimize">
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onMinimize) {
                   onMinimize();
-                }}
-                sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-              >
-                <MinimizeIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
+                } else if (dialogManager && !dialogId) {
+                  // If not managed, add to manager and minimize
+                  const id = dialogManager.openDialog({
+                    type: 'item_details',
+                    title: title || 'Item Details',
+                    data: {
+                      itemType,
+                      data,
+                      title,
+                      folder_path,
+                      user_id,
+                      onEnrich,
+                      onNavigateToChild,
+                      onNavigateToParent,
+                      parentAward,
+                      item_id,
+                    },
+                    props: {},
+                    position,
+                    size,
+                  });
+                  dialogManager.minimizeDialog(id);
+                  onClose(); // Close the unmanaged dialog
+                }
+              }}
+              sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+            >
+              <MinimizeIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           
           {/* Close Button */}
           <IconButton

@@ -44,7 +44,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
-import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -137,8 +136,7 @@ const NewsSearchPage: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
   
   // Dialog state for article details
-  const [selectedArticleForDetails, setSelectedArticleForDetails] = useState<NewsArticle | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
+  // const { openItemDetails } = useDialogManagerHelpers(); // Unused for now
   
   // Selection state
   const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
@@ -995,13 +993,6 @@ const NewsSearchPage: React.FC = () => {
                                 width: 120,
                                 minWidth: 120,
                               }}>Date</TableCell>
-                              <TableCell sx={{ 
-                                color: '#9ca3af', 
-                                fontWeight: 600, 
-                                fontSize: '0.875rem',
-                                width: 100,
-                                minWidth: 100,
-                              }}>More Info</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
@@ -1181,33 +1172,6 @@ const NewsSearchPage: React.FC = () => {
                                   padding: '8px 12px',
                                 }}>
                                   {formatDate(article.published_date)}
-                                </TableCell>
-                                <TableCell sx={{ 
-                                  fontSize: '0.875rem',
-                                  width: 100,
-                                  minWidth: 100,
-                                  padding: '8px 12px',
-                                }}>
-                                  <Button
-                                    variant="outlined"
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedArticleForDetails(article);
-                                      setDetailsDialogOpen(true);
-                                    }}
-                                    sx={{
-                                      color: '#3b82f6',
-                                      borderColor: '#3b82f6',
-                                      fontSize: '0.7rem',
-                                      '&:hover': {
-                                        borderColor: '#60a5fa',
-                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                      },
-                                    }}
-                                  >
-                                    More Info
-                                  </Button>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -1846,15 +1810,6 @@ const NewsSearchPage: React.FC = () => {
         title="Save to Files"
       />
 
-      {/* Article Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => setDetailsDialogOpen(false)}
-        itemType="news_article"
-        data={selectedArticleForDetails}
-        title={selectedArticleForDetails?.title}
-        user_id={user?.id}
-      />
     </Box>
   );
 };

@@ -27,11 +27,13 @@ import {
   Warning as WarningIcon,
   InfoOutlined as InfoIcon,
   Minimize as MinimizeIcon,
+  Dashboard as DashboardIcon,
 } from '@mui/icons-material';
 import { fileReturnAPI } from '@/services/api';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
 import ItemDetailsDialog, { ItemType } from './ItemDetailsDialog';
+import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
 
 interface FilePreviewDialogProps {
   open: boolean;
@@ -55,6 +57,8 @@ interface FilePreviewDialogProps {
   onSizeChange?: (size: { width: number; height: number }) => void;
   onCacheContent?: (content: any) => void;
   cachedContent?: any;
+  zIndex?: number;
+  onBringToFront?: () => void;
 }
 
 interface PreviewResponse {
@@ -79,15 +83,20 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   dialogId,
   initialPosition,
   initialSize,
-  onPositionChange,
   onSizeChange,
   onCacheContent,
   cachedContent,
+  zIndex = 1000,
+  onBringToFront,
 }) => {
   const [loading, setLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(cachedContent || null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Dialog manager for minimize functionality (only use if not already managed)
+  const safeDialogManager = useSafeDialogManager();
+  const dialogManager = (!dialogId && safeDialogManager) ? safeDialogManager : undefined;
   
   // Resizable and movable state
   const [position, setPosition] = useState(initialPosition || { x: 100, y: 100 });
@@ -140,10 +149,18 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           onCacheContent(previewData);
         }
         if (dialogId) {
-          try {
-            sessionStorage.setItem(`dialog-cache-${dialogId}`, JSON.stringify(previewData));
-          } catch (e) {
-            // Ignore
+          // Save to sessionStorage asynchronously to avoid blocking
+          const saveCache = () => {
+            try {
+              sessionStorage.setItem(`dialog-cache-${dialogId}`, JSON.stringify(previewData));
+            } catch (e) {
+              // Ignore
+            }
+          };
+          if ('requestIdleCallback' in window) {
+            requestIdleCallback(saveCache, { timeout: 1000 });
+          } else {
+            setTimeout(saveCache, 0);
           }
         }
         setPreviewData(previewData);
@@ -277,6 +294,71 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
       setLoading(false);
     }
   }, [open, item, fetchPreview, cachedContent]);
+
+  const handleAddToContext = useCallback(() => {
+    if (!user_id || !item.s3_key) {
+      // Try to construct s3_key if missing
+      const isCosineFile = item.type === 'context_item' || 
+                          item.name?.toLowerCase().endsWith('.cosine') ||
+                          item.metadata?.type === 'context_item';
+      
+      let s3_key = item.s3_key;
+      
+      if (!s3_key && isCosineFile) {
+        // Construct s3_key for .cosine files
+        const folderPath = folder_path || (item.parentId && item.parentId !== 'root' ? item.parentId : '');
+        const folderPathPart = folderPath ? `${folderPath}/` : '';
+        s3_key = `users/${user_id}/filesys/${folderPathPart}${item.id}.cosine`;
+      }
+      
+      if (!s3_key) {
+        alert(`Cannot add "${item.name}" to context: file location information is missing.`);
+        return;
+      }
+      
+      // Create context item
+      const contextItem = {
+        id: `filesystem_item_${item.id}_${Date.now()}`,
+        type: (item.metadata?.type || item.type) as any,
+        title: item.metadata?.title || item.name,
+        subtitle: item.metadata?.subtitle || 'Filesystem Item',
+        data: {
+          filesystem_type: 'item',
+          item_id: item.id,
+          s3_key: s3_key,
+          item_type: item.type,
+        },
+        timestamp: Date.now(),
+      };
+      
+      // Dispatch to sidebar context
+      const event = new CustomEvent('add-to-sidebar-context', {
+        detail: contextItem
+      });
+      window.dispatchEvent(event);
+    } else {
+      // Create context item with available s3_key
+      const contextItem = {
+        id: `filesystem_item_${item.id}_${Date.now()}`,
+        type: (item.metadata?.type || item.type) as any,
+        title: item.metadata?.title || item.name,
+        subtitle: item.metadata?.subtitle || 'Filesystem Item',
+        data: {
+          filesystem_type: 'item',
+          item_id: item.id,
+          s3_key: item.s3_key,
+          item_type: item.type,
+        },
+        timestamp: Date.now(),
+      };
+      
+      // Dispatch to sidebar context
+      const event = new CustomEvent('add-to-sidebar-context', {
+        detail: contextItem
+      });
+      window.dispatchEvent(event);
+    }
+  }, [item, user_id, folder_path]);
 
   const handleDownload = async () => {
     // Always make an API call to get the download URL (ensures encrypted .cosine files are downloaded correctly)
@@ -3070,13 +3152,37 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 1100,
+          zIndex: zIndex,
           pointerEvents: 'none',
+        }}
+        onMouseDown={(e) => {
+          // Bring dialog to front when clicking anywhere on the backdrop
+          if (onBringToFront && e.target === e.currentTarget) {
+            // Use requestAnimationFrame to avoid blocking
+            requestAnimationFrame(() => {
+              onBringToFront();
+            });
+          }
         }}
       >
         <Paper
           ref={paperRef}
           elevation={8}
+          onMouseDown={(e) => {
+            // Only bring to front when clicking on the title bar or empty space, not on buttons/interactive elements
+            const target = e.target as HTMLElement;
+            const isInteractiveElement = target.closest('button, a, input, select, textarea, [role="button"], [onClick]');
+            const isTitleBar = target.closest('[data-title-bar]');
+            
+            // Only bring to front if clicking on title bar or non-interactive area
+            if (onBringToFront && (isTitleBar || !isInteractiveElement)) {
+              // Use requestAnimationFrame to avoid blocking
+              requestAnimationFrame(() => {
+                onBringToFront();
+              });
+            }
+            // Don't prevent default - allow drag to work
+          }}
           sx={{
             position: 'fixed',
             left: `${position.x}px`,
@@ -3091,10 +3197,12 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             overflow: 'hidden',
             pointerEvents: 'auto',
             cursor: isDragging ? 'move' : 'default',
+            zIndex: zIndex,
           }}
         >
           {/* Title bar - draggable */}
           <Box
+            data-title-bar
             onMouseDown={handleDragStart}
             sx={{
               display: 'flex',
@@ -3115,17 +3223,45 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              {onMinimize && (
+              <Tooltip title="Add to Context">
                 <IconButton 
                   onClick={(e) => {
                     e.stopPropagation();
-                    onMinimize();
+                    handleAddToContext();
                   }} 
                   sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
                 >
-                  <MinimizeIcon />
+                  <DashboardIcon />
                 </IconButton>
-              )}
+              </Tooltip>
+              <IconButton 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onMinimize) {
+                    onMinimize();
+                  } else if (dialogManager && !dialogId) {
+                    // If not managed, add to manager and minimize
+                    const id = dialogManager.openDialog({
+                      type: 'file_preview',
+                      title: item.name,
+                      data: {
+                        item,
+                        user_id,
+                        folder_path,
+                      },
+                      props: {},
+                      position,
+                      size,
+                    });
+                    dialogManager.minimizeDialog(id);
+                    onClose(); // Close the unmanaged dialog
+                  }
+                }} 
+                sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                title="Minimize"
+              >
+                <MinimizeIcon />
+              </IconButton>
               <IconButton onClick={onClose} sx={{ color: '#9ca3af', '&:hover': { color: '#ef4444' } }}>
                 <CloseIcon />
               </IconButton>

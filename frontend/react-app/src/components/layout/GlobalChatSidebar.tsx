@@ -40,7 +40,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
 // import { useWebSocket } from '../../contexts/WebSocketContext';
-import { ContextItem } from '../tiles/common/contextManager';
+import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext } from '../tiles/common/contextManager';
 import ContextItemRow from '../context/ContextItemRow';
 import { sessionManagementAPI } from '../../services/api';
 // COMMENTED OUT: useMessagingService (replaced with unified architecture)
@@ -262,6 +262,15 @@ const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabl
         onKeyPress={onKeyPress}
         placeholder={placeholder}
         disabled={disabled}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // Don't allow dropping text into the input - let parent handle it
+        }}
         sx={{
           '& .MuiOutlinedInput-root': {
             backgroundColor: 'rgba(31, 41, 55, 0.8)',
@@ -1576,8 +1585,14 @@ const GlobalChatSidebar: React.FC = () => {
       
       // Add all items to context even if there's no active session
       // Session will be created when user sends first message
+      // Update previous context ref to mark that context has changed
+      // This ensures the next message will send context data
+      previousContextRef.current = sessionContext; // Keep the old context for change detection
+      
       const newContext = [...sessionContext, ...contextItems];
       setSessionContext(newContext);
+      // Context updated
+      console.log('🎯 Sidebar: Context change detection scenario completed - context data is ready for next message');
       console.log(`✅ Added ${contextItems.length} items to sidebar context`, activeSessionId ? '(with active session)' : '(no session yet - will create on first message)');
       
       // Dispatch success event for feedback
@@ -1947,6 +1962,190 @@ const GlobalChatSidebar: React.FC = () => {
     />
     <Box
       ref={sidebarRef}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Add visual feedback
+        const target = e.currentTarget as HTMLElement;
+        target.style.backgroundColor = 'rgba(59, 130, 246, 0.05)';
+      }}
+      onDragLeave={(e) => {
+        // Only remove highlight if leaving the entire sidebar
+        const target = e.currentTarget as HTMLElement;
+        const relatedTarget = e.relatedTarget as HTMLElement;
+        if (!target.contains(relatedTarget)) {
+          target.style.backgroundColor = 'rgba(15, 23, 42, 0.98)';
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Remove visual feedback
+        const target = e.currentTarget as HTMLElement;
+        target.style.backgroundColor = 'rgba(15, 23, 42, 0.98)';
+        
+        try {
+          // Try to get data from application/json first (for filesystem items and other structured data)
+          let data;
+          try {
+            const jsonData = e.dataTransfer.getData('application/json');
+            if (jsonData) {
+              data = JSON.parse(jsonData);
+            } else {
+              data = JSON.parse(e.dataTransfer.getData('text/plain'));
+            }
+          } catch {
+            data = JSON.parse(e.dataTransfer.getData('text/plain'));
+          }
+          if (data.type === 'congress_bills' && data.bills && Array.isArray(data.bills)) {
+            // Use batch function for multiple bills, single function for one bill
+            if (data.bills.length > 1) {
+              addMultipleBillsToContext(data.bills, 'sidebar');
+            } else if (data.bills.length === 1) {
+              addBillToContext(data.bills[0], 'sidebar');
+            }
+          } else if (data.type === 'govt_contracts' && data.awards && Array.isArray(data.awards)) {
+            // Use batch function for multiple awards, single function for one award
+            if (data.awards.length > 1) {
+              addMultipleAwardsToContext(data.awards);
+            } else if (data.awards.length === 1) {
+              addAwardToContext(data.awards[0]);
+            }
+          } else if (data.type === 'lda_filings' && data.filings && Array.isArray(data.filings)) {
+            // Use batch function for multiple filings, single function for one filing
+            if (data.filings.length > 1) {
+              addMultipleLDAFilingsToContext(data.filings);
+            } else if (data.filings.length === 1) {
+              addLDAFilingToContext(data.filings[0]);
+            }
+            } else if (data.type === 'politician_trades' && data.trades && Array.isArray(data.trades)) {
+              // Use batch function for multiple trades, single function for one trade
+              if (data.trades.length > 1) {
+                addMultipleTradesToContext(data.trades, 'sidebar');
+              } else if (data.trades.length === 1) {
+                addTradeToContext(data.trades[0], 'sidebar');
+              }
+            } else if (data.type === 'sec_filings' && data.filings && Array.isArray(data.filings)) {
+              // Use batch function for multiple filings, single function for one filing
+              if (data.filings.length > 1) {
+                addMultipleFilingsToContext(data.filings, 'sidebar');
+              } else if (data.filings.length === 1) {
+                addFilingToContext(data.filings[0], 'sidebar');
+              }
+            } else if (data.type === 'stocks' && data.stocks && Array.isArray(data.stocks)) {
+              // Transform raw stock objects to the format expected by addStockToContext/addMultipleStocksToContext
+              const formattedStocks = data.stocks.map((stock: any) => ({
+                symbol: stock.symbol || '',
+                name: stock.name || stock.symbol || 'Unknown',
+                timeframe: stock.timeframe || '1y', // Default to 1y if not provided
+                stockData: {
+                  symbol: stock.symbol || '',
+                  name: stock.name || stock.symbol || 'Unknown',
+                  price: stock.price ?? stock.current_price ?? 0,
+                  priceChange: stock.priceChange ?? stock.price_change ?? 0,
+                  priceChangePercent: stock.priceChangePercent ?? stock.price_change_percent ?? 0,
+                  marketCap: stock.marketCap ?? stock.market_cap ?? 0,
+                  volatility: stock.volatility ?? 0,
+                  volume: stock.volume ?? 0,
+                  avgVolume: stock.avg_volume ?? 0,
+                  industry: stock.industry ?? 'Unknown',
+                  sector: stock.sector ?? stock.stockData?.sector ?? 'Unknown',
+                  peRatio: stock.peRatio ?? stock.pe_ratio ?? stock.pe ?? 0,
+                  dividendYield: stock.dividendYield ?? stock.dividend_yield ?? 0,
+                  dayHigh: stock.dayHigh ?? stock.day_high ?? 0,
+                  dayLow: stock.dayLow ?? stock.day_low ?? 0,
+                  yearHigh: stock.yearHigh ?? stock.year_high ?? 0,
+                  yearLow: stock.yearLow ?? stock.year_low ?? 0,
+                  weekReturn: stock.weekReturn ?? stock.week_return ?? 0,
+                  previousClose: stock.previousClose ?? stock.previous_close ?? 0,
+                  timeframe: stock.timeframe || '1y',
+                  ...stock, // Include any additional properties
+                }
+              }));
+              
+              // Use batch function for multiple stocks, single function for one stock
+              if (formattedStocks.length > 1) {
+                addMultipleStocksToContext(formattedStocks, 'sidebar');
+              } else if (formattedStocks.length === 1) {
+                const stock = formattedStocks[0];
+                addStockToContext(stock.symbol, stock.name, stock.timeframe, stock.stockData, 'sidebar');
+              }
+            } else if (data.type === 'news_articles' && data.articles && Array.isArray(data.articles)) {
+              // Transform raw article objects to the format expected by addArticleToContext/addMultipleArticlesToContext
+              const formattedArticles = data.articles.map((article: any) => ({
+                articleId: article.id || article.article_id || '',
+                title: article.title || 'Untitled Article',
+                source: article.source_name || article.source_url || 'Unknown',
+                articleData: article
+              }));
+              
+              // Use batch function for multiple articles, single function for one article
+              if (formattedArticles.length > 1) {
+                addMultipleArticlesToContext(formattedArticles, 'sidebar');
+              } else if (formattedArticles.length === 1) {
+                const article = formattedArticles[0];
+                addArticleToContext(article.articleId, article.title, article.source, article.articleData, 'sidebar');
+              }
+            } else if (data.type === 'lda_filings' && data.filings && Array.isArray(data.filings)) {
+            // Use batch function for multiple filings, single function for one filing
+            if (data.filings.length > 1) {
+              addMultipleLDAFilingsToContext(data.filings);
+            } else if (data.filings.length === 1) {
+              addLDAFilingToContext(data.filings[0]);
+            }
+          } else if (data.type === 'filesystem_items' && data.items && Array.isArray(data.items)) {
+            // Handle filesystem items dragged from FolderTile
+            // Use the same logic as handleAddToContext in FolderTile
+            // Batch add multiple items using add-multiple-to-sidebar-context event for better performance
+            if (data.items.length > 1) {
+              const contextItems = data.items.map((item: any) => ({
+                id: item.id,
+                type: 'filesystem' as const,
+                title: item.metadata?.title || item.name,
+                subtitle: item.metadata?.subtitle || item.type,
+                timestamp: item.created_at,
+                data: {
+                  filesystem_type: item.type === 'folder' ? 'folder' : 'item',
+                  item_id: item.id,
+                  folder_path: data.folderPath || '',
+                  s3_key: item.s3_key,
+                  ...item.metadata?.data,
+                },
+              }));
+              
+              // Add multiple items to current sidebar session's context
+              const event = new CustomEvent('add-multiple-to-sidebar-context', {
+                detail: contextItems
+              });
+              window.dispatchEvent(event);
+            } else if (data.items.length === 1) {
+              const item = data.items[0];
+              const contextItem = {
+                id: item.id,
+                type: 'filesystem' as const,
+                title: item.metadata?.title || item.name,
+                subtitle: item.metadata?.subtitle || item.type,
+                timestamp: item.created_at,
+                data: {
+                  filesystem_type: item.type === 'folder' ? 'folder' : 'item',
+                  item_id: item.id,
+                  folder_path: data.folderPath || '',
+                  s3_key: item.s3_key,
+                  ...item.metadata?.data,
+                },
+              };
+              
+              // Add single item to current sidebar session's context
+              const event = new CustomEvent('add-to-sidebar-context', {
+                detail: contextItem
+              });
+              window.dispatchEvent(event);
+            }
+          }
+        } catch (err) {
+          console.error('Error handling drop:', err);
+        }
+      }}
       sx={{
         position: 'fixed',
         right: isDualScreenMode ? 0 : 0,
@@ -2141,11 +2340,35 @@ const GlobalChatSidebar: React.FC = () => {
           
           <IconButton
             size="small"
-            onClick={() => {
+            onClick={async () => {
+              // Clear context in backend before clearing local state
+              if (activeSessionId && user?.id) {
+                try {
+                  await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+                    session_variables: {
+                      context_items: [],
+                      context_added_at: Date.now(),
+                    }
+                  });
+                  console.log('✅ Cleared context in backend');
+                } catch (error) {
+                  console.error('❌ Failed to clear context in backend:', error);
+                }
+              }
+              
               // Clear unified message handler cache for the current session before clearing
               if (activeSessionId) {
                 unifiedMessageHandler.clearSessionMessages(activeSessionId);
               }
+              
+              // Dispatch context sync event to notify ChatPage that context was cleared
+              if (activeSessionId) {
+                const syncEvent = new CustomEvent('session-context-updated', {
+                  detail: { sessionId: activeSessionId, contextItems: [] }
+                });
+                window.dispatchEvent(syncEvent);
+              }
+              
               setActiveSessionId(null);
               setCurrentSession(null);
               setSessionContext([]);
@@ -2776,6 +2999,10 @@ const GlobalChatSidebar: React.FC = () => {
           height: `calc((100vh - ${64 + headerHeight}px) / 2)`,
           backgroundColor: 'rgba(15, 23, 42, 0.98)',
           borderLeft: '1px solid #374151',
+          '&.drag-over': {
+            borderLeft: '2px solid #3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          },
         }
       }}
       ModalProps={{ keepMounted: true }}
@@ -2790,7 +3017,61 @@ const GlobalChatSidebar: React.FC = () => {
           <CloseIcon fontSize="small" />
         </IconButton>
       </Box>
-      <Box sx={{ p: 1, overflow: 'auto', '&::-webkit-scrollbar': { width: '6px' }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } }}>
+      <Box 
+        data-sidebar-context-panel
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+            if (data.type === 'congress_bills' && data.bills && Array.isArray(data.bills)) {
+              // Use batch function for multiple bills, single function for one bill
+              if (data.bills.length > 1) {
+                addMultipleBillsToContext(data.bills, 'sidebar');
+              } else if (data.bills.length === 1) {
+                addBillToContext(data.bills[0], 'sidebar');
+              }
+            } else if (data.type === 'govt_contracts' && data.awards && Array.isArray(data.awards)) {
+              // Use batch function for multiple awards, single function for one award
+              if (data.awards.length > 1) {
+                addMultipleAwardsToContext(data.awards);
+              } else if (data.awards.length === 1) {
+                addAwardToContext(data.awards[0]);
+              }
+            } else if (data.type === 'news_articles' && data.articles && Array.isArray(data.articles)) {
+              // Transform raw article objects to the format expected by addArticleToContext/addMultipleArticlesToContext
+              const formattedArticles = data.articles.map((article: any) => ({
+                articleId: article.id || article.article_id || '',
+                title: article.title || 'Untitled Article',
+                source: article.source_name || article.source_url || 'Unknown',
+                articleData: article
+              }));
+              
+              // Use batch function for multiple articles, single function for one article
+              if (formattedArticles.length > 1) {
+                addMultipleArticlesToContext(formattedArticles, 'sidebar');
+              } else if (formattedArticles.length === 1) {
+                const article = formattedArticles[0];
+                addArticleToContext(article.articleId, article.title, article.source, article.articleData, 'sidebar');
+              }
+            }
+          } catch (err) {
+            console.error('Error handling drop:', err);
+          }
+        }}
+        sx={{ 
+          p: 1, 
+          overflow: 'auto', 
+          '&::-webkit-scrollbar': { width: '6px' }, 
+          '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, 
+          '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' }, 
+          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' } 
+        }}
+      >
         <List dense sx={{ py: 0, px: 1 }}>
           {sessionContext.map((item, index) => (
             <ListItem key={item.id || index} disableGutters sx={{ display: 'block', px: 0 }}>

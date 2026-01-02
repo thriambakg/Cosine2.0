@@ -53,7 +53,7 @@ import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import FileBrowserDialog from '../common/FileBrowserDialog';
-import ItemDetailsDialog from '../common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../../services/api';
 
 // SEC Form Categories (from SEC website) - simplified for tile
@@ -204,6 +204,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
 }) => {
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
+  const { openItemDetails } = useDialogManagerHelpers();
   
   // Debug authentication state
   useEffect(() => {
@@ -364,7 +365,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   
   // Selection state
   const [selectedResults, setSelectedResults] = useState<Set<string>>(new Set());
-  const [selectedFiling, setSelectedFiling] = useState<SECSearchResult | null>(null);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   
   // Display options state - memoize to prevent infinite re-renders
   const localDisplayOptions = useMemo(() => ({
@@ -1011,16 +1012,97 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     }
   }, [currentResults, calculateColumnWidths]);
 
-  const toggleResultSelection = (accession: string) => {
+  // Handle result selection with single click, Ctrl+click, and Shift+click
+  const handleResultClick = (e: React.MouseEvent, accession: string, index: number) => {
+    // Don't handle if clicking on interactive elements (buttons, links, etc.)
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea, [role="button"]')) {
+      return;
+    }
+    
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
     setSelectedResults(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(accession)) {
-        newSet.delete(accession);
+      const newSelected = new Set(prev);
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const resultsToSelect = currentPageResults.slice(start, end + 1);
+        resultsToSelect.forEach(result => newSelected.add(result.accession));
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(accession)) {
+          newSelected.delete(accession);
+        } else {
+          newSelected.add(accession);
+        }
+        setLastSelectedIndex(index);
       } else {
-        newSet.add(accession);
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(accession)) {
+          newSelected.delete(accession);
+        } else {
+          newSelected.clear();
+          newSelected.add(accession);
+        }
+        setLastSelectedIndex(index);
       }
-      return newSet;
+      
+      return newSelected;
     });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, accession: string) => {
+    e.stopPropagation();
+    
+    // Determine which results to drag
+    const resultsToDrag = selectedResults.has(accession) ? selectedResults : new Set([accession]);
+    
+    // Set drag data
+    const selectedResultObjects = currentResults.filter(result => 
+      resultsToDrag.has(result.accession)
+    );
+    
+    if (selectedResultObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'sec_filings',
+        filings: selectedResultObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedResultObjects.length} filing${selectedResultObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, accession: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this result is not selected, select only it
+    if (!selectedResults.has(accession)) {
+      setSelectedResults(new Set([accession]));
+    }
+    
+    setContextMenuAnchor(e.currentTarget as HTMLElement);
   };
 
 
@@ -2687,34 +2769,43 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               </TableRow>
             </TableHead>
             <TableBody>
-              {currentPageResults.map((result) => (
+              {currentPageResults.map((result, index) => (
                 <TableRow
                   key={result.accession}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, result.accession)}
+                  onClick={(e) => handleResultClick(e, result.accession, index)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    if (user?.id) {
+                      openItemDetails(
+                        'sec_filing',
+                        result,
+                        `Filing Details: ${result.form} - ${result.filingEntity}`,
+                        { user_id: user.id }
+                      );
+                    }
+                  }}
+                  onContextMenu={(e) => handleRowContextMenu(e, result.accession)}
                   sx={{
                     backgroundColor: selectedResults.has(result.accession) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                     cursor: 'pointer',
+                    userSelect: 'none',
                     '&:hover': {
                       backgroundColor: selectedResults.has(result.accession) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                     },
                   }}
-                  onClick={() => toggleResultSelection(result.accession)}
                 >
-                  <TableCell sx={{ 
-                    padding: '8px 12px',
-                    width: columnWidths.checkbox || 50,
-                    minWidth: columnWidths.checkbox || 50,
-                    maxWidth: columnWidths.checkbox || 50,
-                  }}>
-                    <Checkbox
-                      size="small"
-                      checked={selectedResults.has(result.accession)}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        toggleResultSelection(result.accession);
-                      }}
-                      sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                    />
-                  </TableCell>
+                  {/* Empty cell to maintain row height and alignment with header checkbox */}
+                  <TableCell 
+                    padding="none"
+                    sx={{ 
+                      width: '40px',
+                      minWidth: '40px',
+                      maxWidth: '40px',
+                      padding: '8px 4px',
+                    }}
+                  />
                   {visibleColumns.entity && (
                     <TableCell sx={{ 
                       color: '#ffffff', 
@@ -2794,35 +2885,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                       {result.cik}
                     </TableCell>
                   )}
-                  <TableCell sx={{ 
-                    color: '#9ca3b8', 
-                    fontSize: '0.875rem',
-                    width: 120,
-                    minWidth: 120,
-                    padding: '8px 12px',
-                  }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedFiling(result);
-                      }}
-                      sx={{
-                        color: '#3b82f6',
-                        borderColor: '#3b82f6',
-                        fontSize: '0.75rem',
-                        py: 0.5,
-                        px: 1.5,
-                        '&:hover': {
-                          borderColor: '#60a5fa',
-                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        },
-                      }}
-                    >
-                      View Filing
-                    </Button>
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -2936,15 +2998,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       {renderFilterDialog()}
       {renderFormTypesModal()}
 
-      {/* Filing Details Dialog */}
-      <ItemDetailsDialog
-        open={selectedFiling !== null}
-        onClose={() => setSelectedFiling(null)}
-        itemType="sec_filing"
-        data={selectedFiling}
-        title={selectedFiling ? `Filing Details: ${selectedFiling.form} - ${selectedFiling.filingEntity}` : 'Filing Details'}
-        user_id={user?.id}
-      />
 
       {/* Dialog to show all selected form types */}
       <Dialog

@@ -43,7 +43,7 @@ import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutoc
 import MultiSelectField from '../components/MultiSelectField';
 import { useAuth } from '../contexts/AuthContext';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
-import ItemDetailsDialog from '../components/common/ItemDetailsDialog';
+import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../services/api';
 
 // Minimum date for date filters (January 1, 2000)
@@ -104,6 +104,7 @@ const LDASearchPage: React.FC = () => {
 
   // Get user and session info for authenticated downloads
   const { user } = useAuth();
+  const { openItemDetails } = useDialogManagerHelpers();
 
   // Initialize state from sessionStorage immediately
   const savedState = loadStateFromStorage();
@@ -138,13 +139,12 @@ const LDASearchPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 50);
   
-  // Dialog state for filing details
-  const [selectedFilingForDetails, setSelectedFilingForDetails] = useState<LDAFiling | null>(null);
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState<boolean>(false);
   
   // Selection state
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
   // Column visibility state
@@ -778,6 +778,101 @@ const LDASearchPage: React.FC = () => {
 
   const handleContextMenuClose = () => {
     setContextMenuAnchor(null);
+    setContextMenuPosition(null);
+  };
+
+  // Handle filing click (single, Ctrl+click, Shift+click)
+  const handleFilingClick = (e: React.MouseEvent, filingId: string, index: number) => {
+    e.stopPropagation();
+    
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    
+    setSelectedFilings(prev => {
+      const newSelected = new Set(prev);
+      
+      // Calculate pagination offset
+      const startIndex = (currentPage - 1) * pageSize;
+      
+      if (isShiftClick && lastSelectedIndex !== null) {
+        // Range selection - map indices back to currentResults
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        const filingsToSelect = currentResults.slice(startIndex + start, startIndex + end + 1);
+        filingsToSelect.forEach(filing => {
+          const id = filing.id || filing.filing_uuid || '';
+          if (id) newSelected.add(id);
+        });
+      } else if (isCtrlClick) {
+        // Multi-select: toggle this item
+        if (newSelected.has(filingId)) {
+          newSelected.delete(filingId);
+        } else {
+          newSelected.add(filingId);
+        }
+        setLastSelectedIndex(index);
+      } else {
+        // Single click: toggle this item (select if not selected, deselect if selected)
+        if (newSelected.has(filingId)) {
+          newSelected.delete(filingId);
+        } else {
+          newSelected.clear();
+          newSelected.add(filingId);
+        }
+        setLastSelectedIndex(index);
+      }
+      
+      return newSelected;
+    });
+  };
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent, filingId: string) => {
+    e.stopPropagation();
+    
+    // Determine which filings to drag
+    const filingsToDrag = selectedFilings.has(filingId) ? selectedFilings : new Set([filingId]);
+    
+    // Set drag data
+    const selectedFilingObjects = currentResults.filter(filing => {
+      const id = filing.id || filing.filing_uuid || '';
+      return filingsToDrag.has(id);
+    });
+    
+    if (selectedFilingObjects.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        type: 'lda_filings',
+        filings: selectedFilingObjects
+      }));
+      
+      // Create a custom drag image
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${selectedFilingObjects.length} filing${selectedFilingObjects.length > 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  // Handle context menu for selected items
+  const handleRowContextMenu = (e: React.MouseEvent, filingId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If this filing is not selected, select only it
+    if (!selectedFilings.has(filingId)) {
+      setSelectedFilings(new Set([filingId]));
+    }
+    
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
   };
 
   const handleAddToFiles = () => {
@@ -836,17 +931,7 @@ const LDASearchPage: React.FC = () => {
     handleContextMenuClose();
   };
   
-  const toggleFilingSelection = (filingId: string) => {
-    setSelectedFilings(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(filingId)) {
-        newSet.delete(filingId);
-      } else {
-        newSet.add(filingId);
-      }
-      return newSet;
-    });
-  };
+  // Removed unused toggleFilingSelection - selection handled by handleFilingClick
 
   const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return 'N/A';
@@ -1761,7 +1846,7 @@ const LDASearchPage: React.FC = () => {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem', width: 50 }}>
+                              <TableCell padding="none" sx={{ width: 40, padding: '8px 4px', color: '#9ca3af', fontWeight: 600 }}>
                                 <Checkbox
                                   size="small"
                                   indeterminate={selectedFilings.size > 0 && selectedFilings.size < paginatedResults.length}
@@ -1808,36 +1893,40 @@ const LDASearchPage: React.FC = () => {
                               {visibleColumns.includes('state') && (
                                 <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>State</TableCell>
                               )}
-                              {/* Actions column is always visible */}
-                              <TableCell sx={{ color: '#9ca3af', fontWeight: 600, fontSize: '0.875rem' }}>More Info</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
-                            {paginatedResults.map((filing) => {
+                            {paginatedResults.map((filing, index) => {
                               const filingId = filing.id || filing.filing_uuid || '';
                               return (
                               <TableRow
                                 key={filingId}
+                                onClick={(e) => handleFilingClick(e, filingId, index)}
+                                onContextMenu={(e) => handleRowContextMenu(e, filingId)}
+                                draggable={selectedFilings.has(filingId)}
+                                onDragStart={(e) => handleDragStart(e, filingId)}
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  if (user?.id) {
+                                    openItemDetails(
+                                      'lda_disclosure',
+                                      filing,
+                                      'Filing Details',
+                                      { user_id: user.id }
+                                    );
+                                  }
+                                }}
                                 sx={{
                                   backgroundColor: selectedFilings.has(filingId) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                                   '&:hover': {
                                     backgroundColor: selectedFilings.has(filingId) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                                   },
                                   cursor: 'pointer',
+                                  userSelect: 'none',
                                 }}
-                                onClick={() => toggleFilingSelection(filingId)}
                               >
-                                <TableCell sx={{ padding: '8px 12px' }}>
-                                  <Checkbox
-                                    size="small"
-                                    checked={selectedFilings.has(filingId)}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      toggleFilingSelection(filingId);
-                                    }}
-                                    sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#10b981' } }}
-                                  />
-                                </TableCell>
+                                {/* Empty cell to maintain alignment */}
+                                <TableCell sx={{ width: 40, padding: '8px 4px' }} />
                                 {visibleColumns.includes('filing_type') && (
                                   <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                                     {filing.report_type_display || filing.filing_type_display || filing.report_type || filing.filing_type || 'N/A'}
@@ -1878,29 +1967,7 @@ const LDASearchPage: React.FC = () => {
                                     {filing.state || 'N/A'}
                                   </TableCell>
                                 )}
-                                {/* Actions column is always visible */}
-                                <TableCell>
-                                  <Button
-                                    variant="outlined"
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedFilingForDetails(filing);
-                                      setDetailsDialogOpen(true);
-                                    }}
-                                    sx={{
-                                      color: '#3b82f6',
-                                      borderColor: '#3b82f6',
-                                      fontSize: '0.7rem',
-                                      '&:hover': {
-                                        borderColor: '#60a5fa',
-                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                      },
-                                    }}
-                                  >
-                                    More Info
-                                  </Button>
-                                </TableCell>
+                                {/* Actions column removed - use double-click to open details */}
                               </TableRow>
                               );
                             })}
@@ -2777,26 +2844,32 @@ const LDASearchPage: React.FC = () => {
       {/* Context Menu */}
       <Menu
         anchorEl={contextMenuAnchor}
-        open={Boolean(contextMenuAnchor)}
+        anchorPosition={contextMenuPosition ? { top: contextMenuPosition.y, left: contextMenuPosition.x } : undefined}
+        anchorReference={contextMenuPosition ? 'anchorPosition' : 'anchorEl'}
+        open={Boolean(contextMenuAnchor || contextMenuPosition)}
         onClose={handleContextMenuClose}
         PaperProps={{
           sx: {
-            backgroundColor: '#334155',
-            border: '1px solid #475569',
-            '& .MuiMenuItem-root': {
-              color: '#ffffff',
-              '&:hover': { backgroundColor: '#475569' },
-            },
-          },
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+          }
         }}
       >
-        <MenuItem onClick={handleAddToContext} sx={{ color: '#3b82f6', fontWeight: 600 }}>
-          <SidebarChatIcon sx={{ color: '#3b82f6', mr: 1, fontSize: 18 }} />
-          Add to Context
+        <MenuItem
+          onClick={handleAddToContext}
+          disabled={selectedFilings.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Context {selectedFilings.size > 0 ? `(${selectedFilings.size} item${selectedFilings.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
-        <MenuItem onClick={handleAddToFiles} sx={{ fontWeight: 600 }}>
-          <FolderIcon sx={{ color: '#fbbf24', mr: 1, fontSize: 18 }} />
-          Add to Files
+        <MenuItem
+          onClick={handleAddToFiles}
+          disabled={selectedFilings.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files {selectedFilings.size > 0 ? `(${selectedFilings.size} item${selectedFilings.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
       </Menu>
       
@@ -2808,17 +2881,6 @@ const LDASearchPage: React.FC = () => {
         title="Save to Files"
       />
 
-      {/* Filing Details Dialog */}
-      <ItemDetailsDialog
-        open={detailsDialogOpen}
-        onClose={() => {
-          setDetailsDialogOpen(false);
-        }}
-        itemType="lda_disclosure"
-        data={selectedFilingForDetails}
-        title="Filing Details"
-        user_id={user?.id}
-      />
     </Box>
   );
 };
