@@ -45,7 +45,7 @@ export const theme = createTheme({
       dark: colors.secondary.dark,
     },
     background: {
-      default: '#1E3A8A', // Will be overridden by gradient
+      default: '#0f172a', // Blue slate-900 to match page gradients
       paper: 'rgba(255, 255, 255, 0.1)', // Glass effect
     },
     text: {

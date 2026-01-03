@@ -27,6 +27,7 @@ import {
   Slider,
 } from '@mui/material';
 import {
+  Search as SearchIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Chat as SidebarChatIcon,
@@ -173,7 +174,7 @@ const StockScreenerSearchPage: React.FC = () => {
   // Ref to track if we just set results from API to avoid overwriting with applyFilters
   const justSetResultsRef = useRef(false);
   // const [criteriaDialogOpen, setCriteriaDialogOpen] = useState<boolean>(false);
-  const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
+  const [searchSidebarVisible, setSearchSidebarVisible] = useState<boolean>(savedState?.searchSidebarVisible !== undefined ? savedState.searchSidebarVisible : true);
   const [expandedFilters, setExpandedFilters] = useState<{
     industries: boolean;
     marketCap: boolean;
@@ -536,7 +537,7 @@ const StockScreenerSearchPage: React.FC = () => {
         },
         currentPage,
         pageSize,
-        searchFormExpanded,
+        searchSidebarVisible,
       };
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
     } catch (error: any) {
@@ -558,7 +559,6 @@ const StockScreenerSearchPage: React.FC = () => {
             },
             currentPage,
             pageSize,
-            searchFormExpanded,
           };
           sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateWithoutResults));
         } catch (retryError) {
@@ -568,7 +568,7 @@ const StockScreenerSearchPage: React.FC = () => {
         console.error('Error saving state to sessionStorage:', error);
       }
     }
-  }, [criteria, allResults, filteredResults, lastEvaluatedKey, hasMore, visibleColumns, selectedFilters, currentPage, pageSize, searchFormExpanded]);
+  }, [criteria, allResults, filteredResults, lastEvaluatedKey, hasMore, visibleColumns, selectedFilters, currentPage, pageSize, searchSidebarVisible]);
 
   // Pagination
   const totalPages = Math.ceil(filteredResults.length / pageSize);
@@ -727,29 +727,32 @@ const StockScreenerSearchPage: React.FC = () => {
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Left Sidebar - Search Filters (Always visible) */}
-          <GlassCard sx={{ 
-            minWidth: 320, 
-            maxWidth: 380,
-            height: 'fit-content',
-            position: 'sticky',
-            top: 20,
-            alignSelf: 'flex-start',
-          }}>
-            <Box sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                  Search Criteria
-                </Typography>
-                <IconButton
-                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                  sx={{ color: '#94a3b8' }}
-                  size="small"
-                >
-                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                </IconButton>
-              </Box>
-              <Collapse in={searchFormExpanded}>
+          {/* Left Sidebar - Search Filters (Collapsible) */}
+          {searchSidebarVisible ? (
+            <GlassCard sx={{ 
+              minWidth: 320, 
+              maxWidth: 380,
+              width: 320,
+              height: 'fit-content',
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+              transition: 'all 0.3s ease-in-out',
+            }}>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    Search Criteria
+                  </Typography>
+                  <IconButton
+                    onClick={() => setSearchSidebarVisible(false)}
+                    sx={{ color: '#94a3b8' }}
+                    size="small"
+                    title="Hide search filters"
+                  >
+                    <KeyboardArrowDownIcon sx={{ transform: 'rotate(-90deg)' }} />
+                  </IconButton>
+                </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Industries */}
                   <FormControl fullWidth>
@@ -875,51 +878,82 @@ const StockScreenerSearchPage: React.FC = () => {
                     </Select>
                   </FormControl>
 
-                  {/* Search Button */}
-                  <Button
-                    variant="contained"
-                    onClick={runScreener}
-                    disabled={isSearching}
-                    fullWidth
-                    sx={{
-                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                      color: '#ffffff',
-                      '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
-                      '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
-                    }}
-                  >
-                    {isSearching ? 'Searching...' : 'Search'}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setCriteria({
-                        industries: [],
-                        volatilityRange: [0, 100],
-                        priceChangeRange: [-50, 50],
-                        marketCapRange: [0, 10000000000000],
-                        priceRange: [0, 1000],
-                        peRatioRange: [0, 100],
-                        dividendYieldRange: [0, 20],
-                        timeframe: '1d',
-                      });
-                    }}
-                    fullWidth
-                    sx={{
-                      borderColor: '#475569',
-                      color: '#94a3b8',
-                      '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
-                    }}
-                  >
-                    Clear
-                  </Button>
+                  {/* Search and Clear Buttons */}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
+                    <Button
+                      variant="contained"
+                      onClick={runScreener}
+                      disabled={isSearching}
+                      fullWidth
+                      sx={{
+                        background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                        color: '#ffffff',
+                        '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                        '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
+                      }}
+                    >
+                      {isSearching ? 'Searching...' : 'Search'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        setCriteria({
+                          industries: [],
+                          volatilityRange: [0, 100],
+                          priceChangeRange: [-50, 50],
+                          marketCapRange: [0, 10000000000000],
+                          priceRange: [0, 1000],
+                          peRatioRange: [0, 100],
+                          dividendYieldRange: [0, 20],
+                          timeframe: '1d',
+                        });
+                      }}
+                      fullWidth
+                      sx={{
+                        borderColor: '#475569',
+                        color: '#94a3b8',
+                        '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </Box>
                 </Box>
-              </Collapse>
+              </Box>
+            </GlassCard>
+          ) : (
+            <Box sx={{ 
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+              height: 'fit-content',
+            }}>
+              <IconButton
+                onClick={() => setSearchSidebarVisible(true)}
+                sx={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  border: '2px solid #374151',
+                  borderRadius: '50%',
+                  width: 48,
+                  height: 48,
+                  color: '#3b82f6',
+                  '&:hover': {
+                    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                    borderColor: '#3b82f6',
+                    transform: 'scale(1.05)',
+                  },
+                  transition: 'all 0.3s ease-in-out',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                }}
+                title="Show search filters"
+              >
+                <SearchIcon />
+              </IconButton>
             </Box>
-          </GlassCard>
+          )}
 
           {/* Middle - Results Table */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }}>
             {/* Error Alert */}
             {searchError && (
               <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>

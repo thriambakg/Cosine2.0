@@ -49,14 +49,15 @@ class PDFReader:
     def __init__(self):
         self.s3_client = boto3.client('s3')
         self.textract_client = boto3.client('textract')
-        self.bucket_name = os.environ.get('S3_BUCKET_NAME', 'cosine-uploads')
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
     
-    def read_pdf_from_s3(self, s3_key: str) -> Dict[str, Any]:
+    def read_pdf_from_s3(self, s3_key: str, page_number: Optional[int] = None) -> Dict[str, Any]:
         """
         Read PDF file from S3 and extract text content
         
         Args:
             s3_key: S3 key of the PDF file
+            page_number: Optional page number to read (1-indexed). If None, reads all pages.
             
         Returns:
             Dictionary with extracted text and metadata
@@ -66,7 +67,23 @@ class PDFReader:
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
             pdf_content = response['Body'].read()
             
-            # Try Textract first for better accuracy, fallback to PyPDF2
+            # If page_number is specified, extract only that page
+            if page_number is not None:
+                text_content = self._extract_text_from_pdf_page(pdf_content, page_number)
+                total_pages = self._get_pdf_page_count(pdf_content)
+                
+                return {
+                    "success": True,
+                    "s3_key": s3_key,
+                    "text_content": text_content,
+                    "page_number": page_number,
+                    "total_pages": total_pages,
+                    "file_size": len(pdf_content),
+                    "text_length": len(text_content),
+                    "is_partial": True
+                }
+            
+            # For full document reading, try Textract first for better accuracy, fallback to PyPDF2
             text_content = self._extract_text_with_textract(s3_key)
             if not text_content or len(text_content.strip()) < 50:
                 logger.info("Textract extraction insufficient, falling back to PyPDF2")
@@ -81,7 +98,8 @@ class PDFReader:
                 "text_content": text_content,
                 "analysis": analysis,
                 "file_size": len(pdf_content),
-                "text_length": len(text_content)
+                "text_length": len(text_content),
+                "is_partial": False
             }
             
         except Exception as e:
@@ -115,14 +133,54 @@ class PDFReader:
             logger.error(f"Error extracting text from PDF: {str(e)}")
             return f"Error extracting text: {str(e)}"
     
+    def _extract_text_from_pdf_page(self, pdf_content: bytes, page_number: int) -> str:
+        """Extract text from a specific page of PDF content using PyPDF2"""
+        try:
+            import PyPDF2
+            
+            # Create PDF reader from bytes
+            pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
+            total_pages = len(pdf_reader.pages)
+            
+            # Validate page number (1-indexed)
+            if page_number < 1 or page_number > total_pages:
+                return f"Error: Page {page_number} does not exist. PDF has {total_pages} pages."
+            
+            # Extract text from the specified page (convert to 0-indexed)
+            page = pdf_reader.pages[page_number - 1]
+            text_content = page.extract_text()
+            
+            return text_content.strip()
+            
+        except ImportError:
+            logger.error("PyPDF2 not available for page extraction")
+            return "Error: PyPDF2 not available for page-by-page extraction"
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF page {page_number}: {str(e)}")
+            return f"Error extracting text from page {page_number}: {str(e)}"
+    
+    def _get_pdf_page_count(self, pdf_content: bytes) -> int:
+        """Get the total number of pages in a PDF"""
+        try:
+            import PyPDF2
+            pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
+            return len(pdf_reader.pages)
+        except Exception as e:
+            logger.error(f"Error getting PDF page count: {str(e)}")
+            return 0
+    
     def _extract_text_with_textract(self, s3_key: str) -> str:
         """Extract text using Amazon Textract for better accuracy"""
         try:
+            # Use the correct bucket name
+            bucket_name = self.bucket_name
+            logger.info(f"Using bucket {bucket_name} for Textract extraction of {s3_key}")
+            
             # Start document text detection job
             response = self.textract_client.start_document_text_detection(
                 DocumentLocation={
                     'S3Object': {
-                        'Bucket': self.bucket_name,
+                        'Bucket': bucket_name,
                         'Name': s3_key
                     }
                 }
@@ -192,11 +250,15 @@ class PDFReader:
     def _analyze_forms_with_textract(self, s3_key: str) -> Dict[str, Any]:
         """Analyze PDF forms using Amazon Textract"""
         try:
+            # Use the correct bucket name
+            bucket_name = self.bucket_name
+            logger.info(f"Using bucket {bucket_name} for Textract form analysis of {s3_key}")
+            
             # Start document analysis job for forms and tables
             response = self.textract_client.start_document_analysis(
                 DocumentLocation={
                     'S3Object': {
-                        'Bucket': self.bucket_name,
+                        'Bucket': bucket_name,
                         'Name': s3_key
                     }
                 },
@@ -493,12 +555,14 @@ class PDFReader:
 pdf_reader = PDFReader()
 
 @tool
-def read_pdf_tool(s3_key: str) -> str:
+def read_pdf_tool(s3_key: str, page_number: Optional[int] = None) -> str:
     """
     Tool function to read and analyze PDF files from S3
     
     Args:
-        s3_key: S3 key of the PDF file to read
+        s3_key: S3 key of the PDF file to read (e.g., 'users/user_id/filesys/file_id.pdf')
+        page_number: Optional page number to read (1-indexed). If None, reads all pages.
+                    Use page_number for large PDFs to manage memory and avoid token limits.
         
     Returns:
         String with PDF content and analysis
@@ -508,12 +572,24 @@ def read_pdf_tool(s3_key: str) -> str:
             return "Error: s3_key parameter is required"
     
         # Read PDF from S3
-        result = pdf_reader.read_pdf_from_s3(s3_key)
+        result = pdf_reader.read_pdf_from_s3(s3_key, page_number)
         
         if not result["success"]:
             return f"Error reading PDF: {result['error']}"
         
-        # Format response for AI
+        # If reading a specific page
+        if page_number is not None:
+            response_parts = [
+                f"PDF Page {page_number} of {result.get('total_pages', '?')} for: {result['s3_key']}",
+                f"File Size: {result['file_size']:,} bytes",
+                f"Text Length: {result['text_length']:,} characters",
+                "",
+                "Page Content:",
+                result['text_content']
+            ]
+            return "\n".join(response_parts)
+        
+        # Format response for AI (full document)
         response_parts = [
             f"PDF Analysis for: {result['s3_key']}",
             f"File Size: {result['file_size']:,} bytes",

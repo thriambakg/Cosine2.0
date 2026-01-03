@@ -57,6 +57,7 @@ class UnifiedMessageHandlerService {
   private loadingStateListeners: Set<(sessionId: string, isLoading: boolean, source: 'chatpage' | 'sidebar') => void> = new Set(); // Loading state listeners
   private webSocketConnections: Map<string, WebSocket> = new Map(); // sessionId -> WebSocket connection
   private cancelledMessages: Set<string> = new Set(); // messageId -> cancelled messages
+  private cancelledSessions: Set<string> = new Set(); // sessionId -> cancelled sessions (stops all processing)
   private requestIdCounter: number = 0; // For generating unique request IDs
   private sessionUserIds: Map<string, string> = new Map(); // sessionId -> userId mapping
   private recentSendTimestamps: Map<string, number> = new Map(); // queueKey -> last send timestamp (prevents rapid duplicates)
@@ -88,9 +89,34 @@ class UnifiedMessageHandlerService {
     console.log(`🔍 DEBUG: processMessage [${requestId}] - contextItems length:`, messageData.contextItems?.length || 0);
     
     // For edit messages, clear cancelled status since user is explicitly resending
-    if (messageData.type === 'edit_message' && this.cancelledMessages.has(messageData.messageId)) {
-      console.log('✏️ UnifiedMessageHandler: Clearing cancelled status for edit message:', messageData.messageId);
-      this.cancelledMessages.delete(messageData.messageId);
+    if (messageData.type === 'edit_message') {
+      if (this.cancelledMessages.has(messageData.messageId)) {
+        console.log('✏️ UnifiedMessageHandler: Clearing cancelled status for edit message:', messageData.messageId);
+        this.cancelledMessages.delete(messageData.messageId);
+      }
+      // Also clear session cancellation if this is an edit
+      if (messageData.sessionId && this.cancelledSessions.has(messageData.sessionId)) {
+        console.log('✏️ UnifiedMessageHandler: Clearing cancelled status for session (edit message):', messageData.sessionId);
+        this.cancelledSessions.delete(messageData.sessionId);
+      }
+    }
+    
+    // For any new message type (new_message, followup_message, context_message, file_message),
+    // clear cancelled session status when user explicitly sends a message
+    // This allows users to send messages after cancelling a previous one
+    if (messageData.sessionId && this.cancelledSessions.has(messageData.sessionId)) {
+      // Clear cancelled status for all message types except edit (which is handled above)
+      if (messageData.type !== 'edit_message') {
+        console.log(`🔄 UnifiedMessageHandler: Clearing cancelled status for session (${messageData.type}):`, messageData.sessionId);
+        this.cancelledSessions.delete(messageData.sessionId);
+      }
+    }
+    
+    // Check if session was cancelled (after clearing for new messages)
+    // This should now always be false since we cleared it above, but keeping as safety check
+    if (messageData.sessionId && this.cancelledSessions.has(messageData.sessionId)) {
+      console.log('❌ UnifiedMessageHandler: Session was cancelled:', messageData.sessionId);
+      return { sessionId: messageData.sessionId, success: false, error: 'Session was cancelled' };
     }
     
     // Check if message was cancelled (after clearing edit messages)
@@ -153,6 +179,16 @@ class UnifiedMessageHandlerService {
     if (this.processingQueue.has(messageId)) {
       this.processingQueue.delete(messageId);
     }
+    
+    // Find the session for this message and stop streaming immediately
+    for (const [sessionId, messages] of this.localCache.entries()) {
+      const message = messages.find(m => m.id === messageId);
+      if (message) {
+        // Stop streaming for this message immediately
+        this.stopStreamingForMessage(sessionId, messageId);
+        break;
+      }
+    }
   }
 
   /**
@@ -162,6 +198,9 @@ class UnifiedMessageHandlerService {
     const requestId = `cancel_all_${++this.requestIdCounter}_${Date.now()}`;
     console.log(`🚫 UnifiedMessageHandler: Cancelling all messages for session [${requestId}]:`, sessionId);
     
+    // Mark session as cancelled immediately (stops all frontend processing)
+    this.cancelledSessions.add(sessionId);
+    
     // Get all message IDs for this session from the cache
     const sessionMessages = this.localCache.get(sessionId) || [];
     console.log(`🚫 UnifiedMessageHandler: Found ${sessionMessages.length} messages to cancel for session ${sessionId}`);
@@ -169,6 +208,13 @@ class UnifiedMessageHandlerService {
     sessionMessages.forEach(message => {
       this.cancelledMessages.add(message.id);
     });
+    
+    // Immediately stop all streaming messages for this session
+    this.stopAllStreamingForSession(sessionId);
+    
+    // Clear loading states immediately
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
     
     // Clear the processing queue for this session
     const sessionKeys = Array.from(this.processingQueue.keys()).filter(key => 
@@ -178,7 +224,7 @@ class UnifiedMessageHandlerService {
     sessionKeys.forEach(key => this.processingQueue.delete(key));
     
     // Send kill signal to backend to stop agent processing
-    this.sendKillSignal(sessionId, 'timeout_cancellation');
+    this.sendKillSignal(sessionId, 'user_cancellation');
   }
 
   /**
@@ -957,6 +1003,18 @@ class UnifiedMessageHandlerService {
    * Handle WebSocket message
    */
   private handleWebSocketMessage(sessionId: string, data: any): void {
+    // Immediately ignore messages for cancelled sessions
+    if (this.cancelledSessions.has(sessionId)) {
+      console.log(`🚫 UnifiedMessageHandler: Ignoring WebSocket message for cancelled session: ${sessionId}, type: ${data.type}`);
+      return;
+    }
+    
+    // Check if this specific message was cancelled
+    if (data.message_id && this.cancelledMessages.has(data.message_id)) {
+      console.log(`🚫 UnifiedMessageHandler: Ignoring WebSocket message for cancelled message: ${data.message_id}`);
+      return;
+    }
+    
     // Only log non-streaming messages to reduce noise
     if (data.type !== 'ai_response_chunk') {
       console.log('📨 UnifiedMessageHandler: Handling WebSocket message:', data.type, 'for session:', sessionId);
@@ -1009,22 +1067,34 @@ class UnifiedMessageHandlerService {
   }
 
   /**
-   * Handle kill signal acknowledgment from backend
-   * Stops loading animation and allows user to edit the message they just sent
+   * Stop streaming for a specific message
    */
-  private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
-    console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason);
-    console.log('🛑 Processing Cancelled: Processing cancelled successfully');
+  private stopStreamingForMessage(sessionId: string, messageId: string): void {
+    const messages = this.localCache.get(sessionId) || [];
+    const updatedMessages = messages.map(msg => {
+      if (msg.id === messageId && msg.sender === 'ai' && msg.isStreaming) {
+        // Remove streaming flag and mark as complete
+        const { isStreaming, ...rest } = msg;
+        return rest;
+      }
+      return msg;
+    });
     
-    // Clear loading state for all interfaces since processing was cancelled
-    this.broadcastLoadingState(sessionId, false, 'chatpage');
-    this.broadcastLoadingState(sessionId, false, 'sidebar');
-    
-    // Remove any typing/streaming messages for this session
+    if (updatedMessages.length !== messages.length || updatedMessages.some((m, i) => m !== messages[i])) {
+      this.localCache.set(sessionId, updatedMessages);
+      this.notifyMessageUpdate(sessionId, updatedMessages);
+      console.log(`🛑 UnifiedMessageHandler: Stopped streaming for message: ${messageId}`);
+    }
+  }
+  
+  /**
+   * Stop all streaming messages for a session
+   */
+  private stopAllStreamingForSession(sessionId: string): void {
     const messages = this.localCache.get(sessionId) || [];
     const updatedMessages = messages.filter(msg => {
-      // Remove any incomplete AI messages (streaming messages)
-      if (msg.sender === 'ai' && msg.status === 'sending') {
+      // Remove any incomplete streaming AI messages
+      if (msg.sender === 'ai' && msg.isStreaming) {
         return false;
       }
       return true;
@@ -1033,18 +1103,43 @@ class UnifiedMessageHandlerService {
     if (updatedMessages.length !== messages.length) {
       this.localCache.set(sessionId, updatedMessages);
       this.notifyMessageUpdate(sessionId, updatedMessages);
-      console.log('🧹 UnifiedMessageHandler: Removed incomplete AI messages after kill signal');
+      console.log(`🛑 UnifiedMessageHandler: Stopped all streaming for session: ${sessionId}`);
     }
+  }
+  
+  /**
+   * Handle kill signal acknowledgment from backend
+   * Stops loading animation and allows user to edit the message they just sent
+   */
+  private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
+    console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason);
+    console.log('🛑 Processing Cancelled: Processing cancelled successfully');
+    
+    // Mark session as cancelled (if not already)
+    this.cancelledSessions.add(sessionId);
+    
+    // Clear loading state for all interfaces since processing was cancelled
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
+    
+    // Stop all streaming immediately
+    this.stopAllStreamingForSession(sessionId);
     
     // Update user message status to 'sent' (not 'sending') so it can be edited
-    const userMessages = updatedMessages.filter(msg => msg.sender === 'user');
+    const messages = this.localCache.get(sessionId) || [];
+    const userMessages = messages.filter(msg => msg.sender === 'user');
     if (userMessages.length > 0) {
       const lastUserMessage = userMessages[userMessages.length - 1];
       if (lastUserMessage.status === 'sending') {
         lastUserMessage.status = 'sent';
-        this.localCache.set(sessionId, updatedMessages);
-        this.notifyMessageUpdate(sessionId, updatedMessages);
-        console.log('✏️ UnifiedMessageHandler: Updated last user message status to "sent" to allow editing');
+        const updatedMessages = [...messages];
+        const index = updatedMessages.findIndex(m => m.id === lastUserMessage.id);
+        if (index !== -1) {
+          updatedMessages[index] = lastUserMessage;
+          this.localCache.set(sessionId, updatedMessages);
+          this.notifyMessageUpdate(sessionId, updatedMessages);
+          console.log('✏️ UnifiedMessageHandler: Updated last user message status to "sent" to allow editing');
+        }
       }
     }
     
@@ -1059,7 +1154,19 @@ class UnifiedMessageHandlerService {
    * Handle AI response
    */
   private handleAIResponse(sessionId: string, data: any): void {
+    // Immediately ignore if session or message is cancelled
+    if (this.cancelledSessions.has(sessionId)) {
+      console.log(`🚫 UnifiedMessageHandler: Ignoring AI response for cancelled session: ${sessionId}`);
+      return;
+    }
+    
     const { message_id, content, timestamp } = data;
+    
+    // Check if this specific message was cancelled
+    if (message_id && this.cancelledMessages.has(message_id)) {
+      console.log(`🚫 UnifiedMessageHandler: Ignoring AI response for cancelled message: ${message_id}`);
+      return;
+    }
     
     console.log('🤖 UnifiedMessageHandler: Received AI response for session:', sessionId, 'message_id:', message_id);
     
@@ -1173,6 +1280,17 @@ class UnifiedMessageHandlerService {
    */
   private handleAIResponseChunk(sessionId: string, data: any): void {
     const { message_id, content, timestamp, is_complete } = data;
+    
+    // Immediately stop processing if session or message is cancelled
+    if (this.cancelledSessions.has(sessionId)) {
+      console.log(`🚫 UnifiedMessageHandler: Stopping streaming chunk for cancelled session: ${sessionId}`);
+      return;
+    }
+    
+    if (message_id && this.cancelledMessages.has(message_id)) {
+      console.log(`🚫 UnifiedMessageHandler: Stopping streaming chunk for cancelled message: ${message_id}`);
+      return;
+    }
     
     // Get or create the streaming message
     const messages = this.localCache.get(sessionId) || [];

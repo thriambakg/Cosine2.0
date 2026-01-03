@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 interface DualScreenModeContextType {
   isDualScreenMode: boolean;
   toggleDualScreenMode: () => void;
+  setDualScreenMode: (enabled: boolean) => void;
   sidebarWidth: number;
   setSidebarWidth: (width: number) => void;
 }
@@ -55,6 +56,10 @@ export const DualScreenModeProvider: React.FC<DualScreenModeProviderProps> = ({ 
     setIsDualScreenMode(prev => !prev);
   }, []);
 
+  const setDualScreenMode = useCallback((enabled: boolean) => {
+    setIsDualScreenMode(enabled);
+  }, []);
+
   const setSidebarWidth = useCallback((width: number) => {
     // Clamp width between 300px and 70% of screen width
     const minWidth = 300;
@@ -68,6 +73,7 @@ export const DualScreenModeProvider: React.FC<DualScreenModeProviderProps> = ({ 
       value={{
         isDualScreenMode,
         toggleDualScreenMode,
+        setDualScreenMode,
         sidebarWidth,
         setSidebarWidth,
       }}

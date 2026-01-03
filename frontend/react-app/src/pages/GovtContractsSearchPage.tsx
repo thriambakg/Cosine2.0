@@ -236,7 +236,7 @@ const GovtContractsSearchPage: React.FC = () => {
   const [isFiltered, setIsFiltered] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(savedState?.currentPage || 1);
   const [pageSize, setPageSize] = useState<number>(savedState?.pageSize || 25);
-  const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== false);
+  const [searchSidebarVisible, setSearchSidebarVisible] = useState<boolean>(savedState?.searchSidebarVisible !== undefined ? savedState.searchSidebarVisible : true);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== false);
 
   // Autocomplete state - use state for suggestions (like SECSearchPage)
@@ -809,10 +809,10 @@ const GovtContractsSearchPage: React.FC = () => {
         hasMore,
         currentPage,
         pageSize,
-        searchFormExpanded,
         advancedSearchExpanded,
         visibleColumns,
         expandedFilters,
+        searchSidebarVisible,
       };
       
       // Use compressed storage (automatically compresses if beneficial)
@@ -840,7 +840,7 @@ const GovtContractsSearchPage: React.FC = () => {
         console.error('Error saving state to sessionStorage:', error);
       }
     }
-  }, [searchParams, allSearchResults.length, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded, advancedSearchExpanded, visibleColumns, expandedFilters]);
+  }, [searchParams, allSearchResults.length, lastEvaluatedKey, hasMore, currentPage, pageSize, advancedSearchExpanded, visibleColumns, expandedFilters, searchSidebarVisible]);
 
   // Apply filters when they change
   useEffect(() => {
@@ -1102,29 +1102,32 @@ const GovtContractsSearchPage: React.FC = () => {
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Left Sidebar - Search Filters (Always visible) */}
-          <GlassCard sx={{ 
-            minWidth: 320, 
-            maxWidth: 380,
-            height: 'fit-content',
-            position: 'sticky',
-            top: 20,
-            alignSelf: 'flex-start',
-          }}>
-            <Box sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                  Search Filters
-                </Typography>
-                <IconButton
-                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                  sx={{ color: '#94a3b8' }}
-                  size="small"
-                >
-                  {searchFormExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                </IconButton>
-              </Box>
-              <Collapse in={searchFormExpanded}>
+          {/* Left Sidebar - Search Filters (Collapsible) */}
+          {searchSidebarVisible ? (
+            <GlassCard sx={{ 
+              minWidth: 320, 
+              maxWidth: 380,
+              width: 320,
+              height: 'fit-content',
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+              transition: 'all 0.3s ease-in-out',
+            }}>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                    Search Filters
+                  </Typography>
+                  <IconButton
+                    onClick={() => setSearchSidebarVisible(false)}
+                    sx={{ color: '#94a3b8' }}
+                    size="small"
+                    title="Hide search filters"
+                  >
+                    <KeyboardArrowDownIcon sx={{ transform: 'rotate(-90deg)' }} />
+                  </IconButton>
+                </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Basic Search Section */}
 
@@ -1504,14 +1507,43 @@ const GovtContractsSearchPage: React.FC = () => {
                       >
                         Clear
                       </Button>
+                      </Box>
                     </Box>
-                  </Box>
-              </Collapse>
+              </Box>
+            </GlassCard>
+          ) : (
+            <Box sx={{ 
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+              height: 'fit-content',
+            }}>
+              <IconButton
+                onClick={() => setSearchSidebarVisible(true)}
+                sx={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  border: '2px solid #374151',
+                  borderRadius: '50%',
+                  width: 48,
+                  height: 48,
+                  color: '#3b82f6',
+                  '&:hover': {
+                    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                    borderColor: '#3b82f6',
+                    transform: 'scale(1.05)',
+                  },
+                  transition: 'all 0.3s ease-in-out',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                }}
+                title="Show search filters"
+              >
+                <SearchIcon />
+              </IconButton>
             </Box>
-          </GlassCard>
+          )}
 
           {/* Middle - Results Table */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }}>
             {/* Error Alert */}
             {searchError && (
               <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>

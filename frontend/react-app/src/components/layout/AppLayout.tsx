@@ -5,13 +5,11 @@ import { useAppDispatch } from '../../store/hooks';
 import { setCurrentPage } from '../../store/slices/navigationSlice';
 import AppHeader from './AppHeader';
 import AppSidebar from './AppSidebar';
-import FloatingClock from './FloatingClock';
 import GlobalChatSidebar from './GlobalChatSidebar';
 import ContextSessionHandler from './ContextSessionHandler';
 import ContextSuccessNotification from '../common/ContextSuccessNotification';
 import FilesystemSuccessNotification from '../common/FilesystemSuccessNotification';
 import ManagedDialogRenderer from '../common/ManagedDialogRenderer';
-import { ClockProvider } from '../../contexts/ClockContext';
 // import { WebSocketProvider } from '../../contexts/WebSocketContext'; // COMMENTED OUT: Replaced by UnifiedMessageHandler
 import { GlobalChatProvider } from '../../contexts/GlobalChatContext';
 import { DualScreenModeProvider, useDualScreenMode } from '../../contexts/DualScreenModeContext';
@@ -54,9 +52,6 @@ const AppLayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
         {children}
       </Box>
       
-      {/* Floating Clock */}
-      <FloatingClock />
-      
       {/* Global Chat Sidebar */}
       <GlobalChatSidebar />
       
@@ -68,24 +63,22 @@ const AppLayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
 
 export default function AppLayout({ children }: AppLayoutProps) {
   return (
-    <ClockProvider>
-      <GlobalChatProvider>
-        <DualScreenModeProvider>
-          <AppLayoutContent>
-            {children}
-          </AppLayoutContent>
-          
-          {/* Global Context Session Handler - processes context sessions from any page */}
-          <ContextSessionHandler />
-          
-          {/* Global Success Notification for sidebar context additions */}
-          <ContextSuccessNotification />
-          
-          {/* Global Success Notification for filesystem additions */}
-          <FilesystemSuccessNotification />
-        </DualScreenModeProvider>
-      </GlobalChatProvider>
-    </ClockProvider>
+    <GlobalChatProvider>
+      <DualScreenModeProvider>
+        <AppLayoutContent>
+          {children}
+        </AppLayoutContent>
+        
+        {/* Global Context Session Handler - processes context sessions from any page */}
+        <ContextSessionHandler />
+        
+        {/* Global Success Notification for sidebar context additions */}
+        <ContextSuccessNotification />
+        
+        {/* Global Success Notification for filesystem additions */}
+        <FilesystemSuccessNotification />
+      </DualScreenModeProvider>
+    </GlobalChatProvider>
   );
 }
 

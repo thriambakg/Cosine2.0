@@ -175,20 +175,58 @@ const MessageEditInput = memo(({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        variant="outlined"
+        variant="standard"
+        InputProps={{
+          disableUnderline: true,
+        }}
         sx={{
-          '& .MuiOutlinedInput-root': {
-            color: 'white',
-            fontSize: '0.875rem',
+          '& .MuiInput-root': {
+            backgroundColor: 'transparent',
+            border: 'none',
+            outline: 'none !important',
+            boxShadow: 'none !important',
+            padding: 0,
+            margin: 0,
             paddingRight: '60px',
-            '& fieldset': {
-              borderColor: 'rgba(59, 130, 246, 0.3)',
+            '&:before': {
+              display: 'none',
             },
-            '&:hover fieldset': {
-              borderColor: 'rgba(59, 130, 246, 0.5)',
+            '&:after': {
+              display: 'none',
             },
-            '&.Mui-focused fieldset': {
-              borderColor: 'rgba(59, 130, 246, 0.7)',
+            '&:hover:before': {
+              display: 'none',
+            },
+            '&:focus': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&:focus-within': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&.Mui-focused': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+              '&:before': {
+                display: 'none',
+              },
+              '&:after': {
+                display: 'none',
+              },
+            },
+          },
+          '& .MuiInput-input': {
+            color: '#ffffff',
+            fontSize: '0.875rem',
+            padding: '3px',
+            lineHeight: '1.5',
+            outline: 'none !important',
+            border: 'none !important',
+            '&:focus': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
             },
           },
         }}
@@ -196,11 +234,12 @@ const MessageEditInput = memo(({
       <Box
         sx={{
           position: 'absolute',
-          bottom: 8,
+          top: '3px', // Align with text input top padding (3px) for single line
           right: 8,
           display: 'flex',
           gap: 0.5,
           alignItems: 'center',
+          height: 'fit-content',
         }}
       >
         <Tooltip title="Cancel (Esc)">
@@ -218,22 +257,24 @@ const MessageEditInput = memo(({
           </IconButton>
         </Tooltip>
         <Tooltip title="Send (Enter)">
-          <IconButton
-            size="small"
-            onClick={onSave}
-            disabled={!value.trim()}
-            sx={{
-              color: value.trim() ? '#22c55e' : '#6b7280',
-              '&:hover': { 
-                color: value.trim() ? '#16a34a' : '#6b7280',
-                backgroundColor: value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
-              },
-              width: 28,
-              height: 28,
-            }}
-          >
-            <SendIcon sx={{ fontSize: 16 }} />
-          </IconButton>
+          <span>
+            <IconButton
+              size="small"
+              onClick={onSave}
+              disabled={!value.trim()}
+              sx={{
+                color: value.trim() ? '#22c55e' : '#6b7280',
+                '&:hover': { 
+                  color: value.trim() ? '#16a34a' : '#6b7280',
+                  backgroundColor: value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
+                },
+                width: 28,
+                height: 28,
+              }}
+            >
+              <SendIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
     </Box>
@@ -465,39 +506,41 @@ const SidebarMessageInputBar = memo(({
         </Box>
         {/* Right Side - Send/Stop Button */}
         <Tooltip title={isLoading ? "Stop processing" : "Send (Enter)"}>
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isLoading && onStop) {
-                onStop();
-              } else {
-                void onSendClick();
-              }
-            }}
-            disabled={!isLoading && !value.trim()}
-            sx={{
-              color: isLoading 
-                ? '#ef4444' 
-                : (value.trim() ? '#22c55e' : '#6b7280'),
-              padding: '4px',
-              transition: 'all 0.2s ease',
-              '&:hover': { 
+          <span>
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isLoading && onStop) {
+                  onStop();
+                } else {
+                  void onSendClick();
+                }
+              }}
+              disabled={!isLoading && !value.trim()}
+              sx={{
                 color: isLoading 
-                  ? '#dc2626' 
-                  : (value.trim() ? '#16a34a' : '#6b7280'),
-                backgroundColor: isLoading 
-                  ? 'rgba(239, 68, 68, 0.1)' 
-                  : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
-              },
-            }}
-          >
-            {isLoading ? (
-              <StopIcon sx={{ fontSize: '0.9rem' }} />
-            ) : (
-              <SendIcon sx={{ fontSize: '0.9rem' }} />
-            )}
-          </IconButton>
+                  ? '#ef4444' 
+                  : (value.trim() ? '#22c55e' : '#6b7280'),
+                padding: '4px',
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  color: isLoading 
+                    ? '#dc2626' 
+                    : (value.trim() ? '#16a34a' : '#6b7280'),
+                  backgroundColor: isLoading 
+                    ? 'rgba(239, 68, 68, 0.1)' 
+                    : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
+                },
+              }}
+            >
+              {isLoading ? (
+                <StopIcon sx={{ fontSize: '0.9rem' }} />
+              ) : (
+                <SendIcon sx={{ fontSize: '0.9rem' }} />
+              )}
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
     </Box>
@@ -676,6 +719,8 @@ const GlobalChatSidebar: React.FC = () => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [inputAreaHeight, setInputAreaHeight] = useState(160); // Default height in px
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState<number>(56);
   const [visibleCount, setVisibleCount] = useState<number>(50);
@@ -1632,6 +1677,30 @@ const GlobalChatSidebar: React.FC = () => {
       window.removeEventListener('streaming-complete', handleStreamingComplete as EventListener);
     };
   }, [activeSessionId]);
+
+  // Listen for kill signal acknowledgment to clear streaming states
+  useEffect(() => {
+    const handleKillSignalAcknowledged = (event: CustomEvent) => {
+      const { sessionId } = event.detail;
+      // Only clear if this is for the active session
+      if (sessionId === activeSessionId) {
+        console.log('🛑 Sidebar: Kill signal acknowledged, clearing streaming states');
+        setIsStreamingActive(false);
+        setTypingMessages(new Set());
+        setIsLoadingMessage(false);
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [sessionId]: false
+        }));
+      }
+    };
+    
+    window.addEventListener('kill-signal-acknowledged', handleKillSignalAcknowledged as EventListener);
+    
+    return () => {
+      window.removeEventListener('kill-signal-acknowledged', handleKillSignalAcknowledged as EventListener);
+    };
+  }, [activeSessionId]);
   
   // Track when streaming starts (when loading begins)
   useEffect(() => {
@@ -2243,16 +2312,30 @@ const GlobalChatSidebar: React.FC = () => {
     return () => window.removeEventListener('resize', measure);
   }, []);
 
-  // In dual screen mode, ensure chat is visible
+  // Measure input area height to set messages container padding
   useEffect(() => {
-    if (isDualScreenMode && !isVisible) {
-      setIsVisible(true);
-    }
-  }, [isDualScreenMode, isVisible, setIsVisible]);
+    const measureInputArea = () => {
+      if (inputAreaRef.current && !isInputCentered) {
+        const height = inputAreaRef.current.offsetHeight;
+        setInputAreaHeight(height);
+      } else {
+        // When centered, no padding needed
+        setInputAreaHeight(0);
+      }
+    };
+    measureInputArea();
+    window.addEventListener('resize', measureInputArea);
+    // Also measure when queue expands/collapses or files change
+    const interval = setInterval(measureInputArea, 100);
+    return () => {
+      window.removeEventListener('resize', measureInputArea);
+      clearInterval(interval);
+    };
+  }, [isInputCentered, messageQueue.length, uploadedFiles.length, isQueueExpanded]);
 
-  // In dual screen mode, always render the sidebar (it's part of the layout)
-  // In normal mode, only render when visible
-  if (!isDualScreenMode && !isVisible) {
+  // Only render when visible - dual screen mode is automatically managed by chat visibility
+  // When chat closes, dual screen mode is also disabled, so we only need to check isVisible
+  if (!isVisible) {
     return null;
   }
 
@@ -2480,12 +2563,12 @@ const GlobalChatSidebar: React.FC = () => {
           from: { transform: 'translateX(100%)' },
           to: { transform: 'translateX(0)' },
         },
-        // In dual screen mode, ensure sidebar is always visible when chat is open
-        transform: isDualScreenMode && isVisible ? 'translateX(0)' : undefined,
+        // Transform based on visibility - dual screen mode is managed automatically
+        transform: isVisible ? 'translateX(0)' : 'translateX(100%)',
       }}
     >
-      {/* Resize Handle - always visible in dual screen mode */}
-      {(isDualScreenMode || isVisible) && (
+      {/* Resize Handle - visible when sidebar is visible */}
+      {isVisible && (
         <Box
           onMouseDown={handleMouseDown}
           sx={{
@@ -2732,6 +2815,7 @@ const GlobalChatSidebar: React.FC = () => {
           overflowY: 'auto',
           px: 0.375, // 3px horizontal padding
           py: 0.375, // 3px from top
+          pb: isInputCentered ? 0.375 : `${inputAreaHeight + 10}px`, // Add bottom padding to prevent overlap with input area
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
@@ -2764,8 +2848,8 @@ const GlobalChatSidebar: React.FC = () => {
           >
             <Box
               sx={{
-                p: 1.5,
-                borderRadius: 2,
+                p: 1, // 8px padding to match input area
+                borderRadius: 0.5, // 4px to match input area
                 backgroundColor: message.sender === 'user' 
                   ? 'rgba(59, 130, 246, 0.2)' 
                   : 'rgba(255, 255, 255, 0.1)',
@@ -2906,6 +2990,7 @@ const GlobalChatSidebar: React.FC = () => {
 
       {/* Input Area - Bubble Style */}
       <Box
+        ref={inputAreaRef}
         sx={{
           flexShrink: 0,
           position: 'absolute',
@@ -3102,9 +3187,10 @@ const GlobalChatSidebar: React.FC = () => {
                             </Typography>
                           }
                           secondary={
-                            <Box display="flex" gap={0.5} mt={0.25} flexWrap="wrap" alignItems="center">
+                            <Box component="span" display="flex" gap={0.5} mt={0.25} flexWrap="wrap" alignItems="center">
                               {queuedMessage.files && queuedMessage.files.length > 0 && (
                                 <Typography
+                                  component="span"
                                   variant="caption"
                                   sx={{
                                     color: '#6b7280',
@@ -3116,6 +3202,7 @@ const GlobalChatSidebar: React.FC = () => {
                               )}
                               {queuedMessage.context && queuedMessage.context.length > 0 && (
                                 <Typography
+                                  component="span"
                                   variant="caption"
                                   sx={{
                                     color: '#6b7280',
@@ -3126,6 +3213,7 @@ const GlobalChatSidebar: React.FC = () => {
                                 </Typography>
                               )}
                               <Typography
+                                component="span"
                                 variant="caption"
                                 sx={{
                                   color: '#6b7280',
@@ -3197,14 +3285,15 @@ const GlobalChatSidebar: React.FC = () => {
                 : (sessionContext.length > 0 ? 'context' 
                 : (activeSessionId ? 'followup' : 'new'));
               
-              // Check if agent is busy (loading, processing, or streaming)
-              // Note: We check typingMessages and isStreamingActive separately to ensure we catch all streaming states
-              const isStreamingComplete = typingMessages.size === 0 && !isStreamingActive;
-              const isAgentBusy = isLoadingMessage || isUnifiedProcessing || !isStreamingComplete || isProcessingQueueRef.current;
+              // Always send immediately - the kill signal will stop agent processing if needed
+              // Only queue if we're actively processing a message AND it's not from a kill signal
+              // (kill signals clear the processing state, so we can send immediately after)
+              const isAgentActuallyProcessing = isLoadingMessage || isUnifiedProcessing;
               
-              // If already processing or streaming, add to queue
-              if (isAgentBusy) {
-                console.log('📬 Sidebar: Message queued (processing in progress or streaming)');
+              // If agent is actively processing (not just in a streaming state that might be stale),
+              // queue the message. Otherwise send immediately.
+              if (isAgentActuallyProcessing && !isProcessingQueueRef.current) {
+                console.log('📬 Sidebar: Message queued (agent actively processing)');
                 setMessageQueue(prev => [...prev, {
                   text,
                   files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
@@ -3216,7 +3305,7 @@ const GlobalChatSidebar: React.FC = () => {
                 return;
               }
               
-              // Send immediately if not processing
+              // Send immediately - kill signal listener will stop processing if needed
               setIsLoadingMessage(true);
               if (activeSessionId) {
                 unifiedMessageHandler.broadcastLoadingState(activeSessionId, true, 'sidebar');

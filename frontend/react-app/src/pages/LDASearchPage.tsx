@@ -222,8 +222,8 @@ const LDASearchPage: React.FC = () => {
   });
   
   const [isFiltered, setIsFiltered] = useState<boolean>(savedState?.isFiltered || false);
-  const [searchFormExpanded, setSearchFormExpanded] = useState<boolean>(savedState?.searchFormExpanded !== undefined ? savedState.searchFormExpanded : true);
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState<boolean>(savedState?.advancedSearchExpanded !== undefined ? savedState.advancedSearchExpanded : false);
+  const [searchSidebarVisible, setSearchSidebarVisible] = useState<boolean>(savedState?.searchSidebarVisible !== undefined ? savedState.searchSidebarVisible : true);
 
   // Helper function to clean double quotes from CSV values
   const cleanCSVValue = (value: string): string => {
@@ -416,9 +416,9 @@ const LDASearchPage: React.FC = () => {
         pageSize,
         lastEvaluatedKey,
         hasMore,
-        searchFormExpanded,
         advancedSearchExpanded,
         visibleColumns,
+        searchSidebarVisible,
       };
       
       // Use compressed storage (automatically compresses if beneficial)
@@ -460,9 +460,9 @@ const LDASearchPage: React.FC = () => {
     pageSize,
     lastEvaluatedKey,
     hasMore,
-    searchFormExpanded,
     advancedSearchExpanded,
     visibleColumns,
+    searchSidebarVisible,
   ]);
 
   // Compute filters from search results
@@ -1012,49 +1012,38 @@ const LDASearchPage: React.FC = () => {
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Left Sidebar - Search Filters (Always visible) */}
-          <GlassCard sx={{ 
-            minWidth: searchFormExpanded ? 320 : 60,
-            maxWidth: searchFormExpanded ? 380 : 60,
-            width: searchFormExpanded ? 'auto' : 60,
+          {/* Left Sidebar - Search Filters (Collapsible) */}
+          {searchSidebarVisible ? (
+            <GlassCard sx={{ 
+            minWidth: 320,
+            maxWidth: 380,
+            width: 320,
             minHeight: 'fit-content',
             height: 'fit-content',
             position: 'sticky',
             top: 20,
             alignSelf: 'flex-start',
-            transition: 'min-width 0.3s ease, max-width 0.3s ease, width 0.3s ease',
-            overflow: 'hidden',
+            transition: 'all 0.3s ease-in-out',
           }}>
-            <Box sx={{ p: 3, position: 'relative' }}>
-              <Box sx={{ 
-                display: 'flex', 
-                justifyContent: searchFormExpanded ? 'space-between' : 'center', 
-                alignItems: 'center', 
-                mb: 2 
-              }}>
-                {searchFormExpanded && (
+              <Box sx={{ p: 3, position: 'relative' }}>
+                <Box sx={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center', 
+                  mb: 2 
+                }}>
                   <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
                     Search Filters
                   </Typography>
-                )}
-                <IconButton
-                  onClick={() => setSearchFormExpanded(!searchFormExpanded)}
-                  sx={{ 
-                    color: '#94a3b8', 
-                    ml: searchFormExpanded ? 'auto' : 0, 
-                    flexShrink: 0,
-                    transform: searchFormExpanded ? 'none' : 'translateX(-2px)', // Move slightly left when collapsed
-                  }}
-                  size="small"
-                >
-                  {searchFormExpanded ? <KeyboardArrowLeftIcon /> : <KeyboardArrowRightIcon />}
-                </IconButton>
-              </Box>
-              <Box sx={{ 
-                overflow: 'hidden',
-                position: 'relative',
-              }}>
-                <Slide direction="left" in={searchFormExpanded}>
+                  <IconButton
+                    onClick={() => setSearchSidebarVisible(false)}
+                    sx={{ color: '#94a3b8' }}
+                    size="small"
+                    title="Hide search filters"
+                  >
+                    <KeyboardArrowDownIcon sx={{ transform: 'rotate(-90deg)' }} />
+                  </IconButton>
+                </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* General Text Search */}
                   <Box>
@@ -1682,13 +1671,41 @@ const LDASearchPage: React.FC = () => {
                     </Button>
                   </Box>
                 </Box>
-                </Slide>
-              </Box>
             </Box>
           </GlassCard>
+          ) : (
+            <Box sx={{ 
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+              height: 'fit-content',
+            }}>
+              <IconButton
+                onClick={() => setSearchSidebarVisible(true)}
+                sx={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  border: '2px solid #374151',
+                  borderRadius: '50%',
+                  width: 48,
+                  height: 48,
+                  color: '#3b82f6',
+                  '&:hover': {
+                    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                    borderColor: '#3b82f6',
+                    transform: 'scale(1.05)',
+                  },
+                  transition: 'all 0.3s ease-in-out',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                }}
+                title="Show search filters"
+              >
+                <SearchIcon />
+              </IconButton>
+            </Box>
+          )}
 
           {/* Middle - Results Table */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }}>
             {/* Error Alert */}
             {searchError && (
               <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>

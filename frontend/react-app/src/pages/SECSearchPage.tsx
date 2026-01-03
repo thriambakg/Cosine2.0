@@ -788,6 +788,7 @@ const SECSearchPage: React.FC = () => {
   );
   
   const [resultsPerPage, setResultsPerPage] = useState<number>(10);
+  const [searchSidebarVisible, setSearchSidebarVisible] = useState<boolean>(savedState?.searchSidebarVisible !== undefined ? savedState.searchSidebarVisible : true);
   const RESULTS_PER_PAGE = resultsPerPage; // Keep for backward compatibility
 
   const { data: searchResults, loading: searchLoading, error: searchError } = useSECSearch();
@@ -883,7 +884,7 @@ const SECSearchPage: React.FC = () => {
           : null;
         parsed.searchStartTime = searchStartTime;
         parsed.jobId = searchState.jobId;  // Save job_id for cancellation
-        parsed.jobId = searchState.jobId;  // Save job_id for cancellation
+        parsed.searchSidebarVisible = searchSidebarVisible;
         sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(parsed));
         if (searchState.isSearching) {
           console.log('💾 Updated search state in sessionStorage:', {
@@ -1932,19 +1933,32 @@ const SECSearchPage: React.FC = () => {
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
-          {/* Left Sidebar - Search Filters (Always visible) */}
-          <GlassCard sx={{ 
-            minWidth: 320, 
-            maxWidth: 380,
-            height: 'fit-content',
-            position: 'sticky',
-            top: 20,
-            alignSelf: 'flex-start',
-          }}>
-            <Box sx={{ p: 3 }}>
-              <Typography variant="h6" sx={{ color: '#ffffff', mb: 3, fontSize: '1.1rem', fontWeight: 600 }}>
-                Search Parameters
-            </Typography>
+          {/* Left Sidebar - Search Filters (Collapsible) */}
+          {searchSidebarVisible ? (
+            <GlassCard sx={{ 
+              minWidth: 320, 
+              maxWidth: 380,
+              width: 320,
+              height: 'fit-content',
+              position: 'sticky',
+              top: 20,
+              alignSelf: 'flex-start',
+              transition: 'all 0.3s ease-in-out',
+            }}>
+              <Box sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                  <Typography variant="h6" sx={{ color: '#ffffff', fontSize: '1.1rem', fontWeight: 600 }}>
+                    Search Parameters
+                  </Typography>
+                  <IconButton
+                    onClick={() => setSearchSidebarVisible(false)}
+                    sx={{ color: '#94a3b8' }}
+                    size="small"
+                    title="Hide search filters"
+                  >
+                    <KeyboardArrowDownIcon sx={{ transform: 'rotate(-90deg)' }} />
+                  </IconButton>
+                </Box>
 
               {/* Search Parameters - Vertical Layout */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -2237,6 +2251,36 @@ const SECSearchPage: React.FC = () => {
             </Box>
             </Box>
         </GlassCard>
+        ) : (
+          <Box sx={{ 
+            position: 'sticky',
+            top: 20,
+            alignSelf: 'flex-start',
+            height: 'fit-content',
+          }}>
+            <IconButton
+              onClick={() => setSearchSidebarVisible(true)}
+              sx={{
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '2px solid #374151',
+                borderRadius: '50%',
+                width: 48,
+                height: 48,
+                color: '#3b82f6',
+                '&:hover': {
+                  backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                  borderColor: '#3b82f6',
+                  transform: 'scale(1.05)',
+                },
+                transition: 'all 0.3s ease-in-out',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              }}
+              title="Show search filters"
+            >
+              <SearchIcon />
+            </IconButton>
+          </Box>
+        )}
 
         {/* Form Types Selection Modal */}
         <Dialog
@@ -2459,7 +2503,7 @@ const SECSearchPage: React.FC = () => {
         )}
 
           {/* Middle Section - Results Table */}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }}>
             <GlassCard sx={{ p: 4 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>

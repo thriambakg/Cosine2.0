@@ -911,7 +911,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 14. analyze_chat_session_context_tool(session_id, user_id, context_items, analysis_type) - Analyze chat session context for insights and summaries
 15. get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Get real-time cryptocurrency data for analysis with flexible timeframes
 16. compare_crypto_tool(symbols, timeframe, start_date, end_date) - Compare multiple cryptocurrencies side by side with flexible timeframes
-17. read_pdf_tool(s3_key) - Read and analyze PDF files from S3 storage
+17. read_pdf_tool(s3_key, page_number=None) - Read and analyze PDF files from S3 storage. Use page_number parameter for large PDFs to read page-by-page and manage memory.
 18. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
 19. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3. Requires pre-fetched data from get_financial_data or get_crypto_data_tool.
 20. generate_stock_chart(symbol, timeframe, chart_type, title, start_date, end_date) - Convenience tool: Fetch stock data and generate chart in one step. Use this for simpler stock chart requests when you don't already have the data.
@@ -1286,12 +1286,34 @@ FOR CRYPTOCURRENCY QUESTIONS:
 5. Compare crypto performance against traditional assets when relevant
 
 FOR PDF FILE ANALYSIS:
-1. read_pdf_tool(s3_key) → Read and extract text from PDF files stored in S3 (uses Textract for better accuracy)
+🚨 CRITICAL: MEMORY MANAGEMENT FOR LARGE PDFs
+- For large PDFs (especially from filesystem at users/user_id/filesys/), ALWAYS read page-by-page to avoid token limits
+- Start with page 1: read_pdf_tool(s3_key, page_number=1) to see the document structure
+- Read subsequent pages incrementally: read_pdf_tool(s3_key, page_number=2), then page 3, etc.
+- NEVER attempt to read the entire PDF at once if it's large - this will cause context window overflow errors
+- Use page-by-page reading to manage memory and stay within token limits
+- After reading each page, analyze it before moving to the next page
+- If you encounter a "context window overflow" error, you MUST switch to page-by-page reading immediately
+
+1. read_pdf_tool(s3_key, page_number=None) → Read full PDF (ONLY for small PDFs < 10 pages)
+   - For large PDFs, use: read_pdf_tool(s3_key, page_number=1) to read specific pages
+   - Page numbers are 1-indexed (first page is page 1, not page 0)
+   - Example workflow for large PDF:
+     a. read_pdf_tool(s3_key, page_number=1) → Get title/header
+     b. read_pdf_tool(s3_key, page_number=2) → Get next section
+     c. Continue incrementally as needed
 2. analyze_pdf_content_tool(s3_key, analysis_type) → Perform specific analysis on PDF content
 3. analyze_pdf_forms_tool(s3_key) → Analyze PDF forms and tables using Amazon Textract
 4. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
 5. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
 6. Detect document type (financial, legal, technical, academic, report) automatically
+
+📋 FILESYSTEM PDF READING (users/user_id/filesys/):
+- Filesystem PDFs are stored at: users/{user_id}/filesys/{item_id}.pdf
+- The S3 key is provided directly in context items - use it exactly as provided
+- DO NOT prepend any path - the key is already complete
+- Example: If context shows s3_key="users/abc123/filesys/file.pdf", use it directly
+- Always start with page 1 for filesystem PDFs to assess document size
 
 FOR CSV FILE GENERATION (Excel-compatible):
 1. FIRST: Determine data source:

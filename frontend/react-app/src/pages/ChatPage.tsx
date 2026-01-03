@@ -102,8 +102,8 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
 const MessageBubble = ({ isUser, children, status, ...props }: any) => (
   <Box
     sx={{
-      p: 1.5,
-      borderRadius: 2,
+      p: 1, // 8px padding to match input area
+      borderRadius: 0.5, // 4px to match input area
       backgroundColor: isUser 
         ? 'rgba(59, 130, 246, 0.2)' 
         : 'rgba(255, 255, 255, 0.1)',
@@ -480,19 +480,58 @@ const MessageEditInput = memo(({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        variant="outlined"
+        variant="standard"
+        InputProps={{
+          disableUnderline: true,
+        }}
         sx={{
-          '& .MuiOutlinedInput-root': {
-            color: 'white',
+          '& .MuiInput-root': {
+            backgroundColor: 'transparent',
+            border: 'none',
+            outline: 'none !important',
+            boxShadow: 'none !important',
+            padding: 0,
+            margin: 0,
             paddingRight: '60px',
-            '& fieldset': {
-              borderColor: '#374151',
+            '&:before': {
+              display: 'none',
             },
-            '&:hover fieldset': {
-              borderColor: '#3b82f6',
+            '&:after': {
+              display: 'none',
             },
-            '&.Mui-focused fieldset': {
-              borderColor: '#3b82f6',
+            '&:hover:before': {
+              display: 'none',
+            },
+            '&:focus': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&:focus-within': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&.Mui-focused': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+              '&:before': {
+                display: 'none',
+              },
+              '&:after': {
+                display: 'none',
+              },
+            },
+          },
+          '& .MuiInput-input': {
+            color: '#ffffff',
+            fontSize: '0.875rem',
+            padding: '3px',
+            lineHeight: '1.5',
+            outline: 'none !important',
+            border: 'none !important',
+            '&:focus': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
             },
           },
         }}
@@ -500,12 +539,13 @@ const MessageEditInput = memo(({
       <Box
         sx={{
           position: 'absolute',
-          bottom: 8,
+          top: '3px', // Align with text input top padding (3px) for single line
           right: 8,
           display: 'flex',
           gap: 0.5,
           alignItems: 'center',
           justifyContent: 'center',
+          height: 'fit-content',
         }}
       >
         <Tooltip title="Cancel (Esc)">
@@ -523,39 +563,41 @@ const MessageEditInput = memo(({
           </IconButton>
         </Tooltip>
         <Tooltip title={isLoading ? "Stop processing" : "Send (Enter)"}>
-          <IconButton
-            size="small"
-            onClick={() => {
-              if (isLoading && onStop) {
-                onStop();
-              } else {
-                onSave();
-              }
-            }}
-            disabled={!isLoading && !value.trim()}
-            sx={{
-              color: isLoading 
-                ? '#ef4444' 
-                : (value.trim() ? '#22c55e' : '#6b7280'),
-              transition: 'all 0.2s ease',
-              '&:hover': { 
+          <span>
+            <IconButton
+              size="small"
+              onClick={() => {
+                if (isLoading && onStop) {
+                  onStop();
+                } else {
+                  onSave();
+                }
+              }}
+              disabled={!isLoading && !value.trim()}
+              sx={{
                 color: isLoading 
-                  ? '#dc2626' 
-                  : (value.trim() ? '#16a34a' : '#6b7280'),
-                backgroundColor: isLoading 
-                  ? 'rgba(239, 68, 68, 0.1)' 
-                  : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
-              },
-              width: 28,
-              height: 28,
-            }}
-          >
-            {isLoading ? (
-              <StopIcon sx={{ fontSize: 16 }} />
-            ) : (
-              <SendIcon sx={{ fontSize: 16 }} />
-            )}
-          </IconButton>
+                  ? '#ef4444' 
+                  : (value.trim() ? '#22c55e' : '#6b7280'),
+                transition: 'all 0.2s ease',
+                '&:hover': { 
+                  color: isLoading 
+                    ? '#dc2626' 
+                    : (value.trim() ? '#16a34a' : '#6b7280'),
+                  backgroundColor: isLoading 
+                    ? 'rgba(239, 68, 68, 0.1)' 
+                    : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
+                },
+                width: 28,
+                height: 28,
+              }}
+            >
+              {isLoading ? (
+                <StopIcon sx={{ fontSize: 16 }} />
+              ) : (
+                <SendIcon sx={{ fontSize: 16 }} />
+              )}
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
     </Box>
