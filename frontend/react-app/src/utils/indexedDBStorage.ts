@@ -217,3 +217,4 @@ export const clearIndexedDB = (): Promise<void> => {
   return indexedDBStorage.clear();
 };
 
+

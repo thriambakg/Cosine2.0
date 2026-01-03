@@ -392,6 +392,15 @@ export default function ChatPage() {
   const [missedResponseNotification] = useState<string | null>(null);
   // Typing messages for AI response animation
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
+  // Message queue for sequential processing
+  const [messageQueue, setMessageQueue] = useState<Array<{
+    text: string;
+    files?: UploadedFile[];
+    context?: ContextItem[];
+    model: string;
+    type: 'file' | 'context' | 'followup' | 'new';
+  }>>([]);
+  const isProcessingQueueRef = useRef(false);
   
   // Session-specific state tracking
   const [sessionLoadingStates, setSessionLoadingStates] = useState<Record<string, boolean>>({});
@@ -629,6 +638,69 @@ export default function ChatPage() {
     return () => clearTimeout(syncTimeout);
   }, [unifiedMessages, currentSession?.session_id, currentSession?.messages, addPersistedMessage]);
 
+  // Process next message in queue
+  const processNextMessageInQueue = useCallback(async () => {
+    if (isProcessingQueueRef.current || messageQueue.length === 0 || getCurrentSessionLoading() || isUnifiedProcessing) {
+      return;
+    }
+
+    isProcessingQueueRef.current = true;
+    const nextMessage = messageQueue[0];
+    
+    // Remove from queue
+    setMessageQueue(prev => prev.slice(1));
+    
+    console.log('📬 ChatPage: Processing queued message:', nextMessage.type);
+    
+    try {
+      const sessionId = currentSession?.session_id || 'pending';
+      setSessionLoadingStates(prev => ({
+        ...prev,
+        [sessionId]: true
+      }));
+      unifiedMessageHandler.broadcastLoadingState(sessionId, true, 'chatpage');
+
+      let result;
+      if (nextMessage.type === 'file' && nextMessage.files) {
+        result = await sendUnifiedFileMessage(nextMessage.text, nextMessage.files as unknown as File[], nextMessage.model);
+      } else if (nextMessage.type === 'context' && nextMessage.context) {
+        result = await sendUnifiedContextMessage(nextMessage.text, nextMessage.context, nextMessage.model);
+      } else if (nextMessage.type === 'followup' && currentSession?.session_id) {
+        result = await sendUnifiedFollowupMessage(nextMessage.text, nextMessage.model);
+      } else {
+        result = await sendUnifiedMessage({ text: nextMessage.text, model: nextMessage.model, type: 'new_message' });
+      }
+
+      if (result.success) {
+        console.log('✅ ChatPage: Queued message sent successfully');
+        
+        // Handle session creation if needed (same logic as regular send)
+        if (result.sessionId && result.sessionId !== currentSession?.session_id) {
+          await loadSession(result.sessionId);
+          await loadSessionFromDatabase(result.sessionId);
+        }
+      } else {
+        console.error('❌ ChatPage: Failed to send queued message:', result.error);
+        const errorSessionId = result.sessionId || currentSession?.session_id || 'pending';
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [errorSessionId]: false
+        }));
+        unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
+      }
+    } catch (error) {
+      console.error('❌ ChatPage: Error processing queued message:', error);
+      const errorSessionId = currentSession?.session_id || 'pending';
+      setSessionLoadingStates(prev => ({
+        ...prev,
+        [errorSessionId]: false
+      }));
+      unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
+    } finally {
+      isProcessingQueueRef.current = false;
+    }
+  }, [messageQueue, currentSession?.session_id, getCurrentSessionLoading, isUnifiedProcessing, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, loadSession, loadSessionFromDatabase]);
+
   // Subscribe to loading state updates from unified messaging system
   useEffect(() => {
     // Subscribe to agent log updates
@@ -661,6 +733,11 @@ export default function ChatPage() {
           ...prev,
           [sessionId]: false
         }));
+        
+        // Process next message in queue when current message finishes
+        if (messageQueue.length > 0 && !isProcessingQueueRef.current) {
+          processNextMessageInQueue();
+        }
       }
     });
 
@@ -668,7 +745,7 @@ export default function ChatPage() {
       unsubscribe();
       unsubscribeAgentLog();
     };
-  }, []);
+  }, [currentSession?.session_id, messageQueue.length, processNextMessageInQueue]);
 
   // Listen for AI response typing events from unified messaging system
   useEffect(() => {
@@ -1630,8 +1707,33 @@ export default function ChatPage() {
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!text.trim() || getCurrentSessionLoading() || isUnifiedProcessing) return;
+    if (!text.trim()) return;
 
+    console.log('📤 ChatPage: Preparing to send message');
+    
+    // Determine message type
+    const messageType = uploadedFiles.length > 0 ? 'file' 
+      : (sessionContext.length > 0 && hasContextChanged() ? 'context' 
+      : (currentSession?.session_id ? 'followup' : 'new'));
+    
+    // If already processing, add to queue
+    if (getCurrentSessionLoading() || isUnifiedProcessing) {
+      console.log('📬 ChatPage: Message queued (processing in progress)');
+      setMessageQueue(prev => [...prev, {
+        text,
+        files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+        context: sessionContext.length > 0 && hasContextChanged() ? sessionContext : undefined,
+        model: selectedModel,
+        type: messageType as 'file' | 'context' | 'followup' | 'new'
+      }]);
+      // Clear files immediately when queuing
+      if (uploadedFiles.length > 0) {
+        setUploadedFiles([]);
+      }
+      return;
+    }
+    
+    // Send immediately if not processing
     console.log('📤 ChatPage: Sending message via unified messaging system');
     
     // Clear files immediately when sending (text input is local to child)
@@ -1804,7 +1906,11 @@ export default function ChatPage() {
           [errorSessionId]: false
         }));
         unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
-        // Handle error (could show toast notification)
+        
+        // Process next message in queue even on error
+        if (messageQueue.length > 0 && !isProcessingQueueRef.current) {
+          setTimeout(() => processNextMessageInQueue(), 100);
+        }
       }
       } catch (error) {
       console.error('❌ ChatPage: Error sending message via unified system:', error);
@@ -1815,6 +1921,11 @@ export default function ChatPage() {
         [errorSessionId]: false
       }));
       unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
+      
+      // Process next message in queue even on error
+      if (messageQueue.length > 0 && !isProcessingQueueRef.current) {
+        setTimeout(() => processNextMessageInQueue(), 100);
+      }
     }
   };
 

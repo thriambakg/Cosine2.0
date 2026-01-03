@@ -142,7 +142,6 @@ const CongressBillsSearchPage: React.FC = () => {
       congress: Array.isArray(saved?.congress) ? saved.congress : [],
       policy_area: Array.isArray(saved?.policy_area) ? saved.policy_area : [],
       sponsor_party: Array.isArray(saved?.sponsor_party) ? saved.sponsor_party : [],
-      sponsor_state: Array.isArray(saved?.sponsor_state) ? saved.sponsor_state : [],
       latest_action_date_from: saved?.latest_action_date_from || '',
       latest_action_date_to: saved?.latest_action_date_to || '',
       bipartisan: saved?.bipartisan,
@@ -234,7 +233,6 @@ const CongressBillsSearchPage: React.FC = () => {
       return (
         (saved.bill_types && saved.bill_types.length > 0) ||
         (saved.sponsor_parties && saved.sponsor_parties.length > 0) ||
-        (saved.sponsor_states && saved.sponsor_states.length > 0) ||
         (saved.policy_areas && saved.policy_areas.length > 0) ||
         (saved.congresses && saved.congresses.length > 0) ||
         (saved.bipartisan && saved.bipartisan.length > 0)
@@ -360,7 +358,6 @@ const CongressBillsSearchPage: React.FC = () => {
     'bill_number',
     'sponsor_name',
     'sponsor_party',
-    'sponsor_state',
     'introduced_date',
     'latest_action_date',
     'congress',
@@ -534,12 +531,8 @@ const CongressBillsSearchPage: React.FC = () => {
       
       console.log('🟢 [Search] Final politician_role (array format):', filters.politician_role);
 
-      // Use default batch size for initial fetch
-      const fetchPageSize = 10;
-      
       const response = await congressBillsSearchAPI.search({
         filters,
-        limit: fetchPageSize,
       });
 
       if (response.success) {
@@ -607,12 +600,8 @@ const CongressBillsSearchPage: React.FC = () => {
         }
       });
 
-      // Use default batch size for load more
-      const fetchPageSize = 10;
-      
       const response = await congressBillsSearchAPI.search({
         filters,
-        limit: fetchPageSize,
         last_evaluated_key: lastEvaluatedKey,
       });
 
@@ -829,7 +818,6 @@ const CongressBillsSearchPage: React.FC = () => {
         selectedFilters: {
           bill_types: Array.from(selectedFilters.bill_types),
           sponsor_parties: Array.from(selectedFilters.sponsor_parties),
-          sponsor_states: Array.from(selectedFilters.sponsor_states),
           policy_areas: Array.from(selectedFilters.policy_areas),
           congresses: Array.from(selectedFilters.congresses),
           bipartisan: Array.from(selectedFilters.bipartisan),
@@ -1240,16 +1228,6 @@ const CongressBillsSearchPage: React.FC = () => {
                         />
 
                         {/* Sponsor State - Dropdown multi-select */}
-                        <MultiSelectField<string>
-                          label="Sponsor State"
-                          selectedItems={searchParams.sponsor_state || []}
-                          onItemsChange={(states) => {
-                            setSearchParams((prev) => ({ ...prev, sponsor_state: states }));
-                          }}
-                          suggestions={US_STATES}
-                          renderItem={(state) => state}
-                          placeholder="Select states..."
-                        />
 
                         {/* Bipartisan - Dropdown single-select */}
                         <FormControl fullWidth>
@@ -1390,7 +1368,6 @@ const CongressBillsSearchPage: React.FC = () => {
                           introduced_date_to: '',
                           policy_area: [] as string[],
                           sponsor_party: [] as string[],
-                          sponsor_state: [] as string[],
                           latest_action_date_from: '',
                           latest_action_date_to: '',
                         });
@@ -1644,9 +1621,6 @@ const CongressBillsSearchPage: React.FC = () => {
                     {visibleColumns.includes('sponsor_party') && (
                       <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Party</TableCell>
                     )}
-                    {visibleColumns.includes('sponsor_state') && (
-                      <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>State</TableCell>
-                    )}
                     {visibleColumns.includes('introduced_date') && (
                       <TableCell sx={{ color: '#94a3b8', borderColor: '#374151' }}>Introduced Date</TableCell>
                     )}
@@ -1720,11 +1694,6 @@ const CongressBillsSearchPage: React.FC = () => {
                       {visibleColumns.includes('sponsor_party') && (
                         <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
                           {bill.sponsor_party || 'N/A'}
-                        </TableCell>
-                      )}
-                      {visibleColumns.includes('sponsor_state') && (
-                        <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                          {bill.sponsor_state || 'N/A'}
                         </TableCell>
                       )}
                       {visibleColumns.includes('introduced_date') && (
@@ -1876,7 +1845,6 @@ const CongressBillsSearchPage: React.FC = () => {
               {/* Selected Filters Box */}
               {(selectedFilters.bill_types.size > 0 ||
                 selectedFilters.sponsor_parties.size > 0 ||
-                selectedFilters.sponsor_states.size > 0 ||
                 selectedFilters.policy_areas.size > 0 ||
                 selectedFilters.congresses.size > 0 ||
                 selectedFilters.bipartisan.size > 0) && (

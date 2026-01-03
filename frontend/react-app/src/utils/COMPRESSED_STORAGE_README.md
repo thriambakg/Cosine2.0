@@ -103,3 +103,4 @@ compressedSessionStorage.setItem('search-page-state', stateToSave);
 const savedState = compressedSessionStorage.getItem('search-page-state');
 ```
 
+

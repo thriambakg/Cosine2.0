@@ -489,7 +489,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults,
       };
       
       const response = await ldaSearchAPI.search(searchRequest);
@@ -661,7 +660,6 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults,
         last_evaluated_key: keyToUse,
       };
       

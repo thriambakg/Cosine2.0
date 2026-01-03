@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional
 from decimal import Decimal
 from datetime import datetime, timedelta
 from boto3.dynamodb.conditions import Key, Attr
-from boto3.dynamodb.types import TypeDeserializer
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 
 # Configure logging
 logger = logging.getLogger()
@@ -273,15 +273,6 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             if item_party not in parties:
                 return False
     
-    # Sponsor state filter (OR logic within field)
-    if filters.get('sponsor_state'):
-        states = filters['sponsor_state'] if isinstance(filters['sponsor_state'], list) else [filters['sponsor_state']]
-        states = [s for s in states if s and str(s).strip()]
-        if states:
-            item_state = str(item.get('sponsor_state') or '').strip()
-            if item_state not in states:
-                return False
-    
     # Policy area filter (OR logic within field)
     if filters.get('policy_area'):
         policy_areas = filters['policy_area'] if isinstance(filters['policy_area'], list) else [filters['policy_area']]
@@ -486,27 +477,6 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_key': 'introduced_date' if range_value else None,
                 'range_value': range_value,
                 'range_condition': range_condition
-            })
-    
-    # SponsorStateDateIndex: hash_key=sponsor_state, range_key=introduced_date
-    if filters.get('sponsor_state'):
-        states = filters['sponsor_state'] if isinstance(filters['sponsor_state'], list) else [filters['sponsor_state']]
-        states = [s for s in states if s and str(s).strip()]
-        if states:
-            # Use first state for hash key
-            state = states[0].strip()
-            introduced_date = None
-            if filters.get('introduced_date_from'):
-                introduced_date = filters['introduced_date_from']
-            
-            query_configs.append({
-                'filter_key': 'sponsor_state',
-                'index_name': 'SponsorStateDateIndex',
-                'hash_key': 'sponsor_state',
-                'hash_value': state,
-                'range_key': 'introduced_date' if introduced_date else None,
-                'range_value': introduced_date,
-                'range_condition': 'gte' if introduced_date else None
             })
     
     # PolicyAreaDateIndex: hash_key=policy_area, range_key=introduced_date
@@ -908,7 +878,7 @@ def prepare_range_key_value_for_query(config: Dict[str, Any]) -> tuple[Any, Opti
 def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: Any,
                            range_key_name: Optional[str] = None, range_key_value: Any = None,
                            range_key_condition: Optional[str] = None, limit: int = 1000,
-                           exclusive_start_key: Optional[Dict] = None, get_all: bool = False) -> tuple[List[str], Optional[Dict]]:
+                           exclusive_start_key: Optional[Dict] = None, get_all: bool = False) -> tuple[List[str], Optional[Dict], Dict[str, Dict]]:
     """
     Query a GSI and return bill_ids (for KEYS_ONLY GSIs)
     
@@ -924,19 +894,42 @@ def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: 
         get_all: If True, paginate to get all items (up to limit). If False, return single batch.
     
     Returns:
-        Tuple of (bill_ids list, last_evaluated_key for pagination)
+        Tuple of (bill_ids list, last_evaluated_key for pagination, bill_id_to_gsi_item mapping)
+        The bill_id_to_gsi_item mapping allows us to create pagination keys from the last returned item
     """
     bill_ids = []
+    bill_id_to_gsi_item = {}  # Map bill_id to GSI item (for pagination key creation)
     last_eval_key = exclusive_start_key
     
     params = {
         'IndexName': index_name,
         'KeyConditionExpression': Key(hash_key_name).eq(hash_key_value),
         'Limit': limit,
-        'ProjectionExpression': 'bill_id'  # Only need bill_id from KEYS_ONLY GSI
-        # Note: Cannot use FilterExpression on is_search_index here because GSIs don't project it
-        # Search index items will be filtered out after BatchGetItem using is_search_index_item()
+        # CRITICAL: Project hash_key, range_key (if present), and bill_id for pagination key creation
+        # We need these keys to create valid pagination keys from the last returned item
+        # DynamoDB requires hash_key, range_key (if GSI has one), and primary key for ExclusiveStartKey
     }
+    
+    # Build ProjectionExpression to include hash_key, range_key (if present), and bill_id
+    # CRITICAL: Some GSIs always have a range key even if we're not filtering by it
+    # We need to include it in the projection for pagination key creation
+    projection_attrs = [hash_key_name, 'bill_id']
+    if range_key_name:
+        projection_attrs.append(range_key_name)
+    else:
+        # Determine range key from index name if not in config
+        # All "*DateIndex" GSIs (except IntroducedDateIndex and LatestActionDateIndex) have introduced_date as range key
+        gsis_with_date_range_key = [
+            'SponsorPartyDateIndex', 'PolicyAreaDateIndex',
+            'SponsorNameDateIndex', 'BillTitleDateIndex', 'BillTypeDateIndex',
+            'BipartisanDateIndex', 'BillNumberDateIndex'
+        ]
+        if index_name in gsis_with_date_range_key:
+            projection_attrs.append('introduced_date')
+    params['ProjectionExpression'] = ', '.join(projection_attrs)
+    
+    # Note: Cannot use FilterExpression on is_search_index here because GSIs don't project it
+    # Search index items will be filtered out after BatchGetItem using is_search_index_item()
     
     # Add range key condition if provided
     if range_key_name:
@@ -957,17 +950,21 @@ def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: 
         round_count += 1
         try:
             if last_eval_key:
+                # Log the pagination key before using it
+                logger.info(f"Using ExclusiveStartKey for GSI {index_name}: {json.dumps(last_eval_key, default=str)}")
                 params['ExclusiveStartKey'] = last_eval_key
             
             response = bills_table.query(**params)
             gsi_items = response.get('Items', [])
             last_eval_key = response.get('LastEvaluatedKey')
             
-            # Extract bill_ids
+            # Extract bill_ids and store GSI items for pagination key creation
             for item in gsi_items:
                 bill_id = item.get('bill_id')
                 if bill_id:
                     bill_ids.append(bill_id)
+                    # Store GSI item for this bill_id (contains hash key, range key, and bill_id)
+                    bill_id_to_gsi_item[bill_id] = item
             
             # Stop if no more items or we have enough (and not getting all)
             if not last_eval_key:
@@ -981,7 +978,7 @@ def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: 
             logger.error(f"Error querying GSI {index_name}: {str(e)}", exc_info=True)
             break
     
-    return bill_ids[:limit], last_eval_key
+    return bill_ids[:limit], last_eval_key, bill_id_to_gsi_item
 
 
 def search_by_introduced_date_range(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
@@ -1609,7 +1606,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                                 all_bill_ids.update(cosponsor_bill_ids)
                                 logger.info(f"Initial union cosponsor query complete: {len(cosponsor_bill_ids)} total bill IDs")
                             elif union_config.get('index_name'):
-                                bill_ids, _ = query_gsi_for_bill_ids(
+                                bill_ids, _, _ = query_gsi_for_bill_ids(
                                     index_name=union_config['index_name'],
                                     hash_key_name=union_config['hash_key'],
                                     hash_key_value=union_config['hash_value'],
@@ -1652,7 +1649,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         logger.info(f"Initial cosponsor query complete: {len(cosponsor_bill_ids)} total bill IDs")
                     elif politician_config.get('index_name'):
                         # Single sponsor GSI query
-                        bill_ids, _ = query_gsi_for_bill_ids(
+                        bill_ids, _, _ = query_gsi_for_bill_ids(
                             index_name=politician_config['index_name'],
                             hash_key_name=politician_config['hash_key'],
                             hash_key_value=politician_config['hash_value'],
@@ -1686,7 +1683,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         all_bill_ids.update(bill_ids)
                     elif union_config.get('index_name'):
                         # Query sponsor GSI
-                        bill_ids, _ = query_gsi_for_bill_ids(
+                        bill_ids, _, _ = query_gsi_for_bill_ids(
                             index_name=union_config['index_name'],
                             hash_key_name=union_config['hash_key'],
                             hash_key_value=union_config['hash_value'],
@@ -1718,7 +1715,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 # Prepare range key value (handles BETWEEN condition)
                 range_key_value, range_key_condition = prepare_range_key_value_for_query(config)
                 
-                bill_ids, _ = query_gsi_for_bill_ids(
+                bill_ids, _, _ = query_gsi_for_bill_ids(
                     index_name=index_name,
                     hash_key_name=config['hash_key'],
                     hash_key_value=config['hash_value'],
@@ -1745,7 +1742,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # Priority-based source selection
         # Priority order (lower number = higher priority):
         # 1. Exact matches (bill_number, bill_title) - most specific, should be source
-        # 2. Single-value filters (sponsor_party, sponsor_state, policy_area, bipartisan, bill_type, congress) - moderately specific
+        # 2. Single-value filters (sponsor_party, policy_area, bipartisan, bill_type, congress) - moderately specific
         # 3. Search indices (cosponsor, sponsor via politician_name) - can have many results, need to continue querying
         # 4. Date ranges (introduced_date, latest_action_date) - least specific, should be applied as filters, not as source
         
@@ -1761,7 +1758,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             
             # Priority 2: Single-value filters (moderately specific)
             # Note: bipartisan moved to priority 3 because it can return many results
-            if filter_key in ['sponsor_party', 'sponsor_state', 'policy_area', 'bill_type', 'congress']:
+            if filter_key in ['sponsor_party', 'policy_area', 'bill_type', 'congress']:
                 return 2
             
             # Priority 3: Search indices (cosponsor, sponsor via politician_name) and bipartisan
@@ -1895,6 +1892,8 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # For union_politician queries, we need separate tokens for sponsor and cosponsor
         initial_sponsor_last_key = None
         initial_cosponsor_last_key = None
+        # Initialize re_query_from_beginning early so it's available when needed
+        re_query_from_beginning = False
         if last_evaluated_key and isinstance(last_evaluated_key, dict):
             if last_evaluated_key.get('query_type') == 'multi_gsi_intersection_offset':
                 offset = last_evaluated_key.get('offset', 0)
@@ -1916,24 +1915,15 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 initial_cosponsor_last_key = last_evaluated_key.get('cosponsor_last_key')
                 logger.info(f"Union politician pagination: sponsor={initial_sponsor_last_key is not None}, cosponsor={initial_cosponsor_last_key is not None}")
         
-        # If source is exhausted (source_last_eval_key is None) and offset >= total_matching_items, return no more items
-        if initial_source_last_eval_key is None and total_matching_items_from_previous is not None and offset >= total_matching_items_from_previous:
-            logger.info(f"Offset {offset} >= total matching items {total_matching_items_from_previous}, returning no more items")
-            return {
-                'success': True,
-                'results': [],
-                'count': 0,
-                'has_more': False,
-                'last_evaluated_key': None,
-                'method': 'multi_gsi_intersection',
-                'index_used': f"{len(query_configs)}_GSIs"
-            }
+        # Don't do early return check - we'll fetch the whole batch, apply filters, then apply offset
+        # This ensures we follow the correct order: fetch -> filter -> paginate
         
         # Paginate through source GSI until we have enough results or it runs out
         all_matching_items = []
         # Use initial_source_last_eval_key if provided (from offset token), otherwise start fresh
         # For union_politician queries, we may have separate tokens from the offset token or directly
-        source_last_eval_key = initial_source_last_eval_key
+        # If re_query_from_beginning is True, start from None to re-query from the beginning
+        source_last_eval_key = None if re_query_from_beginning else initial_source_last_eval_key
         # If initial_source_last_eval_key is a union_politician_pagination token, extract the separate tokens
         # (This handles the case where the token comes directly, not from an offset token)
         if isinstance(initial_source_last_eval_key, dict) and initial_source_last_eval_key.get('query_type') == 'union_politician_pagination':
@@ -1947,26 +1937,41 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         pagination_round = 0
         
         # CRITICAL FIX: If source is exhausted (initial_source_last_eval_key is None) and we have an offset,
-        # we cannot re-query from the beginning because that would return the same items again.
-        # Instead, we should only query if the source still has more items OR if we don't have an offset yet.
-        # If source is exhausted and we have an offset, we've already collected all items in a previous request,
-        # so we should not re-query. The offset check above (line 1906) should have caught this case.
-        # However, if the source is NOT exhausted, we should continue querying from where we left off.
+        # we need to re-query from the beginning to collect items again, then apply the offset.
+        # This is necessary because we can't store items between Lambda invocations.
+        # We'll re-query the source GSI from the beginning (no pagination key) to rebuild the collection.
         should_query_source = True
         if initial_source_last_eval_key is None and offset > 0:
-            # Source is exhausted and we have an offset - this means we've already collected all items
-            # in a previous request. We should not re-query because that would return duplicate items.
-            # The offset check above should have returned early, but if we get here, it means
-            # total_matching_items_from_previous was None or offset < total_matching_items_from_previous.
-            # In this case, we should not query - we'll return empty results or use cached items if available.
-            should_query_source = False
-            logger.warning(f"⚠️ Source exhausted with offset {offset} - cannot re-query without returning duplicates. total_matching_items_from_previous: {total_matching_items_from_previous}")
+            # Source is exhausted and we have an offset - we need to re-query from the beginning
+            # to collect items again, then apply the offset to get the right items.
+            # This is safe because we know the source is exhausted (no more items), so we'll get
+            # the same items as before, which is what we need to apply the offset correctly.
+            should_query_source = True
+            re_query_from_beginning = True
+            logger.info(f"Source exhausted with offset {offset} - re-querying from beginning to collect items for offset application")
         
-        # We need enough items to cover the offset + limit
-        # If we have an offset, we might already have items in memory from a previous request
-        # In that case, we should continue querying the source to get more items
-        # However, if source is exhausted (source_last_eval_key is None), we should only fetch once
-        while should_query_source and len(all_matching_items) < (offset + limit) and pagination_round < max_pagination_rounds:
+        # Paginate through source GSI until we have enough results or it runs out
+        all_matching_items = []
+        # Use initial_source_last_eval_key if provided (from offset token), otherwise start fresh
+        # For union_politician queries, we may have separate tokens from the offset token or directly
+        # If re_query_from_beginning is True, start from None to re-query from the beginning
+        source_last_eval_key = None if re_query_from_beginning else initial_source_last_eval_key
+        # If initial_source_last_eval_key is a union_politician_pagination token, extract the separate tokens
+        # (This handles the case where the token comes directly, not from an offset token)
+        if isinstance(initial_source_last_eval_key, dict) and initial_source_last_eval_key.get('query_type') == 'union_politician_pagination':
+            # Override the separate tokens if they weren't already set from offset token
+            if initial_sponsor_last_key is None:
+                initial_sponsor_last_key = initial_source_last_eval_key.get('sponsor_last_key')
+            if initial_cosponsor_last_key is None:
+                initial_cosponsor_last_key = initial_source_last_eval_key.get('cosponsor_last_key')
+            logger.info(f"Extracted union politician tokens from source_last_eval_key: sponsor={initial_sponsor_last_key is not None}, cosponsor={initial_cosponsor_last_key is not None}")
+        max_pagination_rounds = 50
+        pagination_round = 0
+        
+        # For multi-GSI intersection, fetch all items from source GSI first, then filter, then apply offset
+        # This ensures we follow the correct order: fetch -> filter -> paginate
+        # We'll fetch all items (or up to 3000) in one go, then filter them, then apply offset
+        while should_query_source and pagination_round < max_pagination_rounds:
             pagination_round += 1
             
             # Query source GSI/search index with pagination
@@ -1993,7 +1998,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                                 if cosponsor_last_key:
                                     new_last_eval_key = cosponsor_last_key
                             elif union_config.get('index_name'):
-                                bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                                bill_ids_batch, sponsor_last_key, _ = query_gsi_for_bill_ids(
                                     index_name=union_config['index_name'],
                                     hash_key_name=union_config['hash_key'],
                                     hash_key_value=union_config['hash_value'],
@@ -2019,7 +2024,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         if cosponsor_last_key:
                             new_last_eval_key = cosponsor_last_key
                     elif politician_config.get('index_name'):
-                        bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                        bill_ids_batch, sponsor_last_key, _ = query_gsi_for_bill_ids(
                             index_name=politician_config['index_name'],
                             hash_key_name=politician_config['hash_key'],
                             hash_key_value=politician_config['hash_value'],
@@ -2064,7 +2069,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 
                 if sponsor_config:
                     try:
-                        bill_ids_batch, sponsor_last_key = query_gsi_for_bill_ids(
+                        bill_ids_batch, sponsor_last_key, _ = query_gsi_for_bill_ids(
                             index_name=sponsor_config['index_name'],
                             hash_key_name=sponsor_config['hash_key'],
                             hash_key_value=sponsor_config['hash_value'],
@@ -2134,7 +2139,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     elif cosponsor_exhausted and not sponsor_exhausted:
                         # Fetch more from sponsor
                         logger.info(f"Cosponsor exhausted, fetching {additional_needed} more from sponsor")
-                        more_bill_ids, sponsor_last_key = query_gsi_for_bill_ids(
+                        more_bill_ids, sponsor_last_key, _ = query_gsi_for_bill_ids(
                             index_name=sponsor_config['index_name'],
                             hash_key_name=sponsor_config['hash_key'],
                             hash_key_value=sponsor_config['hash_value'],
@@ -2206,19 +2211,24 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 logger.info(f"Search index pagination complete: {len(source_bill_ids_batch)} total bill IDs, has_more: {new_last_eval_key is not None}")
             else:
                 # Use GSI query
+                # For multi-GSI intersection, fetch all items from source GSI first, then filter, then apply offset
+                # This ensures we follow the correct order: fetch -> filter -> paginate
                 # Prepare range key value (handles BETWEEN condition)
                 range_key_value, range_key_condition = prepare_range_key_value_for_query(source_config)
                 
-                source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
+                # If re-querying from beginning (source exhausted with offset), fetch all items
+                # Otherwise, if we have a pagination key, continue from where we left off
+                # Use get_all=True to fetch all items from the source GSI (up to 3000)
+                source_bill_ids_batch, new_last_eval_key, _ = query_gsi_for_bill_ids(
                     index_name=source_config['index_name'],
                     hash_key_name=source_config['hash_key'],
                     hash_key_value=source_config['hash_value'],
                     range_key_name=source_config.get('range_key'),
                     range_key_value=range_key_value,
                     range_key_condition=range_key_condition,
-                    limit=1000,
+                    limit=3000,  # Fetch large batch
                     exclusive_start_key=source_last_eval_key,
-                    get_all=False
+                    get_all=True  # Fetch all items from source GSI
                 )
             source_last_eval_key = new_last_eval_key
             
@@ -2242,10 +2252,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             
             logger.info(f"Pagination round {pagination_round}: Got {len(source_bill_ids_batch)} bill_ids from source GSI")
             
-            # Fetch full items for this batch
+            # CRITICAL: Fetch FULL bill items from the table using BatchGetItem
+            # We query GSIs (KEYS_ONLY projection) to get bill_ids, then fetch complete bill data from the table
+            # Never return GSI projection results - always fetch full items
             items_batch = []
             if source_bill_ids_batch:
                 batch_size = limit  # Use limit (page size) for batch size
+                logger.info(f"Fetching FULL bill items from table for {len(source_bill_ids_batch)} bill_ids (not returning GSI projection)")
                 for i in range(0, len(source_bill_ids_batch), batch_size):
                     batch_ids = source_bill_ids_batch[i:i + batch_size]
                     # Deduplicate batch_ids to avoid ValidationException for duplicate keys
@@ -2254,6 +2267,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     dynamodb_client = boto3.client('dynamodb')
                     # Include both bill_id (hash key) and search_index_sk (range key)
                     # For regular bill items, search_index_sk = bill_id
+                    # This fetches FULL items from the table, not just GSI projection
                     request_items = {
                         BILLS_TABLE_NAME: {
                             'Keys': [
@@ -2273,6 +2287,8 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         # Filter out search index items
                         if not is_search_index_item(converted_item):
                             items_batch.append(converted_item)
+                
+                logger.info(f"Fetched {len(items_batch)} FULL bill items from table (not GSI projection)")
             
             # Apply remaining filters in Python
             for item in items_batch:
@@ -2281,43 +2297,37 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             
             logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
             
-            # Stop if source GSI ran out or we have enough results
-            # For high-priority sources (exact matches like bill_number), continue querying until we find matches
-            # with other filters OR exhaust the source. This ensures we don't miss results when intersections
-            # initially return 0.
+            # For multi-GSI intersection, we fetch all items from source GSI first (get_all=True)
+            # Then we'll filter them and apply offset. So we stop when source is exhausted.
             if not source_last_eval_key:
-                # Source query ran out of items
-                # For high-priority sources (exact matches), if we have 0 matches, this might indicate
-                # the filters are incompatible, but we've exhausted the source so stop
-                if source_priority <= 2 and len(all_matching_items) == 0 and pagination_round == 1:
-                    logger.warning(f"⚠️ High-priority source ({shortest_key}) exhausted with 0 matches. Filters may be incompatible.")
+                # Source query ran out of items - we've fetched all items
+                logger.info(f"Source GSI exhausted - fetched all items, will filter and apply offset")
                 break
-            elif len(all_matching_items) >= (offset + limit):
-                # We have enough filtered results (including offset)
+            # For regular GSI queries (not get_all), we might continue paginating
+            # But for multi-GSI intersection with get_all=True, we fetch all in one go
+            # So we only need one pagination round for regular GSI queries
+            if pagination_round >= 1 and source_config.get('index_name') and not source_config.get('query_type'):
+                # We've fetched all items (or up to 3000), now filter and apply offset
                 break
-            elif source_priority <= 2 and len(all_matching_items) == 0:
-                # For high-priority sources (exact matches, single-value filters), continue querying
-                # even if we have 0 matches so far, to ensure we check all possible matches
-                logger.info(f"High-priority source ({shortest_key}) has 0 matches so far, continuing to query...")
-                # Continue to next iteration
         
         # Use the collected items directly, applying offset if needed
-        # CRITICAL FIX: When we have an offset and the source is NOT exhausted, we're continuing to query
-        # from where we left off. The new items we collect are items we haven't seen before, so we should
-        # NOT apply the offset to them. The offset was already applied in the previous request.
-        # However, if the source IS exhausted and we have an offset, we can't re-query, so we return empty.
-        if not should_query_source and offset > 0:
-            # Source exhausted with offset - cannot access previously collected items
-            logger.info(f"Source exhausted with offset {offset} - returning empty results (cannot access previously collected items)")
-            items = []
-        elif offset > 0 and initial_source_last_eval_key is not None:
+        # OPTIMIZATION: If source is exhausted and we have all matching items in memory,
+        # return all remaining items (after offset) instead of limiting to `limit`.
+        # This saves compute by avoiding unnecessary pagination when we already have everything.
+        if offset > 0 and initial_source_last_eval_key is not None and not re_query_from_beginning:
             # Source is NOT exhausted and we have an offset - we're continuing from where we left off
             # The new items we collected are items we haven't returned yet, so return them directly (up to limit)
             # Don't apply offset because these are new items, not items we've already seen
             items = all_matching_items[:limit]
             logger.info(f"Continuing query with offset {offset} - returning {len(items)} new items (not applying offset to new batch)")
+        elif re_query_from_beginning or (initial_source_last_eval_key is None and offset > 0):
+            # Source is exhausted and we re-queried from beginning, or source was exhausted with offset
+            # We have all matching items in memory - return all remaining items (after offset) instead of limiting
+            # This saves compute by avoiding unnecessary pagination
+            items = all_matching_items[offset:]  # Return all remaining items, not just up to limit
+            logger.info(f"Source exhausted - returning all {len(items)} remaining items after offset {offset} (total: {len(all_matching_items)} items)")
         else:
-            # No offset, or first request - apply offset normally
+            # No offset, first request - apply offset and limit normally
             items = all_matching_items[offset:offset + limit]
         
         logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
@@ -2354,10 +2364,17 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             logger.info(f"Enriched {len(enriched_results)} bill(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
         
         # Determine if there are more results
-        # We have more if: (1) there are more items in all_matching_items than returned, OR (2) source query has more items
-        has_more_items = len(all_matching_items) > len(enriched_results)
-        has_more_source = source_last_eval_key is not None
-        has_more = has_more_items or has_more_source
+        # If source is exhausted and we returned all remaining items, there are no more results
+        # Otherwise, we have more if: (1) there are more items in all_matching_items than returned, OR (2) source query has more items
+        if re_query_from_beginning or (initial_source_last_eval_key is None and offset > 0):
+            # Source is exhausted and we returned all remaining items - no more results
+            has_more = False
+            has_more_items = False
+            has_more_source = False
+        else:
+            has_more_items = len(all_matching_items) > len(enriched_results)
+            has_more_source = source_last_eval_key is not None
+            has_more = has_more_items or has_more_source
         
         # Convert last_evaluated_key to JSON-serializable format
         serializable_last_key = None
@@ -2553,7 +2570,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                         )
                         all_bill_ids.update(batch_ids)
                     elif union_config.get('index_name'):
-                        batch_ids, _ = query_gsi_for_bill_ids(
+                        batch_ids, _, _ = query_gsi_for_bill_ids(
                             index_name=union_config['index_name'],
                             hash_key_name=union_config['hash_key'],
                             hash_key_value=union_config['hash_value'],
@@ -2573,7 +2590,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 )
                 all_bill_ids.update(batch_ids)
             elif politician_config.get('index_name'):
-                batch_ids, _ = query_gsi_for_bill_ids(
+                batch_ids, _, _ = query_gsi_for_bill_ids(
                     index_name=politician_config['index_name'],
                     hash_key_name=politician_config['hash_key'],
                     hash_key_value=politician_config['hash_value'],
@@ -2598,6 +2615,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         index_name = f"UnionAllPoliticians({len(politician_names)} names)"
         last_eval_key = None
         last_processed_index = start_index
+        total_filtered_count = 0  # Initialize for has_more calculation
     elif config.get('query_type') == 'union_politician':
         # Union sponsor and cosponsor queries
         union_configs = config['union_configs']
@@ -2663,7 +2681,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 
                 while total_fetched < fetch_limit:
                     batch_limit = min(1000, fetch_limit - total_fetched)
-                    batch_ids, sponsor_last_key = query_gsi_for_bill_ids(
+                    batch_ids, sponsor_last_key, _ = query_gsi_for_bill_ids(
                         index_name=union_config['index_name'],
                         hash_key_name=union_config['hash_key'],
                         hash_key_value=union_config['hash_value'],
@@ -2737,19 +2755,34 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         logger.info(f"Search index query complete: {len(bill_ids)} total bill IDs, has_more: {last_eval_key is not None}")
     else:
         # Use GSI query
+        # SIMPLIFIED: For single GSI queries, fetch entire batch (up to 3000) and filter
+        # This avoids complex internal pagination logic
         logger.info(f"Using single GSI query: {config['index_name']}")
-        bill_ids, last_eval_key = query_gsi_for_bill_ids(
+        
+        # For single GSI queries, check if we're continuing from an offset-based pagination
+        single_gsi_offset = None
+        if last_evaluated_key and isinstance(last_evaluated_key, dict) and last_evaluated_key.get('query_type') == 'single_gsi_offset':
+            single_gsi_offset = last_evaluated_key.get('offset', 0)
+            logger.info(f"Single GSI query: continuing from offset {single_gsi_offset}")
+        
+        # For single GSI queries, fetch a large batch (up to 3000) to get all results
+        # Then filter and return up to 300 items per page
+        max_batch_size = 3000
+        bill_ids, last_eval_key, bill_id_to_gsi_item = query_gsi_for_bill_ids(
             index_name=config['index_name'],
             hash_key_name=config['hash_key'],
             hash_key_value=config['hash_value'],
             range_key_name=config.get('range_key'),
             range_key_value=config.get('range_value'),
             range_key_condition=config.get('range_condition'),
-            limit=limit * 5,  # Fetch more to account for filtering
-            exclusive_start_key=last_evaluated_key,  # Support pagination
-            get_all=False
+            limit=max_batch_size,  # Fetch large batch
+            exclusive_start_key=None,  # Always start from beginning for single GSI queries
+            get_all=True  # Get all items up to limit
         )
         index_name = config['index_name']
+        # Track GSI items for pagination key creation
+        # This mapping allows us to create pagination keys from the last returned item
+        logger.info(f"Single GSI query fetched {len(bill_ids)} bill IDs (has_more: {last_eval_key is not None})")
     
     # Fetch full items
     items = []
@@ -2829,10 +2862,13 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     else:
                         del remaining_filters_for_fetch['politician_name']
             
-            # Fetch and filter items in batches until we have enough filtered items or run out
+            # Fetch and filter items in batches - process ALL IDs to get accurate filtered count
+            # Then return up to limit, but correctly track if there are more IDs to process
             i = 0
             filtered_count = 0
-            while i < len(bill_ids) and filtered_count < limit:
+            all_filtered_items = []  # Store all filtered items, then slice to limit
+            
+            while i < len(bill_ids):
                 batch_ids = bill_ids[i:i + batch_size]
                 # Deduplicate batch_ids to avoid ValidationException for duplicate keys
                 batch_ids = list(dict.fromkeys(batch_ids))  # Preserves order while removing duplicates
@@ -2862,26 +2898,23 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     if is_search_index_item(converted_item):
                         continue
                     if apply_python_filter(converted_item, remaining_filters_for_fetch):
-                        items.append(converted_item)
+                        all_filtered_items.append(converted_item)
                         filtered_count += 1
-                        if filtered_count >= limit:
-                            # We have enough filtered items, stop processing
-                            break
                 
-                # Update last_processed_index to the next index after this batch
-                # This tracks how many IDs we've processed in the bill_ids list
+                # Update last_processed_index to track how many IDs we've processed
                 last_processed_index = start_index + i + len(batch_ids)
-                
-                # If we have enough filtered items, stop fetching more batches
-                if filtered_count >= limit:
-                    break
                 
                 i += batch_size
                 
-                logger.info(f"Union pagination: processed {i} IDs, {filtered_count} filtered items (need {limit}), last_processed_index: {last_processed_index}")
+                logger.info(f"Union all politicians pagination: processed {i} IDs, {filtered_count} filtered items so far")
+            
+            # Return up to limit items
+            items = all_filtered_items[:limit]
+            # Store total filtered count for has_more calculation
+            total_filtered_count = len(all_filtered_items)
+            logger.info(f"Union all politicians: processed all {len(bill_ids)} IDs, got {total_filtered_count} filtered items, returning {len(items)} items (limit: {limit})")
         else:
             # For single queries (including search_index), fetch items and filter
-            # For search_index queries, we may need to continue querying more bill_ids if we don't have enough filtered results
             remaining_filters_for_fetch = filters.copy()
             if config.get('query_type') == 'search_index':
                 # For search_index queries, remove politician_name and politician_role since they're handled by the search index
@@ -2900,79 +2933,235 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 else:
                     del remaining_filters_for_fetch[config['filter_key']]
             
-            # Fetch items in batches and filter as we go
-            filtered_count = 0
-            processed_bill_ids = 0
-            current_bill_ids = bill_ids.copy()
-            # For search_index queries, track the pagination key separately
-            # Initialize with the last_eval_key from the initial query
-            current_search_last_key = last_eval_key if config.get('query_type') == 'search_index' else None
-            if config.get('query_type') == 'search_index':
-                logger.info(f"Search index: starting with {len(current_bill_ids)} bill IDs, last_key: {current_search_last_key is not None}")
-            
-            while filtered_count < limit and processed_bill_ids < len(current_bill_ids):
-                # Fetch next batch of items
-                batch_start = processed_bill_ids
-                batch_end = min(processed_bill_ids + batch_size, len(current_bill_ids))
-                batch_ids = current_bill_ids[batch_start:batch_end]
-                batch_ids = list(dict.fromkeys(batch_ids))  # Deduplicate
+            # SIMPLIFIED: For single GSI queries, fetch all items at once, filter, and return up to limit
+            # This avoids complex internal pagination logic
+            if config.get('query_type') != 'search_index' and config.get('index_name'):
+                # Single GSI query - fetch all items, filter, return up to limit
+                # CRITICAL: We query GSIs (KEYS_ONLY projection) to get bill_ids, then fetch FULL bill data from the table
+                # Never return GSI projection results - always fetch full items
+                logger.info(f"Single GSI query: fetching FULL bill items from table for {len(bill_ids)} bill_ids (not returning GSI projection)")
                 
-                if not batch_ids:
-                    break
-                
-                dynamodb_client = boto3.client('dynamodb')
-                request_items = {
-                    BILLS_TABLE_NAME: {
-                        'Keys': [
-                            {
-                                'bill_id': {'S': str(bid)},
-                                'search_index_sk': {'S': str(bid)}
-                            }
-                            for bid in batch_ids
-                        ]
+                # Fetch all items in batches using BatchGetItem to get FULL bill data
+                batch_size = 100
+                all_fetched_items = []
+                for i in range(0, len(bill_ids), batch_size):
+                    batch_ids = bill_ids[i:i + batch_size]
+                    batch_ids = list(dict.fromkeys(batch_ids))  # Deduplicate
+                    
+                    if not batch_ids:
+                        break
+                    
+                    dynamodb_client = boto3.client('dynamodb')
+                    # This fetches FULL items from the table, not just GSI projection
+                    request_items = {
+                        BILLS_TABLE_NAME: {
+                            'Keys': [
+                                {
+                                    'bill_id': {'S': str(bid)},
+                                    'search_index_sk': {'S': str(bid)}
+                                }
+                                for bid in batch_ids
+                            ]
+                        }
                     }
-                }
-                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
-                deserializer = TypeDeserializer()
+                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                    batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                    deserializer = TypeDeserializer()
+                    
+                    for item in batch_items:
+                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                        if not is_search_index_item(converted_item):
+                            all_fetched_items.append(converted_item)
                 
-                for item in batch_items:
-                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    if not is_search_index_item(converted_item):
-                        if apply_python_filter(converted_item, remaining_filters_for_fetch):
-                            items.append(converted_item)
-                            filtered_count += 1
-                            if filtered_count >= limit:
+                logger.info(f"Single GSI query: fetched {len(all_fetched_items)} FULL bill items from table (not GSI projection)")
+                
+                # Filter all items
+                filtered_items = [item for item in all_fetched_items if apply_python_filter(item, remaining_filters_for_fetch)]
+                total_filtered_count = len(filtered_items)  # Store total before applying offset
+                logger.info(f"Single GSI query: fetched {len(all_fetched_items)} items, filtered to {total_filtered_count} items")
+                
+                # Apply offset if continuing from a previous request
+                if single_gsi_offset is not None and single_gsi_offset > 0:
+                    filtered_items = filtered_items[single_gsi_offset:]
+                    logger.info(f"Single GSI query: applied offset {single_gsi_offset}, {len(filtered_items)} items remaining (total filtered: {total_filtered_count})")
+                
+                # Return up to limit
+                items = filtered_items[:limit]
+                filtered_count = len(items)
+                processed_bill_ids = len(bill_ids)  # Mark all as processed
+                
+                # Skip all the complex internal pagination logic for single GSI queries
+                # We've already fetched and filtered all items
+            else:
+                # For search_index queries, use the existing complex logic
+                # Fetch items in batches and filter as we go
+                filtered_count = 0
+                processed_bill_ids = 0
+                current_bill_ids = bill_ids.copy()
+                # For search_index queries, track the pagination key separately
+                # Initialize with the last_eval_key from the initial query
+                current_search_last_key = last_eval_key if config.get('query_type') == 'search_index' else None
+                if config.get('query_type') == 'search_index':
+                    logger.info(f"Search index: starting with {len(current_bill_ids)} bill IDs, last_key: {current_search_last_key is not None}")
+                
+                while filtered_count < limit and processed_bill_ids < len(current_bill_ids):
+                    # Fetch next batch of items
+                    batch_start = processed_bill_ids
+                    batch_end = min(processed_bill_ids + batch_size, len(current_bill_ids))
+                    batch_ids = current_bill_ids[batch_start:batch_end]
+                    batch_ids = list(dict.fromkeys(batch_ids))  # Deduplicate
+                    
+                    if not batch_ids:
+                        break
+                    
+                    dynamodb_client = boto3.client('dynamodb')
+                    request_items = {
+                        BILLS_TABLE_NAME: {
+                            'Keys': [
+                                {
+                                    'bill_id': {'S': str(bid)},
+                                    'search_index_sk': {'S': str(bid)}
+                                }
+                                for bid in batch_ids
+                            ]
+                        }
+                    }
+                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                    batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                    deserializer = TypeDeserializer()
+                    
+                    for item in batch_items:
+                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                        if not is_search_index_item(converted_item):
+                            if apply_python_filter(converted_item, remaining_filters_for_fetch):
+                                items.append(converted_item)
+                                filtered_count += 1
+                                if filtered_count >= limit:
+                                    break
+                    
+                    processed_bill_ids = batch_end
+                    
+                    # If we have enough filtered items, stop
+                    if filtered_count >= limit:
+                        break
+                    
+                    # If we've processed all current bill_ids and don't have enough results,
+                    # continue querying more bill_ids from the GSI/search index
+                    if processed_bill_ids >= len(current_bill_ids) and filtered_count < limit:
+                        if config.get('query_type') == 'search_index':
+                            # For search_index queries, continue querying more bill_ids
+                            if current_search_last_key:
+                                logger.info(f"Search index: need more results ({filtered_count}/{limit}), querying more bill_ids...")
+                                more_bill_ids, current_search_last_key = query_cosponsor_search_index(
+                                cosponsor_name=config['search_value'],
+                                limit=1000,
+                                exclusive_start_key=current_search_last_key,
+                                date_from=filters.get('introduced_date_from'),
+                                date_to=filters.get('introduced_date_to')
+                            )
+                                if more_bill_ids:
+                                    current_bill_ids.extend(more_bill_ids)
+                                    logger.info(f"Search index: fetched {len(more_bill_ids)} more bill IDs (total: {len(current_bill_ids)})")
+                                else:
+                                    # No more items in search index
+                                    current_search_last_key = None
+                                    break
+                            else:
+                                # No more items in search index
                                 break
-                
-                processed_bill_ids = batch_end
-                
-                # If we have enough filtered items, stop
-                if filtered_count >= limit:
-                    break
-                
-                # For search_index queries, if we've processed all current bill_ids and don't have enough results,
-                # continue querying more bill_ids from the search index
-                if config.get('query_type') == 'search_index' and processed_bill_ids >= len(current_bill_ids) and filtered_count < limit:
-                    if current_search_last_key:
-                        # Query more bill_ids from search index
-                        logger.info(f"Search index: need more results ({filtered_count}/{limit}), querying more bill_ids...")
-                        more_bill_ids, current_search_last_key = query_cosponsor_search_index(
-                            cosponsor_name=config['search_value'],
-                            limit=1000,
-                            exclusive_start_key=current_search_last_key,
-                            date_from=filters.get('introduced_date_from'),
-                            date_to=filters.get('introduced_date_to')
-                        )
-                        if more_bill_ids:
-                            current_bill_ids.extend(more_bill_ids)
-                            logger.info(f"Search index: fetched {len(more_bill_ids)} more bill IDs (total: {len(current_bill_ids)})")
-                        else:
-                            # No more items in search index
-                            current_search_last_key = None
+                    elif last_eval_key:
+                        # For regular GSI queries, continue querying more bill_ids if we have a last_eval_key
+                        # NOTE: This should not happen for single GSI queries (they fetch all upfront)
+                        # This is only for search_index queries that need more results
+                        # CRITICAL: Continue internal pagination until we have enough filtered items or GSI is exhausted
+                        # This ensures we don't stop early when filtering reduces the number of results
+                        logger.info(f"GSI query: need more results ({filtered_count}/{limit}), querying more bill_ids from {config.get('index_name')}...")
+                        
+                        # Continue querying in batches until we have enough or GSI is exhausted
+                        max_internal_pagination_rounds = 50  # Prevent infinite loops
+                        internal_round = 0
+                        current_internal_last_key = last_eval_key
+                        
+                        while filtered_count < limit and internal_round < max_internal_pagination_rounds:
+                            internal_round += 1
+                            
+                            if not current_internal_last_key:
+                                logger.info(f"GSI query: no more items in GSI after {internal_round} internal pagination rounds")
+                                break
+                            
+                            more_bill_ids, new_last_eval_key, more_bill_id_to_gsi_item = query_gsi_for_bill_ids(
+                                index_name=config['index_name'],
+                                hash_key_name=config['hash_key'],
+                                hash_key_value=config['hash_value'],
+                                range_key_name=config.get('range_key'),
+                                range_key_value=config.get('range_value'),
+                                range_key_condition=config.get('range_condition'),
+                                limit=1000,  # Fetch a large batch to reduce round trips
+                                exclusive_start_key=current_internal_last_key,
+                                get_all=False
+                            )
+                            
+                            if more_bill_ids:
+                                current_bill_ids.extend(more_bill_ids)
+                                # Merge GSI item mappings for pagination key creation
+                                bill_id_to_gsi_item.update(more_bill_id_to_gsi_item)
+                                
+                                # Fetch and filter the new batch
+                                batch_start = len(current_bill_ids) - len(more_bill_ids)
+                                batch_end = len(current_bill_ids)
+                                batch_ids = current_bill_ids[batch_start:batch_end]
+                                batch_ids = list(dict.fromkeys(batch_ids))  # Deduplicate
+                                
+                                if batch_ids:
+                                    dynamodb_client = boto3.client('dynamodb')
+                                    request_items = {
+                                        BILLS_TABLE_NAME: {
+                                            'Keys': [
+                                                {
+                                                    'bill_id': {'S': str(bid)},
+                                                    'search_index_sk': {'S': str(bid)}
+                                                }
+                                                for bid in batch_ids
+                                            ]
+                                        }
+                                    }
+                                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                                    batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                                    deserializer = TypeDeserializer()
+                                    
+                                    for item in batch_items:
+                                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                                        if not is_search_index_item(converted_item):
+                                            if apply_python_filter(converted_item, remaining_filters_for_fetch):
+                                                items.append(converted_item)
+                                                filtered_count += 1
+                                                if filtered_count >= limit:
+                                                    break
+                                
+                                logger.info(f"GSI query internal round {internal_round}: fetched {len(more_bill_ids)} bill IDs, filtered {filtered_count}/{limit} items so far")
+                                
+                                # Update for next round
+                                current_internal_last_key = new_last_eval_key
+                                
+                                # Stop if we have enough filtered items
+                                if filtered_count >= limit:
+                                    logger.info(f"GSI query: have enough filtered items ({filtered_count} >= {limit}), stopping internal pagination")
+                                    break
+                            else:
+                                # No more items in GSI
+                                logger.info(f"GSI query: no more items in GSI after {internal_round} internal pagination rounds")
+                                current_internal_last_key = None
+                                break
+                        
+                        # Update last_eval_key for external pagination (next API request)
+                        last_eval_key = current_internal_last_key
+                        logger.info(f"GSI query: internal pagination complete, filtered {filtered_count}/{limit} items, has_more: {last_eval_key is not None}")
+                        
+                        # If we have enough filtered items, we can stop
+                        if filtered_count >= limit:
                             break
                     else:
-                        # No more items in search index
+                        # No more items in GSI
                         break
             
             # Update last_eval_key for search_index queries
@@ -3028,12 +3217,14 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     
     # For union queries, calculate next offset for pagination
     if config.get('query_type') == 'union_all_politicians':
-        # For union_all_politicians, we don't track individual has_more flags
-        # We just check if we've processed all fetched IDs
+        # For union_all_politicians, check if there are more filtered items than we returned
+        # We process all IDs upfront, so we know the total filtered count
         items_returned = len(filtered_items)
-        has_more_union = last_processed_index < original_bill_ids_count
+        # Check if we have more filtered items than we returned (or if we haven't processed all IDs yet)
+        # total_filtered_count is set in the union_all_politicians block above
+        has_more_union = (total_filtered_count > items_returned) if 'total_filtered_count' in locals() and total_filtered_count > 0 else (last_processed_index < original_bill_ids_count)
         
-        logger.info(f"Union all politicians pagination check - last_processed_index: {last_processed_index}, original_bill_ids_count: {original_bill_ids_count}, items_returned: {items_returned}, limit: {limit}, has_more_union: {has_more_union}")
+        logger.info(f"Union all politicians pagination check - last_processed_index: {last_processed_index}, original_bill_ids_count: {original_bill_ids_count}, total_filtered: {total_filtered_count if 'total_filtered_count' in locals() else 'N/A'}, items_returned: {items_returned}, limit: {limit}, has_more_union: {has_more_union}")
         
         if has_more_union:
             next_offset = last_processed_index
@@ -3105,12 +3296,208 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 bill = convert_decimal_to_float(full_bill)
         enriched_results.append(bill)
     
+    # CRITICAL: For GSI queries (non-union, non-search_index), we need to handle pagination carefully.
+    # DynamoDB's LastEvaluatedKey points to after the last queried bill_id, not after the last returned item.
+    # We need to create a custom pagination key from the last returned item to ensure we continue from exactly
+    # where we left off, not from a later position in the GSI.
+    #
+    # Store the original DynamoDB LastEvaluatedKey
+    dynamodb_last_eval_key = last_eval_key
+    
+    # For single GSI queries that fetched all items upfront, we need to check if we have more filtered items
+    # than the limit, and create a pagination key from the last returned item
+    if (config.get('index_name') and 
+        config.get('query_type') not in ['union_politician', 'union_all_politicians', 'search_index'] and
+        len(enriched_results) > 0):
+        
+        # Check if we have more filtered items than we returned
+        # For single GSI queries, filtered_items contains all filtered items
+        if 'filtered_items' in locals() and len(filtered_items) > len(enriched_results):
+            # We have more items - need to create pagination key from last returned item
+            # Set last_eval_key to a placeholder so the pagination key creation logic runs
+            if last_eval_key is None:
+                # Create a dummy key to trigger pagination key creation
+                last_eval_key = {'trigger_custom_key': True}
+                logger.info(f"Single GSI query: have {len(filtered_items)} filtered items but only returned {len(enriched_results)}, will create pagination key from last returned item")
+    
+    # CRITICAL: Always create custom pagination key from last returned item
+    # Using DynamoDB's LastEvaluatedKey directly causes the "64 results" issue because:
+    # - DynamoDB's LastEvaluatedKey points to after the last QUERIED item (e.g., 1000th item)
+    # - But we might only RETURN a subset (e.g., 64 items after filtering or limiting)
+    # - This causes us to skip all items between the last returned and last queried
+    # 
+    # By creating a custom key from the last RETURNED item, we ensure we continue from exactly
+    # where we left off, not from a later position in the GSI.
+    #
+    # For single GSI queries that fetched all items upfront, we need to create a pagination key
+    # if we have more filtered items than we returned, even if last_eval_key is None
+    should_create_pagination_key = (
+        config.get('query_type') not in ['union_politician', 'union_all_politicians', 'search_index'] and
+        len(enriched_results) > 0 and
+        (
+            last_eval_key is not None or  # Normal case: DynamoDB provided a LastEvaluatedKey
+            ('filtered_items' in locals() and len(filtered_items) > len(enriched_results))  # Single GSI: have more filtered items
+        ) and
+        'bill_id_to_gsi_item' in locals() and bill_id_to_gsi_item
+    )
+    
+    if should_create_pagination_key:
+        
+        # Get the last returned item's bill_id
+        last_returned_item = enriched_results[-1]
+        last_returned_bill_id = last_returned_item.get('bill_id')
+        
+        if last_returned_bill_id and last_returned_bill_id in bill_id_to_gsi_item:
+            # Get the GSI item for this bill_id - this contains the exact key structure from DynamoDB
+            gsi_item = bill_id_to_gsi_item[last_returned_bill_id]
+            
+            # CRITICAL: Verify the GSI item matches the last returned item
+            # This ensures we're using the correct item when multiple bills share the same introduced_date
+            gsi_introduced_date = gsi_item.get('introduced_date')
+            last_returned_introduced_date = last_returned_item.get('introduced_date')
+            if gsi_introduced_date and last_returned_introduced_date:
+                if str(gsi_introduced_date) != str(last_returned_introduced_date):
+                    logger.warning(f"GSI item has different introduced_date ({gsi_introduced_date} vs {last_returned_introduced_date}) for bill_id {last_returned_bill_id}, using last returned item values")
+                    # Use values from last returned item to ensure correctness
+                    gsi_item = gsi_item.copy()
+                    gsi_item['introduced_date'] = last_returned_introduced_date
+            
+            logger.info(f"GSI item for bill_id {last_returned_bill_id}: {json.dumps(gsi_item, default=str)}")
+            
+            # Create pagination key from the GSI item
+            # CRITICAL: We use bill_id (unique) as the primary identifier, not introduced_date (not unique)
+            # The GSI item from DynamoDB has the correct format and types
+            pagination_key = {}
+            
+            # First, set bill_id as the primary identifier (it's unique, unlike introduced_date)
+            # This ensures we continue from exactly the right item even when multiple bills share the same date
+            pagination_key['bill_id'] = last_returned_bill_id
+            
+            # Copy other keys from the GSI item - this ensures we have the exact format DynamoDB expects
+            # GSI items from KEYS_ONLY projection contain: hash_key, range_key (if present), and bill_id
+            for key, value in gsi_item.items():
+                # Skip bill_id since we already set it above (ensures we use the exact value from last_returned_item)
+                if key == 'bill_id':
+                    continue
+                # Convert Decimal to int/float if needed for JSON serialization
+                from decimal import Decimal as DecimalType
+                if isinstance(value, DecimalType):
+                    # For integers, convert to int; for floats, convert to float
+                    if value == int(value):
+                        pagination_key[key] = int(value)
+                    else:
+                        pagination_key[key] = float(value)
+                else:
+                    pagination_key[key] = value
+            
+            # CRITICAL: If the GSI item doesn't have the hash key or range key, we need to add them
+            # This can happen if the GSI projection doesn't include them, but they're required for pagination
+            hash_key_name = config.get('hash_key')
+            range_key_name = config.get('range_key')
+            
+            # If range_key is not in config, determine it from the index name
+            # Some GSIs always have a range key even if we're not filtering by it
+            if not range_key_name:
+                index_name = config.get('index_name', '')
+                # These GSIs always have introduced_date as range key, even if we're not filtering by date
+                # All "*DateIndex" GSIs (except IntroducedDateIndex and LatestActionDateIndex which use date as hash key)
+                # have introduced_date as the range key
+                gsis_with_date_range_key = [
+                    'SponsorPartyDateIndex', 'PolicyAreaDateIndex',
+                    'SponsorNameDateIndex', 'BillTitleDateIndex', 'BillTypeDateIndex',
+                    'BipartisanDateIndex', 'BillNumberDateIndex'
+                ]
+                if index_name in gsis_with_date_range_key:
+                    range_key_name = 'introduced_date'
+                    logger.info(f"Determined range key {range_key_name} from index name {index_name}")
+            
+            # Add hash key if missing (use value from config)
+            if hash_key_name and hash_key_name not in pagination_key:
+                hash_key_value = config.get('hash_value')
+                if hash_key_value is not None:
+                    pagination_key[hash_key_name] = hash_key_value
+                    logger.info(f"Added hash key {hash_key_name}={hash_key_value} to pagination key")
+            
+            # Add range key if missing (get from last returned item or GSI item)
+            if range_key_name and range_key_name not in pagination_key:
+                # Try to get from last returned item first (full item has all attributes)
+                range_value = last_returned_item.get(range_key_name)
+                if range_value is None:
+                    # Fallback: try to get from GSI item
+                    range_value = gsi_item.get(range_key_name)
+                
+                logger.info(f"Attempting to add range key {range_key_name}: value from last_returned_item={last_returned_item.get(range_key_name)}, from gsi_item={gsi_item.get(range_key_name) if range_key_name in gsi_item else 'N/A'}, final={range_value}")
+                
+                if range_value is not None:
+                    # Convert Decimal to int/float if needed
+                    from decimal import Decimal as DecimalType
+                    if isinstance(range_value, DecimalType):
+                        range_value = int(range_value) if range_value == int(range_value) else float(range_value)
+                    pagination_key[range_key_name] = range_value
+                    logger.info(f"Added range key {range_key_name}={range_value} to pagination key")
+                else:
+                    logger.warning(f"Range key {range_key_name} is None in both last_returned_item and gsi_item, cannot add to pagination key")
+            elif range_key_name:
+                logger.info(f"Range key {range_key_name} already in pagination key: {pagination_key.get(range_key_name)}")
+            else:
+                logger.info(f"No range key configured for this GSI")
+            
+            # CRITICAL: Use bill_id as the primary identifier for pagination (it's unique)
+            # This ensures we don't skip items when multiple bills share the same introduced_date
+            # bill_id is the table's primary hash key, so it's always unique
+            pagination_key['bill_id'] = last_returned_bill_id
+            
+            # CRITICAL: Include search_index_sk (table's range key) - DynamoDB requires this for ExclusiveStartKey
+            # For regular bills, search_index_sk = bill_id, which ensures uniqueness
+            search_index_sk = last_returned_item.get('search_index_sk')
+            if not search_index_sk:
+                # Fallback: for regular bills, search_index_sk equals bill_id
+                search_index_sk = last_returned_bill_id
+            pagination_key['search_index_sk'] = search_index_sk
+            
+            # Note: We still include introduced_date (GSI range key) because DynamoDB requires it for the GSI query,
+            # but bill_id + search_index_sk together provide the unique identifier to ensure we continue from
+            # exactly the right position, even when multiple bills share the same introduced_date
+            
+            if pagination_key:
+                # Verify the pagination key has all required components
+                has_hash_key = hash_key_name and hash_key_name in pagination_key
+                has_range_key = (not range_key_name) or (range_key_name and range_key_name in pagination_key)
+                has_bill_id = 'bill_id' in pagination_key
+                has_search_index_sk = 'search_index_sk' in pagination_key
+                
+                if has_hash_key and has_range_key and has_bill_id and has_search_index_sk:
+                    logger.info(f"Created custom pagination key from last returned item GSI (bill_id={last_returned_bill_id}): {json.dumps(pagination_key, default=str)}")
+                    # Use our custom pagination key instead of DynamoDB's LastEvaluatedKey
+                    # This ensures we continue from the last returned item, not from after the last queried item
+                    # NOTE: Using DynamoDB's LastEvaluatedKey directly causes the "64 results" issue because
+                    # it points to after the last queried item, skipping items between last returned and last queried
+                    last_eval_key = pagination_key
+                else:
+                    logger.warning(f"Pagination key missing required components (hash_key: {has_hash_key}, range_key: {has_range_key}, bill_id: {has_bill_id}, search_index_sk: {has_search_index_sk}), using DynamoDB's LastEvaluatedKey")
+                    logger.warning(f"Pagination key contents: {json.dumps(pagination_key, default=str)}")
+                    # Fall back to DynamoDB's LastEvaluatedKey if our custom key is invalid
+                    # This may cause some items to be skipped, but it's better than an error
+                    last_eval_key = dynamodb_last_eval_key
+            else:
+                logger.warning(f"Could not create pagination key from GSI item (bill_id={last_returned_bill_id}), using DynamoDB's LastEvaluatedKey")
+                last_eval_key = dynamodb_last_eval_key
+        elif last_returned_bill_id:
+            logger.warning(f"Could not find GSI item for last returned bill_id: {last_returned_bill_id}, using DynamoDB's LastEvaluatedKey")
+            last_eval_key = dynamodb_last_eval_key
+        else:
+            logger.warning(f"Could not find bill_id in last returned item, using DynamoDB's LastEvaluatedKey")
+            last_eval_key = dynamodb_last_eval_key
+    
     # Convert last_evaluated_key to JSON-serializable format
     serializable_last_key = None
     if last_eval_key:
         if isinstance(last_eval_key, dict) and last_eval_key.get('query_type') == 'union_offset':
             # Union offset pagination key is already serializable
             serializable_last_key = last_eval_key
+        elif isinstance(last_eval_key, dict) and last_eval_key.get('trigger_custom_key'):
+            # This was a placeholder - don't use it, but check if we have more filtered items
+            serializable_last_key = None
         else:
             try:
                 serializable_last_key = convert_decimal_to_float(last_eval_key)
@@ -3118,7 +3505,38 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
                 serializable_last_key = None
     
+    # For single GSI queries that fetched all items upfront, use offset-based pagination
+    # Check if we have more filtered items than we returned
     has_more = serializable_last_key is not None
+    if config.get('index_name') and config.get('query_type') not in ['union_politician', 'union_all_politicians', 'search_index']:
+        # For single GSI queries, check if we have more filtered items than we returned
+        if 'total_filtered_count' in locals() or 'filtered_items' in locals():
+            # Use total_filtered_count if available (before offset was applied), otherwise use filtered_items length
+            if 'total_filtered_count' in locals():
+                total_filtered = total_filtered_count
+            else:
+                # If offset was applied, we need to add it back
+                total_filtered = len(filtered_items) + (single_gsi_offset if single_gsi_offset is not None else 0)
+            
+            current_offset = single_gsi_offset if single_gsi_offset is not None else 0
+            items_returned_so_far = current_offset + len(enriched_results)
+            
+            if items_returned_so_far < total_filtered:
+                has_more = True
+                # Create offset-based pagination key
+                next_offset = items_returned_so_far
+                serializable_last_key = {
+                    'query_type': 'single_gsi_offset',
+                    'offset': next_offset,
+                    'index_name': config['index_name'],
+                    'hash_key': config['hash_key'],
+                    'hash_value': config['hash_value']
+                }
+                logger.info(f"Single GSI query: total filtered={total_filtered}, returned so far={items_returned_so_far}, setting has_more=True with offset {next_offset}")
+            else:
+                has_more = False
+                serializable_last_key = None
+                logger.info(f"Single GSI query: returned all {items_returned_so_far} of {total_filtered} filtered items, setting has_more=False")
     
     return {
         'success': True,
@@ -3211,6 +3629,20 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             limit = 1000
         if limit < 1:
             limit = 100
+        
+        # For single GSI queries, automatically increase limit to 300 for better pagination
+        # Single GSI queries fetch all items upfront, so returning more per page is efficient
+        # Check if this will be a single GSI query (only one populated filter, not a union/search_index)
+        query_configs = identify_queryable_filters(filters)
+        is_single_gsi_query = (
+            len(query_configs) == 1 and 
+            query_configs[0].get('query_type') not in ['union_politician', 'union_all_politicians', 'search_index'] and
+            query_configs[0].get('index_name')  # Has an index (not a scan)
+        )
+        
+        if is_single_gsi_query and limit < 300:
+            logger.info(f"Single GSI query detected, increasing limit from {limit} to 300 for better pagination")
+            limit = 300
         
         # Perform search
         result = search_bills(filters, limit, last_evaluated_key)

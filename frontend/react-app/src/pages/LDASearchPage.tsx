@@ -45,6 +45,7 @@ import { useAuth } from '../contexts/AuthContext';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../services/api';
+import { compressedSessionStorage } from '../utils/compressedStorage';
 
 // Minimum date for date filters (January 1, 2000)
 const MIN_DATE = '2000-01-01';
@@ -89,15 +90,21 @@ const LDASearchPage: React.FC = () => {
   // Session persistence key
   const SESSION_STORAGE_KEY = 'lda-search-page-state';
 
-  // Helper function to load state from sessionStorage
+  // Helper function to load state from sessionStorage (with compression support)
   const loadStateFromStorage = () => {
     try {
-      const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (savedState) {
-        return JSON.parse(savedState);
-      }
+      return compressedSessionStorage.getItem(SESSION_STORAGE_KEY);
     } catch (error) {
       console.error('❌ Error loading state from sessionStorage:', error);
+      // Fallback to uncompressed
+      try {
+        const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (savedState) {
+          return JSON.parse(savedState);
+        }
+      } catch (fallbackError) {
+        console.error('❌ Error loading state from uncompressed storage:', fallbackError);
+      }
     }
     return null;
   };
@@ -127,7 +134,7 @@ const LDASearchPage: React.FC = () => {
   );
   
   const [allSearchResults, setAllSearchResults] = useState<LDAFiling[]>(
-    savedState?.allSearchResults || []
+    savedState?.allSearchResults || [] // May be empty if only resultCount was saved
   );
   const [currentResults, setCurrentResults] = useState<LDAFiling[]>([]);
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
@@ -267,7 +274,7 @@ const LDASearchPage: React.FC = () => {
     if (savedState) {
       console.log('🔄 Restored LDA search page state from sessionStorage:', {
         hasSearchParams: !!savedState.searchParams,
-        allResultsCount: savedState.allSearchResults?.length || 0,
+        allResultsCount: savedState.allSearchResults?.length || savedState.resultCount || 0,
         totalFound: savedState.totalFound || 0,
         hasFilters: !!savedState.selectedFilters,
         hasMore: savedState.hasMore,
@@ -389,17 +396,20 @@ const LDASearchPage: React.FC = () => {
     }
   }, [generalSearchItems]);
 
-  // Save state to sessionStorage whenever relevant state changes
+  // Save state to sessionStorage
   useEffect(() => {
     try {
+      // Don't save allSearchResults to avoid quota exceeded errors
+      // Only save essential state - results will be re-fetched on page load if needed
       const stateToSave = {
         searchParams,
         generalSearchItems, // Include generalSearchItems in saved state
-        allSearchResults,
+        // Only save result count, not full results
+        resultCount: allSearchResults.length,
         totalFound,
         isSearching,
         selectedFilters,
-        availableFilters,
+        // Don't save availableFilters as it can be large
         expandedFilters,
         isFiltered,
         currentPage,
@@ -408,20 +418,42 @@ const LDASearchPage: React.FC = () => {
         hasMore,
         searchFormExpanded,
         advancedSearchExpanded,
+        visibleColumns,
       };
       
-      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
-    } catch (error) {
-      console.error('❌ Error saving LDA search page state:', error);
+      // Use compressed storage (automatically compresses if beneficial)
+      compressedSessionStorage.setItem(SESSION_STORAGE_KEY, stateToSave);
+    } catch (error: any) {
+      // Handle quota exceeded errors gracefully
+      if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
+        console.warn('SessionStorage quota exceeded, saving minimal state only');
+        try {
+          // Save only essential state (compressed)
+          const minimalState = {
+            searchParams,
+            generalSearchItems,
+            resultCount: allSearchResults.length,
+            lastEvaluatedKey,
+            hasMore,
+            currentPage,
+            pageSize,
+            visibleColumns,
+          };
+          compressedSessionStorage.setItem(SESSION_STORAGE_KEY, minimalState);
+        } catch (minimalError) {
+          console.error('Failed to save even minimal state:', minimalError);
+        }
+      } else {
+        console.error('Error saving state to sessionStorage:', error);
+      }
     }
   }, [
     searchParams,
-    generalSearchItems, // Include in dependency array
-    allSearchResults,
+    generalSearchItems,
+    allSearchResults.length, // Only depend on length, not full array
     totalFound,
     isSearching,
     selectedFilters,
-    availableFilters,
     expandedFilters,
     isFiltered,
     currentPage,
@@ -430,6 +462,7 @@ const LDASearchPage: React.FC = () => {
     hasMore,
     searchFormExpanded,
     advancedSearchExpanded,
+    visibleColumns,
   ]);
 
   // Compute filters from search results
@@ -655,7 +688,6 @@ const LDASearchPage: React.FC = () => {
       
       const response = await ldaSearchAPI.search({
         filters: filters,
-        limit: pageSize,
       });
       
       if (response.success && response.results) {
@@ -748,12 +780,21 @@ const LDASearchPage: React.FC = () => {
       
       const response = await ldaSearchAPI.search({
         filters: filters,
-        limit: pageSize,
         last_evaluated_key: lastEvaluatedKey,
       });
       
       if (response.success && response.results) {
-        const newResults = [...allSearchResults, ...response.results];
+        // Deduplicate results by filing ID (id or filing_uuid)
+        const existingIds = new Set(
+          allSearchResults.map(filing => filing.id || filing.filing_uuid || '')
+        );
+        const uniqueNewResults = response.results.filter(
+          filing => {
+            const id = filing.id || filing.filing_uuid || '';
+            return id && !existingIds.has(id);
+          }
+        );
+        const newResults = [...allSearchResults, ...uniqueNewResults];
         setAllSearchResults(newResults);
         setCurrentResults(newResults);
         setHasMore(response.has_more || false);
@@ -2140,10 +2181,178 @@ const LDASearchPage: React.FC = () => {
                           backgroundColor: 'rgba(59, 130, 246, 0.2)',
                           color: '#93c5fd',
                           border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
                         }}
                       />
                     ))}
-                    {/* Similar chips for other filter types */}
+                    {selectedFilters.clients.map((client, idx) => (
+                      <Chip
+                        key={`client-${idx}`}
+                        label={client}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newClients = prev.clients.filter((_, i) => i !== idx);
+                            setIsFiltered(
+                              prev.registrants.length > 0 ||
+                              newClients.length > 0 ||
+                              prev.lobbyists.length > 0 ||
+                              prev.filingTypes.length > 0 ||
+                              prev.issueCodes.length > 0 ||
+                              prev.states.length > 0
+                            );
+                            return {
+                              ...prev,
+                              clients: newClients,
+                            };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.lobbyists.map((lobbyist, idx) => (
+                      <Chip
+                        key={`lobbyist-${idx}`}
+                        label={lobbyist}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newLobbyists = prev.lobbyists.filter((_, i) => i !== idx);
+                            setIsFiltered(
+                              prev.registrants.length > 0 ||
+                              prev.clients.length > 0 ||
+                              newLobbyists.length > 0 ||
+                              prev.filingTypes.length > 0 ||
+                              prev.issueCodes.length > 0 ||
+                              prev.states.length > 0
+                            );
+                            return {
+                              ...prev,
+                              lobbyists: newLobbyists,
+                            };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.filingTypes.map((filingType, idx) => (
+                      <Chip
+                        key={`filingType-${idx}`}
+                        label={filingType}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newFilingTypes = prev.filingTypes.filter((_, i) => i !== idx);
+                            setIsFiltered(
+                              prev.registrants.length > 0 ||
+                              prev.clients.length > 0 ||
+                              prev.lobbyists.length > 0 ||
+                              newFilingTypes.length > 0 ||
+                              prev.issueCodes.length > 0 ||
+                              prev.states.length > 0
+                            );
+                            return {
+                              ...prev,
+                              filingTypes: newFilingTypes,
+                            };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.issueCodes.map((issueCode, idx) => (
+                      <Chip
+                        key={`issueCode-${idx}`}
+                        label={issueCode}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newIssueCodes = prev.issueCodes.filter((_, i) => i !== idx);
+                            setIsFiltered(
+                              prev.registrants.length > 0 ||
+                              prev.clients.length > 0 ||
+                              prev.lobbyists.length > 0 ||
+                              prev.filingTypes.length > 0 ||
+                              newIssueCodes.length > 0 ||
+                              prev.states.length > 0
+                            );
+                            return {
+                              ...prev,
+                              issueCodes: newIssueCodes,
+                            };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
+                    {selectedFilters.states.map((state, idx) => (
+                      <Chip
+                        key={`state-${idx}`}
+                        label={state}
+                        onDelete={() => {
+                          setSelectedFilters(prev => {
+                            const newStates = prev.states.filter((_, i) => i !== idx);
+                            setIsFiltered(
+                              prev.registrants.length > 0 ||
+                              prev.clients.length > 0 ||
+                              prev.lobbyists.length > 0 ||
+                              prev.filingTypes.length > 0 ||
+                              prev.issueCodes.length > 0 ||
+                              newStates.length > 0
+                            );
+                            return {
+                              ...prev,
+                              states: newStates,
+                            };
+                          });
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
                   </Box>
                   <Button
                     size="small"

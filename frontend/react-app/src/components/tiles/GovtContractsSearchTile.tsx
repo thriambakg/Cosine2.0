@@ -92,6 +92,7 @@ interface GovtContractsSearchTileProps {
     naics?: string[];
     psc?: string[];
     cfda?: string[];
+    months?: number[];
   };
   results?: GovtContractAward[];
   displayOptions?: {
@@ -144,8 +145,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     naics_code: [],
     psc_code: [],
     cfda_number: [],
-    date_from: '',
-    date_to: '',
+    date_year: undefined,
+    // Don't include legacy date_from/date_to - they're no longer used
   },
   filterSettings: initialFilterSettings,
   paginationState: initialPaginationState,
@@ -198,6 +199,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     naics: Set<string>;
     psc: Set<string>;
     cfda: Set<string>;
+    months: Set<number>;
   }>({
     awardTypes: new Set(initialFilterSettings?.awardTypes || []),
     agencies: new Set(initialFilterSettings?.agencies || []),
@@ -207,6 +209,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     naics: new Set(initialFilterSettings?.naics || []),
     psc: new Set(initialFilterSettings?.psc || []),
     cfda: new Set(initialFilterSettings?.cfda || []),
+    months: new Set(initialFilterSettings?.months || []),
   });
 
   const [selectedAwards, setSelectedAwards] = useState<Set<string>>(new Set());
@@ -578,17 +581,27 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         ...currentSearchParams,
       };
 
-      // Remove empty arrays
+      // Remove legacy date fields (date_from, date_to) - use date_year instead
+      delete filters.date_from;
+      delete filters.date_to;
+
+      // Remove empty arrays, empty strings, null, and undefined
       Object.keys(filters).forEach((key) => {
         const value = filters[key];
         if (Array.isArray(value) && value.length === 0) {
+          delete filters[key];
+        } else if (value === '' || value === null || value === undefined) {
+          delete filters[key];
+        }
+        // Also explicitly remove legacy date fields if they somehow got through
+        if (key === 'date_from' || key === 'date_to') {
           delete filters[key];
         }
       });
 
       const searchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults,
+        limit: 125,
       };
       
       const response = await govtContractsSearchAPI.search(searchRequest);
@@ -678,17 +691,27 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         ...currentSearchParams,
       };
 
-      // Remove empty arrays
+      // Remove legacy date fields (date_from, date_to) - use date_year instead
+      delete filters.date_from;
+      delete filters.date_to;
+
+      // Remove empty arrays, empty strings, null, and undefined
       Object.keys(filters).forEach((key) => {
         const value = filters[key];
         if (Array.isArray(value) && value.length === 0) {
+          delete filters[key];
+        } else if (value === '' || value === null || value === undefined) {
+          delete filters[key];
+        }
+        // Also explicitly remove legacy date fields if they somehow got through
+        if (key === 'date_from' || key === 'date_to') {
           delete filters[key];
         }
       });
 
       const searchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults,
+        limit: 125,
         last_evaluated_key: lastEvaluatedKey,
       };
       
@@ -798,16 +821,22 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           ...currentSearchParams,
         };
         
+        // Remove legacy date fields (date_from, date_to) - use date_year instead
+        delete filters.date_from;
+        delete filters.date_to;
+        
         Object.keys(filters).forEach((key) => {
           const value = filters[key];
           if (Array.isArray(value) && value.length === 0) {
+            delete filters[key];
+          } else if (value === '' || value === null || value === undefined) {
             delete filters[key];
           }
         });
         
         const searchRequest = {
           filters,
-          limit: localDisplayOptions.maxResults,
+          limit: 125,
           last_evaluated_key: nextKey,
         };
         
@@ -940,8 +969,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         (currentSearchParams.naics_code && currentSearchParams.naics_code.length > 0) ||
         (currentSearchParams.psc_code && currentSearchParams.psc_code.length > 0) ||
         (currentSearchParams.cfda_number && currentSearchParams.cfda_number.length > 0) ||
-        currentSearchParams.date_from ||
-        currentSearchParams.date_to;
+        currentSearchParams.date_year ||
+        currentSearchParams.date_from ||  // Legacy
+        currentSearchParams.date_to;  // Legacy
       
       if (hasSearchCriteria) {
         console.log('🔄 GovtContractsSearchTile: Preview mode - running fresh query');
@@ -963,8 +993,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         (currentSearchParams.naics_code && currentSearchParams.naics_code.length > 0) ||
         (currentSearchParams.psc_code && currentSearchParams.psc_code.length > 0) ||
         (currentSearchParams.cfda_number && currentSearchParams.cfda_number.length > 0) ||
-        currentSearchParams.date_from ||
-        currentSearchParams.date_to;
+        currentSearchParams.date_year ||
+        currentSearchParams.date_from ||  // Legacy
+        currentSearchParams.date_to;  // Legacy
       
       if (hasSearchCriteria) {
         console.log('🔄 GovtContractsSearchTile: Initial load - performing search with existing params');
@@ -1121,6 +1152,23 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       );
     }
     
+    // Filter by month (extract month from period_start_date or period_end_date)
+    if (selectedFilters.months.size > 0) {
+      filtered = filtered.filter((award) => {
+        const dateStr = award.period_start_date || award.period_end_date;
+        if (!dateStr) return false;
+        
+        try {
+          // Parse date string (format: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss")
+          const date = new Date(dateStr);
+          const month = date.getMonth() + 1; // getMonth() returns 0-11, we want 1-12
+          return selectedFilters.months.has(month);
+        } catch {
+          return false;
+        }
+      });
+    }
+    
     setFilteredResults(filtered);
     setCurrentResults(filtered);
   }, [allResults, selectedFilters]);
@@ -1141,6 +1189,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     naics: Array.from(selectedFilters.naics),
     psc: Array.from(selectedFilters.psc),
     cfda: Array.from(selectedFilters.cfda),
+    months: Array.from(selectedFilters.months),
   });
   useEffect(() => {
     const filterSettings = {
@@ -1152,6 +1201,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       naics: Array.from(selectedFilters.naics),
       psc: Array.from(selectedFilters.psc),
       cfda: Array.from(selectedFilters.cfda),
+      months: Array.from(selectedFilters.months),
     };
     // Only persist if filterSettings actually changed (deep comparison)
     const prev = prevFilterSettingsRef.current;
@@ -1992,40 +2042,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               allowCustomInput={false}
             />
 
-            {/* Funding Agency */}
-            <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
-              label="Funding Agency"
-              selectedItems={(() => {
-                const names = currentSearchParams.funding_agency_name || [];
-                return names.map(name => {
-                  const found = findOptionByName(name, 'funding_agency');
-                  if (found) return found;
-                  return { name: name || '', code: '', text: name || '' };
-                });
-              })()}
-              onItemsChange={(items) => {
-                setCurrentSearchParams((prev) => ({
-                  ...prev,
-                  funding_agency_name: items.map(item => 
-                    typeof item === 'string' ? item : item.name || item.text || ''
-                  ),
-                }));
-              }}
-              suggestions={fundingAgencySuggestions}
-              onSearch={fundingAgencySearch}
-              isLoading={fundingAgencyLoading}
-              renderItem={(item) => {
-                if (typeof item === 'string') return item;
-                return item.name || item.text || item.code || '';
-              }}
-              getItemKey={(item) => {
-                if (typeof item === 'string') return item;
-                return item.code || item.id || item.name || '';
-              }}
-              placeholder="Search for funding agencies..."
-              allowCustomInput={false}
-            />
-
             {/* Recipient */}
             <MultiSelectField<{ id?: string; name?: string; text?: string; [key: string]: any }>
               label="Recipient"
@@ -2061,6 +2077,88 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 return `recipient-${itemStr.slice(0, 100).replace(/[^a-zA-Z0-9]/g, '-')}`;
               }}
               placeholder="Search for recipients..."
+              allowCustomInput={false}
+            />
+
+            {/* State */}
+            <MultiSelectField<string>
+              label="Recipient State"
+              selectedItems={currentSearchParams.recipient_location_state || []}
+              onItemsChange={(states) => {
+                setCurrentSearchParams((prev) => ({ ...prev, recipient_location_state: states }));
+              }}
+              suggestions={US_STATES}
+              renderItem={(state) => state}
+              placeholder="Select states..."
+            />
+
+            {/* Zip Code */}
+            <MultiSelectField<string>
+              label="Recipient Zip Code"
+              selectedItems={currentSearchParams.recipient_zip_code || []}
+              onItemsChange={(zipCodes) => {
+                setCurrentSearchParams((prev) => ({ ...prev, recipient_zip_code: zipCodes }));
+              }}
+              suggestions={[]}
+              onSearch={() => []}
+              renderItem={(zipCode) => zipCode}
+              placeholder="Enter zip codes..."
+              disableAutocomplete={true}
+            />
+
+            {/* Date Range */}
+            <TextField
+              label="Fiscal Year"
+              type="number"
+              value={currentSearchParams.date_year || ''}
+              onChange={(e) => {
+                const year = e.target.value ? parseInt(e.target.value) : undefined;
+                setCurrentSearchParams(prev => ({ ...prev, date_year: year }));
+              }}
+              inputProps={{
+                min: 2000,
+                max: 2100,
+              }}
+              InputLabelProps={{ shrink: true }}
+              size="small"
+              sx={{
+                mt: 3,
+                '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
+                '& .MuiInputLabel-root': { color: '#94a3b8' },
+              }}
+            />
+
+            {/* Funding Agency */}
+            <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
+              label="Funding Agency"
+              selectedItems={(() => {
+                const names = currentSearchParams.funding_agency_name || [];
+                return names.map(name => {
+                  const found = findOptionByName(name, 'funding_agency');
+                  if (found) return found;
+                  return { name: name || '', code: '', text: name || '' };
+                });
+              })()}
+              onItemsChange={(items) => {
+                setCurrentSearchParams((prev) => ({
+                  ...prev,
+                  funding_agency_name: items.map(item => 
+                    typeof item === 'string' ? item : item.name || item.text || ''
+                  ),
+                }));
+              }}
+              suggestions={fundingAgencySuggestions}
+              onSearch={fundingAgencySearch}
+              isLoading={fundingAgencyLoading}
+              renderItem={(item) => {
+                if (typeof item === 'string') return item;
+                return item.name || item.text || item.code || '';
+              }}
+              getItemKey={(item) => {
+                if (typeof item === 'string') return item;
+                return item.code || item.id || item.name || '';
+              }}
+              placeholder="Search for funding agencies..."
               allowCustomInput={false}
             />
 
@@ -2106,34 +2204,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               />
             </Box>
 
-            {/* Date Range */}
-            <Box display="flex" gap={2}>
-              <TextField
-                label="Date From"
-                type="date"
-                value={currentSearchParams.date_from || ''}
-                onChange={(e) => setCurrentSearchParams(prev => ({ ...prev, date_from: e.target.value || undefined }))}
-                InputLabelProps={{ shrink: true }}
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
-                  '& .MuiInputLabel-root': { color: '#94a3b8' },
-                }}
-              />
-              <TextField
-                label="Date To"
-                type="date"
-                value={currentSearchParams.date_to || ''}
-                onChange={(e) => setCurrentSearchParams(prev => ({ ...prev, date_to: e.target.value || undefined }))}
-                InputLabelProps={{ shrink: true }}
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
-                  '& .MuiInputLabel-root': { color: '#94a3b8' },
-                }}
-              />
-            </Box>
-
             {/* Award Type */}
             <MultiSelectField<string>
               label="Award Type"
@@ -2144,32 +2214,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               suggestions={AWARD_TYPES}
               renderItem={(type) => type}
               placeholder="Select award types..."
-            />
-
-            {/* State */}
-            <MultiSelectField<string>
-              label="Recipient State"
-              selectedItems={currentSearchParams.recipient_location_state || []}
-              onItemsChange={(states) => {
-                setCurrentSearchParams((prev) => ({ ...prev, recipient_location_state: states }));
-              }}
-              suggestions={US_STATES}
-              renderItem={(state) => state}
-              placeholder="Select states..."
-            />
-
-            {/* Zip Code */}
-            <MultiSelectField<string>
-              label="Recipient Zip Code"
-              selectedItems={currentSearchParams.recipient_zip_code || []}
-              onItemsChange={(zipCodes) => {
-                setCurrentSearchParams((prev) => ({ ...prev, recipient_zip_code: zipCodes }));
-              }}
-              suggestions={[]}
-              onSearch={() => []}
-              renderItem={(zipCode) => zipCode}
-              placeholder="Enter zip codes..."
-              disableAutocomplete={true}
             />
 
             {/* NAICS Code */}
@@ -2231,8 +2275,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 naics_code: [],
                 psc_code: [],
                 cfda_number: [],
-                date_from: '',
-                date_to: '',
+                date_year: undefined,
               });
             }}
             sx={{ color: '#94a3b8' }}
@@ -3016,6 +3059,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 naics: new Set(),
                 psc: new Set(),
                 cfda: new Set(),
+                months: new Set(),
               });
             }}
             sx={{ color: '#9ca3af' }}

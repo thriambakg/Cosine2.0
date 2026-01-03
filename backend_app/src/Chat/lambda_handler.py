@@ -451,6 +451,14 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                         
                         return response
                 except Exception as e:
+                    error_str = str(e)
+                    # Handle max_tokens limit error gracefully
+                    if "max_tokens" in error_str.lower() or "unrecoverable state" in error_str.lower() or "MaxTokensReached" in str(type(e).__name__):
+                        logger.warning(f"Agent reached max_tokens limit: {error_str}")
+                        from strands.types import AgentResult, Message
+                        return AgentResult(message=Message(
+                            content="I apologize, but the response exceeded the maximum length limit. Please try breaking your question into smaller parts or ask a more specific question."
+                        ))
                     logger.error(f"Error in streaming wrapper: {str(e)}")
                     raise
             
@@ -497,12 +505,16 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             return result
             
     except Exception as e:
-        if "Session has been terminated" in str(e):
+        error_str = str(e)
+        if "Session has been terminated" in error_str:
             logger.warning(f"Agent processing terminated for session {session_id}")
             raise e
-        elif "Read timed out" in str(e) or "TimeoutError" in str(e):
+        elif "Read timed out" in error_str or "TimeoutError" in error_str:
             logger.error(f"Network timeout during agent processing for session {session_id}")
             raise Exception(f"Request timed out due to network connectivity issues. Please try again.")
+        elif "max_tokens" in error_str.lower() or "unrecoverable state" in error_str.lower() or "MaxTokensReached" in str(type(e).__name__):
+            logger.warning(f"Agent reached max_tokens limit: {error_str}")
+            raise Exception("The response exceeded the maximum length limit. Please try breaking your question into smaller parts or ask a more specific question.")
         else:
             logger.error(f"Error in kill-monitored processing: {str(e)}")
             raise e
@@ -1207,9 +1219,23 @@ Context Items Available: {len(context_items)} items
             
             logger.debug(f"Agent response received: {type(agent_response)}")
         except Exception as e:
-            # Handle other exceptions
-            logger.error(f"Error in agent processing: {str(e)}")
-            raise
+            error_str = str(e)
+            # Handle max_tokens limit error gracefully
+            if "max_tokens" in error_str.lower() or "unrecoverable state" in error_str.lower() or "MaxTokensReached" in str(type(e).__name__):
+                logger.warning(f"Agent reached max_tokens limit: {error_str}")
+                # Create a mock agent response with error message
+                from strands.types import AgentResult, Message
+                agent_response = AgentResult(message=Message(
+                    content="I apologize, but the response exceeded the maximum length limit. Please try breaking your question into smaller parts or ask a more specific question."
+                ))
+                logger.debug(f"Created mock agent response for max_tokens error")
+                # Set streaming content to empty so we use the agent_response content
+                accumulated_streaming_content['value'] = ''
+                streaming_used['value'] = False
+            else:
+                # Handle other exceptions
+                logger.error(f"Error in agent processing: {str(e)}")
+                raise
         
         # Extract the actual response content from AgentResult
         # If streaming was used, prefer the accumulated streaming content (it's already clean)
@@ -1400,6 +1426,19 @@ Context Items Available: {len(context_items)} items
             }
         
     except Exception as e:
+        error_str = str(e)
+        # Handle max_tokens limit error with user-friendly message
+        if "max_tokens" in error_str.lower() or "unrecoverable state" in error_str.lower() or "MaxTokensReached" in str(type(e).__name__) or "maximum length limit" in error_str.lower():
+            logger.warning(f"Agent reached max_tokens limit: {error_str}")
+            return {
+                'statusCode': 200,
+                'body': {
+                    'response': "I apologize, but the response exceeded the maximum length limit. Please try breaking your question into smaller parts or ask a more specific question.",
+                    'session_id': event_body.get('session_id', 'unknown'),
+                    'timestamp': int(time.time())
+                }
+            }
+        
         logger.error(f"Error in chat processing: {str(e)}")
         import traceback
         logger.debug(f"Error traceback: {traceback.format_exc()}")

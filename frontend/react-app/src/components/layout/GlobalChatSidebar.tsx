@@ -408,6 +408,15 @@ const GlobalChatSidebar: React.FC = () => {
   const { selectedModel, setSelectedModel } = usePersistentModel();
   const [isLoadingMessage, setIsLoadingMessage] = useState(false);
   const [currentAgentLog, setCurrentAgentLog] = useState<string | null>(null);
+  // Message queue for sequential processing
+  const [messageQueue, setMessageQueue] = useState<Array<{
+    text: string;
+    files?: UploadedFile[];
+    context?: ContextItem[];
+    model: string;
+    type: 'file' | 'context' | 'followup' | 'new';
+  }>>([]);
+  const isProcessingQueueRef = useRef(false);
   // Session-specific loading states (matching ChatPage pattern)
   // Note: Currently only used for timeout management, but kept for consistency with ChatPage
   const [, setSessionLoadingStates] = useState<Record<string, boolean>>({});
@@ -904,6 +913,7 @@ const GlobalChatSidebar: React.FC = () => {
           [sessionId]: false
         }));
         setIsLoadingMessage(false);
+        // Queue processing will be handled by the separate effect below
       }
     });
 
@@ -1333,6 +1343,80 @@ const GlobalChatSidebar: React.FC = () => {
       console.error('❌ Sidebar: Failed to reload session on refresh:', error);
     });
   }, [user?.id, activeSessionId]); // Watch for user and session to become available
+
+  // Process next message in queue
+  const processNextMessageInQueue = useCallback(async () => {
+    if (isProcessingQueueRef.current || messageQueue.length === 0 || isLoadingMessage || isUnifiedProcessing) {
+      return;
+    }
+
+    isProcessingQueueRef.current = true;
+    const nextMessage = messageQueue[0];
+    
+    // Remove from queue
+    setMessageQueue(prev => prev.slice(1));
+    
+    console.log('📬 Sidebar: Processing queued message:', nextMessage.type);
+    
+    try {
+      setIsLoadingMessage(true);
+      if (activeSessionId) {
+        unifiedMessageHandler.broadcastLoadingState(activeSessionId, true, 'sidebar');
+      }
+
+      let result;
+      if (nextMessage.type === 'file' && nextMessage.files) {
+        result = await sendUnifiedFileMessage(nextMessage.text, nextMessage.files as unknown as File[], nextMessage.model);
+      } else if (nextMessage.type === 'context' && nextMessage.context) {
+        result = await sendUnifiedContextMessage(nextMessage.text, nextMessage.context, nextMessage.model, activeSessionId || undefined);
+      } else if (nextMessage.type === 'followup' && activeSessionId) {
+        result = await sendUnifiedFollowupMessage(nextMessage.text, nextMessage.model);
+      } else {
+        result = await sendUnifiedMessage({ text: nextMessage.text, model: nextMessage.model, type: 'new_message' });
+      }
+
+      if (result.success) {
+        console.log('✅ Sidebar: Queued message sent successfully');
+        
+        // Handle session creation if needed (same logic as regular send)
+        if (result.sessionId && result.sessionId !== activeSessionId) {
+          setActiveSessionId(result.sessionId);
+          await loadSessionFromDatabase(result.sessionId);
+        }
+      } else {
+        console.error('❌ Sidebar: Failed to send queued message:', result.error);
+        setIsLoadingMessage(false);
+        const errorSessionId = result.sessionId || activeSessionId || 'pending';
+        setSessionLoadingStates(prev => ({
+          ...prev,
+          [errorSessionId]: false
+        }));
+        if (errorSessionId) {
+          unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'sidebar');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Sidebar: Error processing queued message:', error);
+      setIsLoadingMessage(false);
+      const errorSessionId = activeSessionId || 'pending';
+      setSessionLoadingStates(prev => ({
+        ...prev,
+        [errorSessionId]: false
+      }));
+      if (errorSessionId) {
+        unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'sidebar');
+      }
+    } finally {
+      isProcessingQueueRef.current = false;
+    }
+  }, [messageQueue, isLoadingMessage, isUnifiedProcessing, activeSessionId, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, setActiveSessionId, loadSessionFromDatabase]);
+
+  // Effect to process queue when loading completes and queue has items
+  useEffect(() => {
+    if (!isLoadingMessage && !isUnifiedProcessing && messageQueue.length > 0 && !isProcessingQueueRef.current) {
+      processNextMessageInQueue();
+    }
+  }, [isLoadingMessage, isUnifiedProcessing, messageQueue.length, processNextMessageInQueue]);
 
   // Mirror ChatPage's current session
   useEffect(() => {
@@ -2707,7 +2791,28 @@ const GlobalChatSidebar: React.FC = () => {
             placeholder="Type your message..."
             onSend={async (text: string) => {
               // Use the same logic as the inline input bar previously
-              if ((!text.trim() && uploadedFiles.length === 0) || !user?.id || isUnifiedProcessing) return;
+              if ((!text.trim() && uploadedFiles.length === 0) || !user?.id) return;
+              
+              // Determine message type
+              const messageType = uploadedFiles.length > 0 ? 'file' 
+                : (sessionContext.length > 0 ? 'context' 
+                : (activeSessionId ? 'followup' : 'new'));
+              
+              // If already processing, add to queue
+              if (isLoadingMessage || isUnifiedProcessing) {
+                console.log('📬 Sidebar: Message queued (processing in progress)');
+                setMessageQueue(prev => [...prev, {
+                  text,
+                  files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
+                  context: sessionContext.length > 0 ? sessionContext : undefined,
+                  model: selectedModel,
+                  type: messageType as 'file' | 'context' | 'followup' | 'new'
+                }]);
+                setUploadedFiles([]);
+                return;
+              }
+              
+              // Send immediately if not processing
               setIsLoadingMessage(true);
               if (activeSessionId) {
                 unifiedMessageHandler.broadcastLoadingState(activeSessionId, true, 'sidebar');
@@ -2846,6 +2951,11 @@ const GlobalChatSidebar: React.FC = () => {
                   if (errorSessionId) {
                     unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'sidebar');
                   }
+                  
+                  // Process next message in queue even on error
+                  if (messageQueue.length > 0 && !isProcessingQueueRef.current) {
+                    setTimeout(() => processNextMessageInQueue(), 100);
+                  }
                 }
               } catch (e) {
                 console.error('❌ Sidebar: Error sending message:', e);
@@ -2857,6 +2967,11 @@ const GlobalChatSidebar: React.FC = () => {
                 }));
                 if (errorSessionId) {
                   unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'sidebar');
+                }
+                
+                // Process next message in queue even on error
+                if (messageQueue.length > 0 && !isProcessingQueueRef.current) {
+                  setTimeout(() => processNextMessageInQueue(), 100);
                 }
               }
             }}

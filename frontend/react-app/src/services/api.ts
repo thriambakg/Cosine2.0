@@ -1050,8 +1050,9 @@ export interface GovtContractsSearchFilters {
   cfda_number?: string[];
   min_obligation?: number;
   max_obligation?: number;
-  date_from?: string;
-  date_to?: string;
+  date_year?: number;  // Fiscal year for date filtering (e.g., 2025)
+  date_from?: string;  // Legacy - deprecated, use date_year instead
+  date_to?: string;  // Legacy - deprecated, use date_year instead
   fiscal_year?: number[];
   [key: string]: any;  // Allow additional properties for dynamic filters
 }
@@ -1377,7 +1378,6 @@ export interface CongressBillsSearchFilters {
   congress?: number[];
   policy_area?: string[];
   sponsor_party?: string[];
-  sponsor_state?: string[];
   latest_action_date_from?: string;
   latest_action_date_to?: string;
   bipartisan?: number;
@@ -1392,7 +1392,6 @@ export interface CongressBill {
   bill_number?: number;
   sponsor_full_name?: string;
   sponsor_party?: string;
-  sponsor_state?: string;
   introduced_date?: string;
   latest_action_date?: string;
   congress?: number;

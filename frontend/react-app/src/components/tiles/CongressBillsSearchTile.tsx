@@ -154,7 +154,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     congress: [] as number[],
     policy_area: [] as string[],
     sponsor_party: [] as string[],
-    sponsor_state: [] as string[],
     latest_action_date_from: '',
     latest_action_date_to: '',
     bipartisan: undefined,
@@ -289,7 +288,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     'bill_number',
     'sponsor_name',
     'sponsor_party',
-    'sponsor_state',
     'introduced_date',
     'latest_action_date',
     'congress',
@@ -306,7 +304,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     if (localDisplayOptions.showBillNumber) cols.push('bill_number');
     if (localDisplayOptions.showSponsorName) cols.push('sponsor_name');
     if (localDisplayOptions.showSponsorParty) cols.push('sponsor_party');
-    if (localDisplayOptions.showSponsorState) cols.push('sponsor_state');
     if (localDisplayOptions.showIntroducedDate) cols.push('introduced_date');
     if (localDisplayOptions.showLatestActionDate) cols.push('latest_action_date');
     if (localDisplayOptions.showCongress) cols.push('congress');
@@ -330,7 +327,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         showBillNumber: newColumns.includes('bill_number'),
         showSponsorName: newColumns.includes('sponsor_name'),
         showSponsorParty: newColumns.includes('sponsor_party'),
-        showSponsorState: newColumns.includes('sponsor_state'),
         showIntroducedDate: newColumns.includes('introduced_date'),
         showLatestActionDate: newColumns.includes('latest_action_date'),
         showCongress: newColumns.includes('congress'),
@@ -487,7 +483,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       
       const searchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults,
       };
       
       const response = await congressBillsSearchAPI.search(searchRequest);
@@ -590,7 +585,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       
       const searchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults,
         last_evaluated_key: lastEvaluatedKey,
       };
       
@@ -840,7 +834,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         (currentSearchParams.sponsor_name && currentSearchParams.sponsor_name.length > 0) ||
         (currentSearchParams.policy_area && currentSearchParams.policy_area.length > 0) ||
         (currentSearchParams.sponsor_party && currentSearchParams.sponsor_party.length > 0) ||
-        (currentSearchParams.sponsor_state && currentSearchParams.sponsor_state.length > 0) ||
         (currentSearchParams.congress && currentSearchParams.congress.length > 0) ||
         currentSearchParams.introduced_date_from ||
         currentSearchParams.introduced_date_to ||
@@ -867,7 +860,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         (currentSearchParams.sponsor_name && currentSearchParams.sponsor_name.length > 0) ||
         (currentSearchParams.policy_area && currentSearchParams.policy_area.length > 0) ||
         (currentSearchParams.sponsor_party && currentSearchParams.sponsor_party.length > 0) ||
-        (currentSearchParams.sponsor_state && currentSearchParams.sponsor_state.length > 0) ||
         (currentSearchParams.congress && currentSearchParams.congress.length > 0) ||
         currentSearchParams.introduced_date_from ||
         currentSearchParams.introduced_date_to ||
@@ -1091,7 +1083,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     if (localDisplayOptions.showBillNumber) cols.push('bill_number');
     if (localDisplayOptions.showSponsorName) cols.push('sponsor_name');
     if (localDisplayOptions.showSponsorParty) cols.push('sponsor_party');
-    if (localDisplayOptions.showSponsorState) cols.push('sponsor_state');
     if (localDisplayOptions.showIntroducedDate) cols.push('introduced_date');
     if (localDisplayOptions.showLatestActionDate) cols.push('latest_action_date');
     if (localDisplayOptions.showCongress) cols.push('congress');
@@ -1627,9 +1618,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                   {visibleColumns.includes('sponsor_party') && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Party</TableCell>
                   )}
-                  {visibleColumns.includes('sponsor_state') && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>State</TableCell>
-                  )}
                   {visibleColumns.includes('introduced_date') && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Introduced</TableCell>
                   )}
@@ -1708,11 +1696,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                     {visibleColumns.includes('sponsor_party') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                         {bill.sponsor_party || 'N/A'}
-                      </TableCell>
-                    )}
-                    {visibleColumns.includes('sponsor_state') && (
-                      <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                        {bill.sponsor_state || 'N/A'}
                       </TableCell>
                     )}
                     {visibleColumns.includes('introduced_date') && (
@@ -2050,18 +2033,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                     placeholder="Select parties..."
                   />
 
-                  {/* Sponsor State */}
-                  <MultiSelectField<string>
-                    label="Sponsor State"
-                    selectedItems={currentSearchParams?.sponsor_state || []}
-                    onItemsChange={(states) => {
-                      setCurrentSearchParams((prev) => ({ ...prev, sponsor_state: states }));
-                    }}
-                    suggestions={US_STATES}
-                    renderItem={(state) => state}
-                    placeholder="Select states..."
-                  />
-
                   {/* Bipartisan */}
                   <FormControl fullWidth>
                     <TextField
@@ -2196,7 +2167,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                 introduced_date_to: '',
                 policy_area: [],
                 sponsor_party: [],
-                sponsor_state: [],
                 latest_action_date_from: '',
                 latest_action_date_to: '',
                 bipartisan: undefined,
@@ -2842,7 +2812,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
             bill_number: 'Bill Number',
             sponsor_name: 'Sponsor Name',
             sponsor_party: 'Sponsor Party',
-            sponsor_state: 'Sponsor State',
             introduced_date: 'Introduced Date',
             latest_action_date: 'Latest Action Date',
             congress: 'Congress',

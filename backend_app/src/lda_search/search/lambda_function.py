@@ -22,6 +22,9 @@ dynamodb = boto3.resource('dynamodb')
 # Environment variables
 FILINGS_TABLE_NAME = os.environ.get('FILINGS_TABLE_NAME', 'lda-filings')
 
+# Global constants
+GSI_QUERY_BATCH_SIZE = 125  # Limit all GSI queries to 125 items per batch
+
 # Get DynamoDB table
 filings_table = dynamodb.Table(FILINGS_TABLE_NAME) if FILINGS_TABLE_NAME else None
 
@@ -368,22 +371,69 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     # would create an unnecessary intersection that could exclude valid results (e.g., if date_from=2007
     # but earliest data is 2008, YearPostedDateIndex for 2007 would return 0 results)
     if (date_from or date_to) and not has_item_type_with_date:
-        # Extract year from date_from or date_to
-        date_str = date_from or date_to
-        if date_str:
-            try:
-                year = int(date_str.split('-')[0])
+        # Query all years in the date range (similar to amount bucket queries)
+        try:
+            from datetime import datetime
+            
+            # Determine year range
+            if date_from and date_to:
+                year_from = int(date_from.split('-')[0])
+                year_to = int(date_to.split('-')[0])
+                years_to_query = list(range(year_from, year_to + 1))
+            elif date_from:
+                year_from = int(date_from.split('-')[0])
+                years_to_query = [year_from]
+            elif date_to:
+                year_to = int(date_to.split('-')[0])
+                years_to_query = [year_to]
+            else:
+                years_to_query = []
+            
+            # Create a query config for each year in the range
+            for year in years_to_query:
+                # For each year, determine the range key condition
+                # If this is the first year and we have date_from, use >= date_from
+                # If this is the last year and we have date_to, use <= date_to
+                # Otherwise, query the entire year
+                range_value = None
+                range_condition = None
+                
+                if len(years_to_query) == 1:
+                    # Single year - apply both date_from and date_to if available
+                    if date_from and date_to:
+                        # Will be handled as 'between' in query_gsi_for_filing_ids
+                        range_value = (date_from, date_to)
+                        range_condition = 'between'
+                    elif date_from:
+                        range_value = date_from
+                        range_condition = 'gte'
+                    elif date_to:
+                        range_value = date_to
+                        range_condition = 'lte'
+                else:
+                    # Multiple years - apply date_from on first year, date_to on last year
+                    if year == years_to_query[0] and date_from:
+                        range_value = date_from
+                        range_condition = 'gte'
+                    elif year == years_to_query[-1] and date_to:
+                        range_value = date_to
+                        range_condition = 'lte'
+                    # For middle years, no range condition (query entire year)
+                
                 query_configs.append({
-                    'filter_key': 'date_from' if date_from else 'date_to',
+                    'filter_key': 'date_range',
                     'index_name': 'YearPostedDateIndex',
                     'hash_key': 'filing_year',
                     'hash_value': year,
-                    'range_key': 'dt_posted',
-                    'range_value': date_from if date_from else date_to,
-                    'range_condition': 'gte' if date_from else 'lte'
+                    'range_key': 'dt_posted' if range_value else None,
+                    'range_value': range_value,
+                    'range_condition': range_condition,
+                    'date_from': date_from,  # Store for reference
+                    'date_to': date_to  # Store for reference
                 })
-            except (ValueError, IndexError):
-                pass
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Error parsing date range: {e}")
+            pass
     
     # Check for general_text_search_fields structure (new format)
     general_text_search_fields = filters.get('general_text_search_fields', {})
@@ -609,6 +659,25 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                         'category': 'government_entity'
                     })
     
+    # Amount filter - use AmountReportedIndex
+    # amount_min and amount_max are handled specially - we query buckets incrementally
+    amount_min = filters.get('amount_min')
+    amount_max = filters.get('amount_max')
+    if amount_min is not None and amount_min > 0:
+        # Convert to int for bucket value (buckets are integers)
+        amount_bucket = int(amount_min)
+        query_configs.append({
+            'filter_key': 'amount',
+            'index_name': 'AmountReportedIndex',
+            'hash_key': 'amount_bucket',
+            'hash_value': amount_bucket,
+            'range_key': None,  # No range key condition - bucket already narrows results
+            'range_value': None,
+            'range_condition': None,
+            'amount_min': amount_min,  # Store original min for Python filtering
+            'amount_max': amount_max if amount_max and amount_max > 0 else None  # Store max for Python filtering
+        })
+    
     return query_configs
 
 
@@ -622,7 +691,7 @@ def clean_quotes(value: str) -> str:
 def query_search_index(
     search_type: str,
     search_values: List[str],
-    limit: int = 1000,
+    limit: int = GSI_QUERY_BATCH_SIZE,
     exclusive_start_key: Optional[Dict] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None
@@ -747,7 +816,7 @@ def query_search_index(
 def query_parameter_filing_mappings(
     parameter_type: str,
     parameter_values: List[str],
-    limit: int = 1000,
+    limit: int = GSI_QUERY_BATCH_SIZE,
     exclusive_start_key: Optional[Dict] = None,
     per_param_limit: Optional[int] = None
 ) -> tuple[List[str], Optional[Dict]]:
@@ -870,7 +939,7 @@ def query_gsi_for_filing_ids(
     range_key_name: Optional[str] = None,
     range_key_value: Optional[str] = None,
     range_key_condition: Optional[str] = None,
-    limit: int = 1000,
+    limit: int = GSI_QUERY_BATCH_SIZE,
     exclusive_start_key: Optional[Dict] = None,
     get_all: bool = False
 ) -> tuple[List[str], Optional[Dict]]:
@@ -981,7 +1050,7 @@ def query_gsi_for_filing_ids(
     return filing_ids, last_eval_key
 
 
-def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search filings in DynamoDB using filters with multi-GSI intersection approach
     
@@ -990,12 +1059,11 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
     2. Use the shortest list as source of truth (most restrictive filter)
     3. Fetch full items for that list
     4. Apply remaining filters in Python
-    5. Paginate until one query runs out of items
+    5. Return all matching results (no limit)
     
     Args:
         filters: Dictionary of filter fields
-        limit: Maximum number of results to return
-        last_evaluated_key: Pagination token from previous request
+        last_evaluated_key: Pagination token from previous request (not used - returns all results)
     
     Returns:
         Dictionary with search results and pagination info
@@ -1077,7 +1145,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         logger.info(f"Continuing pagination for GSI: {gsi_config['index_name'] if gsi_config else 'unknown'}")
         
         # Query each filter to get batches of filing IDs (GSI or parameter-filing mapping)
-        # Continue fetching batches until we have enough items in the intersection to meet the limit
+        # Continue fetching batches until intersection is complete (no limit)
         # Use a unique key for each query config to handle multiple values in the same category
         
         # If we need to fetch next batches, extract query keys from pagination token
@@ -1104,7 +1172,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 query_pagination_keys[unique_key] = None
         
         # Continue fetching batches until we have enough items or all queries are exhausted
-        max_batch_iterations = 10  # Limit iterations to prevent infinite loops
+        # Only fetch first batch - user will paginate through the rest
+        # Exception: For amount filters, allow fetching more batches since buckets are ranges
+        has_amount_filters = any(config.get('filter_key') == 'amount' for config in query_configs)
+        max_batch_iterations = 1  # Only fetch first batch, let user paginate
+        if has_amount_filters:
+            # For amount filters, allow fetching more batches to find matches
+            # But limit to prevent infinite loops
+            max_batch_iterations = 10  # Allow up to 10 batches for amount filters
         batch_iteration = 0
         accumulated_gsi_results = {}  # Accumulate results across batches
         
@@ -1145,7 +1220,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     entity_pks, search_last_key = query_search_index(
                         search_type=config['search_type'],
                         search_values=config['search_values'],
-                        limit=1000,
+                        limit=GSI_QUERY_BATCH_SIZE,
                         exclusive_start_key=exclusive_start_key,
                         date_from=date_from,
                         date_to=date_to
@@ -1185,9 +1260,9 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     filing_ids, param_last_key = query_parameter_filing_mappings(
                         parameter_type=config['parameter_type'],
                         parameter_values=config['parameter_values'],
-                        limit=1000,
+                        limit=GSI_QUERY_BATCH_SIZE,
                         exclusive_start_key=exclusive_start_key,
-                        per_param_limit=1000
+                        per_param_limit=GSI_QUERY_BATCH_SIZE
                     )
                     
                     # Accumulate IDs across batches (union)
@@ -1271,7 +1346,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         range_key_name=config.get('range_key'),
                         range_key_value=config.get('range_value'),
                         range_key_condition=config.get('range_condition'),
-                        limit=1000,
+                        limit=GSI_QUERY_BATCH_SIZE,
                         exclusive_start_key=exclusive_start_key,
                         get_all=False
                     )
@@ -1292,9 +1367,13 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             
             # Quick intersection check to see if we have enough items
             # Group results by category for intersection computation
+            # Exclude amount filters from ID-level intersection (they're applied in Python)
+            # Date range filters should be unioned first (OR logic), then intersected
             temp_general_text_search_results = {}
             temp_advanced_search_results = {}
             temp_other_filters_results = {}
+            temp_amount_filters_results = {}
+            temp_date_range_filters_results = {}
             
             for key, result in accumulated_gsi_results.items():
                 config = result['config']
@@ -1305,6 +1384,12 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     if category not in temp_advanced_search_results:
                         temp_advanced_search_results[category] = []
                     temp_advanced_search_results[category].append(result)
+                elif config.get('filter_key') == 'amount':
+                    # Amount filters - don't include in ID-level intersection
+                    temp_amount_filters_results[key] = result
+                elif config.get('filter_key') == 'date_range':
+                    # Date range filters - union first, then intersect
+                    temp_date_range_filters_results[key] = result
                 else:
                     temp_other_filters_results[key] = result
             
@@ -1333,6 +1418,41 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 else:
                     temp_intersection = general_text_union
             
+            # Union date_range filters first (OR logic - a filing can only be in one year)
+            # BUT: If general_text_search or advanced_search queries already have date filtering,
+            # we should NOT intersect with date_range because the date filtering is already applied
+            if temp_date_range_filters_results:
+                # Check if any general_text_search or advanced_search query has date filtering
+                has_date_in_queries = False
+                for key, result in temp_general_text_search_results.items():
+                    config = result.get('config', {})
+                    if config.get('range_key') == 'dt_posted' and config.get('range_value'):
+                        has_date_in_queries = True
+                        break
+                if not has_date_in_queries:
+                    for category, results in temp_advanced_search_results.items():
+                        for result in results:
+                            config = result.get('config', {})
+                            if config.get('range_key') == 'dt_posted' and config.get('range_value'):
+                                has_date_in_queries = True
+                                break
+                        if has_date_in_queries:
+                            break
+                
+                if not has_date_in_queries:
+                    # Only intersect with date_range if queries don't already have date filtering
+                    date_range_union = set()
+                    for key, result in temp_date_range_filters_results.items():
+                        date_range_union = date_range_union | result['filing_ids']
+                    # Then intersect the date_range union with other filters
+                    if temp_intersection is not None:
+                        temp_intersection = temp_intersection & date_range_union
+                    else:
+                        temp_intersection = date_range_union
+                else:
+                    # Date filtering already applied in queries, skip date_range intersection
+                    logger.info(f"Skipping date_range intersection in temp check - date filtering already applied in queries")
+            
             if temp_other_filters_results:
                 for key, result in temp_other_filters_results.items():
                     if temp_intersection is not None:
@@ -1341,18 +1461,15 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                         temp_intersection = result['filing_ids']
             
             intersection_size = len(temp_intersection) if temp_intersection else 0
-            logger.info(f"After batch {batch_iteration}: intersection size = {intersection_size}, limit = {limit}")
+            logger.info(f"After batch {batch_iteration}: intersection size = {intersection_size}")
             
             # Check if we have enough items in intersection or all queries exhausted
             if all_queries_exhausted:
                 logger.info(f"All queries exhausted after batch {batch_iteration}")
                 break
             
-            # If we have enough items in the intersection (with some buffer), we can stop fetching
-            # We use limit * 2 as buffer because not all items will pass Python filters
-            if intersection_size >= limit * 2:
-                logger.info(f"Intersection has enough items ({intersection_size} >= {limit * 2}), stopping batch fetching")
-                break
+            # Continue fetching batches until intersection is complete
+            # No limit - fetch all items
             
             # Early termination: If intersection is 0 and ALL queries are exhausted,
             # we should stop because the intersection will remain 0
@@ -1370,14 +1487,21 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     for key in query_pagination_keys.keys()
                 )
                 if exhausted_queries_with_results and all_queries_exhausted_check:
-                    logger.warning(f"Intersection is 0 and all queries are exhausted. "
-                                 f"{len(exhausted_queries_with_results)} exhausted query/queries have results, "
-                                 f"but they don't overlap. Stopping pagination.")
-                    logger.info(f"Exhausted queries with results: {exhausted_queries_with_results}")
-                    # Log the sizes for debugging
-                    for key in exhausted_queries_with_results:
-                        logger.info(f"  {key}: {len(accumulated_gsi_results[key]['filing_ids'])} IDs")
-                    break
+                    # For amount filters, don't stop early - we need to apply Python filtering
+                    # Amount buckets are ranges, so intersection at ID level may be 0 but
+                    # Python filtering will find matches
+                    if not has_amount_filters:
+                        logger.warning(f"Intersection is 0 and all queries are exhausted. "
+                                     f"{len(exhausted_queries_with_results)} exhausted query/queries have results, "
+                                     f"but they don't overlap. Stopping pagination.")
+                        logger.info(f"Exhausted queries with results: {exhausted_queries_with_results}")
+                        # Log the sizes for debugging
+                        for key in exhausted_queries_with_results:
+                            logger.info(f"  {key}: {len(accumulated_gsi_results[key]['filing_ids'])} IDs")
+                        break
+                    else:
+                        # For amount filters, continue - we'll apply Python filtering
+                        logger.info(f"Intersection is 0 but amount filters present - continuing to apply Python filters")
                 elif exhausted_queries_with_results:
                     # Some queries are exhausted but others have more - continue paginating
                     logger.info(f"Intersection is 0 after batch {batch_iteration}, but some queries still have more results. "
@@ -1401,12 +1525,16 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         # This reflects whether queries are exhausted after all batch iterations
         final_query_pagination_keys = query_pagination_keys.copy() if 'query_pagination_keys' in locals() else {}
         
-        # Separate filters into three groups:
+        # Separate filters into five groups:
         # 1. general_text_search_fields (OR logic - union all)
         # 2. advanced_search_fields (AND across categories, OR within each category)
-        # 3. other_filters (AND logic - intersection)
+        # 3. amount_filters (special handling - don't intersect at ID level, apply in Python)
+        # 4. date_range_filters (OR logic - union all years in the range)
+        # 5. other_filters (AND logic - intersection)
         general_text_search_results = {}
         advanced_search_results = {}  # Grouped by category
+        amount_filters_results = {}  # Amount filters - don't intersect at ID level
+        date_range_filters_results = {}  # Date range filters - union all years
         other_filters_results = {}
         
         for key, result in gsi_results.items():
@@ -1418,6 +1546,13 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 if category not in advanced_search_results:
                     advanced_search_results[category] = []
                 advanced_search_results[category].append(result)
+            elif config.get('filter_key') == 'amount':
+                # Amount filters need special handling - don't intersect at ID level
+                # Use as source and apply exact filtering in Python
+                amount_filters_results[key] = result
+            elif config.get('filter_key') == 'date_range':
+                # Date range filters - union all years (OR logic)
+                date_range_filters_results[key] = result
             else:
                 other_filters_results[key] = result
         
@@ -1428,6 +1563,14 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             for key, result in general_text_search_results.items():
                 general_text_search_union = general_text_search_union | result['filing_ids']
             logger.info(f"Union of general_text_search_fields filters: {len(general_text_search_union)} filing IDs (OR logic)")
+        
+        # Step 1.5: Union all date_range filters (OR logic - union all years in the range)
+        date_range_union = None
+        if date_range_filters_results:
+            date_range_union = set()
+            for key, result in date_range_filters_results.items():
+                date_range_union = date_range_union | result['filing_ids']
+            logger.info(f"Union of date_range filters: {len(date_range_union)} filing IDs (OR logic - all years in range)")
         
         # Step 2: For advanced search fields, union within each category (OR), then intersect across categories (AND)
         advanced_search_intersection = None
@@ -1449,36 +1592,134 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     advanced_search_intersection = advanced_search_intersection & category_unions[category]
                 logger.info(f"Intersection of advanced search categories: {len(advanced_search_intersection)} filing IDs (AND across categories)")
         
-        # Step 3: Combine all three groups
-        # Start with the most restrictive set
-        if advanced_search_intersection is not None:
+        # Step 3: Combine all groups
+        # For amount filters combined with other filters, use the non-amount filter as source
+        # (amount buckets are ranges, so we apply exact filtering in Python)
+        # For amount-only queries, use amount filter as source
+        # Track which filter keys are the source for has_more determination
+        source_filter_keys = set()  # Track which filter keys contribute to source_filing_ids_set
+        
+        if amount_filters_results and (general_text_search_union is not None or advanced_search_intersection is not None or other_filters_results):
+            # When amount filters are combined with other filters, use the non-amount filter as source
+            # and apply amount filter in Python (buckets are ranges, so ID-level intersection doesn't work)
+            # Priority: advanced_search_intersection > general_text_search_union > other_filters_results
+            if advanced_search_intersection is not None:
+                source_filing_ids_set = advanced_search_intersection
+                # Track all keys that contributed to advanced_search_intersection
+                for category, results in advanced_search_results.items():
+                    for result in results:
+                        # Find the key in gsi_results that matches this result
+                        for key, gsi_result in gsi_results.items():
+                            if gsi_result == result:
+                                source_filter_keys.add(key)
+                logger.info(f"Starting with advanced search intersection (will apply amount filter in Python): {len(source_filing_ids_set)} filing IDs")
+            elif general_text_search_union is not None:
+                source_filing_ids_set = general_text_search_union
+                # Track all keys that contributed to general_text_search_union
+                for key in general_text_search_results.keys():
+                    source_filter_keys.add(key)
+                logger.info(f"Starting with general_text_search union (will apply amount filter in Python): {len(source_filing_ids_set)} filing IDs")
+            elif other_filters_results:
+                shortest_key = min(other_filters_results.keys(), key=lambda k: len(other_filters_results[k]['filing_ids']))
+                source_filing_ids_set = other_filters_results[shortest_key]['filing_ids']
+                source_filter_keys.add(shortest_key)
+                logger.info(f"Starting with shortest other filter (will apply amount filter in Python): {len(source_filing_ids_set)} filing IDs")
+        elif amount_filters_results:
+            # Amount-only query - use amount filter as source
+            if len(amount_filters_results) == 1:
+                amount_key = list(amount_filters_results.keys())[0]
+                source_filing_ids_set = amount_filters_results[amount_key]['filing_ids']
+                source_filter_keys.add(amount_key)
+                logger.info(f"Starting with amount filter: {len(source_filing_ids_set)} filing IDs")
+            else:
+                # Union all amount filter results (multiple buckets)
+                source_filing_ids_set = set()
+                for key, result in amount_filters_results.items():
+                    source_filing_ids_set = source_filing_ids_set | result['filing_ids']
+                    source_filter_keys.add(key)
+                logger.info(f"Starting with amount filters union: {len(source_filing_ids_set)} filing IDs")
+        elif advanced_search_intersection is not None:
             source_filing_ids_set = advanced_search_intersection
+            # Track all keys that contributed to advanced_search_intersection
+            for category, results in advanced_search_results.items():
+                for result in results:
+                    # Find the key in gsi_results that matches this result
+                    for key, gsi_result in gsi_results.items():
+                        if gsi_result == result:
+                            source_filter_keys.add(key)
             logger.info(f"Starting with advanced search intersection: {len(source_filing_ids_set)} filing IDs")
         elif general_text_search_union is not None:
             source_filing_ids_set = general_text_search_union
+            # Track all keys that contributed to general_text_search_union
+            for key in general_text_search_results.keys():
+                source_filter_keys.add(key)
             logger.info(f"Starting with general_text_search union: {len(source_filing_ids_set)} filing IDs")
         elif other_filters_results:
             shortest_key = min(other_filters_results.keys(), key=lambda k: len(other_filters_results[k]['filing_ids']))
             source_filing_ids_set = other_filters_results[shortest_key]['filing_ids']
+            source_filter_keys.add(shortest_key)
             logger.info(f"Starting with shortest other filter: {len(source_filing_ids_set)} filing IDs")
         else:
             source_filing_ids_set = set()
             logger.warning("No queryable filters found - empty result set")
         
-        # Intersect with general_text_search_fields union (if present)
-        if general_text_search_union is not None and advanced_search_intersection is not None:
-            source_filing_ids_set = source_filing_ids_set & general_text_search_union
-            logger.info(f"After intersecting with general_text_search union: {len(source_filing_ids_set)} filing IDs")
-        elif general_text_search_union is not None and advanced_search_intersection is None:
-            # Only general_text_search_fields - use union directly
-            source_filing_ids_set = general_text_search_union
-            logger.info(f"Only general_text_search_fields - using union: {len(source_filing_ids_set)} filing IDs")
+        # Intersect with general_text_search_fields union (if present and not using amount as source)
+        if not amount_filters_results:
+            if general_text_search_union is not None and advanced_search_intersection is not None:
+                source_filing_ids_set = source_filing_ids_set & general_text_search_union
+                logger.info(f"After intersecting with general_text_search union: {len(source_filing_ids_set)} filing IDs")
+            elif general_text_search_union is not None and advanced_search_intersection is None:
+                # Only general_text_search_fields - use union directly
+                source_filing_ids_set = general_text_search_union
+                logger.info(f"Only general_text_search_fields - using union: {len(source_filing_ids_set)} filing IDs")
         
-        # Intersect with other filters (date, item_type, etc.)
+        # Intersect with date_range union if present (date ranges span multiple years, so union first, then intersect)
+        # BUT: If general_text_search or advanced_search queries already have date filtering (range_key with date_from),
+        # we should NOT intersect with date_range_union because the date filtering is already applied in those queries
+        # and intersecting would incorrectly exclude valid results
+        has_date_filtering_in_queries = False
+        if general_text_search_results:
+            # Check if any general_text_search query has date filtering
+            for key, result in general_text_search_results.items():
+                config = result.get('config', {})
+                if config.get('range_key') == 'dt_posted' and config.get('range_value'):
+                    has_date_filtering_in_queries = True
+                    break
+        if not has_date_filtering_in_queries and advanced_search_results:
+            # Check if any advanced_search query has date filtering
+            for category, results in advanced_search_results.items():
+                for result in results:
+                    config = result.get('config', {})
+                    if config.get('range_key') == 'dt_posted' and config.get('range_value'):
+                        has_date_filtering_in_queries = True
+                        break
+                if has_date_filtering_in_queries:
+                    break
+        
+        if date_range_union is not None and not has_date_filtering_in_queries:
+            # Only intersect with date_range_union if queries don't already have date filtering
+            source_filing_ids_set = source_filing_ids_set & date_range_union
+            for key in date_range_filters_results.keys():
+                source_filter_keys.add(key)
+            logger.info(f"After intersecting with date_range union: {len(source_filing_ids_set)} filing IDs")
+        elif date_range_union is not None and has_date_filtering_in_queries:
+            # Date filtering already applied in queries, skip date_range intersection
+            # But still track date_range keys for has_more determination
+            for key in date_range_filters_results.keys():
+                source_filter_keys.add(key)
+            logger.info(f"Skipping date_range intersection - date filtering already applied in queries (source: {len(source_filing_ids_set)} filing IDs)")
+        
+        # Intersect with other filters (item_type, etc.) - but NOT amount filters or date_range
+        # (amount filters are applied in Python, date_range is already handled above)
         if other_filters_results:
             for key, result in other_filters_results.items():
                 source_filing_ids_set = source_filing_ids_set & result['filing_ids']
+                # Track keys that contribute to the final source (for has_more determination)
+                source_filter_keys.add(key)
             logger.info(f"After intersecting with {len(other_filters_results)} other filters: {len(source_filing_ids_set)} filing IDs")
+        
+        # If using non-amount filters as source but have amount filters, we've already
+        # set the source correctly above - amount filters will be applied in Python
         
         source_filing_ids = list(source_filing_ids_set)
         logger.info(f"Initial intersection: {len(source_filing_ids)} filing IDs after applying OR logic for general_text_search_fields, OR within/AND across for advanced search, and AND for other filters")
@@ -1529,6 +1770,12 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     # (We queried all values via separate GSI queries and unioned them, but keep for exact name matching)
                     # The filter will remain in remaining_filters for Python filtering
             
+            # For amount filters, keep in remaining_filters for Python filtering (buckets are ranges)
+            elif filter_key == 'amount':
+                # Keep amount_min and amount_max for Python filtering to ensure exact matching
+                # (GSI buckets are ranges, so we need to filter by exact amount)
+                pass  # Don't remove - we need them for Python filtering
+            
             # For other filters (date, item_type, state, etc.), remove them since they're fully applied
             elif not is_from_general_text_search and not is_advanced_search:
                 if filter_key in remaining_filters:
@@ -1551,9 +1798,9 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
-        # For multi-query intersection, we need to continue fetching batches from all queries
-        # until we have enough items in the intersection to meet the limit
+        # For multi-query intersection, limit to 125 items per batch (DEFAULT_BATCH_SIZE)
         # Use union offset pagination consistently to avoid switching between pagination methods
+        DEFAULT_BATCH_SIZE = 125  # Default batch size (matches contracts lambda)
         all_matching_items = []
         next_offset = None  # Initialize next_offset
         
@@ -1567,10 +1814,10 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             start_index = union_offset if union_offset is not None else 0
             last_processed_index = start_index
             
-            # Fetch and filter items in batches until we have enough filtered items or run out of IDs
+            # Fetch and filter items in batches until we have DEFAULT_BATCH_SIZE filtered items or run out of IDs
             filtered_items = []
             i = start_index
-            while i < len(source_filing_ids) and len(filtered_items) < limit:
+            while i < len(source_filing_ids) and len(filtered_items) < DEFAULT_BATCH_SIZE:
                 batch_ids = source_filing_ids[i:i + batch_size]
                 last_processed_index = i + len(batch_ids)  # Track the last index we processed
                 
@@ -1596,20 +1843,22 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                     if apply_python_filter(converted_item, remaining_filters):
                         filtered_items.append(converted_item)
-                        if len(filtered_items) >= limit:
+                        # Stop if we've reached the batch size limit
+                        if len(filtered_items) >= DEFAULT_BATCH_SIZE:
                             break
                 
                 i += batch_size
-                if len(filtered_items) >= limit:
+                
+                # Stop if we've reached the batch size limit
+                if len(filtered_items) >= DEFAULT_BATCH_SIZE:
                     break
             
-            all_matching_items = filtered_items
+            all_matching_items = filtered_items[:DEFAULT_BATCH_SIZE]  # Limit to DEFAULT_BATCH_SIZE
             logger.info(f"Fetched and filtered {len(all_matching_items)} items (processed up to index {last_processed_index} of {len(source_filing_ids)})")
             
-            # If we don't have enough items and haven't processed all IDs, we need to fetch more batches
-            # from the queries and re-intersect. However, for now, we'll use union offset pagination
-            # to continue from where we left off in the current intersection
+            # Set next_offset for pagination
             if last_processed_index < len(source_filing_ids):
+                # More IDs to process in current intersection
                 next_offset = last_processed_index
             else:
                 # We've processed all IDs in the current intersection
@@ -1618,8 +1867,8 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         else:
             next_offset = None
         
-        # Use the collected items directly
-        items = all_matching_items[:limit]
+        # Use the collected items (limited to DEFAULT_BATCH_SIZE)
+        items = all_matching_items
         
         logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
         method = 'multi_gsi_intersection'
@@ -1650,13 +1899,24 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 logger.info(f"Continuing union offset pagination - next offset: {next_offset}, total IDs: {len(source_filing_ids)}")
             else:
                 # Check if we need to fetch more batches from queries to get more items in intersection
-                # If we have more results available from any query, we should continue
+                # If we have more results available from SOURCE queries, we should continue
                 # CRITICAL: Use final_query_pagination_keys which reflects the current state after all batches
+                # Only check source filter keys, not amount filters (when amount is combined with other filters)
                 has_more = False
                 query_pagination_keys_for_token = {}  # Store pagination keys for each query
                 
-                # Check final_query_pagination_keys to see if any query still has more results
+                # Check final_query_pagination_keys to see if SOURCE queries still have more results
                 for key, result in gsi_results.items():
+                    # Only check if this is a source filter key
+                    # If amount filters are combined with other filters, exclude amount filters from has_more check
+                    config = result['config']
+                    is_amount_filter = config.get('filter_key') == 'amount'
+                    is_source_filter = key in source_filter_keys
+                    
+                    # Skip amount filters when they're not the source (i.e., when combined with other filters)
+                    if is_amount_filter and not is_source_filter:
+                        continue
+                    
                     # Check if this query has a pagination key in the final state
                     current_pagination_key = final_query_pagination_keys.get(key) if final_query_pagination_keys else None
                     
@@ -1668,7 +1928,6 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     if current_pagination_key:
                         has_more = True
                         # Store the pagination key for this query
-                        config = result['config']
                         if result['query_type'] == 'search_index':
                             query_pagination_keys_for_token[key] = {
                                 'type': 'search_index',
@@ -1714,13 +1973,24 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 }
                 logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs: {len(source_filing_ids)}")
             else:
-                # Check if any queries have more results to fetch
+                # Check if SOURCE queries have more results to fetch
                 # CRITICAL: Use final_query_pagination_keys which reflects the current state after all batches
+                # Only check source filter keys, not amount filters (when amount is combined with other filters)
                 has_more = False
                 query_pagination_keys_for_token = {}  # Store pagination keys for each query
                 
-                # Check final_query_pagination_keys to see if any query still has more results
+                # Check final_query_pagination_keys to see if SOURCE queries still have more results
                 for key, result in gsi_results.items():
+                    # Only check if this is a source filter key
+                    # If amount filters are combined with other filters, exclude amount filters from has_more check
+                    config = result['config']
+                    is_amount_filter = config.get('filter_key') == 'amount'
+                    is_source_filter = key in source_filter_keys
+                    
+                    # Skip amount filters when they're not the source (i.e., when combined with other filters)
+                    if is_amount_filter and not is_source_filter:
+                        continue
+                    
                     # Check if this query has a pagination key in the final state
                     current_pagination_key = final_query_pagination_keys.get(key) if final_query_pagination_keys else None
                     
@@ -1732,7 +2002,6 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                     if current_pagination_key:
                         has_more = True
                         # Store the pagination key for this query
-                        config = result['config']
                         if result['query_type'] == 'search_index':
                             query_pagination_keys_for_token[key] = {
                                 'type': 'search_index',
@@ -1797,7 +2066,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             date_to = filters.get('date_to')
             
             # Query search index to get entity PKs (with pagination support)
-            batch_size = min(limit * 3, 200)  # Fetch 3x limit or max 200, whichever is smaller
+            batch_size = 125  # Default batch size (matches contracts lambda)
             entity_pks, search_index_key = query_search_index(
                 search_type=config['search_type'],
                 search_values=config['search_values'],
@@ -1916,15 +2185,13 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 passed = apply_python_filter(item, remaining_filters)
                 if passed:
                     filtered_items.append(item)
-                    if len(filtered_items) >= limit:
-                        break
                 else:
                     # Log why item was filtered out for debugging (only log first few to avoid spam)
                     if idx < 3:
                         logger.info(f"Item {idx+1} filtered out: filing_id={item.get('filing_id', 'N/A')}, client_name={item.get('client_name', 'N/A')}, amount_reported={item.get('amount_reported', 0)}")
             
             logger.info(f"After Python filtering: {len(filtered_items)} items passed filters out of {len(items)} total")
-            results = [convert_decimal_to_float(item) for item in filtered_items[:limit]]
+            results = [convert_decimal_to_float(item) for item in filtered_items]
             
             # Prepare pagination token for "load more" functionality
             # Store the search index key so we can continue pagination
@@ -1966,7 +2233,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             # Query parameter-filing mappings to get filing IDs (with pagination support)
             # Use a reasonable batch size for pagination - fetch enough to account for filtering
             # but not too many to avoid long wait times
-            batch_size = min(limit * 3, 200)  # Fetch 3x limit or max 200, whichever is smaller
+            batch_size = 125  # Default batch size (matches contracts lambda)
             filing_ids, param_mapping_key = query_parameter_filing_mappings(
                 parameter_type=config['parameter_type'],
                 parameter_values=config['parameter_values'],
@@ -2046,10 +2313,8 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             for item in items:
                 if apply_python_filter(item, remaining_filters):
                     filtered_items.append(item)
-                    if len(filtered_items) >= limit:
-                        break
             
-            results = [convert_decimal_to_float(item) for item in filtered_items[:limit]]
+            results = [convert_decimal_to_float(item) for item in filtered_items]
             
             # Prepare pagination token for "load more" functionality
             # Store the parameter-filing mapping key so we can continue pagination
@@ -2081,6 +2346,42 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         logger.info(f"Using single GSI query: {config['index_name']}")
         logger.info(f"GSI query config: hash_key={config['hash_key']}, hash_value={config['hash_value']}, range_key={config.get('range_key')}, range_value={config.get('range_value')}")
         
+        # Special handling for amount_bucket queries - need to increment buckets
+        is_amount_query = config['filter_key'] == 'amount' and config['hash_key'] == 'amount_bucket'
+        current_amount_bucket = None
+        amount_min = config.get('amount_min')
+        amount_max = config.get('amount_max')
+        
+        # Parse pagination key for amount queries
+        if is_amount_query:
+            # Extract current bucket from pagination key or start from amount_min
+            if last_evaluated_key and isinstance(last_evaluated_key, dict):
+                if 'amount_bucket' in last_evaluated_key:
+                    current_amount_bucket = int(last_evaluated_key['amount_bucket'])
+                    # Also extract the actual DynamoDB last_eval_key if present
+                    if 'last_eval_key' in last_evaluated_key:
+                        last_evaluated_key = last_evaluated_key['last_eval_key']
+                    else:
+                        last_evaluated_key = None  # Reset for new bucket
+                    logger.info(f"Continuing amount query from bucket: {current_amount_bucket}")
+                elif 'hash_value' in last_evaluated_key:
+                    # Fallback: try to extract from hash_value
+                    try:
+                        current_amount_bucket = int(last_evaluated_key['hash_value'])
+                        if 'last_eval_key' in last_evaluated_key:
+                            last_evaluated_key = last_evaluated_key['last_eval_key']
+                        else:
+                            last_evaluated_key = None
+                    except (ValueError, TypeError):
+                        pass
+            
+            if current_amount_bucket is None:
+                current_amount_bucket = int(amount_min) if amount_min else int(config['hash_value'])
+                logger.info(f"Starting amount query from bucket: {current_amount_bucket}")
+            
+            # Update config to use current bucket
+            config['hash_value'] = current_amount_bucket
+        
         # For PAC searches, we need to paginate through all results efficiently
         # Process in batches to avoid memory issues
         remaining_filters = filters.copy()
@@ -2097,17 +2398,31 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             else:
                 del remaining_filters[config['filter_key']]
         
+        # For amount queries, remove amount_min and amount_max from remaining filters
+        # (they're already handled by the GSI query, but we still need to apply Python filtering
+        # to ensure exact amount matching since buckets are ranges)
+        if is_amount_query:
+            # Keep amount_min and amount_max in filters for Python filtering to ensure exact matching
+            # (GSI buckets are ranges, so we need to filter by exact amount)
+            pass  # Don't remove - we need them for Python filtering
+        
         logger.info(f"Applying remaining filters: {list(remaining_filters.keys())}")
         logger.info(f"Remaining filters details: {json.dumps(remaining_filters, default=str)}")
         
         # Memory-efficient pagination: process in batches
+        # Only fetch first batch - user will paginate through the rest
+        # For amount queries, allow trying multiple buckets within the same round
         filtered_items = []
         gsi_last_eval_key = last_evaluated_key
-        max_pagination_rounds = 1000  # Safety limit
+        max_pagination_rounds = 1  # Only fetch first batch, let user paginate
         max_consecutive_empty_rounds = 5  # Stop if 5 consecutive rounds return 0 matching items
         consecutive_empty_rounds = 0
         pagination_round = 0
-        batch_size = 100  # Process 100 items at a time
+        batch_size = 125  # Default batch size (matches contracts lambda)
+        
+        # For amount queries, allow trying multiple buckets until we have enough results
+        if is_amount_query:
+            max_pagination_rounds = 100  # Allow trying many buckets, but will break when we have enough items
         
         # Special handling for PAC searches - GSI returns CONTRIBUTION items, not FILING items
         is_pac_search = config['filter_key'] == 'pac' and 'general_text_search_fields' in remaining_filters and remaining_filters.get('general_text_search_fields', {}).get('pac')
@@ -2176,11 +2491,28 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 # Original value works, use it
                 logger.info(f"Original value '{hash_value_variations[0]}' works - no variation needed")
         
-        while len(filtered_items) < limit and pagination_round < max_pagination_rounds:
+        while pagination_round < max_pagination_rounds:
             pagination_round += 1
             
-            # Use the working variation (or original if none worked)
-            current_hash_value = hash_value_variations[current_variation_index] if current_variation_index < len(hash_value_variations) else config['hash_value']
+            # For amount queries, use current bucket; otherwise use working variation
+            if is_amount_query:
+                current_hash_value = current_amount_bucket
+                # Reset pagination key when moving to next bucket
+                if pagination_round > 1 and gsi_last_eval_key is None:
+                    # We exhausted previous bucket, increment to next
+                    current_amount_bucket += 1
+                    current_hash_value = current_amount_bucket
+                    config['hash_value'] = current_amount_bucket
+                    gsi_last_eval_key = None  # Reset for new bucket
+                    logger.info(f"Amount bucket {current_amount_bucket - 1} exhausted, moving to bucket {current_amount_bucket}")
+                    
+                    # Check if we've exceeded amount_max
+                    if amount_max and current_amount_bucket > int(amount_max):
+                        logger.info(f"Reached amount_max ({amount_max}), stopping bucket increment")
+                        break
+            else:
+                # Use the working variation (or original if none worked)
+                current_hash_value = hash_value_variations[current_variation_index] if current_variation_index < len(hash_value_variations) else config['hash_value']
             
             # Query GSI to get a batch of IDs (could be filing IDs or contribution IDs)
             ids_batch, new_last_eval_key = query_gsi_for_filing_ids(
@@ -2199,7 +2531,22 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             
             if not ids_batch:
                 logger.info(f"GSI query returned no more IDs (pagination round {pagination_round})")
-                break
+                # For amount queries, try next bucket if current one is exhausted
+                if is_amount_query:
+                    current_amount_bucket += 1
+                    if amount_max and current_amount_bucket > int(amount_max):
+                        logger.info(f"Reached amount_max ({amount_max}), stopping bucket increment")
+                        break
+                    logger.info(f"Moving to next amount bucket: {current_amount_bucket}")
+                    config['hash_value'] = current_amount_bucket
+                    gsi_last_eval_key = None  # Reset for new bucket
+                    # Continue loop to try next bucket (but only if we haven't reached max_pagination_rounds)
+                    if pagination_round < max_pagination_rounds:
+                        continue  # Try next bucket
+                    else:
+                        break
+                else:
+                    break
             
             logger.info(f"Pagination round {pagination_round}: Got {len(ids_batch)} IDs from GSI")
             
@@ -2339,24 +2686,36 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 for item in items_batch:
                     if apply_python_filter(item, temp_filters):
                         filtered_items.append(item)
-                        if len(filtered_items) >= limit:
-                            break
             else:
                 # Normal filtering
                 for item in items_batch:
                     if apply_python_filter(item, remaining_filters):
                         filtered_items.append(item)
-                        if len(filtered_items) >= limit:
-                            break
             
             items_after_round = len(filtered_items)
             items_matched_this_round = items_after_round - items_before_round
             
-            logger.info(f"Pagination round {pagination_round}: {len(filtered_items)} items match all filters so far (need {limit}), matched {items_matched_this_round} this round")
+            logger.info(f"Pagination round {pagination_round}: {len(filtered_items)} items match all filters so far, matched {items_matched_this_round} this round")
             
-            # Stop if we have enough results or GSI ran out
-            if len(filtered_items) >= limit or not gsi_last_eval_key:
+            # For amount queries, stop if we have enough items
+            if is_amount_query and len(filtered_items) >= batch_size:
+                logger.info(f"Reached batch size limit ({batch_size}), stopping")
                 break
+            
+            # Stop if GSI ran out
+            if not gsi_last_eval_key:
+                # For amount queries, try next bucket if current one is exhausted
+                if is_amount_query:
+                    current_amount_bucket += 1
+                    if amount_max and current_amount_bucket > int(amount_max):
+                        logger.info(f"Reached amount_max ({amount_max}), stopping bucket increment")
+                        break
+                    logger.info(f"Bucket exhausted, moving to next amount bucket: {current_amount_bucket}")
+                    config['hash_value'] = current_amount_bucket
+                    gsi_last_eval_key = None  # Reset for new bucket
+                    continue  # Try next bucket
+                else:
+                    break
             
             # Early termination: if multiple consecutive rounds return 0 matching items, stop paginating
             if items_matched_this_round == 0:
@@ -2368,22 +2727,55 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
                 consecutive_empty_rounds = 0  # Reset counter if we found items
         
         logger.info(f"Pagination complete: {len(filtered_items)} items match all filters after {pagination_round} rounds")
-        filtered_items = filtered_items[:limit]
         
-        results = [convert_decimal_to_float(item) for item in filtered_items]
+        # Limit results to batch_size
+        results = [convert_decimal_to_float(item) for item in filtered_items[:batch_size]]
         
         serializable_last_key = None
-        if gsi_last_eval_key:
-            try:
-                serializable_last_key = convert_decimal_to_float(gsi_last_eval_key)
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key: {e}")
+        has_more = False
+        
+        if is_amount_query:
+            # For amount queries, create custom pagination key with bucket info
+            if gsi_last_eval_key:
+                # Still have more in current bucket
+                try:
+                    serializable_last_key = {
+                        'amount_bucket': current_amount_bucket,
+                        'hash_value': current_amount_bucket,
+                        'index_name': config['index_name'],
+                        'hash_key': config['hash_key'],
+                        'last_eval_key': convert_decimal_to_float(gsi_last_eval_key),
+                        'amount_min': amount_min,
+                        'amount_max': amount_max
+                    }
+                    has_more = True
+                except Exception as e:
+                    logger.warning(f"Error converting last_evaluated_key: {e}")
+            elif amount_max is None or current_amount_bucket < int(amount_max):
+                # Current bucket exhausted but more buckets available
+                serializable_last_key = {
+                    'amount_bucket': current_amount_bucket + 1,
+                    'hash_value': current_amount_bucket + 1,
+                    'index_name': config['index_name'],
+                    'hash_key': config['hash_key'],
+                    'amount_min': amount_min,
+                    'amount_max': amount_max
+                }
+                has_more = True
+        else:
+            # Normal GSI query pagination
+            if gsi_last_eval_key:
+                try:
+                    serializable_last_key = convert_decimal_to_float(gsi_last_eval_key)
+                    has_more = True
+                except Exception as e:
+                    logger.warning(f"Error converting last_evaluated_key: {e}")
         
         return {
             'success': True,
             'results': results,
             'count': len(results),
-            'has_more': gsi_last_eval_key is not None,
+            'has_more': has_more,
             'last_evaluated_key': serializable_last_key,
             'method': 'single_gsi_query',
             'index_used': config['index_name']
@@ -2402,13 +2794,22 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         all_filing_ids = []
         all_last_eval_keys = {}
         
-        # Query each year's GSI to get filing IDs
+        # Query each year's GSI to get filing IDs (limit to 125 to prevent large responses)
+        DEFAULT_BATCH_SIZE = 125  # Default batch size (matches contracts lambda)
+        total_ids_needed = DEFAULT_BATCH_SIZE
+        
         for year in years_to_query:
+            if len(all_filing_ids) >= total_ids_needed:
+                break  # Stop if we have enough IDs
+            
+            # Calculate how many more IDs we need
+            remaining_needed = total_ids_needed - len(all_filing_ids)
+            
             filing_ids, last_eval_key = query_gsi_for_filing_ids(
                 index_name='YearPostedDateIndex',
                 hash_key_name='filing_year',
                 hash_key_value=year,
-                limit=limit * 10,  # Get more IDs to account for filtering
+                limit=remaining_needed,  # Only fetch what we need
                 exclusive_start_key=last_evaluated_key if year == years_to_query[0] else None,
                 get_all=False
             )
@@ -2416,15 +2817,18 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
             if last_eval_key:
                 all_last_eval_keys[year] = last_eval_key
         
-        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years")
+        logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years (limited to {DEFAULT_BATCH_SIZE} for response size)")
         
-        # Fetch full items using batch get
+        # Fetch full items using batch get (only fetch what we need)
         items = []
         if all_filing_ids:
-            batch_size = 100
+            # Limit to DEFAULT_BATCH_SIZE to prevent large responses
+            ids_to_fetch = all_filing_ids[:DEFAULT_BATCH_SIZE]
+            # DynamoDB BatchGetItem limit is 100 items per request
+            batch_get_size = 100
             dynamodb_client = boto3.client('dynamodb')
-            for i in range(0, len(all_filing_ids), batch_size):
-                batch_ids = all_filing_ids[i:i + batch_size]
+            for i in range(0, len(ids_to_fetch), batch_get_size):
+                batch_ids = ids_to_fetch[i:i + batch_get_size]
                 request_items = {
                     FILINGS_TABLE_NAME: {
                         'Keys': [
@@ -2444,25 +2848,44 @@ def search_filings(filters: Dict[str, Any], limit: int = 100, last_evaluated_key
         
         # Apply all filters in Python
         filtered_items = [item for item in items if apply_python_filter(item, filters)]
-        logger.info(f"After filtering: {len(filtered_items)} items match filters")
-        filtered_items = filtered_items[:limit]
+        logger.info(f"After filtering: {len(filtered_items)} items match filters (out of {len(items)} fetched)")
         
-        results = [convert_decimal_to_float(item) for item in filtered_items]
+        # Return up to DEFAULT_BATCH_SIZE items to prevent response size issues
+        results = [convert_decimal_to_float(item) for item in filtered_items[:DEFAULT_BATCH_SIZE]]
         
         # Use the last evaluated key from the most recent year queried
+        # has_more is True if: (1) we have a pagination key, OR (2) we fetched the full batch
         serializable_last_key = None
+        has_more = False
+        
+        # Check if we have more results available
         if all_last_eval_keys:
+            # We have a pagination key, so there are more items in the GSI
             try:
                 # Use the last evaluated key from the first year (most recent)
                 serializable_last_key = convert_decimal_to_float(all_last_eval_keys.get(years_to_query[0]))
+                has_more = True
             except Exception as e:
                 logger.warning(f"Error converting last_evaluated_key: {e}")
+        elif len(all_filing_ids) >= DEFAULT_BATCH_SIZE:
+            # We fetched the full batch, so there might be more items
+            # Create a pagination key to continue from where we left off
+            has_more = True
+            # Store the last fetched ID and year info for continuation
+            if all_filing_ids:
+                serializable_last_key = {
+                    'query_type': 'default_gsi_query',
+                    'last_fetched_id': all_filing_ids[-1],
+                    'years_queried': years_to_query,
+                    'total_ids_fetched': len(all_filing_ids),
+                    'last_eval_key': convert_decimal_to_float(all_last_eval_keys.get(years_to_query[0])) if all_last_eval_keys else None
+                }
         
         return {
             'success': True,
             'results': results,
             'count': len(results),
-            'has_more': serializable_last_key is not None,
+            'has_more': has_more,
             'last_evaluated_key': serializable_last_key,
             'method': 'default_gsi_query',
             'index_used': 'YearPostedDateIndex'
@@ -2535,22 +2958,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             request_body = event.get('body', {})
         
-        # Extract filters and limit
+        # Extract filters
         filters = request_body.get('filters', {})
-        limit = request_body.get('limit', 100)
         last_evaluated_key = request_body.get('last_evaluated_key')
         
         # Log filters for debugging
-        logger.info(f"Search request - filters: {json.dumps(filters)}, limit: {limit}, last_evaluated_key: {last_evaluated_key is not None}")
+        logger.info(f"Search request - filters: {json.dumps(filters)}, last_evaluated_key: {last_evaluated_key is not None}")
         
-        # Validate limit
-        if limit > 1000:
-            limit = 1000
-        if limit < 1:
-            limit = 100
-        
-        # Perform search
-        result = search_filings(filters, limit, last_evaluated_key)
+        # Perform search - return all results (no limit)
+        result = search_filings(filters, last_evaluated_key)
         logger.info(f"Search complete - found {result.get('count', 0)} results, has_more: {result.get('has_more', False)}")
         
         # If this is from SQS, publish completion notification

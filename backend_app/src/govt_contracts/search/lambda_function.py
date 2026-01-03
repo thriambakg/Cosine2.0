@@ -318,7 +318,16 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         except (ValueError, TypeError):
             return False
     
-    # Date filters
+    # Simplified date filter: date_year maps to fiscal_year
+    # Fiscal year is already handled by GSI queries, so we just verify it matches
+    if filters.get('date_year'):
+        item_fy = item.get('fiscal_year')
+        filter_fy = int(filters['date_year'])  # date_year maps directly to fiscal_year
+        if not item_fy or item_fy != filter_fy:
+            logger.debug(f"Date filter failed: item fiscal_year='{item_fy}' doesn't match date_year={filter_fy}, award_id={item.get('award_id', 'unknown')}")
+            return False
+    
+    # Legacy date filters (deprecated, but keep for backward compatibility)
     if filters.get('date_from'):
         item_date = item.get('period_start_date') or item.get('period_of_performance_start_date', '')
         if not item_date:
@@ -336,9 +345,11 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
             return False
     
     if filters.get('date_to'):
-        item_date = item.get('period_start_date') or item.get('period_of_performance_start_date', '')
+        # For date_to, we should check period_end_date (when the period ends)
+        # This matches the PeriodEndDateIndex GSI which uses period_end_date
+        item_date = item.get('period_end_date') or item.get('period_of_performance_end_date', '')
         if not item_date:
-            logger.debug(f"Date to filter failed: item has no period_start_date, award_id={item.get('award_id', 'unknown')}")
+            logger.debug(f"Date to filter failed: item has no period_end_date, award_id={item.get('award_id', 'unknown')}")
             return False
         # Normalize dates to YYYY-MM-DD format for comparison
         try:
@@ -602,12 +613,7 @@ def build_filter_expression(filters: Dict[str, Any]) -> Optional[Any]:
     if filters.get('max_obligation') is not None:
         conditions.append(Attr('total_obligation').lte(Decimal(str(filters['max_obligation']))))
     
-    # Date filters
-    if filters.get('date_from'):
-        conditions.append(Attr('period_start_date').gte(filters['date_from']))
-    
-    if filters.get('date_to'):
-        conditions.append(Attr('period_start_date').lte(filters['date_to']))
+    # Date filter: date_year maps to fiscal_year (handled by GSI, no Python filter needed)
     
     # Fiscal year filter
     if filters.get('fiscal_year'):
@@ -919,6 +925,16 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     query_configs = []
     
+    # Convert date_year to fiscal_year FIRST, before processing other filters
+    # This ensures that GSIs with fiscal_year as range key can use it
+    if filters.get('date_year') and not filters.get('fiscal_year'):
+        try:
+            fiscal_year = int(filters['date_year'])
+            filters['fiscal_year'] = fiscal_year
+            logger.info(f"Converted date_year={filters['date_year']} to fiscal_year={fiscal_year}")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Error parsing date_year: {e}")
+    
     # AwardingAgencyCodeFiscalYearIndex: hash_key=awarding_agency_code, range_key=fiscal_year
     if filters.get('awarding_agency_code'):
         values = filters['awarding_agency_code'] if isinstance(filters['awarding_agency_code'], list) else [filters['awarding_agency_code']]
@@ -1029,97 +1045,60 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_condition': None
             })
     
-    # FiscalYearObligationIndex: hash_key=fiscal_year, range_key=total_obligated_amount
-    if filters.get('fiscal_year') and (filters.get('min_obligation') is not None or filters.get('max_obligation') is not None):
+    # FiscalYearObligationIndex: Only use when we have fiscal_year but no other GSI hash keys
+    # OR when we have fiscal_year + obligation filters (need obligation range key)
+    # If we have other GSIs that can use fiscal_year as range key, they should handle it
+    has_other_gsi_hash_keys = any([
+        filters.get('awarding_agency_code'),
+        filters.get('recipient_name'),
+        filters.get('recipient_location_state'),
+        filters.get('recipient_zip_code'),
+        filters.get('award_type'),
+    ])
+    
+    if filters.get('fiscal_year'):
         fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
         if fiscal_years:
             fiscal_year = fiscal_years[0]
-            range_condition = None
-            range_value = None
-            if filters.get('min_obligation') is not None and filters.get('max_obligation') is not None:
-                range_condition = 'between'
-                range_value = (Decimal(str(filters['min_obligation'])), Decimal(str(filters['max_obligation'])))
-            elif filters.get('min_obligation') is not None:
-                range_condition = 'gte'
-                range_value = Decimal(str(filters['min_obligation']))
-            elif filters.get('max_obligation') is not None:
-                range_condition = 'lte'
-                range_value = Decimal(str(filters['max_obligation']))
             
-            query_configs.append({
-                'filter_key': 'fiscal_year_obligation',
-                'index_name': 'FiscalYearObligationIndex',
-                'hash_key': 'fiscal_year',
-                'hash_value': fiscal_year,
-                'range_key': 'total_obligated_amount',
-                'range_value': range_value,
-                'range_condition': range_condition
-            })
-    
-    # PeriodStartDateIndex: hash_key=fiscal_year, range_key=period_start_date
-    if filters.get('date_from'):
-        date_from = filters['date_from']
-        if date_from and str(date_from).strip():
-            # Calculate fiscal_year from date_from if not provided
-            fiscal_year = None
-            if filters.get('fiscal_year'):
-                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
-                if fiscal_years:
-                    fiscal_year = fiscal_years[0]
-            else:
-                # Calculate fiscal year from date (US fiscal year: Oct 1 - Sep 30)
-                try:
-                    from datetime import datetime
-                    date_obj = datetime.strptime(str(date_from).split('T')[0], '%Y-%m-%d')
-                    year = date_obj.year
-                    month = date_obj.month
-                    # Fiscal year starts Oct 1, so months 10-12 belong to next fiscal year
-                    fiscal_year = year + 1 if month >= 10 else year
-                except (ValueError, TypeError):
-                    pass
+            # Only create FiscalYearObligationIndex query if:
+            # 1. We have obligation filters (need the obligation range key), OR
+            # 2. We don't have any other GSI hash keys (simple fiscal year query)
+            has_obligation_filter = filters.get('min_obligation') is not None or filters.get('max_obligation') is not None
             
-            if fiscal_year:
+            if has_obligation_filter:
+                # Use FiscalYearObligationIndex with obligation range key
+                range_condition = None
+                range_value = None
+                if filters.get('min_obligation') is not None and filters.get('max_obligation') is not None:
+                    range_condition = 'between'
+                    range_value = (Decimal(str(filters['min_obligation'])), Decimal(str(filters['max_obligation'])))
+                elif filters.get('min_obligation') is not None:
+                    range_condition = 'gte'
+                    range_value = Decimal(str(filters['min_obligation']))
+                elif filters.get('max_obligation') is not None:
+                    range_condition = 'lte'
+                    range_value = Decimal(str(filters['max_obligation']))
+                
                 query_configs.append({
-                    'filter_key': 'date_from',
-                    'index_name': 'PeriodStartDateIndex',
+                    'filter_key': 'fiscal_year_obligation',
+                    'index_name': 'FiscalYearObligationIndex',
                     'hash_key': 'fiscal_year',
                     'hash_value': fiscal_year,
-                    'range_key': 'period_start_date',
-                    'range_value': str(date_from).split('T')[0],  # Use just date part
-                    'range_condition': 'gte'  # Greater than or equal to date_from
+                    'range_key': 'total_obligated_amount',
+                    'range_value': range_value,
+                    'range_condition': range_condition
                 })
-    
-    # PeriodEndDateIndex: hash_key=fiscal_year, range_key=period_end_date
-    if filters.get('date_to'):
-        date_to = filters['date_to']
-        if date_to and str(date_to).strip():
-            # Calculate fiscal_year from date_to if not provided
-            fiscal_year = None
-            if filters.get('fiscal_year'):
-                fiscal_years = filters['fiscal_year'] if isinstance(filters['fiscal_year'], list) else [filters['fiscal_year']]
-                if fiscal_years:
-                    fiscal_year = fiscal_years[0]
-            else:
-                # Calculate fiscal year from date (US fiscal year: Oct 1 - Sep 30)
-                try:
-                    from datetime import datetime
-                    date_obj = datetime.strptime(str(date_to).split('T')[0], '%Y-%m-%d')
-                    year = date_obj.year
-                    month = date_obj.month
-                    # Fiscal year starts Oct 1, so months 10-12 belong to next fiscal year
-                    fiscal_year = year + 1 if month >= 10 else year
-                except (ValueError, TypeError):
-                    pass
-            
-            if fiscal_year:
+            elif not has_other_gsi_hash_keys:
+                # Simple fiscal year query with no other filters - use FiscalYearObligationIndex
                 query_configs.append({
-                    'filter_key': 'date_to',
-                    'index_name': 'PeriodEndDateIndex',
+                    'filter_key': 'fiscal_year',
+                    'index_name': 'FiscalYearObligationIndex',
                     'hash_key': 'fiscal_year',
                     'hash_value': fiscal_year,
-                    'range_key': 'period_end_date',
-                    'range_value': str(date_to).split('T')[0],  # Use just date part
-                    'range_condition': 'lte'  # Less than or equal to date_to
+                    'range_key': None,  # No range filter - get all items for this fiscal year
+                    'range_value': None,
+                    'range_condition': None
                 })
     
     return query_configs
@@ -1407,6 +1386,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         filters.get('recipient_name_normalized'),
         filters.get('naics_code'),
         filters.get('psc_code'),
+        filters.get('recipient_zip_code'),  # recipient_zip_code is a GSI hash key (ZipCodeFiscalYearIndex)
     ])
     
     # If we have obligation filter but no fiscal_year and no other GSI hash keys, use efficient obligation range query
@@ -1458,10 +1438,13 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Limit results
         items = all_items[:limit]
         
-        # Determine if there are more results
-        has_more = len(all_items) > limit
+        # Simplified pagination logic: Always allow pagination to continue if we have items to return.
+        # The frontend will detect when there are no more results by seeing 0 items or the count stop increasing.
+        has_more = len(items) > 0  # If we have items, allow frontend to continue paginating
+        
+        # Create a pagination key from the last item if we have items
         last_eval_key = None
-        if has_more and items:
+        if items:
             last_item = items[-1]
             last_eval_key = {
                 'award_id': last_item.get('award_id'),
@@ -1505,6 +1488,8 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         
         # Query each GSI to get initial batch of award_ids (to determine shortest list)
         gsi_results = {}
+        
+        # Process each query config
         for config in query_configs:
             # Special handling for recipient_name with multiple values - query each and union results
             if config['filter_key'] == 'recipient_name' and filters.get('recipient_name'):
@@ -1613,52 +1598,87 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             }
             logger.info(f"Found {len(award_ids)} award_ids from {config['index_name']} (first batch)")
         
-        # Find the shortest list (most restrictive filter) - this is our source of truth
-        shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['award_ids']))
-        source_award_ids = list(gsi_results[shortest_key]['award_ids'])
-        source_config = gsi_results[shortest_key]['config']
+        # Intersect all GSI results to get the final set of matching award_ids
+        # This ensures we only fetch items that match ALL GSI filters
+        all_gsi_keys = list(gsi_results.keys())
+        if len(all_gsi_keys) > 1:
+            # Start with the first GSI result
+            intersection_ids = gsi_results[all_gsi_keys[0]]['award_ids'].copy()
+            logger.info(f"Starting intersection with {all_gsi_keys[0]}: {len(intersection_ids)} award_ids")
+            
+            # Intersect with all other GSI results
+            for key in all_gsi_keys[1:]:
+                other_ids = gsi_results[key]['award_ids']
+                intersection_ids = intersection_ids & other_ids
+                logger.info(f"After intersecting with {key} ({len(other_ids)} IDs): {len(intersection_ids)} award_ids remain")
+            
+            # If intersection is empty, no items match all GSI filters - return early
+            if len(intersection_ids) == 0:
+                logger.info("Intersection of all GSI filters is empty - no items match all filters")
+                return {
+                    'awards': [],
+                    'count': 0,
+                    'has_more': False,
+                    'last_evaluated_key': None,
+                    'method': 'multi_gsi_intersection',
+                    'index_used': f"{len(all_gsi_keys)}_GSIs"
+                }
+            
+            # Use the shortest list as the source for pagination (most efficient)
+            shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['award_ids']))
+            source_config = gsi_results[shortest_key]['config']
+            source_award_ids = list(intersection_ids)  # Use the intersected set
+            logger.info(f"Intersection complete: {len(source_award_ids)} award_ids match all GSI filters. Using {shortest_key} as source for pagination.")
+        else:
+            # Only one GSI result, use it directly
+            shortest_key = all_gsi_keys[0]
+            source_award_ids = list(gsi_results[shortest_key]['award_ids'])
+            source_config = gsi_results[shortest_key]['config']
+            logger.info(f"Using {shortest_key} as source of truth ({len(source_award_ids)} award_ids)")
         
-        logger.info(f"Using {shortest_key} as source of truth ({len(source_award_ids)} award_ids)")
-        
-        # Remove the source filter from filters (we've already applied it via GSI)
-        # Keep all other filters to apply in Python
+        # Remove ALL GSI filters from remaining_filters since we've already applied them via GSI intersection
+        # Keep only non-GSI filters (like obligation ranges) to apply in Python
         remaining_filters = filters.copy()
-        if shortest_key == 'awarding_agency_code':
-            del remaining_filters['awarding_agency_code']
-            # Also remove awarding_agency_name if present (code takes precedence when using GSI)
-            if 'awarding_agency_name' in remaining_filters:
-                del remaining_filters['awarding_agency_name']
-        elif shortest_key == 'recipient_name':
-            del remaining_filters['recipient_name']
-        elif shortest_key == 'recipient_location_state':
-            del remaining_filters['recipient_location_state']
-        elif shortest_key == 'recipient_zip_code':
-            del remaining_filters['recipient_zip_code']
-        elif shortest_key == 'award_type':
-            del remaining_filters['award_type']
-        elif shortest_key == 'fiscal_year_obligation':
-            if 'fiscal_year' in remaining_filters:
-                del remaining_filters['fiscal_year']
-            if 'min_obligation' in remaining_filters:
-                del remaining_filters['min_obligation']
-            if 'max_obligation' in remaining_filters:
-                del remaining_filters['max_obligation']
-        elif shortest_key == 'date_from':
-            # Remove date_from since we've applied it via GSI
-            if 'date_from' in remaining_filters:
-                del remaining_filters['date_from']
-            # Also remove fiscal_year if it was calculated from date_from
-            if 'fiscal_year' in remaining_filters and not filters.get('fiscal_year'):
-                # Only remove if it wasn't explicitly provided
-                pass  # Keep it for now, might be needed for other filters
-        elif shortest_key == 'date_to':
-            # Remove date_to since we've applied it via GSI
-            if 'date_to' in remaining_filters:
-                del remaining_filters['date_to']
-            # Also remove fiscal_year if it was calculated from date_to
-            if 'fiscal_year' in remaining_filters and not filters.get('fiscal_year'):
-                # Only remove if it wasn't explicitly provided
-                pass  # Keep it for now, might be needed for other filters
+        
+        # Remove all GSI-queryable filters that were used
+        for gsi_key in gsi_results.keys():
+            if gsi_key == 'awarding_agency_code':
+                if 'awarding_agency_code' in remaining_filters:
+                    del remaining_filters['awarding_agency_code']
+                # Also remove awarding_agency_name if present (code takes precedence when using GSI)
+                if 'awarding_agency_name' in remaining_filters:
+                    del remaining_filters['awarding_agency_name']
+            elif gsi_key == 'recipient_name':
+                if 'recipient_name' in remaining_filters:
+                    del remaining_filters['recipient_name']
+            elif gsi_key == 'recipient_location_state':
+                if 'recipient_location_state' in remaining_filters:
+                    del remaining_filters['recipient_location_state']
+            elif gsi_key == 'recipient_zip_code':
+                if 'recipient_zip_code' in remaining_filters:
+                    del remaining_filters['recipient_zip_code']
+            elif gsi_key == 'award_type':
+                if 'award_type' in remaining_filters:
+                    del remaining_filters['award_type']
+            elif gsi_key == 'fiscal_year_obligation':
+                if 'fiscal_year' in remaining_filters:
+                    del remaining_filters['fiscal_year']
+                if 'min_obligation' in remaining_filters:
+                    del remaining_filters['min_obligation']
+                if 'max_obligation' in remaining_filters:
+                    del remaining_filters['max_obligation']
+            elif gsi_key == 'fiscal_year_obligation':
+                if 'fiscal_year' in remaining_filters:
+                    del remaining_filters['fiscal_year']
+                if 'min_obligation' in remaining_filters:
+                    del remaining_filters['min_obligation']
+                if 'max_obligation' in remaining_filters:
+                    del remaining_filters['max_obligation']
+        
+        # Remove fiscal_year if it was set from date_year (not explicitly provided)
+        if 'fiscal_year' in remaining_filters and filters.get('date_year') and not filters.get('fiscal_year'):
+            # Fiscal year was set from date_year, remove it from remaining_filters since it's used in GSI
+            del remaining_filters['fiscal_year']
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
@@ -1674,7 +1694,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         is_multi_zip = source_result.get('is_multi_value', False) and shortest_key == 'recipient_zip_code'
         
         if is_multi_recipient or is_multi_zip:
-            # For multiple recipient names or zip codes, paginate through each one
+            # For multiple recipient names, zip codes, or date_to fiscal years, paginate through each one
             all_configs = source_result.get('all_configs', [])
             config_index = 0
             item_type = 'recipient' if is_multi_recipient else 'zip code'
@@ -1748,63 +1768,107 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     break
         else:
             # Normal single-value pagination
-            while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
-                pagination_round += 1
-                
-                # Query source GSI with pagination
-                source_award_ids_batch, source_last_eval_key = query_gsi_for_award_ids(
-                    index_name=source_config['index_name'],
-                    hash_key_name=source_config['hash_key'],
-                    hash_key_value=source_config['hash_value'],
-                    range_key_name=source_config.get('range_key'),
-                    range_key_value=source_config.get('range_value'),
-                    range_key_condition=source_config.get('range_condition'),
-                    limit=1000,
-                    exclusive_start_key=source_last_eval_key,
-                    get_all=False
-                )
-                
-                if not source_award_ids_batch:
-                    logger.info(f"Source GSI {source_config['index_name']} ran out of items")
-                    break
-                
-                logger.info(f"Pagination round {pagination_round}: Got {len(source_award_ids_batch)} award_ids from source GSI")
-                
-                # Fetch full items for this batch (no GSI intersection - we'll filter in Python)
-                items_batch = []
-                if source_award_ids_batch:
-                    batch_size = 100
-                    for i in range(0, len(source_award_ids_batch), batch_size):
-                        batch_ids = source_award_ids_batch[i:i + batch_size]
-                        dynamodb_client = boto3.client('dynamodb')
-                        request_items = {
-                            AWARDS_TABLE_NAME: {
-                                'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+            # If we have multiple GSIs, we need to continue intersecting during pagination
+            # Otherwise, we can just use the source GSI directly
+            if len(all_gsi_keys) > 1:
+                # Multiple GSIs: continue intersecting during pagination
+                # First, use the intersection we already computed
+                if source_award_ids:
+                    # Use the first batch from the intersection
+                    source_award_ids_batch = source_award_ids[:limit]
+                    source_award_ids = source_award_ids[limit:]  # Keep remaining for next iteration
+                    
+                    logger.info(f"Pagination round 1: Using {len(source_award_ids_batch)} award_ids from intersection")
+                    
+                    # Fetch full items for this batch
+                    items_batch = []
+                    if source_award_ids_batch:
+                        batch_size = 100
+                        for i in range(0, len(source_award_ids_batch), batch_size):
+                            batch_ids = source_award_ids_batch[i:i + batch_size]
+                            dynamodb_client = boto3.client('dynamodb')
+                            request_items = {
+                                AWARDS_TABLE_NAME: {
+                                    'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                                }
                             }
-                        }
-                        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                        batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
-                        deserializer = TypeDeserializer()
-                        for item in batch_items:
-                            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                            items_batch.append(converted_item)
+                            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                            batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                            deserializer = TypeDeserializer()
+                            for item in batch_items:
+                                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                                items_batch.append(converted_item)
+                    
+                    # Apply remaining filters in Python
+                    for item in items_batch:
+                        if apply_python_filter(item, remaining_filters):
+                            all_matching_items.append(item)
+                    
+                    logger.info(f"Pagination round 1: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
                 
-                # Apply remaining filters in Python
-                for item in items_batch:
-                    if apply_python_filter(item, remaining_filters):
-                        all_matching_items.append(item)  # Store the full item that matches all filters
-                    else:
-                        # Log why item was filtered out
-                        award_id = item.get('award_id', 'unknown')
-                        item_agency_code = item.get('awarding_agency_code', 'missing')
-                        item_agency_name = item.get('awarding_agency_name', 'missing')
-                        logger.info(f"Item {award_id} filtered out: agency_code='{item_agency_code}' (type={type(item.get('awarding_agency_code'))}), agency_name='{item_agency_name}', filter_value={remaining_filters.get('awarding_agency_code')}")
-                
-                logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
-                
-                # Stop if source GSI ran out or we have enough results
-                if not source_last_eval_key or len(all_matching_items) >= limit:
-                    break
+                # For subsequent batches, we'd need to continue querying both GSIs and intersecting
+                # This is complex and may not be necessary if the first batch is sufficient
+                # For now, we'll only use the first batch from the intersection
+                # TODO: Implement full pagination for multi-GSI intersections
+            else:
+                # Single GSI: normal pagination
+                while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
+                    pagination_round += 1
+                    
+                    # Query source GSI with pagination
+                    source_award_ids_batch, source_last_eval_key = query_gsi_for_award_ids(
+                        index_name=source_config['index_name'],
+                        hash_key_name=source_config['hash_key'],
+                        hash_key_value=source_config['hash_value'],
+                        range_key_name=source_config.get('range_key'),
+                        range_key_value=source_config.get('range_value'),
+                        range_key_condition=source_config.get('range_condition'),
+                        limit=1000,
+                        exclusive_start_key=source_last_eval_key,
+                        get_all=False
+                    )
+                    
+                    if not source_award_ids_batch:
+                        logger.info(f"Source GSI {source_config['index_name']} ran out of items")
+                        break
+                    
+                    logger.info(f"Pagination round {pagination_round}: Got {len(source_award_ids_batch)} award_ids from source GSI")
+                    
+                    # Fetch full items for this batch
+                    items_batch = []
+                    if source_award_ids_batch:
+                        batch_size = 100
+                        for i in range(0, len(source_award_ids_batch), batch_size):
+                            batch_ids = source_award_ids_batch[i:i + batch_size]
+                            dynamodb_client = boto3.client('dynamodb')
+                            request_items = {
+                                AWARDS_TABLE_NAME: {
+                                    'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids]
+                                }
+                            }
+                            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                            batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+                            deserializer = TypeDeserializer()
+                            for item in batch_items:
+                                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                                items_batch.append(converted_item)
+                    
+                    # Apply remaining filters in Python
+                    for item in items_batch:
+                        if apply_python_filter(item, remaining_filters):
+                            all_matching_items.append(item)  # Store the full item that matches all filters
+                        else:
+                            # Log why item was filtered out
+                            award_id = item.get('award_id', 'unknown')
+                            item_agency_code = item.get('awarding_agency_code', 'missing')
+                            item_agency_name = item.get('awarding_agency_name', 'missing')
+                            logger.info(f"Item {award_id} filtered out: agency_code='{item_agency_code}' (type={type(item.get('awarding_agency_code'))}), agency_name='{item_agency_name}', filter_value={remaining_filters.get('awarding_agency_code')}")
+                    
+                    logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
+                    
+                    # Stop if source GSI ran out or we have enough results
+                    if not source_last_eval_key or len(all_matching_items) >= limit:
+                        break
         
         # Use the collected items directly (they're already full items)
         items = all_matching_items[:limit]
@@ -1907,27 +1971,26 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         if enriched_results:
             logger.info(f"Enriched {len(enriched_results)} award(s). S3 fetch: {s3_fetch_success_count} success, {s3_fetch_fail_count} failed")
         
-        # Determine if there are more results
-        # Check if source GSI still has more items to paginate
-        has_more = False
-        last_eval_key = None
-        last_gsi_item = None  # Track last GSI item processed (in GSI order) for pagination key creation
+        # Simplified pagination logic: Always allow pagination to continue if we have items to return.
+        # The frontend will detect when there are no more results by seeing 0 items or the count stop increasing.
+        has_more = len(enriched_results) > 0  # If we have items, allow frontend to continue paginating
         
+        # Try to get a pagination key from the source GSI if available
+        # This helps maintain proper pagination state across requests
+        last_eval_key = None
         if is_multi_recipient or is_multi_zip:
             # For multi-value queries, check if any config still has more items
             all_configs = source_result.get('all_configs', [])
             for config_item in all_configs:
                 if config_item.get('last_eval_key'):
-                    has_more = True
                     # Use the last eval key from the current config being paginated
                     # For simplicity, use the first non-null last_eval_key
                     if not last_eval_key:
                         last_eval_key = config_item.get('last_eval_key')
                     break
         else:
-            # For single-value queries, check if source GSI has more items
+            # For single-value queries, use source GSI's last eval key if available
             if source_last_eval_key:
-                has_more = True
                 last_eval_key = source_last_eval_key
         
         # Convert last_eval_key to serializable format
@@ -2036,6 +2099,10 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         }
         logger.info(f"Using GSI query with Limit={query_limit} (result limit={limit}) to account for post-filtering")
     
+    # Initialize pagination variables
+    initial_last_eval_key = None
+    last_eval_key = None
+    
     if method == 'query' and index_name:
         # Use GSI query
         hash_key_name, hash_key_value = key_condition['hash_key']
@@ -2090,6 +2157,19 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # For GSI queries, the key must include the GSI's hash key and range key (if applicable)
         logger.info(f"Checking last_evaluated_key for pagination: {last_evaluated_key is not None}, hash_key_name: {hash_key_name}, index_name: {index_name}")
         if last_evaluated_key:
+            # Ensure fiscal_year is an integer if present (DynamoDB expects integer for year range keys)
+            if isinstance(last_evaluated_key, dict) and 'fiscal_year' in last_evaluated_key:
+                fiscal_year_val = last_evaluated_key['fiscal_year']
+                original_type = type(fiscal_year_val).__name__
+                if isinstance(fiscal_year_val, float):
+                    last_evaluated_key['fiscal_year'] = int(fiscal_year_val)
+                    logger.info(f"Converted fiscal_year from float to int in pagination key: {fiscal_year_val} -> {last_evaluated_key['fiscal_year']}")
+                elif isinstance(fiscal_year_val, str):
+                    try:
+                        last_evaluated_key['fiscal_year'] = int(float(fiscal_year_val))
+                        logger.info(f"Converted fiscal_year from string to int in pagination key: {fiscal_year_val} -> {last_evaluated_key['fiscal_year']}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not convert fiscal_year from string to int: {fiscal_year_val}")
             try:
                 # Validate that the last_evaluated_key has the correct structure for this GSI
                 if isinstance(last_evaluated_key, dict):
@@ -2161,7 +2241,6 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         logger.info(f"Initial query returned {len(response.get('Items', []))} items, LastEvaluatedKey: {last_eval_key is not None}")
         if params.get('ExclusiveStartKey'):
             logger.info(f"Query used ExclusiveStartKey for pagination (continuing from previous page)")
-    
     else:
         # Use table scan
         if filter_expr:
@@ -2445,12 +2524,18 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         #    b. We got exactly query_limit items from the first query (suggesting there might be more)
         # Note: We check both initial_last_eval_key (first request) and last_eval_key (subsequent requests)
         # to ensure we continue querying on all requests until we have enough items or the GSI is exhausted
-        current_last_eval_key = initial_last_eval_key if 'initial_last_eval_key' in locals() and initial_last_eval_key is not None else (last_eval_key if 'last_eval_key' in locals() and last_eval_key is not None else None)
+        # Use initial_last_eval_key if available (from first query), otherwise use last_eval_key (from current query response)
+        # CRITICAL: When using a custom pagination key from a previous request, if DynamoDB returns
+        # LastEvaluatedKey: False but we have fewer filtered items than the limit, we should create
+        # a pagination key from the last GSI item we processed and continue in the next request.
+        # However, within the same request, if DynamoDB says there are no more items, we can't continue.
+        # The issue is that we need to ensure has_more is set correctly so the frontend can continue.
+        current_last_eval_key = initial_last_eval_key if initial_last_eval_key is not None else (last_eval_key if last_eval_key is not None else None)
         should_continue_pagination = (
             method == 'query' and 
             index_name and 
             current_last_eval_key is not None and
-            (len(filtered_items) < limit or len(items) >= query_limit)
+            len(filtered_items) < limit  # Only continue if we don't have enough filtered items yet
         )
         
         if should_continue_pagination:
@@ -2460,7 +2545,12 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             # current_last_eval_key is already set above (from initial_last_eval_key or last_eval_key)
             
             # Continue until we have enough filtered items OR we've exhausted the GSI
-            while (len(filtered_items) < limit or current_last_eval_key is not None) and pagination_round < max_pagination_rounds:
+            # CRITICAL: We need to continue querying if:
+            # 1. We don't have enough filtered items yet (len(filtered_items) < limit), OR
+            # 2. We got exactly query_limit items from the first query (suggesting there might be more in GSI)
+            # The while loop should continue as long as we have a last_eval_key AND we haven't exhausted the GSI
+            # We'll break early inside the loop when we have enough filtered items
+            while current_last_eval_key is not None and pagination_round < max_pagination_rounds:
                 pagination_round += 1
                 
                 # If we don't have a last_eval_key from previous round, we can't continue
@@ -2540,9 +2630,14 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     
                     logger.info(f"Pagination round {pagination_round}: Found {len(filtered_items)} total matching items so far")
                     
-                    # Continue as long as we have a last_eval_key (more items in GSI)
-                    # Stop only when we've exhausted the GSI, not when we have enough filtered items
-                    # This ensures we process all items from the GSI
+                    # CRITICAL: Stop as soon as we have enough filtered items for the current page
+                    # We don't want to process all items - just enough to fill the page
+                    # This ensures pagination works correctly across multiple requests
+                    if len(filtered_items) >= limit:
+                        logger.info(f"Have enough filtered items ({len(filtered_items)} >= {limit}), stopping pagination to allow proper pagination across requests")
+                        break
+                    
+                    # Check if GSI is exhausted
                     if not current_last_eval_key:
                         logger.info(f"No more items in GSI, stopping pagination. Found {len(filtered_items)} filtered items total")
                         break
@@ -2574,6 +2669,9 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     # We need to use the item at position (limit - 1) because that's the last item we're returning
     # If we have fewer items than the limit, use the last item
     last_item_before_limit = items[limit - 1] if len(items) > limit else (items[-1] if items else None)
+    if last_item_before_limit and 'award_id_to_gsi_position' in locals() and award_id_to_gsi_position:
+        gsi_pos = award_id_to_gsi_position.get(last_item_before_limit.get('award_id'), 'unknown')
+        logger.info(f"Selected item at position {limit - 1} (GSI position {gsi_pos}) for pagination key: award_id={last_item_before_limit.get('award_id')}, fiscal_year={last_item_before_limit.get('fiscal_year')}")
     
     # Limit results to requested limit
     items = items[:limit]
@@ -2689,45 +2787,109 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     
     # Convert last_evaluated_key to JSON-serializable format
     # DynamoDB LastEvaluatedKey may contain Decimal types and other DynamoDB-specific types
-    serializable_last_key = None
+    # NOTE: We'll create our own pagination key from the last returned item, so we don't need
+    # to use DynamoDB's LastEvaluatedKey. DynamoDB's key points to after the last item we
+    # QUERIED, not after the last item we RETURNED, which would cause items to be skipped.
+    dynamodb_last_key = None
     if last_eval_key:
         try:
-            serializable_last_key = convert_decimal_to_float(last_eval_key)
+            dynamodb_last_key = convert_decimal_to_float(last_eval_key)
+            logger.info(f"DynamoDB provided LastEvaluatedKey (pointing to after last QUERIED item): {json.dumps(dynamodb_last_key, default=str)}")
+            logger.info(f"Will create custom pagination key from last RETURNED item instead to avoid skipping items")
         except Exception as e:
             logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
-            serializable_last_key = None
+            dynamodb_last_key = None
     
-    # Determine if there are more results
-    # We have more if:
-    # 1. DynamoDB returned a LastEvaluatedKey (more items in GSI), OR
-    # 2. We have more filtered items than the limit (more items in our filtered list)
-    has_more_results = last_eval_key is not None or has_more_filtered_items
+    # We'll set serializable_last_key to our custom key below
+    serializable_last_key = None
     
-    # If we have more filtered items but no LastEvaluatedKey from DynamoDB,
-    # we need to create a pagination key from the last item we're RETURNING (not the last item we processed)
-    # CRITICAL: We must use the GSI item that corresponds to the last returned item, not the item itself
-    # This ensures we use the correct GSI key structure (fiscal_year, etc.) for pagination
-    # BatchGetItem doesn't preserve order, so we need to map award_id back to the GSI item
-    if has_more_filtered_items and not last_eval_key and method == 'query' and index_name and not serializable_last_key:
-        # Use the last item we're returning (the limit-th item, or last if fewer)
-        source_item = last_item_before_limit if last_item_before_limit else (results[-1] if results else None)
+    # Simplified pagination logic: Always allow pagination to continue if we have items to return.
+    # The frontend will detect when there are no more results by:
+    # 1. Seeing that the result count stops increasing
+    # 2. Receiving 0 items in a response
+    # This approach is more reliable than trying to determine has_more on the backend, especially
+    # when using custom pagination keys or when DynamoDB's LastEvaluatedKey might not perfectly
+    # align with our filtered results.
+    # 
+    # Only set has_more to False when we return 0 items (definitely no more results).
+    # Otherwise, always set has_more to True if we have items, allowing the frontend to continue.
+    has_more_results = len(items) > 0  # If we have items, allow frontend to continue paginating
+    
+    # Always create a pagination key from the last RETURNED item if we have items to return.
+    # CRITICAL: We MUST create our own pagination key from the last returned item, even if
+    # DynamoDB gave us a LastEvaluatedKey. DynamoDB's LastEvaluatedKey points to after the
+    # last item we QUERIED (e.g., the 125th item), not after the last item we RETURNED (e.g., the 25th item).
+    # Using DynamoDB's key would cause us to skip items between the last returned item and
+    # the last queried item.
+    #
+    # We use the last item we're RETURNING (not the last item we processed) to create the key,
+    # ensuring we continue from exactly where we left off. We must use the GSI item that corresponds
+    # to the last returned item to get the correct GSI key structure (fiscal_year, etc.).
+    should_create_pagination_key = (
+        len(items) > 0 and  # Only create key if we have items to return
+        method == 'query' and 
+        index_name
+        # Always create our own key, even if DynamoDB gave us one
+    )
+    if should_create_pagination_key:
+        # CRITICAL: Always use the last RETURNED item's GSI item for the pagination key.
+        # This ensures we continue from exactly where we left off, not from a later position.
+        # The last returned item is the item at position (limit - 1), which is the last item
+        # we're actually returning to the user. We must use its corresponding GSI item to get
+        # the correct fiscal_year and award_id combination that DynamoDB expects.
+        #
+        # Using last_gsi_item (the last item in the GSI batch) would cause us to skip items
+        # because it might be from a much later fiscal_year than the last item we returned.
+        source_item = None
         
-        # Try to find the corresponding GSI item for this award_id
-        # This ensures we use the correct GSI key structure for pagination
-        if source_item and 'award_id' in source_item and 'gsi_item_map' in locals() and gsi_item_map:
-            award_id = source_item.get('award_id')
-            gsi_item = gsi_item_map.get(award_id)
-            if gsi_item:
-                # Use the GSI item for pagination key (has correct GSI key structure)
-                source_item = gsi_item
-                logger.info(f"Using GSI item for pagination key (corresponds to last returned item at position {limit - 1}): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
+        # Always use the last returned item's corresponding GSI item
+        # CRITICAL: We MUST use the fiscal_year and award_id from the last returned item
+        # to ensure we continue from exactly where we left off, not from a later position.
+        if last_item_before_limit and 'award_id' in last_item_before_limit:
+            award_id = last_item_before_limit.get('award_id')
+            fiscal_year = last_item_before_limit.get('fiscal_year')
+            recipient_zip_code = last_item_before_limit.get('recipient_zip_code')
+            
+            logger.info(f"Creating pagination key from last returned item: award_id={award_id}, fiscal_year={fiscal_year}, recipient_zip_code={recipient_zip_code}")
+            
+            # Try to find the GSI item for this award_id in the map
+            # But verify it has the same fiscal_year to ensure it's the correct item
+            if 'gsi_item_map' in locals() and gsi_item_map:
+                gsi_item = gsi_item_map.get(award_id)
+                if gsi_item:
+                    # Verify the GSI item has the same fiscal_year as the last returned item
+                    gsi_fiscal_year = gsi_item.get('fiscal_year')
+                    if str(gsi_fiscal_year) == str(fiscal_year):
+                        source_item = gsi_item
+                        logger.info(f"Using GSI item from map for pagination key (verified fiscal_year matches): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
+                    else:
+                        logger.warning(f"GSI item in map has different fiscal_year ({gsi_fiscal_year} vs {fiscal_year}), constructing from last returned item instead")
+            
+            # If GSI item not found in map or has wrong fiscal_year, construct it from the last returned item
+            # This ensures we have the correct fiscal_year and award_id combination
+            if source_item is None:
+                # Build GSI item structure from the last returned item
+                # CRITICAL: Use the exact fiscal_year and award_id from the last returned item
+                source_item = {
+                    'recipient_zip_code': recipient_zip_code,
+                    'fiscal_year': fiscal_year,
+                    'award_id': award_id
+                }
+                logger.info(f"Constructed GSI item for pagination key from last returned item (ensures correct fiscal_year={fiscal_year}, award_id={award_id}): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
+        
+        # Fallback: use the last returned item from results
+        if source_item is None:
+            source_item = results[-1] if results else None
+            if source_item:
+                # Build GSI item structure
+                source_item = {
+                    'recipient_zip_code': source_item.get('recipient_zip_code'),
+                    'fiscal_year': source_item.get('fiscal_year'),
+                    'award_id': source_item.get('award_id')
+                }
+                logger.warning(f"Using last result item for pagination key (fallback): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
             else:
-                # Fallback to using the item itself
-                logger.info(f"GSI item not found for award_id {award_id}, using item itself for pagination key: {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
-        elif source_item:
-            logger.info(f"Using last returned item for pagination key (position {limit - 1}): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
-        else:
-            logger.warning("No source item available for pagination key creation")
+                logger.warning("No source item available for pagination key creation")
         
         if source_item:
             hash_key_name = key_condition.get('hash_key', [None])[0] if key_condition.get('hash_key') else None
@@ -2760,22 +2922,60 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             effective_range_key_name = gsi_range_key_name if gsi_has_range_key else range_key_name
             
             # Build pagination key based on GSI structure
+            # CRITICAL: Use the EXACT format from the GSI item to ensure DynamoDB matches correctly
+            # DynamoDB's ExclusiveStartKey must match the exact key structure and types stored in the GSI
             pagination_key = {}
             if hash_key_name and hash_key_name in source_item:
                 pagination_key[hash_key_name] = source_item[hash_key_name]
             if effective_range_key_name and effective_range_key_name in source_item:
-                pagination_key[effective_range_key_name] = source_item[effective_range_key_name]
+                range_value = source_item[effective_range_key_name]
+                # For fiscal_year, DynamoDB stores it as an integer (N type) in the GSI
+                # But boto3 might return it as Decimal, string, or int depending on how it was stored
+                # We need to ensure it's an integer for proper matching, but preserve the original if it's already correct
+                if effective_range_key_name == 'fiscal_year':
+                    # Import Decimal here to avoid scoping issues
+                    from decimal import Decimal as DecimalType
+                    # Convert to int if it's a float or Decimal (common boto3 return types)
+                    if isinstance(range_value, float):
+                        range_value = int(range_value)
+                    elif isinstance(range_value, DecimalType):
+                        range_value = int(range_value)
+                    elif isinstance(range_value, str):
+                        # If it's a string, try to convert to int (DynamoDB stores years as integers)
+                        try:
+                            range_value = int(float(range_value))
+                        except (ValueError, TypeError):
+                            # If conversion fails, keep as-is (shouldn't happen, but be safe)
+                            logger.warning(f"Could not convert fiscal_year from string to int: {range_value}, keeping as-is")
+                pagination_key[effective_range_key_name] = range_value
             # Always include award_id for uniqueness
             if 'award_id' in source_item:
                 pagination_key['award_id'] = source_item['award_id']
             
             if pagination_key:
                 try:
+                    # Log the pagination key before conversion to see its structure
+                    logger.info(f"Pagination key before conversion: {json.dumps(pagination_key, default=str)}")
+                    # Convert to JSON-serializable format, but preserve integer types for fiscal_year
                     serializable_last_key = convert_decimal_to_float(pagination_key)
-                    logger.info(f"Created pagination key from last item (has_more_filtered_items={has_more_filtered_items}): {json.dumps(serializable_last_key, default=str)}")
+                    # Ensure fiscal_year remains an integer (not float) after conversion
+                    if 'fiscal_year' in serializable_last_key:
+                        if isinstance(serializable_last_key['fiscal_year'], float):
+                            serializable_last_key['fiscal_year'] = int(serializable_last_key['fiscal_year'])
+                        elif isinstance(serializable_last_key['fiscal_year'], str):
+                            try:
+                                serializable_last_key['fiscal_year'] = int(float(serializable_last_key['fiscal_year']))
+                            except (ValueError, TypeError):
+                                pass
+                    logger.info(f"Created pagination key from last item (items_count={len(items)}, allowing frontend to continue pagination): {json.dumps(serializable_last_key, default=str)}")
                 except Exception as e:
                     logger.warning(f"Error converting pagination key to serializable format: {e}")
                     serializable_last_key = None
+    
+    # Fallback to DynamoDB's key if we couldn't create our own (shouldn't happen, but be safe)
+    if serializable_last_key is None and dynamodb_last_key is not None:
+        logger.warning(f"Could not create custom pagination key, falling back to DynamoDB's LastEvaluatedKey (may cause items to be skipped)")
+        serializable_last_key = dynamodb_last_key
     
     return {
         'success': True,
