@@ -681,7 +681,7 @@ class WebSocketHandler:
             logger.error(f"Error creating session: {str(e)}")
     
     def _handle_kill_signal(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle kill signal message"""
+        """Handle kill signal message - sets kill flag in registry for immediate agent response"""
         try:
             reason = message_data.get('reason', 'user_cancellation')
             logger.info(f"🔴 KILL SIGNAL: Processing kill signal for session {session_id}, reason: {reason}")
@@ -692,19 +692,31 @@ class WebSocketHandler:
                     'body': json_dumps_safe({'error': 'No session_id provided'})
                 }
             
-            # Set kill flag in DynamoDB
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
-            self.chat_sessions_table.update_item(
-                Key={'user_id': user_id, 'session_id': session_id},
-                UpdateExpression='SET killed_at = :killed_at, kill_reason = :kill_reason',
-                ExpressionAttributeValues={
-                    ':killed_at': timestamp_ms,
-                    ':kill_reason': reason
-                },
-                ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
-            )
+            # Set kill flag in shared registry (for immediate agent response)
+            try:
+                from kill_signal_registry import set_kill_flag
+                set_kill_flag(session_id, reason)
+                logger.info(f"🔴 KILL SIGNAL: Set kill flag in registry for session {session_id}")
+            except Exception as reg_error:
+                logger.warning(f"Failed to set kill flag in registry: {str(reg_error)}")
             
-            # Send acknowledgment
+            # Also set kill flag in DynamoDB (for persistence and fallback)
+            try:
+                timestamp_ms = int(datetime.now().timestamp() * 1000)
+                self.chat_sessions_table.update_item(
+                    Key={'user_id': user_id, 'session_id': session_id},
+                    UpdateExpression='SET killed_at = :killed_at, kill_reason = :kill_reason',
+                    ExpressionAttributeValues={
+                        ':killed_at': timestamp_ms,
+                        ':kill_reason': reason
+                    },
+                    ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
+                )
+                logger.info(f"🔴 KILL SIGNAL: Set kill flag in DynamoDB for session {session_id}")
+            except Exception as db_error:
+                logger.warning(f"Failed to set kill flag in DynamoDB: {str(db_error)}")
+            
+            # Send acknowledgment to frontend
             ack_message = {
                 'type': 'kill_signal_acknowledged',
                 'session_id': session_id,
@@ -713,6 +725,7 @@ class WebSocketHandler:
                 'message': 'Processing cancelled successfully'
             }
             self.send_to_client(connection_id, ack_message)
+            logger.info(f"🔴 KILL SIGNAL: Sent acknowledgment to frontend for session {session_id}")
             
             return {
                 'statusCode': 200,

@@ -653,17 +653,29 @@ class UnifiedMessageHandlerService {
    * Add user message to local cache for immediate display
    */
   private addUserMessageToLocalCache(sessionId: string, messageData: UnifiedMessageData): void {
+    // Map files correctly - handle both File objects and UploadedFile objects
+    const mappedFiles = messageData.files?.map(file => {
+      // Handle both File objects and UploadedFile objects (which have name, size, type)
+      return {
+        name: file.name || (file as any).filename || 'Unknown',
+        size: file.size || (file as any).file_size || 0,
+        type: file.type || (file as any).content_type || 'application/octet-stream'
+      };
+    });
+    
+    console.log('📁 UnifiedMessageHandler: Adding user message with files:', {
+      messageId: messageData.messageId,
+      fileCount: mappedFiles?.length || 0,
+      files: mappedFiles
+    });
+    
     const userMessage: SharedMessage = {
       id: messageData.messageId,
       sender: 'user',
       text: messageData.text,
       timestamp: Date.now(),
       status: 'sending',
-      files: messageData.files?.map(file => ({
-        name: file.name,
-        size: file.size,
-        type: file.type
-      })),
+      files: mappedFiles,
       sessionId: sessionId,
       source: messageData.source
     };
@@ -998,6 +1010,7 @@ class UnifiedMessageHandlerService {
 
   /**
    * Handle kill signal acknowledgment from backend
+   * Stops loading animation and allows user to edit the message they just sent
    */
   private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
     console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason);
@@ -1007,7 +1020,38 @@ class UnifiedMessageHandlerService {
     this.broadcastLoadingState(sessionId, false, 'chatpage');
     this.broadcastLoadingState(sessionId, false, 'sidebar');
     
-    // Note: Removed cancellation message from chat - now only logs the cancellation
+    // Remove any typing/streaming messages for this session
+    const messages = this.localCache.get(sessionId) || [];
+    const updatedMessages = messages.filter(msg => {
+      // Remove any incomplete AI messages (streaming messages)
+      if (msg.sender === 'ai' && msg.status === 'sending') {
+        return false;
+      }
+      return true;
+    });
+    
+    if (updatedMessages.length !== messages.length) {
+      this.localCache.set(sessionId, updatedMessages);
+      this.notifyMessageUpdate(sessionId, updatedMessages);
+      console.log('🧹 UnifiedMessageHandler: Removed incomplete AI messages after kill signal');
+    }
+    
+    // Update user message status to 'sent' (not 'sending') so it can be edited
+    const userMessages = updatedMessages.filter(msg => msg.sender === 'user');
+    if (userMessages.length > 0) {
+      const lastUserMessage = userMessages[userMessages.length - 1];
+      if (lastUserMessage.status === 'sending') {
+        lastUserMessage.status = 'sent';
+        this.localCache.set(sessionId, updatedMessages);
+        this.notifyMessageUpdate(sessionId, updatedMessages);
+        console.log('✏️ UnifiedMessageHandler: Updated last user message status to "sent" to allow editing');
+      }
+    }
+    
+    // Dispatch event to notify components that kill signal was acknowledged
+    window.dispatchEvent(new CustomEvent('kill-signal-acknowledged', {
+      detail: { sessionId, reason: data.reason }
+    }));
   }
 
 
@@ -1179,6 +1223,15 @@ class UnifiedMessageHandlerService {
         delete streamingMessage.isStreaming;
       }
       console.log('✅ UnifiedMessageHandler: Streaming complete for message:', message_id);
+      
+      // Dispatch streaming complete event for queue processing
+      const streamingCompleteEvent = new CustomEvent('streaming-complete', {
+        detail: {
+          sessionId: sessionId,
+          messageId: message_id
+        }
+      });
+      window.dispatchEvent(streamingCompleteEvent);
     }
   }
 
@@ -1240,18 +1293,36 @@ class UnifiedMessageHandlerService {
   private handleUserMessageWithFiles(sessionId: string, data: any): void {
     const { message_id, content, files, timestamp } = data;
     console.log('📨 UnifiedMessageHandler: Received user message with files for session:', sessionId);
+    console.log('📁 UnifiedMessageHandler: Files from backend:', files);
+    
+    // Map files from backend format to frontend format
+    const mappedFiles = files?.map((f: any) => ({
+      name: f.name || f.filename || 'Unknown',
+      size: f.size || f.file_size || 0,
+      type: f.type || f.content_type || 'application/octet-stream'
+    }));
     
     // Update existing user message in cache (if it exists) or add new one
     const messages = this.localCache.get(sessionId) || [];
     const messageIndex = messages.findIndex(m => m.id === message_id && m.sender === 'user');
     
     if (messageIndex !== -1) {
-      // Update existing message
+      // Update existing message - preserve files from cache if backend doesn't send them
+      const existingFiles = messages[messageIndex].files;
+      const finalFiles = mappedFiles && mappedFiles.length > 0 ? mappedFiles : existingFiles;
+      
+      console.log('📁 UnifiedMessageHandler: Updating message with files:', {
+        messageId: message_id,
+        existingFiles: existingFiles?.length || 0,
+        backendFiles: mappedFiles?.length || 0,
+        finalFiles: finalFiles?.length || 0
+      });
+      
       messages[messageIndex] = {
         ...messages[messageIndex],
         text: content || messages[messageIndex].text,
         status: 'sent',
-        files: files || messages[messageIndex].files,
+        files: finalFiles, // Use mapped files or preserve existing
         timestamp: timestamp || messages[messageIndex].timestamp
       };
     } else {

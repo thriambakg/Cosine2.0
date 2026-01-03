@@ -7,8 +7,6 @@ import {
   TextField,
     CircularProgress,
     Chip,
-    FormControl,
-  Select,
   MenuItem,
   SelectChangeEvent,
   List,
@@ -18,11 +16,13 @@ import {
   Drawer,
   Menu,
   ListItemIcon,
+  Collapse,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Delete as DeleteIcon,
   Send as SendIcon,
+  Stop as StopIcon,
   Close as CloseIcon,
   Edit as EditIcon,
   AttachFile as AttachFileIcon,
@@ -33,6 +33,9 @@ import {
   Dashboard as ContextIcon,
   Share as ShareIcon,
   Upload as UploadIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  ViewList as QueueIcon,
 } from '@mui/icons-material';
 import ChatImportExportDialog from '../dialogs/ChatImportExportDialog';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
@@ -237,7 +240,23 @@ const MessageEditInput = memo(({
   );
 });
 
-const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled: boolean; placeholder: string; onSend: (text: string) => Promise<void> | void }) => {
+const SidebarMessageInputBar = memo(({ 
+  placeholder, 
+  onSend,
+  onModelClick,
+  onFileClick,
+  modelLabel,
+  isLoading,
+  onStop,
+}: { 
+  placeholder: string; 
+  onSend: (text: string) => Promise<void> | void;
+  onModelClick: (e: React.MouseEvent<HTMLElement>) => void;
+  onFileClick: () => void;
+  modelLabel: string;
+  isLoading?: boolean;
+  onStop?: () => void;
+}) => {
   const [value, setValue] = useState('');
   const onSendClick = async () => {
     if (!value.trim()) return;
@@ -248,20 +267,26 @@ const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabl
   const onKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // Always allow sending - the onSend handler will queue if loading
       void onSendClick();
     }
   };
   return (
-    <>
+    <Box sx={{ width: '100%', padding: 0, margin: 0, '& *:focus': { outline: 'none !important' } }}>
+      {/* Message Area */}
       <TextField
         fullWidth
         multiline
-        maxRows={3}
+        variant="standard"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyPress={onKeyPress}
         placeholder={placeholder}
-        disabled={disabled}
+        disabled={false}
+        InputProps={{
+          readOnly: false,
+          disableUnderline: true,
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -272,27 +297,99 @@ const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabl
           // Don't allow dropping text into the input - let parent handle it
         }}
         sx={{
-          '& .MuiOutlinedInput-root': {
-            backgroundColor: 'rgba(31, 41, 55, 0.8)',
-            border: '1px solid #374151',
-            borderRadius: 2,
-            '&:hover': {
-              borderColor: '#6b7280',
+          '& .MuiInput-root': {
+            backgroundColor: 'transparent',
+            border: 'none',
+            outline: 'none !important',
+            boxShadow: 'none !important',
+            maxHeight: '50vh',
+            overflowY: 'auto',
+            padding: 0,
+            margin: 0,
+            '&:before': {
+              display: 'none',
+            },
+            '&:after': {
+              display: 'none',
+            },
+            '&:hover:before': {
+              display: 'none',
+            },
+            '&:focus': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&:focus-within': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
             },
             '&.Mui-focused': {
-              borderColor: '#3b82f6',
+              outline: 'none !important',
+              boxShadow: 'none !important',
+              '&:before': {
+                display: 'none',
+              },
+              '&:after': {
+                display: 'none',
+              },
+            },
+            // Scrollbar styling to match message area
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
             },
           },
-          '& .MuiOutlinedInput-input': {
+          '& .MuiInput-input': {
             color: '#ffffff',
             fontSize: '0.875rem',
+            paddingTop: '3px',
+            paddingBottom: '3px',
+            paddingLeft: '3px',
+            paddingRight: '3px',
+            lineHeight: '1.5',
+            outline: 'none !important',
+            border: 'none !important',
+            '&:focus': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
+            },
             '&::placeholder': {
-              color: '#9ca3af',
+              color: '#6b7280',
               opacity: 1,
             },
           },
           // Scrollbar styling to match main scroll area (for multiline textarea)
           '& textarea': {
+            outline: 'none !important',
+            border: 'none !important',
+            resize: 'none',
+            boxShadow: 'none !important',
+            maxHeight: '50vh',
+            overflowY: 'auto',
+            paddingTop: '3px',
+            paddingBottom: '3px',
+            paddingLeft: '3px',
+            paddingRight: '3px',
+            '&:focus': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&:focus-visible': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
+            },
             '&::-webkit-scrollbar': {
               width: '6px',
             },
@@ -309,24 +406,101 @@ const SidebarMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabl
           },
         }}
       />
-      <IconButton
-        onClick={() => void onSendClick()}
-        disabled={disabled}
-        sx={{
-          color: '#3b82f6',
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-          '&:hover': {
-            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-          },
-          '&:disabled': {
-            color: '#6b7280',
-            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-          },
-        }}
-      >
-        <SendIcon />
-      </IconButton>
-    </>
+      {/* Icons Row - Below Message Area */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5 }}> {/* Increased vertical space */}
+        {/* Left Side - Model Selection and Paperclip */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {/* Model Selection Bubble Dropdown */}
+          <Box 
+            sx={{ 
+              px: 0.75,
+              py: 0.25,
+              borderRadius: 1,
+              backgroundColor: 'rgba(55, 65, 81, 0.5)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                backgroundColor: 'rgba(55, 65, 81, 0.7)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+              },
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onModelClick(e);
+            }}
+          >
+            <Typography
+              variant="caption"
+              sx={{
+                color: '#e5e7eb',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {modelLabel}
+            </Typography>
+          </Box>
+          {/* File Upload Icon */}
+          <Tooltip title="Upload files">
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFileClick();
+              }}
+              sx={{
+                color: '#9ca3af',
+                padding: '4px',
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              <AttachFileIcon sx={{ fontSize: '0.9rem' }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+        {/* Right Side - Send/Stop Button */}
+        <Tooltip title={isLoading ? "Stop processing" : "Send (Enter)"}>
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isLoading && onStop) {
+                onStop();
+              } else {
+                void onSendClick();
+              }
+            }}
+            disabled={!isLoading && !value.trim()}
+            sx={{
+              color: isLoading 
+                ? '#ef4444' 
+                : (value.trim() ? '#22c55e' : '#6b7280'),
+              padding: '4px',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                color: isLoading 
+                  ? '#dc2626' 
+                  : (value.trim() ? '#16a34a' : '#6b7280'),
+                backgroundColor: isLoading 
+                  ? 'rgba(239, 68, 68, 0.1)' 
+                  : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
+              },
+            }}
+          >
+            {isLoading ? (
+              <StopIcon sx={{ fontSize: '0.9rem' }} />
+            ) : (
+              <SendIcon sx={{ fontSize: '0.9rem' }} />
+            )}
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Box>
   );
 });
 
@@ -416,7 +590,12 @@ const GlobalChatSidebar: React.FC = () => {
     model: string;
     type: 'file' | 'context' | 'followup' | 'new';
   }>>([]);
+  const [isQueueExpanded, setIsQueueExpanded] = useState(false);
   const isProcessingQueueRef = useRef(false);
+  // Track streaming completion via custom event
+  const [isStreamingActive, setIsStreamingActive] = useState(false);
+  // Track if input should be centered (for empty session animation)
+  const [isInputCentered, setIsInputCentered] = useState(true);
   // Session-specific loading states (matching ChatPage pattern)
   // Note: Currently only used for timeout management, but kept for consistency with ChatPage
   const [, setSessionLoadingStates] = useState<Record<string, boolean>>({});
@@ -426,6 +605,7 @@ const GlobalChatSidebar: React.FC = () => {
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [shareMenuAnchor, setShareMenuAnchor] = useState<null | HTMLElement>(null);
+  const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
   const [importExportDialogOpen, setImportExportDialogOpen] = useState(false);
   const [importExportMode, setImportExportMode] = useState<'import' | 'export'>('export');
   const handleSidebarRemoveContextItem = useCallback(async (index: number) => {
@@ -797,6 +977,14 @@ const GlobalChatSidebar: React.FC = () => {
     
     return merged;
   }, [unifiedMessageList, activeSessionId, persistenceMessages]);
+
+  // Update input centered state based on messages
+  useEffect(() => {
+    const shouldBeCentered = messages.length === 0 && (!activeSessionId || !currentSession || currentSession.messages.length === 0);
+    if (shouldBeCentered !== isInputCentered) {
+      setIsInputCentered(shouldBeCentered);
+    }
+  }, [messages.length, activeSessionId, currentSession?.messages?.length, isInputCentered, currentSession]);
 
   // Subscribe to agent log updates
   useEffect(() => {
@@ -1346,17 +1534,17 @@ const GlobalChatSidebar: React.FC = () => {
 
   // Process next message in queue
   const processNextMessageInQueue = useCallback(async () => {
-    if (isProcessingQueueRef.current || messageQueue.length === 0 || isLoadingMessage || isUnifiedProcessing) {
+    // Wait for streaming to complete (typingMessages should be empty AND streaming complete event received)
+    const isStreamingComplete = typingMessages.size === 0 && !isStreamingActive;
+    if (isProcessingQueueRef.current || messageQueue.length === 0 || isLoadingMessage || isUnifiedProcessing || !isStreamingComplete) {
       return;
     }
 
     isProcessingQueueRef.current = true;
+    // Get the first message but DON'T remove it yet - wait until it's successfully sent
     const nextMessage = messageQueue[0];
     
-    // Remove from queue
-    setMessageQueue(prev => prev.slice(1));
-    
-    console.log('📬 Sidebar: Processing queued message:', nextMessage.type);
+    console.log('📬 Sidebar: Processing queued message:', nextMessage.type, 'Queue length:', messageQueue.length);
     
     try {
       setIsLoadingMessage(true);
@@ -1377,6 +1565,14 @@ const GlobalChatSidebar: React.FC = () => {
 
       if (result.success) {
         console.log('✅ Sidebar: Queued message sent successfully');
+        
+        // Remove from queue only after successful send
+        setMessageQueue(prev => {
+          if (prev.length > 0 && prev[0] === nextMessage) {
+            return prev.slice(1);
+          }
+          return prev;
+        });
         
         // Handle session creation if needed (same logic as regular send)
         if (result.sessionId && result.sessionId !== activeSessionId) {
@@ -1406,17 +1602,53 @@ const GlobalChatSidebar: React.FC = () => {
       if (errorSessionId) {
         unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'sidebar');
       }
+      // Remove failed message from queue to prevent blocking
+      setMessageQueue(prev => {
+        if (prev.length > 0 && prev[0] === nextMessage) {
+          return prev.slice(1);
+        }
+        return prev;
+      });
     } finally {
       isProcessingQueueRef.current = false;
+      // The effect will automatically process the next message when conditions are met
     }
-  }, [messageQueue, isLoadingMessage, isUnifiedProcessing, activeSessionId, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, setActiveSessionId, loadSessionFromDatabase]);
+  }, [messageQueue, isLoadingMessage, isUnifiedProcessing, typingMessages.size, isStreamingActive, activeSessionId, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, setActiveSessionId, loadSessionFromDatabase]);
 
-  // Effect to process queue when loading completes and queue has items
+  // Track streaming completion via custom event
   useEffect(() => {
-    if (!isLoadingMessage && !isUnifiedProcessing && messageQueue.length > 0 && !isProcessingQueueRef.current) {
+    const handleStreamingComplete = (event: CustomEvent) => {
+      const { sessionId } = event.detail;
+      // Only update if this is for the active session
+      if (sessionId === activeSessionId) {
+        console.log('✅ Sidebar: Streaming complete event received for active session');
+        setIsStreamingActive(false);
+      }
+    };
+    
+    window.addEventListener('streaming-complete', handleStreamingComplete as EventListener);
+    
+    return () => {
+      window.removeEventListener('streaming-complete', handleStreamingComplete as EventListener);
+    };
+  }, [activeSessionId]);
+  
+  // Track when streaming starts (when loading begins)
+  useEffect(() => {
+    if (isLoadingMessage || isUnifiedProcessing) {
+      setIsStreamingActive(true);
+    }
+  }, [isLoadingMessage, isUnifiedProcessing]);
+  
+  // Effect to process queue when loading completes, streaming finishes, and queue has items
+  useEffect(() => {
+    // Wait for both loading to complete AND streaming to finish (typingMessages should be empty AND streaming complete event received)
+    const isStreamingComplete = typingMessages.size === 0 && !isStreamingActive;
+    if (!isLoadingMessage && !isUnifiedProcessing && isStreamingComplete && messageQueue.length > 0 && !isProcessingQueueRef.current) {
+      console.log('🔄 Sidebar: Conditions met for queue processing - loading:', isLoadingMessage, 'processing:', isUnifiedProcessing, 'typing:', typingMessages.size, 'streaming:', isStreamingActive);
       processNextMessageInQueue();
     }
-  }, [isLoadingMessage, isUnifiedProcessing, messageQueue.length, processNextMessageInQueue]);
+  }, [isLoadingMessage, isUnifiedProcessing, typingMessages.size, isStreamingActive, messageQueue.length, processNextMessageInQueue]);
 
   // Mirror ChatPage's current session
   useEffect(() => {
@@ -2498,7 +2730,8 @@ const GlobalChatSidebar: React.FC = () => {
         sx={{
           flex: 1,
           overflowY: 'auto',
-          p: 1,
+          px: 0.375, // 3px horizontal padding
+          py: 0.375, // 3px from top
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
@@ -2560,6 +2793,7 @@ const GlobalChatSidebar: React.FC = () => {
                         setTypingMessages(prev => {
                           const newSet = new Set(prev);
                           newSet.delete(message.id);
+                          // Typing animation complete - queue processing will be handled by the effect
                           return newSet;
                         });
                       }}
@@ -2670,15 +2904,46 @@ const GlobalChatSidebar: React.FC = () => {
 
       {/* Files/Context inline sections removed in favor of side panels */}
 
-      {/* Input Area */}
+      {/* Input Area - Bubble Style */}
       <Box
         sx={{
           flexShrink: 0,
-          p: 2,
-          borderTop: '1px solid #374151',
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          p: 0.625, // 5px padding from edge of chat space
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          zIndex: isInputCentered ? 10 : 1,
+          pointerEvents: 'auto',
         }}
       >
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            width: isInputCentered ? '500px' : '100%',
+            maxWidth: isInputCentered ? '90%' : '100%',
+            transform: isInputCentered 
+              ? 'translate3d(0, calc(-50vh + 50%), 0)' 
+              : 'translate3d(0, 0, 0)',
+            transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+            willChange: 'transform',
+            backfaceVisibility: 'hidden',
+            perspective: 1000,
+          }}
+        >
+          <Box
+            sx={{
+              p: 1, // 8px padding inside bubble
+              borderRadius: 0.5, // 4px rounded corners
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+            }}
+          >
         {/* Show file processing indicator */}
         {isProcessingFiles && (
           <Box sx={{ mb: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>
@@ -2731,39 +2996,178 @@ const GlobalChatSidebar: React.FC = () => {
           </Box>
         )}
 
-        {/* Model Selection */}
-        <FormControl fullWidth size="small" sx={{ mb: 1 }}>
-          <Select
-            value={selectedModel || 'claude-sonnet-4'}
-            onChange={handleModelChange}
-            sx={{
-              color: '#ffffff',
-              '& .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#374151',
-              },
-              '&:hover .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#6b7280',
-              },
-              '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                borderColor: '#3b82f6',
-              },
-              '& .MuiSvgIcon-root': {
-                color: '#9ca3af',
-              },
-            }}
-          >
-            {availableModels.map((model) => (
-              <MenuItem key={model.value} value={model.value} title={model.tooltip}>
-                <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                  {model.label}
-                </Typography>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        {/* Message Queue - Only show when there are messages */}
+        {messageQueue.length > 0 && (
+          <Box sx={{ mb: 0.375, pt: 0.375 }}> {/* 3px margin bottom and padding top */}
+            {/* Queue Header - Collapsible */}
+            <Box
+              onClick={() => setIsQueueExpanded(!isQueueExpanded)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                px: 0,
+                py: 0.5,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <QueueIcon sx={{ color: '#9ca3af', fontSize: '0.7rem', filter: 'grayscale(100%)' }} />
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#9ca3af',
+                  fontSize: '0.65rem',
+                  fontWeight: 400,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {messageQueue.length} queued
+              </Typography>
+              {isQueueExpanded ? (
+                <ExpandLessIcon sx={{ color: '#9ca3af', fontSize: '0.7rem' }} />
+              ) : (
+                <ExpandMoreIcon sx={{ color: '#9ca3af', fontSize: '0.7rem' }} />
+              )}
+            </Box>
 
-        {/* Input Area - Compact with Paperclip */}
-        <Box display="flex" alignItems="flex-end" gap={1}>
+            {/* Queue Content - Collapsible */}
+            <Collapse in={isQueueExpanded}>
+              <Box
+                sx={{
+                  maxHeight: isQueueExpanded ? '400px' : '50px',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <Box
+                  sx={{
+                    px: 0,
+                    py: 0.5,
+                    maxHeight: isQueueExpanded ? '400px' : '50px',
+                    overflowY: 'auto',
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    },
+                  }}
+                >
+                  <List dense sx={{ p: 0 }}>
+                    {messageQueue.map((queuedMessage, index) => (
+                      <ListItem
+                        key={index}
+                        sx={{
+                          mb: 0.5,
+                          px: 0,
+                          py: 0.25,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          '&:last-child': { mb: 0 },
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: '20px', flexShrink: 0 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: '#9ca3af',
+                              fontSize: '0.65rem',
+                              fontWeight: 400,
+                            }}
+                          >
+                            {index + 1}.
+                          </Typography>
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                color: '#9ca3af',
+                                fontSize: '0.75rem',
+                                wordBreak: 'break-word',
+                                whiteSpace: 'normal',
+                              }}
+                            >
+                              {queuedMessage.text || '(No text)'}
+                            </Typography>
+                          }
+                          secondary={
+                            <Box display="flex" gap={0.5} mt={0.25} flexWrap="wrap" alignItems="center">
+                              {queuedMessage.files && queuedMessage.files.length > 0 && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    color: '#6b7280',
+                                    fontSize: '0.65rem',
+                                  }}
+                                >
+                                  {queuedMessage.files.length} file{queuedMessage.files.length !== 1 ? 's' : ''}
+                                </Typography>
+                              )}
+                              {queuedMessage.context && queuedMessage.context.length > 0 && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    color: '#6b7280',
+                                    fontSize: '0.65rem',
+                                  }}
+                                >
+                                  {queuedMessage.context.length} context
+                                </Typography>
+                              )}
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: '#6b7280',
+                                  fontSize: '0.65rem',
+                                  textTransform: 'capitalize',
+                                }}
+                              >
+                                {queuedMessage.type}
+                              </Typography>
+                            </Box>
+                          }
+                          sx={{
+                            minWidth: 0,
+                            flex: 1,
+                          }}
+                        />
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMessageQueue(prev => prev.filter((_, i) => i !== index));
+                          }}
+                          sx={{
+                            color: '#6b7280',
+                            padding: '2px',
+                            '&:hover': {
+                              color: '#ef4444',
+                              backgroundColor: 'transparent',
+                            },
+                          }}
+                        >
+                          <DeleteIcon sx={{ fontSize: '0.75rem' }} />
+                        </IconButton>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              </Box>
+            </Collapse>
+          </Box>
+        )}
+
           <input
             type="file"
             ref={fileInputRef}
@@ -2772,23 +3176,18 @@ const GlobalChatSidebar: React.FC = () => {
             accept=".cosine,image/*,application/pdf,text/*,application/json,application/xml,application/msword,application/vnd.openxmlformats-officedocument.*,application/vnd.ms-excel.*,application/vnd.ms-powerpoint.*,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/octet-stream"
             style={{ display: 'none' }}
           />
-          <Tooltip title="Upload files">
-            <IconButton
-              onClick={() => fileInputRef.current?.click()}
-              sx={{
-                color: '#9ca3af',
-                '&:hover': {
-                  color: '#3b82f6',
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                },
-              }}
-            >
-              <AttachFileIcon />
-            </IconButton>
-          </Tooltip>
           <SidebarMessageInputBar
-            disabled={isLoadingMessage}
             placeholder="Type your message..."
+            onModelClick={(e) => setModelMenuAnchor(e.currentTarget)}
+            onFileClick={() => fileInputRef.current?.click()}
+            modelLabel={availableModels.find(m => m.value === selectedModel)?.label || selectedModel || 'Model'}
+            isLoading={isLoadingMessage || isUnifiedProcessing || (activeSessionId ? crossInterfaceLoading[activeSessionId] : false)}
+            onStop={() => {
+              if (activeSessionId) {
+                console.log('🛑 Sidebar: Sending kill signal for session:', activeSessionId);
+                unifiedMessageHandler.cancelAllMessagesForSession(activeSessionId);
+              }
+            }}
             onSend={async (text: string) => {
               // Use the same logic as the inline input bar previously
               if ((!text.trim() && uploadedFiles.length === 0) || !user?.id) return;
@@ -2798,9 +3197,14 @@ const GlobalChatSidebar: React.FC = () => {
                 : (sessionContext.length > 0 ? 'context' 
                 : (activeSessionId ? 'followup' : 'new'));
               
-              // If already processing, add to queue
-              if (isLoadingMessage || isUnifiedProcessing) {
-                console.log('📬 Sidebar: Message queued (processing in progress)');
+              // Check if agent is busy (loading, processing, or streaming)
+              // Note: We check typingMessages and isStreamingActive separately to ensure we catch all streaming states
+              const isStreamingComplete = typingMessages.size === 0 && !isStreamingActive;
+              const isAgentBusy = isLoadingMessage || isUnifiedProcessing || !isStreamingComplete || isProcessingQueueRef.current;
+              
+              // If already processing or streaming, add to queue
+              if (isAgentBusy) {
+                console.log('📬 Sidebar: Message queued (processing in progress or streaming)');
                 setMessageQueue(prev => [...prev, {
                   text,
                   files: uploadedFiles.length > 0 ? uploadedFiles : undefined,
@@ -2976,8 +3380,8 @@ const GlobalChatSidebar: React.FC = () => {
               }
             }}
           />
+          </Box>
         </Box>
-
       </Box>
     </Box>
     {/* Files Side Panel */}
@@ -3089,7 +3493,7 @@ const GlobalChatSidebar: React.FC = () => {
                       }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#dc2626', '&:hover': { color: '#ef4444' } }}>
                         <DeleteIcon fontSize="small" />
                       </IconButton>
-      </Box>
+                    </Box>
                   }>
                   <ListItemText primary={file.filename} secondary={`${(file.file_size / 1024).toFixed(1)} KB • ${file.content_type} • Generated`} primaryTypographyProps={{ fontSize: '0.8rem', color: '#ffffff' }} secondaryTypographyProps={{ fontSize: '0.7rem', color: '#9ca3af' }} />
                 </ListItem>
@@ -3098,7 +3502,7 @@ const GlobalChatSidebar: React.FC = () => {
           ) : (
             <Typography variant="caption" sx={{ color: '#6b7280', fontSize: '0.75rem', fontStyle: 'italic' }}>No agent files generated</Typography>
           )}
-    </Box>
+        </Box>
       </Box>
     </Drawer>
 
@@ -3201,6 +3605,61 @@ const GlobalChatSidebar: React.FC = () => {
         </List>
       </Box>
     </Drawer>
+
+    {/* Model Selection Menu */}
+    <Menu
+      anchorEl={modelMenuAnchor}
+      open={Boolean(modelMenuAnchor)}
+      onClose={() => setModelMenuAnchor(null)}
+      anchorOrigin={{
+        vertical: 'top',
+        horizontal: 'left',
+      }}
+      transformOrigin={{
+        vertical: 'bottom',
+        horizontal: 'left',
+      }}
+      PaperProps={{
+        sx: {
+          backgroundColor: 'rgba(55, 65, 81, 0.95)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 1,
+          minWidth: 200,
+          mt: 0.5,
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        },
+      }}
+    >
+      {availableModels.map((model) => (
+        <MenuItem
+          key={model.value}
+          onClick={() => {
+            handleModelChange({ target: { value: model.value } } as SelectChangeEvent);
+            setModelMenuAnchor(null);
+          }}
+          selected={selectedModel === model.value}
+          sx={{
+            color: '#e5e7eb',
+            '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+            '&.Mui-selected': {
+              backgroundColor: 'rgba(59, 130, 246, 0.2)',
+              '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.3)' },
+            },
+          }}
+        >
+          <ListItemText>
+            <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+              {model.label}
+            </Typography>
+            {model.tooltip && (
+              <Typography sx={{ color: '#9ca3af', fontSize: '0.7rem' }}>
+                {model.tooltip}
+              </Typography>
+            )}
+          </ListItemText>
+        </MenuItem>
+      ))}
+    </Menu>
 
     {/* Share Menu */}
     <Menu

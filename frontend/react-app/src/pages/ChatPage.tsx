@@ -2,7 +2,6 @@ import { useEffect, useState, useRef, useCallback, memo, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
-import { useClock } from '@/contexts/ClockContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { sessionManagementAPI } from '@/services/api';
 import { ContextItem } from '@/components/tiles/common/contextManager';
@@ -36,9 +35,11 @@ import {
   ListItemText,
   Tooltip,
   Checkbox,
+  Collapse,
 } from '@mui/material';
 import {
   Send as SendIcon,
+  Stop as StopIcon,
   SmartToy as BotIcon,
   Person as PersonIcon,
   InsertDriveFile as FileIcon,
@@ -56,6 +57,9 @@ import {
   SmartToy as SmartToyIcon,
   Share as ShareIcon,
   Upload as UploadIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  ViewList as QueueIcon,
 } from '@mui/icons-material';
 import ChatImportExportDialog from '@/components/dialogs/ChatImportExportDialog';
 
@@ -98,31 +102,78 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => (
 const MessageBubble = ({ isUser, children, status, ...props }: any) => (
   <Box
     sx={{
-      p: 2,
-      maxWidth: '70%',
-      borderRadius: '0px',
+      p: 1.5,
+      borderRadius: 2,
+      backgroundColor: isUser 
+        ? 'rgba(59, 130, 246, 0.2)' 
+        : 'rgba(255, 255, 255, 0.1)',
+      border: isUser 
+        ? '1px solid rgba(59, 130, 246, 0.3)' 
+        : '1px solid rgba(255, 255, 255, 0.2)',
       position: 'relative',
-      ...(isUser ? {
-        backgroundColor: 'rgba(59, 130, 246, 0.8)',
-        color: 'white',
-        marginLeft: 'auto',
-        border: '1px solid #3b82f6',
-      } : {
-        backgroundColor: 'rgba(15, 23, 42, 0.8)',
-        color: 'white',
-        marginRight: 'auto',
-        border: '1px solid #374151',
-      }),
     }}
     {...props}
   >
     {children}
     {isUser && status && (
-      <Box sx={{ position: 'absolute', bottom: 4, right: 4 }}>
-        {status === 'sending' && <CircularProgress size={12} sx={{ color: '#3b82f6' }} />}
-        {status === 'sent' && <Typography variant="caption" sx={{ color: '#22c55e', fontSize: '12px', fontWeight: 'bold' }}>✓</Typography>}
-        {status === 'delivered' && <Typography variant="caption" sx={{ color: '#16a34a', fontSize: '12px', fontWeight: 'bold' }}>✓✓</Typography>}
-        {status === 'error' && <Typography variant="caption" sx={{ color: '#dc2626', fontSize: '12px', fontWeight: 'bold' }}>✗</Typography>}
+      <Box sx={{ 
+        position: 'absolute',
+        bottom: 4,
+        right: 8,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.5
+      }}>
+        {status === 'sending' && (
+          <CircularProgress 
+            size={12} 
+            sx={{ 
+              color: 'rgba(59, 130, 246, 0.6)',
+              '& .MuiCircularProgress-circle': {
+                strokeWidth: 2
+              }
+            }} 
+          />
+        )}
+        {status === 'sent' && (
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              color: 'rgba(59, 130, 246, 0.6)', 
+              fontSize: '10px', 
+              fontWeight: 400,
+              lineHeight: 1
+            }}
+          >
+            ✓
+          </Typography>
+        )}
+        {status === 'delivered' && (
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              color: 'rgba(59, 130, 246, 0.6)', 
+              fontSize: '10px', 
+              fontWeight: 400,
+              lineHeight: 1
+            }}
+          >
+            ✓✓
+          </Typography>
+        )}
+        {status === 'error' && (
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              color: '#EF4444', 
+              fontSize: '10px', 
+              fontWeight: 400,
+              lineHeight: 1
+            }}
+          >
+            ✗
+          </Typography>
+        )}
       </Box>
     )}
   </Box>
@@ -184,25 +235,9 @@ const TypingText = ({
   );
 };
 
-const FilePreview = ({ children, ...props }: any) => (
-  <Box
-    sx={{
-      p: 1,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 1,
-      backgroundColor: 'rgba(55, 65, 81, 0.5)',
-      borderRadius: '4px',
-      border: '1px solid #374151',
-    }}
-    {...props}
-  >
-    {children}
-  </Box>
-);
 
 // Hoisted input bar to preserve local state across parent re-renders
-const ChatMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled: boolean; placeholder: string; onSend: (text: string) => void }) => {
+const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, isLoading, onStop }: { disabled: boolean; placeholder: string; onSend: (text: string) => void; onFileClick: () => void; isLoading?: boolean; onStop?: () => void }) => {
   const [value, setValue] = useState('');
   const onSendClick = () => {
     if (value.trim()) {
@@ -213,58 +248,200 @@ const ChatMessageInputBar = memo(({ disabled, placeholder, onSend }: { disabled:
   const onKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // Always allow sending - the onSend handler will queue if loading
       onSendClick();
     }
   };
   return (
-    <>
+    <Box sx={{ width: '100%', '& *:focus': { outline: 'none !important' } }}>
+      {/* Message Area */}
       <TextField
         fullWidth
         multiline
-        maxRows={3}
+        variant="standard"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyPress={onKeyPress}
         placeholder={placeholder}
-        disabled={disabled}
+        disabled={false}
+        InputProps={{
+          readOnly: false,
+          disableUnderline: true,
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         sx={{
-          '& .MuiOutlinedInput-root': {
-            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-            color: 'white',
-            '& fieldset': {
-              borderColor: '#374151',
+          '& .MuiInput-root': {
+            backgroundColor: 'transparent',
+            border: 'none',
+            outline: 'none !important',
+            boxShadow: 'none !important',
+            maxHeight: '50vh',
+            overflowY: 'auto',
+            '&:before': {
+              display: 'none',
             },
-            '&:hover fieldset': {
-              borderColor: '#6b7280',
+            '&:after': {
+              display: 'none',
             },
-            '&.Mui-focused fieldset': {
-              borderColor: '#3b82f6',
+            '&:hover:before': {
+              display: 'none',
+            },
+            '&:focus': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&:focus-within': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&.Mui-focused': {
+              outline: 'none !important',
+              boxShadow: 'none !important',
+              '&:before': {
+                display: 'none',
+              },
+              '&:after': {
+                display: 'none',
+              },
+            },
+            // Scrollbar styling to match message area
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
             },
           },
-          '& .MuiInputBase-input::placeholder': {
-            color: '#9ca3af',
-            opacity: 1,
+          '& .MuiInput-input': {
+            color: '#ffffff',
+            fontSize: '0.875rem',
+            paddingTop: '5px',
+            paddingBottom: '5px',
+            paddingLeft: '5px',
+            paddingRight: '5px',
+            lineHeight: '1.5',
+            outline: 'none !important',
+            border: 'none !important',
+            '&:focus': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&::placeholder': {
+              color: '#6b7280',
+              opacity: 1,
+            },
+          },
+          // Scrollbar styling to match main scroll area (for multiline textarea)
+          '& textarea': {
+            outline: 'none !important',
+            border: 'none !important',
+            resize: 'none',
+            boxShadow: 'none !important',
+            maxHeight: '50vh',
+            overflowY: 'auto',
+            '&:focus': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&:focus-visible': {
+              outline: 'none !important',
+              border: 'none !important',
+              boxShadow: 'none !important',
+            },
+            '&::-webkit-scrollbar': {
+              width: '6px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderRadius: '3px',
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            },
           },
         }}
       />
-      <IconButton
-        onClick={onSendClick}
-        disabled={disabled || !value.trim()}
-        sx={{
-          color: '#3b82f6',
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-          '&:hover': {
-            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-          },
-          '&:disabled': {
-            color: '#6b7280',
-            backgroundColor: 'rgba(55, 65, 81, 0.3)',
-          },
-        }}
-      >
-        <SendIcon />
-      </IconButton>
-    </>
+      {/* Icons Row - Below Message Area */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
+        {/* Left Side - Paperclip */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Tooltip title="Upload files">
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFileClick();
+              }}
+              sx={{
+                color: '#9ca3af',
+                padding: '4px',
+                '&:hover': {
+                  color: '#3b82f6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                },
+              }}
+            >
+              <AttachFileIcon sx={{ fontSize: '0.9rem' }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+        {/* Right Side - Send/Stop Button */}
+        <Tooltip title={isLoading ? "Stop processing" : "Send (Enter)"}>
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isLoading && onStop) {
+                onStop();
+              } else {
+                onSendClick();
+              }
+            }}
+            disabled={!isLoading && (disabled || !value.trim())}
+            sx={{
+              color: isLoading 
+                ? '#ef4444' 
+                : (value.trim() ? '#22c55e' : '#6b7280'),
+              padding: '4px',
+              transition: 'all 0.2s ease',
+              '&:hover': { 
+                color: isLoading 
+                  ? '#dc2626' 
+                  : (value.trim() ? '#16a34a' : '#6b7280'),
+                backgroundColor: isLoading 
+                  ? 'rgba(239, 68, 68, 0.1)' 
+                  : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
+              },
+            }}
+          >
+            {isLoading ? (
+              <StopIcon sx={{ fontSize: '0.9rem' }} />
+            ) : (
+              <SendIcon sx={{ fontSize: '0.9rem' }} />
+            )}
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Box>
   );
 });
 
@@ -273,12 +450,16 @@ const MessageEditInput = memo(({
   value, 
   onChange, 
   onSave, 
-  onCancel 
+  onCancel,
+  isLoading,
+  onStop,
 }: { 
   value: string; 
   onChange: (value: string) => void; 
   onSave: () => void; 
   onCancel: () => void;
+  isLoading?: boolean;
+  onStop?: () => void;
 }) => {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -341,22 +522,39 @@ const MessageEditInput = memo(({
             <CloseIcon sx={{ fontSize: 16 }} />
           </IconButton>
         </Tooltip>
-        <Tooltip title="Send (Enter)">
+        <Tooltip title={isLoading ? "Stop processing" : "Send (Enter)"}>
           <IconButton
             size="small"
-            onClick={onSave}
-            disabled={!value.trim()}
+            onClick={() => {
+              if (isLoading && onStop) {
+                onStop();
+              } else {
+                onSave();
+              }
+            }}
+            disabled={!isLoading && !value.trim()}
             sx={{
-              color: value.trim() ? '#22c55e' : '#6b7280',
+              color: isLoading 
+                ? '#ef4444' 
+                : (value.trim() ? '#22c55e' : '#6b7280'),
+              transition: 'all 0.2s ease',
               '&:hover': { 
-                color: value.trim() ? '#16a34a' : '#6b7280',
-                backgroundColor: value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent',
+                color: isLoading 
+                  ? '#dc2626' 
+                  : (value.trim() ? '#16a34a' : '#6b7280'),
+                backgroundColor: isLoading 
+                  ? 'rgba(239, 68, 68, 0.1)' 
+                  : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
               },
               width: 28,
               height: 28,
             }}
           >
-            <SendIcon sx={{ fontSize: 16 }} />
+            {isLoading ? (
+              <StopIcon sx={{ fontSize: 16 }} />
+            ) : (
+              <SendIcon sx={{ fontSize: 16 }} />
+            )}
           </IconButton>
         </Tooltip>
       </Box>
@@ -367,7 +565,8 @@ const MessageEditInput = memo(({
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
-  const { clockTimezone, clockMilitaryTime } = useClock();
+  // Clock context available if needed in the future
+  // const { clockTimezone, clockMilitaryTime } = useClock();
   const { openWithSession } = useGlobalChat();
   
   // Chat persistence system
@@ -392,6 +591,10 @@ export default function ChatPage() {
   const [missedResponseNotification] = useState<string | null>(null);
   // Typing messages for AI response animation
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
+  // Track streaming completion via custom event
+  const [isStreamingActive, setIsStreamingActive] = useState(false);
+  // Track if input should be centered (for empty session animation)
+  const [isInputCentered, setIsInputCentered] = useState(true);
   // Message queue for sequential processing
   const [messageQueue, setMessageQueue] = useState<Array<{
     text: string;
@@ -400,6 +603,7 @@ export default function ChatPage() {
     model: string;
     type: 'file' | 'context' | 'followup' | 'new';
   }>>([]);
+  const [isQueueExpanded, setIsQueueExpanded] = useState(false);
   const isProcessingQueueRef = useRef(false);
   
   // Session-specific state tracking
@@ -585,6 +789,14 @@ export default function ChatPage() {
     return merged;
   }, [persistenceMessages, unifiedMessageList, currentSession?.session_id]);
 
+  // Update input centered state based on messages
+  useEffect(() => {
+    const shouldBeCentered = messages.length === 0 && (!currentSession || currentSession.messages.length === 0);
+    if (shouldBeCentered !== isInputCentered) {
+      setIsInputCentered(shouldBeCentered);
+    }
+  }, [messages.length, currentSession?.messages?.length, isInputCentered, currentSession]);
+
   // Sync unified messages with local persistence system (DEBOUNCED for performance)
   // This runs asynchronously to avoid blocking message display
   useEffect(() => {
@@ -638,19 +850,60 @@ export default function ChatPage() {
     return () => clearTimeout(syncTimeout);
   }, [unifiedMessages, currentSession?.session_id, currentSession?.messages, addPersistedMessage]);
 
+  // Load session from database (for refreshing after agent file returns)
+  const loadSessionFromDatabase = useCallback(async (sessionId: string) => {
+    if (!user?.id) return;
+
+    try {
+      console.log('📋 ChatPage: Loading session from database:', sessionId);
+      const session = await sessionManagementAPI.getSession(sessionId, user.id);
+      
+      if (session) {
+        console.log('✅ ChatPage: Session loaded from database successfully:', {
+          sessionId: session.session_id,
+          messageCount: session.messages?.length || 0,
+          hasContext: !!session.session_variables?.context_items
+        });
+        
+        // Update current session via persistence system
+        // Note: currentSession is managed by useChatPersistence, we just need to reload
+        // Don't reset model - keep user's persistent selection
+
+        // Load existing messages into unified messaging system
+        if (session.messages && session.messages.length > 0) {
+          console.log('📨 ChatPage: Loading existing messages into unified system:', session.messages.length);
+          unifiedMessageHandler.loadExistingMessages(sessionId, session.messages);
+        }
+
+        // Load context if available
+        if (session.session_variables?.context_items) {
+          setSessionContext(session.session_variables.context_items);
+        } else {
+          setSessionContext([]);
+        }
+        
+        console.log('✅ ChatPage: Session data loaded');
+      } else {
+        console.log('⚠️ ChatPage: Session not found in database');
+      }
+    } catch (error: any) {
+      console.error('❌ ChatPage: Failed to load session:', error);
+    }
+  }, [user?.id, setSessionContext]);
+
   // Process next message in queue
   const processNextMessageInQueue = useCallback(async () => {
-    if (isProcessingQueueRef.current || messageQueue.length === 0 || getCurrentSessionLoading() || isUnifiedProcessing) {
+    // Wait for streaming to complete (typingMessages should be empty AND streaming complete event received)
+    const isStreamingComplete = typingMessages.size === 0 && !isStreamingActive;
+    if (isProcessingQueueRef.current || messageQueue.length === 0 || getCurrentSessionLoading() || isUnifiedProcessing || !isStreamingComplete) {
       return;
     }
 
     isProcessingQueueRef.current = true;
+    // Get the first message but DON'T remove it yet - wait until it's successfully sent
     const nextMessage = messageQueue[0];
     
-    // Remove from queue
-    setMessageQueue(prev => prev.slice(1));
-    
-    console.log('📬 ChatPage: Processing queued message:', nextMessage.type);
+    console.log('📬 ChatPage: Processing queued message:', nextMessage.type, 'Queue length:', messageQueue.length);
     
     try {
       const sessionId = currentSession?.session_id || 'pending';
@@ -674,6 +927,14 @@ export default function ChatPage() {
       if (result.success) {
         console.log('✅ ChatPage: Queued message sent successfully');
         
+        // Remove from queue only after successful send
+        setMessageQueue(prev => {
+          if (prev.length > 0 && prev[0] === nextMessage) {
+            return prev.slice(1);
+          }
+          return prev;
+        });
+        
         // Handle session creation if needed (same logic as regular send)
         if (result.sessionId && result.sessionId !== currentSession?.session_id) {
           await loadSession(result.sessionId);
@@ -687,6 +948,9 @@ export default function ChatPage() {
           [errorSessionId]: false
         }));
         unifiedMessageHandler.broadcastLoadingState(errorSessionId, false, 'chatpage');
+        
+        // Remove failed message from queue to prevent blocking
+        setMessageQueue(prev => prev.filter((_, i) => i !== 0));
       }
     } catch (error) {
       console.error('❌ ChatPage: Error processing queued message:', error);
@@ -699,7 +963,7 @@ export default function ChatPage() {
     } finally {
       isProcessingQueueRef.current = false;
     }
-  }, [messageQueue, currentSession?.session_id, getCurrentSessionLoading, isUnifiedProcessing, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, loadSession, loadSessionFromDatabase]);
+  }, [messageQueue, currentSession?.session_id, getCurrentSessionLoading, isUnifiedProcessing, isStreamingActive, typingMessages, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, loadSession, loadSessionFromDatabase]);
 
   // Subscribe to loading state updates from unified messaging system
   useEffect(() => {
@@ -745,7 +1009,7 @@ export default function ChatPage() {
       unsubscribe();
       unsubscribeAgentLog();
     };
-  }, [currentSession?.session_id, messageQueue.length, processNextMessageInQueue]);
+  }, [currentSession?.session_id, messageQueue.length, processNextMessageInQueue, isStreamingActive, typingMessages]);
 
   // Listen for AI response typing events from unified messaging system
   useEffect(() => {
@@ -774,6 +1038,36 @@ export default function ChatPage() {
       window.removeEventListener('ai-response-typing', handleAITyping as EventListener);
     };
   }, [currentSession?.session_id]);
+
+  // Listen for streaming completion events
+  useEffect(() => {
+    const handleStreamingComplete = (event: CustomEvent) => {
+      const { sessionId } = event.detail;
+      if (sessionId === currentSession?.session_id) {
+        console.log('✅ ChatPage: Streaming complete for session:', sessionId);
+        setIsStreamingActive(false);
+        
+        // Process next message in queue after streaming completes
+        if (messageQueue.length > 0 && !isProcessingQueueRef.current) {
+          setTimeout(() => processNextMessageInQueue(), 100);
+        }
+      }
+    };
+
+    window.addEventListener('streaming-complete', handleStreamingComplete as EventListener);
+    
+    return () => {
+      window.removeEventListener('streaming-complete', handleStreamingComplete as EventListener);
+    };
+  }, [currentSession?.session_id, messageQueue.length, processNextMessageInQueue]);
+
+  // Set streaming active when loading starts
+  useEffect(() => {
+    const isLoading = getCurrentSessionLoading() || isUnifiedProcessing;
+    if (isLoading) {
+      setIsStreamingActive(true);
+    }
+  }, [getCurrentSessionLoading, isUnifiedProcessing]);
 
   // Poll for new messages when agent might be returning files (REST endpoint)
   useEffect(() => {
@@ -1356,14 +1650,6 @@ export default function ChatPage() {
     }
   };
 
-  const handleFileRemove = (index: number) => {
-    setUploadedFiles(prev => {
-      const fileToRemove = prev[index];
-      const newFiles = prev.filter((_, i) => i !== index);
-      console.log(`🗑️ File removed from upload queue: ${fileToRemove?.name} (${newFiles.length} files remaining)`);
-      return newFiles;
-    });
-  };
 
   const handleEditMessage = (message: Message, messageIndex: number) => {
     // Check if AI is currently processing for this session
@@ -1470,46 +1756,6 @@ export default function ChatPage() {
     }
   };
 
-  // Load session from database (for refreshing after agent file returns)
-  const loadSessionFromDatabase = async (sessionId: string) => {
-    if (!user?.id) return;
-
-    try {
-      console.log('📋 ChatPage: Loading session from database:', sessionId);
-      const session = await sessionManagementAPI.getSession(sessionId, user.id);
-      
-      if (session) {
-        console.log('✅ ChatPage: Session loaded from database successfully:', {
-          sessionId: session.session_id,
-          messageCount: session.messages?.length || 0,
-          hasContext: !!session.session_variables?.context_items
-        });
-        
-        // Update current session via persistence system
-        // Note: currentSession is managed by useChatPersistence, we just need to reload
-        // Don't reset model - keep user's persistent selection
-
-        // Load existing messages into unified messaging system
-        if (session.messages && session.messages.length > 0) {
-          console.log('📨 ChatPage: Loading existing messages into unified system:', session.messages.length);
-          unifiedMessageHandler.loadExistingMessages(sessionId, session.messages);
-        }
-
-        // Load context if available
-        if (session.session_variables?.context_items) {
-          setSessionContext(session.session_variables.context_items);
-        } else {
-          setSessionContext([]);
-        }
-        
-        console.log('✅ ChatPage: Session data loaded');
-      } else {
-        console.log('⚠️ ChatPage: Session not found in database');
-      }
-    } catch (error: any) {
-      console.error('❌ ChatPage: Failed to load session:', error);
-    }
-  };
 
   // Session selection handlers for context
   const handleSessionSelect = (sessionId: string, event: React.MouseEvent) => {
@@ -1615,96 +1861,6 @@ export default function ChatPage() {
     return messages.find(msg => msg.sender === 'user')?.text || 'No user messages';
   };
 
-  // Format timestamp using clock's timezone and military time settings
-  const formatTimestamp = (timestamp: Date | number | string): string => {
-    try {
-      // Ensure we have a Date object
-      let dateObj: Date;
-      if (timestamp instanceof Date) {
-        dateObj = timestamp;
-      } else if (typeof timestamp === 'number') {
-        // Handle Unix timestamp (could be seconds or milliseconds)
-        if (timestamp > 1000000000000) {
-          // Milliseconds
-          dateObj = new Date(timestamp);
-        } else {
-          // Seconds
-          dateObj = new Date(timestamp * 1000);
-        }
-      } else if (typeof timestamp === 'string') {
-        dateObj = new Date(timestamp);
-      } else {
-        console.warn('Invalid timestamp format:', timestamp);
-        dateObj = new Date();
-      }
-
-      // Validate the date
-      if (isNaN(dateObj.getTime())) {
-        console.warn('Invalid date created from timestamp:', timestamp);
-        dateObj = new Date();
-      }
-
-
-      let timeString: string;
-      
-      if (clockTimezone === 'local') {
-        // Use local timezone
-        if (clockMilitaryTime) {
-          timeString = dateObj.toLocaleTimeString('en-US', { 
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-        } else {
-          timeString = dateObj.toLocaleTimeString('en-US', { 
-            hour12: true,
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-        }
-      } else if (clockTimezone === 'UTC') {
-        // Use UTC timezone
-        if (clockMilitaryTime) {
-          timeString = dateObj.toLocaleTimeString('en-US', { 
-            timeZone: 'UTC',
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-        } else {
-          timeString = dateObj.toLocaleTimeString('en-US', { 
-            timeZone: 'UTC',
-            hour12: true,
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-        }
-      } else {
-        // Use specified timezone
-        if (clockMilitaryTime) {
-          timeString = dateObj.toLocaleTimeString('en-US', { 
-            timeZone: clockTimezone,
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-        } else {
-          timeString = dateObj.toLocaleTimeString('en-US', { 
-            timeZone: clockTimezone,
-            hour12: true,
-            hour: '2-digit',
-            minute: '2-digit'
-          });
-        }
-      }
-      
-      return timeString;
-    } catch (error) {
-      console.error('Error formatting timestamp:', error, 'timestamp:', timestamp);
-      // Fallback to current time
-      return new Date().toLocaleTimeString();
-    }
-  };
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -1760,6 +1916,9 @@ export default function ChatPage() {
       if (uploadedFiles.length > 0) {
         // File message
         console.log(`📁 ChatPage: Sending file message with ${uploadedFiles.length} files`);
+        console.log(`📁 ChatPage: Files being sent:`, uploadedFiles.map(f => ({ name: f.name, size: f.size, type: f.type })));
+        // Convert UploadedFile[] to File[] format for the unified handler
+        // The handler expects files with name, size, type properties which UploadedFile has
         result = await sendUnifiedFileMessage(text, uploadedFiles as unknown as File[], selectedModel);
       } else if (sessionContext.length > 0 && hasContextChanged()) {
         // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
@@ -2385,7 +2544,8 @@ export default function ChatPage() {
         <Box ref={messagesContainerRef} onScroll={handleMessagesScroll} sx={{ 
           flex: 1, 
           overflow: 'auto', 
-          p: 2, 
+          px: 2,
+          py: 1,
           minHeight: 0,
           '&::-webkit-scrollbar': {
             width: '6px',
@@ -2401,8 +2561,8 @@ export default function ChatPage() {
             backgroundColor: 'rgba(59, 130, 246, 0.7)',
           },
         }}>
-          <Stack spacing={2}>
-            {messages.length === 0 && !currentSession && (
+          <Stack spacing={1}>
+            {messages.length === 0 && !currentSession && !isInputCentered && (
               <Box sx={{ 
                 display: 'flex', 
                 flexDirection: 'column', 
@@ -2438,12 +2598,14 @@ export default function ChatPage() {
                 : visibleMessages;
               
               return finalVisibleMessages.map((message, messageIndex) => (
-              <Box key={message.id} display="flex" gap={2}>
-                <Avatar sx={{ bgcolor: message.sender === 'user' ? '#3b82f6' : '#374151', width: 32, height: 32 }}>
-                  {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
-                </Avatar>
-                <Box sx={{ flex: 1 }}>
-                  <MessageBubble isUser={message.sender === 'user'} status={(message as any).status || 'sent'}>
+              <Box
+                key={message.id}
+                sx={{
+                  alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
+                  maxWidth: '85%',
+                }}
+              >
+                <MessageBubble isUser={message.sender === 'user'} status={(message as any).status || 'sent'}>
                     {editingMessage && editingMessage.id === message.id ? (
                       <Box ref={editContainerRef}>
                         <MessageEditInput
@@ -2451,6 +2613,13 @@ export default function ChatPage() {
                           onChange={setEditText}
                           onSave={handleSaveEdit}
                           onCancel={handleCancelEdit}
+                          isLoading={editingMessage && currentSession?.session_id ? sessionLoadingStates[currentSession.session_id] : false}
+                          onStop={() => {
+                            if (currentSession?.session_id) {
+                              console.log('🛑 ChatPage: Sending kill signal for session (edit):', currentSession.session_id);
+                              unifiedMessageHandler.cancelAllMessagesForSession(currentSession.session_id);
+                            }
+                          }}
                         />
                       </Box>
                     ) : (
@@ -2474,26 +2643,65 @@ export default function ChatPage() {
                           </>
                         )}
                         {(message as any).files && (message as any).files.length > 0 && (
-                          <Stack spacing={1} mt={1}>
-                            {(message as any).files.map((file: any) => (
-                              <FilePreview key={file.name}>
-                                <FileIcon sx={{ color: '#22c55e' }} />
-                                <Typography variant="body2" color="white">
+                          <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                            {(message as any).files.map((file: any, fileIndex: number) => (
+                              <Box
+                                key={fileIndex}
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 1,
+                                  p: 1,
+                                  backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                                  borderRadius: '4px',
+                                  border: '1px solid #374151',
+                                }}
+                              >
+                                <FileIcon sx={{ color: '#22c55e', flexShrink: 0 }} />
+                                <Typography 
+                                  variant="body2" 
+                                  color="white"
+                                  sx={{
+                                    wordBreak: 'break-word',
+                                    overflowWrap: 'break-word',
+                                    flex: 1,
+                                    minWidth: 0, // Allows flex item to shrink below content size
+                                  }}
+                                >
                                   {file.name}
                                 </Typography>
-                                <Typography variant="caption" color="#9ca3af">
+                                <Typography 
+                                  variant="caption" 
+                                  color="#9ca3af"
+                                  sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+                                >
                                   ({(file.size / 1024).toFixed(1)} KB)
                                 </Typography>
-                              </FilePreview>
+                              </Box>
                             ))}
-                          </Stack>
+                          </Box>
                         )}
                       </>
                     )}
                   </MessageBubble>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
-                      {formatTimestamp(message.timestamp)}
+                  <Box 
+                    display="flex" 
+                    alignItems="center" 
+                    gap={0.5}
+                    sx={{
+                      mt: 0.5,
+                      px: 0.5,
+                    }}
+                  >
+                    <Typography 
+                      variant="caption" 
+                      sx={{ 
+                        color: '#6b7280', 
+                        fontSize: '0.65rem',
+                        fontWeight: 400,
+                      }}
+                    >
+                      {new Date(message.timestamp).toLocaleTimeString()}
                     </Typography>
                     {message.sender === 'user' && !editingMessage && (
                       <Tooltip title="Edit message">
@@ -2502,15 +2710,18 @@ export default function ChatPage() {
                           onClick={() => handleEditMessage(message, messageIndex)}
                           sx={{ 
                             color: '#9ca3af',
-                            '&:hover': { color: '#3b82f6' }
+                            padding: '2px',
+                            '&:hover': { 
+                              color: '#3b82f6',
+                              backgroundColor: 'transparent'
+                            }
                           }}
                         >
-                          <EditIcon sx={{ fontSize: 14 }} />
+                          <EditIcon sx={{ fontSize: 12 }} />
                         </IconButton>
                       </Tooltip>
                     )}
                   </Box>
-                </Box>
               </Box>
             ));
             })()}
@@ -2549,39 +2760,224 @@ export default function ChatPage() {
           </Stack>
         </Box>
 
-        {/* File Upload Area - Compact */}
-        {uploadedFiles.length > 0 && (
-          <GlassCard sx={{ p: 1, borderTop: '2px solid #374151', flexShrink: 0 }}>
-            <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
-              <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase' }}>
-                Files:
+        {/* Message Queue - Only show when there are messages */}
+        {messageQueue.length > 0 && (
+          <Box sx={{ mb: 1, px: 2 }}>
+            {/* Queue Header - Collapsible */}
+            <Box
+              onClick={() => setIsQueueExpanded(!isQueueExpanded)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                px: 0,
+                py: 0.5,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <QueueIcon sx={{ color: '#9ca3af', fontSize: '0.7rem', filter: 'grayscale(100%)' }} />
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#9ca3af',
+                  fontSize: '0.65rem',
+                  fontWeight: 400,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {messageQueue.length} queued
               </Typography>
-              {uploadedFiles.map((file, index) => (
-                <Chip
-                  key={index}
-                  label={file.name}
-                  size="small"
-                  onDelete={() => handleFileRemove(index)}
+              {isQueueExpanded ? (
+                <ExpandLessIcon sx={{ color: '#9ca3af', fontSize: '0.7rem' }} />
+              ) : (
+                <ExpandMoreIcon sx={{ color: '#9ca3af', fontSize: '0.7rem' }} />
+              )}
+            </Box>
+
+            {/* Queue Content - Collapsible */}
+            <Collapse in={isQueueExpanded}>
+              <Box
+                sx={{
+                  maxHeight: isQueueExpanded ? '400px' : '50px',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                <Box
                   sx={{
-                    backgroundColor: '#374151',
-                    color: 'white',
-                    fontSize: '0.75rem',
-                    height: 24,
-                    '& .MuiChip-deleteIcon': {
-                      color: '#9ca3af',
-                      fontSize: '1rem',
+                    px: 0,
+                    py: 0.5,
+                    maxHeight: isQueueExpanded ? '400px' : '50px',
+                    overflowY: 'auto',
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
                     },
                   }}
-                />
-              ))}
-            </Box>
-          </GlassCard>
+                >
+                  <List dense sx={{ p: 0 }}>
+                    {messageQueue.map((queuedMessage, index) => (
+                      <ListItem
+                        key={index}
+                        sx={{
+                          mb: 0.5,
+                          px: 0,
+                          py: 0.25,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          '&:last-child': { mb: 0 },
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: '20px', flexShrink: 0 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: '#9ca3af',
+                              fontSize: '0.65rem',
+                              fontWeight: 400,
+                            }}
+                          >
+                            {index + 1}.
+                          </Typography>
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                color: '#9ca3af',
+                                fontSize: '0.75rem',
+                                wordBreak: 'break-word',
+                                whiteSpace: 'normal',
+                              }}
+                            >
+                              {queuedMessage.text || '(No text)'}
+                            </Typography>
+                          }
+                          secondary={
+                            <Box display="flex" gap={0.5} mt={0.25} flexWrap="wrap" alignItems="center">
+                              {queuedMessage.files && queuedMessage.files.length > 0 && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    color: '#6b7280',
+                                    fontSize: '0.65rem',
+                                  }}
+                                >
+                                  {queuedMessage.files.length} file{queuedMessage.files.length !== 1 ? 's' : ''}
+                                </Typography>
+                              )}
+                              {queuedMessage.context && queuedMessage.context.length > 0 && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    color: '#6b7280',
+                                    fontSize: '0.65rem',
+                                  }}
+                                >
+                                  {queuedMessage.context.length} context
+                                </Typography>
+                              )}
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: '#6b7280',
+                                  fontSize: '0.65rem',
+                                  textTransform: 'capitalize',
+                                }}
+                              >
+                                {queuedMessage.type}
+                              </Typography>
+                            </Box>
+                          }
+                          sx={{
+                            minWidth: 0,
+                            flex: 1,
+                          }}
+                        />
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMessageQueue(prev => prev.filter((_, i) => i !== index));
+                          }}
+                          sx={{
+                            color: '#6b7280',
+                            padding: '2px',
+                            '&:hover': {
+                              color: '#ef4444',
+                              backgroundColor: 'transparent',
+                            },
+                          }}
+                        >
+                          <DeleteIcon sx={{ fontSize: '0.75rem' }} />
+                        </IconButton>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              </Box>
+            </Collapse>
+          </Box>
         )}
 
-
-        {/* Input Area - Compact with Paperclip */}
-        <GlassCard sx={{ p: 2, borderTop: '2px solid #374151', flexShrink: 0 }}>
-          <Box display="flex" alignItems="flex-end" gap={1}>
+        {/* Input Area - Bubble Style */}
+        <Box
+          sx={{
+            flexShrink: 0,
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            p: 0.625, // 5px padding from edge of chat space
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            zIndex: isInputCentered ? 10 : 1,
+            pointerEvents: 'auto',
+            transition: 'z-index 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
+        >
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              width: isInputCentered ? '600px' : '100%',
+              maxWidth: isInputCentered ? '90%' : '100%',
+              transform: isInputCentered 
+                ? 'translate3d(0, calc(-50vh + 50%), 0)' 
+                : 'translate3d(0, 0, 0)',
+              transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              perspective: 1000,
+              WebkitTransform: isInputCentered 
+                ? 'translate3d(0, calc(-50vh + 50%), 0)' 
+                : 'translate3d(0, 0, 0)',
+              WebkitBackfaceVisibility: 'hidden',
+              WebkitPerspective: 1000,
+            }}
+          >
+            <Box
+              sx={{
+                p: 1, // 8px padding inside bubble
+                borderRadius: 0.5, // 4px rounded corners
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+              }}
+            >
             <input
               type="file"
               ref={fileInputRef}
@@ -2589,27 +2985,61 @@ export default function ChatPage() {
               multiple
               style={{ display: 'none' }}
             />
-            <Tooltip title="Upload files">
-              <IconButton
-                onClick={() => fileInputRef.current?.click()}
-              sx={{
-                  color: '#9ca3af',
-                  '&:hover': {
-                    color: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                  },
-                }}
-              >
-                <AttachFileIcon />
-              </IconButton>
-            </Tooltip>
+            {/* Show uploaded files - positioned above input bar */}
+            {uploadedFiles.length > 0 && (
+              <Box sx={{ mb: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {uploadedFiles.map((file, index) => (
+                  <Box 
+                    key={index} 
+                    sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 0.5,
+                      px: 1,
+                      py: 0.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      borderRadius: '12px',
+                      border: '1px solid #374151',
+                    }}
+                  >
+                    <FileIcon sx={{ color: '#22c55e', fontSize: '0.875rem' }} />
+                    <Typography variant="caption" color="white" sx={{ fontSize: '0.75rem' }}>
+                      {file.name}
+                    </Typography>
+                    <IconButton
+                      size="small"
+                      onClick={() => setUploadedFiles(prev => prev.filter((_, i) => i !== index))}
+                      sx={{ 
+                        color: '#9ca3af', 
+                        '&:hover': { color: '#ef4444' }, 
+                        p: 0.25,
+                        minWidth: 'auto',
+                        width: '16px',
+                        height: '16px'
+                      }}
+                    >
+                      <CloseIcon sx={{ fontSize: '0.75rem' }} />
+                    </IconButton>
+                  </Box>
+                ))}
+              </Box>
+            )}
             <ChatMessageInputBar
               disabled={getCurrentSessionLoading()}
               placeholder="Ask me about stocks, crypto, portfolio optimization..."
               onSend={handleSendMessage}
+              onFileClick={() => fileInputRef.current?.click()}
+              isLoading={getCurrentSessionLoading()}
+              onStop={() => {
+                if (currentSession?.session_id) {
+                  console.log('🛑 ChatPage: Sending kill signal for session:', currentSession.session_id);
+                  unifiedMessageHandler.cancelAllMessagesForSession(currentSession.session_id);
+                }
+              }}
             />
           </Box>
-        </GlassCard>
+        </Box>
+      </Box>
       </Box>
 
       {/* Context Drawer */}
@@ -2929,3 +3359,4 @@ export default function ChatPage() {
     </Box>
   );
 }
+

@@ -12,6 +12,7 @@ import logging
 import sys
 import time
 import uuid
+from datetime import datetime
 from typing import Dict, Any
 
 # Fix OpenTelemetry context issue in Lambda environment
@@ -168,22 +169,36 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         logger.warning(f"Session {session_id} already killed before processing")
         raise Exception("Session has been terminated")
     
-    # Create a flag to track if processing should stop
-    kill_flag = threading.Event()
+    # Get kill flag from shared registry (for real-time WebSocket kill signals)
+    try:
+        from kill_signal_registry import get_kill_flag, is_killed
+        kill_flag = get_kill_flag(session_id)
+        logger.info(f"Using shared kill flag registry for session {session_id}")
+    except ImportError:
+        # Fallback: create local kill flag if registry not available
+        logger.warning("Kill signal registry not available, using local kill flag")
+        kill_flag = threading.Event()
+        is_killed = lambda sid: False
     
     def check_kill_signal():
-        """Periodically check for kill signal"""
+        """Periodically check for kill signal from both registry and DynamoDB"""
         session_manager = get_session_manager()
-        check_interval = 30.0  # Check every 30 seconds (much less frequent to reduce polling)
-        max_checks = 30  # Maximum 30 checks (15 minutes total)
+        check_interval = 1.0  # Check every 1 second for faster response
+        max_checks = 900  # Maximum 900 checks (15 minutes total)
         check_count = 0
         
         while not kill_flag.is_set() and check_count < max_checks:
             try:
-                # Get fresh session context to check for kill signal
+                # First check shared registry (fast, real-time WebSocket signals)
+                if is_killed(session_id):
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in registry for session {session_id}")
+                    kill_flag.set()
+                    break
+                
+                # Also check DynamoDB (fallback for persistence)
                 fresh_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
                 if fresh_context and fresh_context.get('killed_at'):
-                    logger.warning(f"Kill signal detected for session {session_id}: {fresh_context.get('kill_reason', 'unknown')}")
+                    logger.warning(f"🔴 KILL SIGNAL: Kill signal detected in DynamoDB for session {session_id}: {fresh_context.get('kill_reason', 'unknown')}")
                     kill_flag.set()
                     break
             except Exception as e:
@@ -472,9 +487,34 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             # Wait for completion with periodic kill signal checks
             while not future.done():
                 if kill_flag.is_set():
-                    logger.warning(f"Kill signal received, stopping agent processing for session {session_id}")
+                    logger.warning(f"🔴 KILL SIGNAL: Kill signal received, stopping agent processing for session {session_id}")
                     # Cancel the future if possible
                     future.cancel()
+                    
+                    # Send kill acknowledgment via WebSocket to frontend
+                    if ws_handler:
+                        try:
+                            # Send a final streaming chunk with is_complete=True to signal termination
+                            if ai_message_id and accumulated_streaming_content.get('value'):
+                                ws_handler.send_chat_response(
+                                    user_id, session_id, "", ai_message_id,
+                                    is_streaming=True, is_complete=True
+                                )
+                            
+                            # Also send explicit kill acknowledgment
+                            connection_ids = ws_handler.get_active_connections_for_user_session(user_id, session_id)
+                            for conn_id in connection_ids:
+                                kill_ack = {
+                                    'type': 'kill_signal_acknowledged',
+                                    'session_id': session_id,
+                                    'message': 'Processing cancelled successfully',
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                ws_handler.send_to_client(conn_id, kill_ack)
+                            logger.info(f"🔴 KILL SIGNAL: Sent kill acknowledgment to frontend for session {session_id}")
+                        except Exception as ws_error:
+                            logger.warning(f"Failed to send kill acknowledgment via WebSocket: {str(ws_error)}")
+                    
                     raise Exception("Session has been terminated")
                 
                 # Check if we've exceeded the maximum timeout

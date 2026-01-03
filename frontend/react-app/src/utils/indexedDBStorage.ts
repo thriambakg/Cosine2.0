@@ -16,7 +16,7 @@ class IndexedDBStorageManager {
   private storeName = 'keyValueStore';
   private db: IDBDatabase | null = null;
   private memoryStorage = new Map<string, StorageEntry<any>>();
-  private initPromise: Promise<void> | null> | null = null;
+  private initPromise: Promise<void | null> | null = null;
 
   constructor() {
     this.initPromise = this.initDB();
@@ -28,7 +28,7 @@ class IndexedDBStorageManager {
       return null;
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {

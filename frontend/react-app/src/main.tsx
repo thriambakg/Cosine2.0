@@ -10,6 +10,10 @@ import { theme } from './theme/theme'
 import configureAmplify from './config/amplify-config'
 import './index.css'
 
+// Initialize logging system early to override console methods globally
+// This must be imported before any other modules that use console.log
+import './utils/logger'
+
 // Configure Amplify before rendering the app
 configureAmplify()
 
