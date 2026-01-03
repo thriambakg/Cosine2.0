@@ -48,6 +48,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
 import { addAwardToContext, addMultipleAwardsToContext } from '../components/tiles/common';
+import { compressedSessionStorage } from '../utils/compressedStorage';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 
@@ -105,15 +106,21 @@ const GovtContractsSearchPage: React.FC = () => {
   // Session persistence key
   const SESSION_STORAGE_KEY = 'govt-contracts-search-page-state';
 
-  // Helper function to load state from sessionStorage
+  // Helper function to load state from sessionStorage (with compression support)
   const loadStateFromStorage = () => {
     try {
-      const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (savedState) {
-        return JSON.parse(savedState);
-      }
+      return compressedSessionStorage.getItem(SESSION_STORAGE_KEY);
     } catch (error) {
       console.error('❌ Error loading state from sessionStorage:', error);
+      // Fallback to uncompressed
+      try {
+        const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (savedState) {
+          return JSON.parse(savedState);
+        }
+      } catch (fallbackError) {
+        console.error('❌ Error loading state from uncompressed storage:', fallbackError);
+      }
     }
     return null;
   };
@@ -142,9 +149,9 @@ const GovtContractsSearchPage: React.FC = () => {
     };
   });
   
-  const [allSearchResults, setAllSearchResults] = useState<GovtContractAward[]>(
-    savedState?.allSearchResults || []
-  );
+  // Don't restore allSearchResults from saved state to avoid quota issues
+  // Results will be re-fetched if needed based on searchParams and lastEvaluatedKey
+  const [allSearchResults, setAllSearchResults] = useState<GovtContractAward[]>([]);
   const [currentResults, setCurrentResults] = useState<GovtContractAward[]>([]);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
@@ -731,19 +738,49 @@ const GovtContractsSearchPage: React.FC = () => {
 
   // Save state to sessionStorage
   useEffect(() => {
-    const stateToSave = {
-      searchParams,
-      allSearchResults,
-      lastEvaluatedKey,
-      hasMore,
-      currentPage,
-      pageSize,
-      searchFormExpanded,
-      advancedSearchExpanded,
-      visibleColumns,
-    };
-    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
-  }, [searchParams, allSearchResults, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded, advancedSearchExpanded, visibleColumns]);
+    try {
+      // Don't save allSearchResults to avoid quota exceeded errors
+      // Only save essential state - results will be re-fetched on page load if needed
+      const stateToSave = {
+        searchParams,
+        // Only save result count, not full results
+        resultCount: allSearchResults.length,
+        lastEvaluatedKey,
+        hasMore,
+        currentPage,
+        pageSize,
+        searchFormExpanded,
+        advancedSearchExpanded,
+        visibleColumns,
+        expandedFilters,
+      };
+      
+      // Use compressed storage (automatically compresses if beneficial)
+      compressedSessionStorage.setItem(SESSION_STORAGE_KEY, stateToSave);
+    } catch (error: any) {
+      // Handle quota exceeded errors gracefully
+      if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
+        console.warn('SessionStorage quota exceeded, saving minimal state only');
+        try {
+          // Save only essential state (compressed)
+          const minimalState = {
+            searchParams,
+            resultCount: allSearchResults.length,
+            lastEvaluatedKey,
+            hasMore,
+            currentPage,
+            pageSize,
+            visibleColumns,
+          };
+          compressedSessionStorage.setItem(SESSION_STORAGE_KEY, minimalState);
+        } catch (minimalError) {
+          console.error('Failed to save even minimal state:', minimalError);
+        }
+      } else {
+        console.error('Error saving state to sessionStorage:', error);
+      }
+    }
+  }, [searchParams, allSearchResults.length, lastEvaluatedKey, hasMore, currentPage, pageSize, searchFormExpanded, advancedSearchExpanded, visibleColumns, expandedFilters]);
 
   // Apply filters when they change
   useEffect(() => {

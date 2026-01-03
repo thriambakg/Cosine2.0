@@ -1911,6 +1911,7 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         # Check if source GSI still has more items to paginate
         has_more = False
         last_eval_key = None
+        last_gsi_item = None  # Track last GSI item processed (in GSI order) for pagination key creation
         
         if is_multi_recipient or is_multi_zip:
             # For multi-value queries, check if any config still has more items
@@ -2108,12 +2109,44 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                             logger.warning(f"last_evaluated_key structure doesn't match GSI {index_name} (hash_key={hash_key_name}, range_key={range_key_name}), ignoring pagination. Key has: {list(last_evaluated_key.keys())}")
                     else:
                         # No range key in query condition, but GSI might still have a range key
-                        # Accept last_evaluated_key if it has the hash key (range key presence is OK)
-                        if has_hash_key:
-                            params['ExclusiveStartKey'] = last_evaluated_key
-                            logger.info(f"Using last_evaluated_key for pagination (hash key only: {hash_key_name})")
+                        # For GSIs with range keys, DynamoDB requires the range key in ExclusiveStartKey
+                        # Check if this GSI has a range key by index name
+                        gsi_has_range_key = False
+                        gsi_range_key_name = None
+                        if index_name == 'ZipCodeFiscalYearIndex':
+                            gsi_has_range_key = True
+                            gsi_range_key_name = 'fiscal_year'
+                        elif index_name == 'RecipientNameFiscalYearIndex':
+                            gsi_has_range_key = True
+                            gsi_range_key_name = 'fiscal_year'
+                        elif index_name == 'AgencyFiscalYearIndex':
+                            gsi_has_range_key = True
+                            gsi_range_key_name = 'fiscal_year'
+                        elif index_name == 'StateFiscalYearIndex':
+                            gsi_has_range_key = True
+                            gsi_range_key_name = 'fiscal_year'
+                        elif index_name == 'AwardTypeFiscalYearIndex':
+                            gsi_has_range_key = True
+                            gsi_range_key_name = 'fiscal_year'
+                        elif index_name == 'FiscalYearObligationIndex':
+                            gsi_has_range_key = True
+                            gsi_range_key_name = 'fiscal_year'
+                        
+                        if gsi_has_range_key:
+                            # GSI has a range key, so last_evaluated_key must include it
+                            has_range_key = gsi_range_key_name in last_evaluated_key
+                            if has_hash_key and has_range_key:
+                                params['ExclusiveStartKey'] = last_evaluated_key
+                                logger.info(f"Using last_evaluated_key for pagination (GSI has range key {gsi_range_key_name})")
+                            else:
+                                logger.warning(f"last_evaluated_key missing required range key {gsi_range_key_name} for GSI {index_name}, ignoring pagination. Key has: {list(last_evaluated_key.keys())}")
                         else:
-                            logger.warning(f"last_evaluated_key missing hash key {hash_key_name} for GSI {index_name}, ignoring pagination. Key has: {list(last_evaluated_key.keys())}")
+                            # No range key in GSI, just need hash key
+                            if has_hash_key:
+                                params['ExclusiveStartKey'] = last_evaluated_key
+                                logger.info(f"Using last_evaluated_key for pagination (hash key only: {hash_key_name})")
+                            else:
+                                logger.warning(f"last_evaluated_key missing hash key {hash_key_name} for GSI {index_name}, ignoring pagination. Key has: {list(last_evaluated_key.keys())}")
                 else:
                     logger.warning(f"last_evaluated_key is not a dict (type: {type(last_evaluated_key)}), ignoring pagination")
             except Exception as e:
@@ -2266,11 +2299,16 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         skip_normal_fetch = False
     
     # Extract award_ids from GSI results (KEYS_ONLY projection only returns keys)
+    # Also create a mapping from award_id to GSI item for pagination key creation
     award_ids = []
+    gsi_item_map = {}  # Map award_id to GSI item (for pagination key creation)
+    last_gsi_item = None  # Track last GSI item processed (in GSI order)
     for item in gsi_items:
         award_id = item.get('award_id')
         if award_id:
             award_ids.append(award_id)
+            gsi_item_map[award_id] = item  # Store mapping for later use
+            last_gsi_item = item  # Keep updating to last item in GSI order
     
     # Don't limit award_ids yet - we need to fetch more items than the limit
     # because we'll filter in Python after BatchGetItem (some items may not match filters)
@@ -2371,6 +2409,13 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         logger.debug(f"Filter criteria: {json.dumps(filter_filters, default=str)}")
         filtered_items = []
         filter_failures = {}
+        # Create a mapping from award_id to its position in award_ids (GSI order)
+        # This allows us to sort filtered items by their GSI position
+        award_id_to_gsi_position = {}
+        if 'award_ids' in locals() and award_ids:
+            for gsi_pos, award_id in enumerate(award_ids):
+                award_id_to_gsi_position[award_id] = gsi_pos
+        
         for idx, item in enumerate(items):
             if apply_python_filter(item, filter_filters):
                 filtered_items.append(item)
@@ -2391,26 +2436,31 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         if len(filtered_items) == 0 and len(items) > 0:
             logger.warning(f"All {len(items)} items were filtered out. Sample filtered items: {json.dumps(list(filter_failures.values())[:3], default=str)}")
         
-        # If we don't have enough filtered results, continue querying with pagination (only for queries, not scans)
+        # Continue querying with pagination if we have more items in the GSI
+        # This is important for KEYS_ONLY GSIs where we need to fetch and filter more items
         # Continue pagination if:
-        # 1. We have fewer filtered items than the limit, AND
-        # 2. We have an initial_last_eval_key (meaning there might be more items), OR
-        # 3. We got exactly query_limit items from the first query (suggesting there might be more)
+        # 1. We have a last_eval_key (meaning there might be more items in GSI), AND
+        # 2. Either:
+        #    a. We have fewer filtered items than the limit (need more to fill the page), OR
+        #    b. We got exactly query_limit items from the first query (suggesting there might be more)
+        # Note: We check both initial_last_eval_key (first request) and last_eval_key (subsequent requests)
+        # to ensure we continue querying on all requests until we have enough items or the GSI is exhausted
+        current_last_eval_key = initial_last_eval_key if 'initial_last_eval_key' in locals() and initial_last_eval_key is not None else (last_eval_key if 'last_eval_key' in locals() and last_eval_key is not None else None)
         should_continue_pagination = (
-            len(filtered_items) < limit and 
             method == 'query' and 
             index_name and 
-            'initial_last_eval_key' in locals() and
-            (initial_last_eval_key is not None or len(items) >= query_limit)
+            current_last_eval_key is not None and
+            (len(filtered_items) < limit or len(items) >= query_limit)
         )
         
         if should_continue_pagination:
-            logger.info(f"Only found {len(filtered_items)} matching items, need {limit}. Continuing query with pagination... (initial_last_eval_key: {initial_last_eval_key is not None})")
+            logger.info(f"Found {len(filtered_items)} filtered items (need {limit}), continuing query with pagination to fetch all items from GSI... (current_last_eval_key: {current_last_eval_key is not None})")
             max_pagination_rounds = 50  # Increased limit for queries that might have many results (like zip codes)
             pagination_round = 0
-            current_last_eval_key = initial_last_eval_key
+            # current_last_eval_key is already set above (from initial_last_eval_key or last_eval_key)
             
-            while len(filtered_items) < limit and pagination_round < max_pagination_rounds:
+            # Continue until we have enough filtered items OR we've exhausted the GSI
+            while (len(filtered_items) < limit or current_last_eval_key is not None) and pagination_round < max_pagination_rounds:
                 pagination_round += 1
                 
                 # If we don't have a last_eval_key from previous round, we can't continue
@@ -2434,8 +2484,31 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     
                     logger.info(f"Pagination round {pagination_round}: Found {len(continuation_gsi_items)} more items from GSI")
                     
-                    # Extract award_ids
-                    continuation_award_ids = [item.get('award_id') for item in continuation_gsi_items if item.get('award_id')]
+                    # Extract award_ids and update gsi_item_map and last_gsi_item (track last item in GSI order)
+                    # Also update award_ids and award_id_to_gsi_position for sorting
+                    continuation_award_ids = []
+                    # Calculate the starting position for this continuation batch
+                    # This should be the current length of award_ids BEFORE we add the continuation items
+                    continuation_gsi_start_position = len(award_ids) if 'award_ids' in locals() and award_ids else 0
+                    for idx, item in enumerate(continuation_gsi_items):
+                        award_id = item.get('award_id')
+                        if award_id:
+                            continuation_award_ids.append(award_id)
+                            # Update award_ids list to maintain GSI order
+                            if 'award_ids' not in locals():
+                                award_ids = []
+                            award_ids.append(award_id)
+                            # Update award_id_to_gsi_position mapping
+                            # Use the index in the continuation batch, not len(continuation_award_ids)
+                            # This ensures correct position calculation
+                            if 'award_id_to_gsi_position' not in locals():
+                                award_id_to_gsi_position = {}
+                            award_id_to_gsi_position[award_id] = continuation_gsi_start_position + idx
+                            # Update gsi_item_map
+                            if 'gsi_item_map' not in locals():
+                                gsi_item_map = {}
+                            gsi_item_map[award_id] = item  # Store mapping for later use
+                            last_gsi_item = item  # Update to last item in GSI order
                     
                     # Fetch full items
                     continuation_items = []
@@ -2459,16 +2532,24 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
                     logger.info(f"Fetched {len(continuation_items)} full items for pagination round {pagination_round}")
                     
                     # Apply filters to continuation items
+                    # Don't break early - we need to process all items to ensure we don't miss any
+                    # The limit will be applied later when we return results
                     for item in continuation_items:
                         if apply_python_filter(item, filter_filters):
                             filtered_items.append(item)
-                            if len(filtered_items) >= limit:
-                                break
                     
                     logger.info(f"Pagination round {pagination_round}: Found {len(filtered_items)} total matching items so far")
                     
-                    if not current_last_eval_key or len(filtered_items) >= limit:
+                    # Continue as long as we have a last_eval_key (more items in GSI)
+                    # Stop only when we've exhausted the GSI, not when we have enough filtered items
+                    # This ensures we process all items from the GSI
+                    if not current_last_eval_key:
+                        logger.info(f"No more items in GSI, stopping pagination. Found {len(filtered_items)} filtered items total")
                         break
+                    
+                    # Update last_gsi_item to the last item from this continuation query
+                    if continuation_gsi_items:
+                        last_gsi_item = continuation_gsi_items[-1]
                         
                 except Exception as e:
                     logger.error(f"Error in pagination round {pagination_round}: {str(e)}", exc_info=True)
@@ -2476,8 +2557,23 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
         
         # Only set items from filtered_items if we didn't already set them (for scans, items are already set)
         if not skip_normal_fetch:
+            # Sort filtered_items by their GSI position to maintain GSI order
+            # This is critical because BatchGetItem doesn't preserve order
+            # We need to ensure items are in GSI order for correct pagination
+            if 'award_id_to_gsi_position' in locals() and award_id_to_gsi_position:
+                filtered_items.sort(key=lambda item: award_id_to_gsi_position.get(item.get('award_id'), float('inf')))
+                logger.info(f"Sorted {len(filtered_items)} filtered items by GSI position")
             items = filtered_items
             logger.info(f"Filtered to {len(items)} items matching all criteria")
+    
+    # Check if we have more items than the limit before limiting
+    has_more_filtered_items = len(items) > limit
+    
+    # Store the last item we're RETURNING (the limit-th item, or the last item if fewer than limit)
+    # This is the item we should use for pagination key creation
+    # We need to use the item at position (limit - 1) because that's the last item we're returning
+    # If we have fewer items than the limit, use the last item
+    last_item_before_limit = items[limit - 1] if len(items) > limit else (items[-1] if items else None)
     
     # Limit results to requested limit
     items = items[:limit]
@@ -2601,11 +2697,91 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
             logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
             serializable_last_key = None
     
+    # Determine if there are more results
+    # We have more if:
+    # 1. DynamoDB returned a LastEvaluatedKey (more items in GSI), OR
+    # 2. We have more filtered items than the limit (more items in our filtered list)
+    has_more_results = last_eval_key is not None or has_more_filtered_items
+    
+    # If we have more filtered items but no LastEvaluatedKey from DynamoDB,
+    # we need to create a pagination key from the last item we're RETURNING (not the last item we processed)
+    # CRITICAL: We must use the GSI item that corresponds to the last returned item, not the item itself
+    # This ensures we use the correct GSI key structure (fiscal_year, etc.) for pagination
+    # BatchGetItem doesn't preserve order, so we need to map award_id back to the GSI item
+    if has_more_filtered_items and not last_eval_key and method == 'query' and index_name and not serializable_last_key:
+        # Use the last item we're returning (the limit-th item, or last if fewer)
+        source_item = last_item_before_limit if last_item_before_limit else (results[-1] if results else None)
+        
+        # Try to find the corresponding GSI item for this award_id
+        # This ensures we use the correct GSI key structure for pagination
+        if source_item and 'award_id' in source_item and 'gsi_item_map' in locals() and gsi_item_map:
+            award_id = source_item.get('award_id')
+            gsi_item = gsi_item_map.get(award_id)
+            if gsi_item:
+                # Use the GSI item for pagination key (has correct GSI key structure)
+                source_item = gsi_item
+                logger.info(f"Using GSI item for pagination key (corresponds to last returned item at position {limit - 1}): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
+            else:
+                # Fallback to using the item itself
+                logger.info(f"GSI item not found for award_id {award_id}, using item itself for pagination key: {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
+        elif source_item:
+            logger.info(f"Using last returned item for pagination key (position {limit - 1}): {json.dumps({k: source_item.get(k) for k in ['recipient_zip_code', 'fiscal_year', 'award_id'] if k in source_item}, default=str)}")
+        else:
+            logger.warning("No source item available for pagination key creation")
+        
+        if source_item:
+            hash_key_name = key_condition.get('hash_key', [None])[0] if key_condition.get('hash_key') else None
+            range_key_name = key_condition.get('range_key', [None])[0] if key_condition.get('range_key') else None
+            
+            # Check if the GSI has a range key (even if we're not filtering by it)
+            # For GSIs with range keys, DynamoDB requires the range key in ExclusiveStartKey
+            gsi_has_range_key = False
+            gsi_range_key_name = None
+            if index_name == 'ZipCodeFiscalYearIndex':
+                gsi_has_range_key = True
+                gsi_range_key_name = 'fiscal_year'
+            elif index_name == 'RecipientNameFiscalYearIndex':
+                gsi_has_range_key = True
+                gsi_range_key_name = 'fiscal_year'
+            elif index_name == 'AgencyFiscalYearIndex':
+                gsi_has_range_key = True
+                gsi_range_key_name = 'fiscal_year'
+            elif index_name == 'StateFiscalYearIndex':
+                gsi_has_range_key = True
+                gsi_range_key_name = 'fiscal_year'
+            elif index_name == 'AwardTypeFiscalYearIndex':
+                gsi_has_range_key = True
+                gsi_range_key_name = 'fiscal_year'
+            elif index_name == 'FiscalYearObligationIndex':
+                gsi_has_range_key = True
+                gsi_range_key_name = 'fiscal_year'
+            
+            # Use GSI range key if available, otherwise use query range key
+            effective_range_key_name = gsi_range_key_name if gsi_has_range_key else range_key_name
+            
+            # Build pagination key based on GSI structure
+            pagination_key = {}
+            if hash_key_name and hash_key_name in source_item:
+                pagination_key[hash_key_name] = source_item[hash_key_name]
+            if effective_range_key_name and effective_range_key_name in source_item:
+                pagination_key[effective_range_key_name] = source_item[effective_range_key_name]
+            # Always include award_id for uniqueness
+            if 'award_id' in source_item:
+                pagination_key['award_id'] = source_item['award_id']
+            
+            if pagination_key:
+                try:
+                    serializable_last_key = convert_decimal_to_float(pagination_key)
+                    logger.info(f"Created pagination key from last item (has_more_filtered_items={has_more_filtered_items}): {json.dumps(serializable_last_key, default=str)}")
+                except Exception as e:
+                    logger.warning(f"Error converting pagination key to serializable format: {e}")
+                    serializable_last_key = None
+    
     return {
         'success': True,
         'results': enriched_results,
         'count': len(enriched_results),
-        'has_more': last_eval_key is not None,
+        'has_more': has_more_results,
         'last_evaluated_key': serializable_last_key,
         'method': method,
         'index_used': index_name

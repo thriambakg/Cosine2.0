@@ -425,11 +425,11 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
             logger.info("Portfolio volatility calculated with correlation matrix")
         except Exception as e:
             logger.warning(f"Correlation calculation failed: {e}, using simplified volatility")
-            # Simplified volatility calculation (assumes no correlation)
-            portfolio_variance = sum(weights[ticker] * (volatilities[i] ** 2) 
-                                   for i, ticker in enumerate(tickers))
-            portfolio_volatility = np.sqrt(portfolio_variance) * 100
-            logger.info("Portfolio volatility calculated using simplified method")
+        # Simplified volatility calculation (assumes no correlation)
+        portfolio_variance = sum(weights[ticker] * (volatilities[i] ** 2) 
+                               for i, ticker in enumerate(tickers))
+        portfolio_volatility = np.sqrt(portfolio_variance) * 100
+        logger.info("Portfolio volatility calculated using simplified method")
         
         # Calculate Sharpe ratio (assuming risk-free rate of 2%)
         risk_free_rate = 0.02
@@ -551,7 +551,7 @@ def calculate_portfolio_metrics(portfolio_tuples, period="1y"):
                     debug_print(f"Beta calculation skipped: insufficient data (portfolio_returns: {len(portfolio_returns)}, spy_returns: {len(spy_returns)})")
             else:
                 debug_print(f"Beta calculation skipped: spy_df empty or no stock data")
-        except Exception as e:
+    except Exception as e:
             logger.warning(f"Beta calculation failed: {e}")
             debug_print(f"Beta calculation error: {str(e)}")
             portfolio_beta = None  # Don't default to 1.0, let frontend show N/A
