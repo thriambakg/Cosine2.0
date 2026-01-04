@@ -608,23 +608,36 @@ const FolderTile: React.FC<FolderTileProps> = ({
     if (itemsToMove.length === 0) return;
     
     try {
-      for (const item of itemsToMove) {
-        const sourceFolderPath = currentFolderPath;
-        
-        // Don't move if already in the same folder
-        if (sourceFolderPath === destFolderPath) continue;
-        
-        const response = await filesystemAPI.moveItem({
-          user_id: user.id,
-          item_id: item.id,
-          source_folder_path: sourceFolderPath,
-          dest_folder_path: destFolderPath,
-        });
-        
-        if (!response.success) {
-          setError(response.error || 'Failed to move item');
-          return;
+      // Use bulk move operation for better performance
+      // Don't move if already in the same folder
+      const items = currentFolderPath !== destFolderPath
+        ? itemsToMove.map(item => ({
+            item_id: item.id,
+            source_folder_path: currentFolderPath,
+          }))
+        : [];
+      
+      if (items.length === 0) {
+        // All items are already in the destination folder
+        setMoveDialogOpen(false);
+        return;
+      }
+      
+      const response = await filesystemAPI.moveBulkItems({
+        user_id: user.id,
+        items: items,
+        dest_folder_path: destFolderPath,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to move:`, result.errors);
+          setError(`Failed to move ${result.errors.length} item(s). Check console for details.`);
         }
+      } else {
+        setError(response.error || 'Failed to move items');
+        return;
       }
       
       // Reload folder contents
@@ -729,24 +742,37 @@ const FolderTile: React.FC<FolderTileProps> = ({
         destFolderPath = currentFolderPath;
       }
       
-      // Move all items
-      for (const item of itemsToMove) {
-        const sourceFolderPath = currentFolderPath;
-        
-        // Don't move if already in the same folder
-        if (sourceFolderPath === destFolderPath) continue;
-        
-        const response = await filesystemAPI.moveItem({
-          user_id: user.id,
-          item_id: item.id,
-          source_folder_path: sourceFolderPath,
-          dest_folder_path: destFolderPath,
-        });
-        
-        if (!response.success) {
-          setError(response.error || 'Failed to move item');
-          return;
+      // Use bulk move operation for better performance
+      // Don't move if already in the same folder
+      const items = currentFolderPath !== destFolderPath
+        ? itemsToMove.map(item => ({
+            item_id: item.id,
+            source_folder_path: currentFolderPath,
+          }))
+        : [];
+      
+      if (items.length === 0) {
+        // All items are already in the destination folder
+        setDraggedItem(null);
+        setDragOverItem(null);
+        return;
+      }
+      
+      const response = await filesystemAPI.moveBulkItems({
+        user_id: user.id,
+        items: items,
+        dest_folder_path: destFolderPath,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to move:`, result.errors);
+          setError(`Failed to move ${result.errors.length} item(s). Check console for details.`);
         }
+      } else {
+        setError(response.error || 'Failed to move items');
+        return;
       }
       
       // Reload folder contents
@@ -783,25 +809,27 @@ const FolderTile: React.FC<FolderTileProps> = ({
     if (itemsToDelete.length === 0) return;
     
     try {
-      for (const item of itemsToDelete) {
-        let response;
-        if (item.type === 'folder') {
-          response = await filesystemAPI.deleteFolder({
-            user_id: user.id,
-            folder_path: item.id === 'root' ? '' : item.id,
-          });
-        } else {
-          response = await filesystemAPI.deleteItem({
-            user_id: user.id,
-            folder_path: currentFolderPath,
-            item_id: item.id,
-          });
+      // Use bulk delete operation for better performance
+      const items = itemsToDelete.map(item => ({
+        item_id: item.id,
+        folder_path: item.type === 'folder' ? (item.id === 'root' ? '' : item.id) : currentFolderPath,
+        is_folder: item.type === 'folder',
+      }));
+      
+      const response = await filesystemAPI.deleteBulkItems({
+        user_id: user.id,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to delete:`, result.errors);
+          setError(`Failed to delete ${result.errors.length} item(s). Check console for details.`);
         }
-        
-        if (!response.success) {
-          setError(response.error || 'Failed to delete item');
-          return;
-        }
+      } else {
+        setError(response.error || 'Failed to delete items');
+        return;
       }
       
       setItemContextMenuAnchor(null);

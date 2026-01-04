@@ -1093,24 +1093,35 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         selectedFilings.has(filing.id || filing.filing_uuid || filing.PK || '')
       );
 
-      // Save each filing to the filesystem with FULL data
-      for (const filing of selectedFilingObjects) {
+      // Save all filings to the filesystem with FULL data using bulk operation
+      const items = selectedFilingObjects.map(filing => {
         const filingId = filing.id || filing.filing_uuid || `filing_${Date.now()}`;
         const title = filing.registrant_name 
           ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
           : `LDA Filing ${filingId}`;
-        
-        // Use full data mode for filesystem - send complete filing object with all fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: filing, // Full filing object with all fields
           title: title,
-          item_type: 'lda_disclosure',
-        });
-      }
+          item_type: 'lda_disclosure' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedFilingObjects.length} filing(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedFilingObjects.length} of ${selectedFilingObjects.length} filing(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} filing(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save filings');
+      }
       setSelectedFilings(new Set());
     } catch (error) {
       console.error('Error saving filings to filesystem:', error);

@@ -480,46 +480,58 @@ const FilesPage: React.FC = () => {
     const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
     
     try {
-      for (const item of itemsToDelete) {
-        if (item.type === 'folder') {
-          const response = await filesystemAPI.deleteFolder({
-            user_id: user.id,
-            folder_path: item.id === 'root' ? '' : item.id,
-          });
-          
-          if (response.success) {
-            setItems(prev => {
-              const newMap = new Map(prev);
+      // Use bulk delete operation for better performance
+      const items = itemsToDelete.map(item => ({
+        item_id: item.id,
+        folder_path: item.type === 'folder' ? (item.id === 'root' ? '' : item.id) : folderPath,
+        is_folder: item.type === 'folder',
+      }));
+      
+      const response = await filesystemAPI.deleteBulkItems({
+        user_id: user.id,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        const deletedItemIds = new Set(result?.results?.map((r: any) => r.item_id) || []);
+        
+        // Update local state for successfully deleted items
+        setItems(prev => {
+          const newMap = new Map(prev);
+          itemsToDelete.forEach(item => {
+            if (deletedItemIds.has(item.id)) {
               newMap.delete(item.id);
-              Array.from(newMap.values()).forEach(child => {
-                if (child.parentId === item.id) {
-                  newMap.delete(child.id);
-                }
-              });
-              return newMap;
-            });
-          }
-        } else {
-          const response = await filesystemAPI.deleteItem({
-            user_id: user.id,
-            folder_path: folderPath,
-            item_id: item.id,
+              // Also remove children if it was a folder
+              if (item.type === 'folder') {
+                Array.from(newMap.values()).forEach(child => {
+                  if (child.parentId === item.id) {
+                    newMap.delete(child.id);
+                  }
+                });
+              }
+            }
           });
-          
-          if (response.success) {
-            setItems(prev => {
-              const newMap = new Map(prev);
-              newMap.delete(item.id);
-              return newMap;
-            });
-          }
+          return newMap;
+        });
+        
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to delete:`, result.errors);
         }
+      } else {
+        console.error('Failed to delete items:', response.error);
       }
       
+      // Reload current folder
       await loadFolderContents(folderPath);
+      
+      // Clear selection
       setSelectedItems(new Set());
+      setContextMenuAnchor(null);
+      setSelectedItem(null);
     } catch (error) {
       console.error('Error deleting items:', error);
+      // TODO: Show error message
     }
   };
 
@@ -944,50 +956,46 @@ const FilesPage: React.FC = () => {
     try {
       const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
       
-      // Delete all selected items
-      for (const item of itemsToDelete) {
-        if (item.type === 'folder') {
-          const response = await filesystemAPI.deleteFolder({
-            user_id: user.id,
-            folder_path: item.id === 'root' ? '' : item.id,
-          });
-          
-          if (response.success) {
-            // Remove from local state
-            setItems(prev => {
-              const newMap = new Map(prev);
+      // Use bulk delete operation for better performance
+      const items = itemsToDelete.map(item => ({
+        item_id: item.id,
+        folder_path: item.type === 'folder' ? (item.id === 'root' ? '' : item.id) : folderPath,
+        is_folder: item.type === 'folder',
+      }));
+      
+      const response = await filesystemAPI.deleteBulkItems({
+        user_id: user.id,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        const deletedItemIds = new Set(result?.results?.map((r: any) => r.item_id) || []);
+        
+        // Update local state for successfully deleted items
+        setItems(prev => {
+          const newMap = new Map(prev);
+          itemsToDelete.forEach(item => {
+            if (deletedItemIds.has(item.id)) {
               newMap.delete(item.id);
-              // Also remove children
-              Array.from(newMap.values()).forEach(child => {
-                if (child.parentId === item.id) {
-                  newMap.delete(child.id);
-                }
-              });
-              return newMap;
-            });
-          } else {
-            console.error('Failed to delete folder:', response.error);
-            // TODO: Show error message
-          }
-        } else {
-          const response = await filesystemAPI.deleteItem({
-            user_id: user.id,
-            folder_path: folderPath,
-            item_id: item.id,
+              // Also remove children if it was a folder
+              if (item.type === 'folder') {
+                Array.from(newMap.values()).forEach(child => {
+                  if (child.parentId === item.id) {
+                    newMap.delete(child.id);
+                  }
+                });
+              }
+            }
           });
-          
-          if (response.success) {
-            // Remove from local state
-            setItems(prev => {
-              const newMap = new Map(prev);
-              newMap.delete(item.id);
-              return newMap;
-            });
-          } else {
-            console.error('Failed to delete item:', response.error);
-            // TODO: Show error message
-          }
+          return newMap;
+        });
+        
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to delete:`, result.errors);
         }
+      } else {
+        console.error('Failed to delete items:', response.error);
       }
       
       // Reload current folder
@@ -1075,8 +1083,11 @@ const FilesPage: React.FC = () => {
       try {
         const parsedIds = JSON.parse(dragData);
         if (Array.isArray(parsedIds)) {
-          // Multiple items
-          itemsToMove = parsedIds.map(id => items.get(id)).filter(Boolean) as FileSystemItem[];
+          // Multiple items - use the component state Map
+          itemsToMove = parsedIds.map((id: string) => {
+            const item = items.get(id);
+            return item;
+          }).filter((item): item is FileSystemItem => Boolean(item));
         } else {
           // Single item
           itemsToMove = [draggedItem];
@@ -1103,41 +1114,61 @@ const FilesPage: React.FC = () => {
         destFolderPath = targetItem.parentId === 'root' ? '' : targetItem.parentId || '';
       }
       
-      // Move all items
-      const sourceFolderPaths = new Set<string>();
-      for (const item of itemsToMove) {
-        const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
-        
-        // Don't move if already in the same folder
-        if (sourceFolderPath === destFolderPath) continue;
-        
-        sourceFolderPaths.add(sourceFolderPath);
-        
-        const response = await filesystemAPI.moveItem({
-          user_id: user.id,
+      // Use bulk move operation for better performance
+      const itemsToMoveData = itemsToMove
+        .filter(item => {
+          const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
+          // Don't move if already in the same folder
+          return sourceFolderPath !== destFolderPath;
+        })
+        .map(item => ({
           item_id: item.id,
-          source_folder_path: sourceFolderPath,
-          dest_folder_path: destFolderPath,
+          source_folder_path: item.parentId === 'root' ? '' : item.parentId || '',
+        }));
+      
+      if (itemsToMoveData.length === 0) {
+        // All items are already in the destination folder
+        setDraggedItem(null);
+        setDragOverItem(null);
+        setDragOverFolder(null);
+        return;
+      }
+      
+      const sourceFolderPaths = new Set(itemsToMoveData.map(item => item.source_folder_path));
+      
+      const response = await filesystemAPI.moveBulkItems({
+        user_id: user.id,
+        items: itemsToMoveData,
+        dest_folder_path: destFolderPath,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        const movedItems = result?.results || [];
+        
+        // Update local state for successfully moved items
+        movedItems.forEach((moved: any) => {
+          if (moved.success && moved.result) {
+            setItems(prev => {
+              const newMap = new Map(prev);
+              const itemToUpdate = newMap.get(moved.item_id);
+              if (itemToUpdate) {
+                newMap.set(moved.item_id, {
+                  ...itemToUpdate,
+                  parentId: destFolderPath || 'root',
+                  updated_at: moved.result.updated_at || Date.now(),
+                });
+              }
+              return newMap;
+            });
+          }
         });
         
-        if (response.success && response.result) {
-          // Update local state
-          setItems(prev => {
-            const newMap = new Map(prev);
-            const itemToUpdate = newMap.get(item.id);
-            if (itemToUpdate) {
-              newMap.set(item.id, {
-                ...itemToUpdate,
-                parentId: destFolderPath || 'root',
-                updated_at: response.result.updated_at || Date.now(),
-              });
-            }
-            return newMap;
-          });
-        } else {
-          console.error('Failed to move item:', response.error);
-          // TODO: Show error message
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to move:`, result.errors);
         }
+      } else {
+        console.error('Failed to move items:', response.error);
       }
       
       // Reload all affected folders
@@ -1450,43 +1481,65 @@ const FilesPage: React.FC = () => {
     }
     
     try {
-      // Move all items
-      for (const item of itemsToMoveArray) {
-        const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
-        
-        // Skip invalid moves (already validated above, but double-check)
-        if (sourceFolderPath === destFolderPath) continue;
-        if (item.type === 'folder') {
-          if (destinationFolderId === item.id || (destinationFolderId && isDescendant(destinationFolderId, item.id))) {
-            continue;
+      // Use bulk move operation for better performance
+      const items = itemsToMoveArray
+        .filter(item => {
+          const sourceFolderPath = item.parentId === 'root' ? '' : item.parentId || '';
+          // Skip invalid moves (already validated above, but double-check)
+          if (sourceFolderPath === destFolderPath) return false;
+          if (item.type === 'folder') {
+            if (destinationFolderId === item.id || (destinationFolderId && isDescendant(destinationFolderId, item.id))) {
+              return false;
+            }
           }
-        }
-        
-        const response = await filesystemAPI.moveItem({
-          user_id: user.id,
+          return true;
+        })
+        .map(item => ({
           item_id: item.id,
-          source_folder_path: sourceFolderPath,
-          dest_folder_path: destFolderPath,
+          source_folder_path: item.parentId === 'root' ? '' : item.parentId || '',
+        }));
+      
+      if (items.length === 0) {
+        // No valid moves
+        setMoveDialogOpen(false);
+        setItemToMove(null);
+        setItemsToMove([]);
+        return;
+      }
+      
+      const response = await filesystemAPI.moveBulkItems({
+        user_id: user.id,
+        items: items,
+        dest_folder_path: destFolderPath,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        const movedItems = result?.results || [];
+        
+        // Update local state for successfully moved items
+        movedItems.forEach((moved: any) => {
+          if (moved.success && moved.result) {
+            setItems(prev => {
+              const newMap = new Map(prev);
+              const itemToUpdate = newMap.get(moved.item_id);
+              if (itemToUpdate) {
+                newMap.set(moved.item_id, {
+                  ...itemToUpdate,
+                  parentId: destinationFolderId || 'root',
+                  updated_at: moved.result.updated_at || Date.now(),
+                });
+              }
+              return newMap;
+            });
+          }
         });
         
-        if (response.success && response.result) {
-          // Update local state
-          setItems(prev => {
-            const newMap = new Map(prev);
-            const itemToUpdate = newMap.get(item.id);
-            if (itemToUpdate) {
-              newMap.set(item.id, {
-                ...itemToUpdate,
-                parentId: destinationFolderId || 'root',
-                updated_at: response.result.updated_at || Date.now(),
-              });
-            }
-            return newMap;
-          });
-        } else {
-          console.error('Failed to move item:', response.error);
-          // TODO: Show error message
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to move:`, result.errors);
         }
+      } else {
+        console.error('Failed to move items:', response.error);
       }
       
       // Reload all affected folders

@@ -51,6 +51,7 @@ import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDial
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -205,6 +206,14 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
   const { openItemDetails } = useDialogManagerHelpers();
+  const { isEasyMode } = useEasyMode();
+  
+  // Helper to get 3 months ago date
+  const getThreeMonthsAgo = () => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 3);
+    return date.toISOString().split('T')[0];
+  };
   
   // Debug authentication state
   useEffect(() => {
@@ -242,7 +251,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   };
   
   const [currentSearchParams, setCurrentSearchParams] = useState<SECSearchParams>({
-    dateFrom: initialSearchParams.dateFrom || '2001-01-01',
+    dateFrom: initialSearchParams.dateFrom || (isEasyMode ? getThreeMonthsAgo() : '2001-01-01'),
     dateTo: initialSearchParams.dateTo || new Date().toISOString().split('T')[0],
     cik: initialSearchParams.cik,
     entityName: normalizeEntityName(initialSearchParams.entityName),
@@ -250,6 +259,16 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     formTypes: initialSearchParams.formTypes,
     located: initialSearchParams.located,
   });
+  
+  // Update dateFrom when easy mode changes
+  useEffect(() => {
+    if (isEasyMode && !initialSearchParams.dateFrom) {
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        dateFrom: getThreeMonthsAgo(),
+      }));
+    }
+  }, [isEasyMode]);
   // Store all results for client-side filtering
   const [allResults, setAllResults] = useState<SECSearchResult[]>([]);
 
@@ -1144,27 +1163,36 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         selectedResults.has(result.accession)
       );
 
-      // Save each filing to the filesystem with FULL data
+      // Save all filings to the filesystem with FULL data using bulk operation
       // Note: currentResults contains the full filing objects from the search API
       // This ensures we save the complete filing with all fields
-      for (const filing of selectedResultObjects) {
+      const items = selectedResultObjects.map(filing => {
         const title = filing.filingEntity 
           ? `SEC Filing - ${filing.filingEntity}${filing.form ? ` (${filing.form})` : ''}`
           : `SEC Filing ${filing.accession || ''}`;
-        
-        // FULL DATA MODE for filesystem - send complete filing object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: filing, // Full filing object with all fields
           title: title,
-          item_type: 'sec_filing',
-        });
-      }
+          item_type: 'sec_filing' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedResultObjects.length} filing(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedResultObjects.length} of ${selectedResultObjects.length} filing(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} filing(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save filings');
+      }
       setSelectedResults(new Set());
     } catch (error) {
       console.error('Error saving filings to filesystem:', error);
@@ -1314,6 +1342,8 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               onSearch={handleFilerSearch}
             />
 
+            {/* Keywords - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="Keywords"
               selectedItems={(() => {
@@ -1337,9 +1367,11 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               isLoading={false}
               disableAutocomplete={true}
             />
+            )}
           </Box>
 
-          {/* Row 2: Date Range - Filed from and Filed to */}
+          {/* Row 2: Date Range - Filed from and Filed to - Hidden in easy mode (auto-set to 3mo ago) */}
+          {!isEasyMode && (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
             <TextField
               label="Filed from"
@@ -1365,8 +1397,10 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               }}
             />
           </Box>
+          )}
 
-          {/* Row 3: Form Types and Location */}
+          {/* Row 3: Form Types and Location - Hidden in easy mode */}
+          {!isEasyMode && (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
             {/* Form Types - Button to open modal (like SEC page) */}
             <Box>
@@ -1464,6 +1498,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               </Select>
             </FormControl>
           </Box>
+          )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>

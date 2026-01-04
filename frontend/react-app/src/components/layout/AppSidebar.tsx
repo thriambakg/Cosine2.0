@@ -87,7 +87,7 @@ export default function AppSidebar() {
     other: 'Other',
   };
 
-  const categoryOrder = ['main', 'government_data', 'news', 'portfolio', 'analysis', 'other'];
+  const categoryOrder = ['main', 'government_data', 'news', 'portfolio', 'other']; // 'analysis' removed - can be re-enabled easily
 
   const renderNavigationSection = (category: string, items: typeof navigationItems) => {
     // Define colors for each category

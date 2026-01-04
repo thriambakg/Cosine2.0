@@ -23,7 +23,6 @@ import {
   IconButton,
   Menu,
   Collapse,
-  Slide,
   Chip,
   Tooltip,
   Pagination,
@@ -32,8 +31,6 @@ import {
   Search as SearchIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
-  KeyboardArrowLeft as KeyboardArrowLeftIcon,
-  KeyboardArrowRight as KeyboardArrowRightIcon,
   Dashboard as AddToContextIcon,
   Chat as SidebarChatIcon,
   ViewColumn as ViewColumnIcon,
@@ -42,6 +39,7 @@ import {
 import { ldaSearchAPI, ldaAutocompleteAPI, LDASearchFilters, LDAFiling, LDAAutocompleteItem } from '../services/api';
 import MultiSelectField from '../components/MultiSelectField';
 import { useAuth } from '../contexts/AuthContext';
+import { useEasyMode } from '../contexts/EasyModeContext';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../services/api';
@@ -112,6 +110,7 @@ const LDASearchPage: React.FC = () => {
   // Get user and session info for authenticated downloads
   const { user } = useAuth();
   const { openItemDetails } = useDialogManagerHelpers();
+  const { isEasyMode } = useEasyMode();
 
   // Initialize state from sessionStorage immediately
   const savedState = loadStateFromStorage();
@@ -930,24 +929,35 @@ const LDASearchPage: React.FC = () => {
         selectedFilings.has(filing.id || filing.filing_uuid || '')
       );
 
-      // Save each filing to the filesystem with FULL data
-      for (const filing of selectedFilingObjects) {
+      // Save all filings to the filesystem with FULL data using bulk operation
+      const items = selectedFilingObjects.map(filing => {
         const filingId = filing.id || filing.filing_uuid || `filing_${Date.now()}`;
         const title = filing.registrant_name 
           ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
           : `LDA Filing ${filingId}`;
-        
-        // Use full data mode for filesystem - send complete filing object with all fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: filing, // Full filing object with all fields
           title: title,
-          item_type: 'lda_disclosure',
-        });
-      }
+          item_type: 'lda_disclosure' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedFilingObjects.length} filing(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedFilingObjects.length} of ${selectedFilingObjects.length} filing(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} filing(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save filings');
+      }
       setSelectedFilings(new Set());
     } catch (error) {
       console.error('Error saving filings to filesystem:', error);
@@ -1130,7 +1140,8 @@ const LDASearchPage: React.FC = () => {
                     />
                   </Box>
 
-                  {/* Date Range */}
+                  {/* Date Range - Hidden in easy mode (query whole table) */}
+                  {!isEasyMode && (
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <TextField
                       label="Date From"
@@ -1189,8 +1200,10 @@ const LDASearchPage: React.FC = () => {
                       }}
                     />
                   </Box>
+                  )}
 
-                  {/* Amount Range */}
+                  {/* Amount Range - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <Box>
                     <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
                       Amount Range
@@ -1238,8 +1251,10 @@ const LDASearchPage: React.FC = () => {
                       />
                     </Box>
                   </Box>
+                  )}
 
-                  {/* Advanced Search */}
+                  {/* Advanced Search - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <Box sx={{ mt: 2 }}>
                     <Box
                       onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
@@ -1617,6 +1632,7 @@ const LDASearchPage: React.FC = () => {
                       </Box>
                     </Collapse>
                   </Box>
+                  )}
 
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>

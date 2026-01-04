@@ -19,7 +19,6 @@ import {
   CircularProgress,
   Checkbox,
   FormControlLabel,
-  FormGroup,
   Collapse,
   Select,
   MenuItem,
@@ -51,6 +50,7 @@ import {
 import { useSECSearch, useSECAutocomplete } from '../hooks/useAPI';
 import { SECSearchParams, SECSearchResult, SECAutocompleteSuggestion, secSearchAPI, filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { addFilingToContext, addMultipleFilingsToContext } from '../components/tiles/common';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
@@ -686,9 +686,22 @@ const SECSearchPage: React.FC = () => {
   // Get user and session info for authenticated downloads
   const { user } = useAuth();
   const { openItemDetails } = useDialogManagerHelpers();
+  const { isEasyMode } = useEasyMode();
+  
+  // Debug: Log easy mode changes
+  useEffect(() => {
+    console.log('🔧 SECSearchPage: Easy mode changed to:', isEasyMode);
+  }, [isEasyMode]);
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
+  
+  // Helper to get 3 months ago date
+  const getThreeMonthsAgo = () => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 3);
+    return date.toISOString().split('T')[0];
+  };
 
   // Helper function to load state from sessionStorage
   const loadStateFromStorage = () => {
@@ -709,7 +722,7 @@ const SECSearchPage: React.FC = () => {
   // Separate search parameters (applied on Search button click) from filters (applied immediately)
   const [searchParams, setSearchParams] = useState<SECSearchParams>(
     savedState?.searchParams || {
-      dateFrom: '2001-01-01',
+      dateFrom: isEasyMode ? getThreeMonthsAgo() : '2001-01-01',
       dateTo: new Date().toISOString().split('T')[0],
       // Include filers, keywords, and form types in search params
       cik: savedState?.searchParams?.cik || undefined,
@@ -723,6 +736,16 @@ const SECSearchPage: React.FC = () => {
       filmNumber: savedState?.searchParams?.filmNumber || undefined,
     }
   );
+  
+  // Update dateFrom when easy mode changes
+  useEffect(() => {
+    if (isEasyMode) {
+      setSearchParams(prev => ({
+        ...prev,
+        dateFrom: getThreeMonthsAgo(),
+      }));
+    }
+  }, [isEasyMode]);
   
   // Multi-select state for filers and keywords (part of search parameters)
   const [selectedFilers, setSelectedFilers] = useState<SECAutocompleteSuggestion[]>(
@@ -1725,21 +1748,32 @@ const SECSearchPage: React.FC = () => {
     try {
       const selectedFilingObjects = currentResults.filter((_, idx) => selectedFilings.has(idx));
 
-      // Save each filing to the filesystem with FULL data
-      for (const filing of selectedFilingObjects) {
+      // Save all filings to the filesystem with FULL data using bulk operation
+      const items = selectedFilingObjects.map(filing => {
         const title = `${filing.form || 'SEC Filing'} - ${filing.filingEntity || filing.reportingFor || 'Unknown Entity'}`;
-        
-        // Use full data mode for filesystem - send complete filing object with all fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: filing, // Full filing object with all fields
           title: title,
-          item_type: 'sec_filing',
-        });
-      }
+          item_type: 'sec_filing' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedFilingObjects.length} filing(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedFilingObjects.length} of ${selectedFilingObjects.length} filing(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} filing(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save filings');
+      }
       setSelectedFilings(new Set());
       setFileBrowserOpen(false);
     } catch (error) {
@@ -1976,21 +2010,24 @@ const SECSearchPage: React.FC = () => {
                 onSearch={handleFilerSearch}
               />
 
-              {/* Multi-Select Keywords */}
-              <MultiSelectField<string>
-                label="Keywords"
-                selectedItems={selectedKeywords}
-                onItemsChange={setSelectedKeywords}
-                suggestions={[]}
-                renderItem={(keyword) => keyword}
-                getItemKey={(keyword) => keyword}
-                placeholder="Type keyword and press Enter to add..."
-                allowCustomInput={true}
-                isLoading={false}
-                disableAutocomplete={true}
-              />
+              {/* Multi-Select Keywords - Hidden in easy mode */}
+              {!isEasyMode && (
+                <MultiSelectField<string>
+                  label="Keywords"
+                  selectedItems={selectedKeywords}
+                  onItemsChange={setSelectedKeywords}
+                  suggestions={[]}
+                  renderItem={(keyword) => keyword}
+                  getItemKey={(keyword) => keyword}
+                  placeholder="Type keyword and press Enter to add..."
+                  allowCustomInput={true}
+                  isLoading={false}
+                  disableAutocomplete={true}
+                />
+              )}
 
-              {/* Form Types - Button to open modal */}
+              {/* Form Types - Button to open modal - Hidden in easy mode */}
+              {!isEasyMode && (
               <Box>
                 <TextField
                   label="Filing category"
@@ -2052,8 +2089,10 @@ const SECSearchPage: React.FC = () => {
                   </Box>
                 )}
               </Box>
+              )}
 
-              {/* Location Filter */}
+              {/* Location Filter - Hidden in easy mode */}
+              {!isEasyMode && (
               <FormControl 
                 variant="outlined" 
                 size="medium"
@@ -2122,8 +2161,11 @@ const SECSearchPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
+              )}
 
-              {/* Date Range */}
+              {/* Date Range - Hidden in easy mode (auto-set to 3mo ago) */}
+              {!isEasyMode && (
+                <>
                 <TextField
                   label="Filed from"
                   type="date"
@@ -2168,6 +2210,8 @@ const SECSearchPage: React.FC = () => {
                     '& .MuiInputBase-input': { color: '#ffffff' },
                   }}
                 />
+                </>
+              )}
 
           {/* Search Button and Stop Button */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -2221,32 +2265,6 @@ const SECSearchPage: React.FC = () => {
                       Stop Search
               </Button>
             )}
-          </Box>
-
-                {/* Column Selection */}
-                <Box sx={{ p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', border: '1px solid #374151', borderRadius: '4px' }}>
-            <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
-              Select columns to display:
-            </Typography>
-                  <FormGroup>
-              {DEFAULT_COLUMNS.map((col) => (
-                <FormControlLabel
-                  key={col}
-                  control={
-                    <Checkbox
-                      checked={selectedColumns.length === 0 || selectedColumns.includes(col)}
-                      onChange={() => handleColumnToggle(col)}
-                      sx={{
-                        color: '#9ca3af',
-                        '&.Mui-checked': { color: '#3b82f6' },
-                      }}
-                    />
-                  }
-                  label={col}
-                  sx={{ color: '#9ca3af', '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                />
-              ))}
-            </FormGroup>
           </Box>
             </Box>
             </Box>
@@ -2921,8 +2939,8 @@ const SECSearchPage: React.FC = () => {
               </GlassCard>
             </Box>
 
-          {/* Right Sidebar - Client-side Filters */}
-        {allSearchResults.length > 0 && (
+          {/* Right Sidebar - Client-side Filters - Hidden in easy mode */}
+        {!isEasyMode && allSearchResults.length > 0 && (
             <GlassCard sx={{ 
               p: 2, 
               minWidth: 280, 

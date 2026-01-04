@@ -784,9 +784,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     try {
       const selectedTilesData = tiles.filter(tile => selectionState.selectedTiles.has(tile.id));
       
-      // Save each tile to the filesystem with FULL data
-      let successCount = 0;
-      for (const tile of selectedTilesData) {
+      // Save all tiles to the filesystem with FULL data using bulk operation
+      const items = selectedTilesData.map(tile => {
         // For filesystem, send full tile data including all configuration and results
         // The spread operator includes all tile properties, but we explicitly ensure
         // searchParams, filterSettings, and paginationState are included for search tiles
@@ -813,29 +812,29 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           ? `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} - ${tile.symbol}`
           : `${tile.type.charAt(0).toUpperCase() + tile.type.slice(1)} Tile`;
         
-        const response = await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: fullTileData, // Full tile object with all fields
           title: title,
-          item_type: 'tile',
-        });
-        
-        if (response.success) {
-          successCount++;
+          item_type: 'tile' as const,
+        };
+      });
+      
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        const successCount = result?.succeeded || selectedTilesData.length;
+        console.log(`✅ Saved ${successCount} of ${selectedTilesData.length} tile(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} tile(s) failed to save:`, result.errors);
         }
-      }
-      
-      console.log(`✅ Saved ${successCount} tile(s) to filesystem`);
-      
-      // Dispatch success notification for multiple items (API already dispatches for single items)
-      if (successCount > 1) {
-        const successEvent = new CustomEvent('filesystem-success', {
-          detail: { 
-            itemCount: successCount
-          }
-        });
-        window.dispatchEvent(successEvent);
+      } else {
+        throw new Error(response.error || 'Failed to save tiles');
       }
     } catch (error) {
       console.error('Error saving tiles to filesystem:', error);

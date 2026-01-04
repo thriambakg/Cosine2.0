@@ -48,6 +48,7 @@ import {
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
 import { policyAreaSuggestionsService } from '../services/policyAreaSuggestions';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
 import { addBillToContext, addMultipleBillsToContext } from '../components/tiles/common/contextManager';
@@ -96,6 +97,7 @@ const CongressBillsSearchPage: React.FC = () => {
   const { user } = useAuth();
   const { openItemDetails } = useDialogManagerHelpers();
   const {} = useGlobalChat();
+  const { isEasyMode } = useEasyMode();
   
   // Context menu state
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
@@ -135,6 +137,7 @@ const CongressBillsSearchPage: React.FC = () => {
       congress: Array.isArray(saved?.congress) ? saved.congress : [],
       policy_area: Array.isArray(saved?.policy_area) ? saved.policy_area : [],
       sponsor_party: Array.isArray(saved?.sponsor_party) ? saved.sponsor_party : [],
+      sponsor_state: Array.isArray(saved?.sponsor_state) ? saved.sponsor_state : [],
       latest_action_date_from: saved?.latest_action_date_from || '',
       latest_action_date_to: saved?.latest_action_date_to || '',
       bipartisan: saved?.bipartisan,
@@ -646,26 +649,35 @@ const CongressBillsSearchPage: React.FC = () => {
         selectedBills.has(bill.bill_id)
       );
 
-      // Save each bill to the filesystem with FULL data
+      // Save all bills to the filesystem with FULL data using bulk operation
       // Note: We use currentResults which contains the full bill objects from the search API
       // The search API already enriches bills with full data (including oversized bills from S3)
       // This ensures we save the complete bill with all fields: actions_json, cosponsors_json, amendments_json, etc.
-      for (const bill of selectedBillObjects) {
+      const items = selectedBillObjects.map(bill => {
         const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
-        
-        // FULL DATA MODE for filesystem - send complete bill object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: bill, // Full bill object: includes actions_json, cosponsors_json, amendments_json, etc.
           title: title,
-          item_type: 'congress_bill',
-        });
-      }
+          item_type: 'congress_bill' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedBillObjects.length} bill(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedBillObjects.length} of ${selectedBillObjects.length} bill(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} bill(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save bills');
+      }
     } catch (error) {
       console.error('Error saving bills to filesystem:', error);
     }
@@ -1015,7 +1027,8 @@ const CongressBillsSearchPage: React.FC = () => {
                     isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
                   />
 
-                  {/* Bill Type - Dropdown multi-select */}
+                  {/* Bill Type - Dropdown multi-select - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <MultiSelectField<string>
                     label="Bill Type"
                     selectedItems={searchParams.bill_type || []}
@@ -1026,8 +1039,10 @@ const CongressBillsSearchPage: React.FC = () => {
                     renderItem={(type) => type}
                     placeholder="Select bill types..."
                   />
+                  )}
 
-                  {/* Introduced Date From */}
+                  {/* Introduced Date From - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <TextField
                     label="Introduced Date From"
                     type="date"
@@ -1061,8 +1076,10 @@ const CongressBillsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
+                  )}
 
-                  {/* Introduced Date To */}
+                  {/* Introduced Date To - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <TextField
                     label="Introduced Date To"
                     type="date"
@@ -1088,8 +1105,10 @@ const CongressBillsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
+                  )}
 
-                  {/* Policy Area - Dropdown multi-select with autocomplete */}
+                  {/* Policy Area - Dropdown multi-select with autocomplete - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <MultiSelectField<string>
                     label="Policy Area"
                     selectedItems={searchParams.policy_area || []}
@@ -1106,8 +1125,10 @@ const CongressBillsSearchPage: React.FC = () => {
                     allowCustomInput={false}
                     isLoading={!isPolicyAreaDataLoaded}
                   />
+                  )}
 
-                  {/* Advanced Search Section */}
+                  {/* Advanced Search Section - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #374151' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
@@ -1334,6 +1355,7 @@ const CongressBillsSearchPage: React.FC = () => {
                       </Box>
                     </Collapse>
                   </Box>
+                  )}
 
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>

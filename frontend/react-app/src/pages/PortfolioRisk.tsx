@@ -399,7 +399,22 @@ export default function PortfolioRisk() {
       
       // Log if no data points were created
       if (portfolioChartData.length === 0) {
-        console.warn('⚠️ No compare chart data points created. Portfolio stocks:', expectedStockCount, 'Compare data points:', compareData?.chart_data?.length || 0);
+        console.warn('⚠️ No compare chart data points created.', {
+          portfolioStocks: expectedStockCount,
+          portfolioStockData: allStockData.map(({ symbol, data }) => ({
+            symbol,
+            hasData: !!data,
+            hasChartData: !!data?.chart_data,
+            chartDataLength: data?.chart_data?.length || 0,
+            samplePoint: data?.chart_data?.[0]
+          })),
+          compareDataPoints: compareData?.chart_data?.length || 0,
+          compareDataSample: compareData?.chart_data?.[0],
+          sortedTimesCount: sortedTimes.length,
+          initialPortfolioValue,
+          firstComparePrice,
+          normalizationFactor
+        });
       }
       
       return portfolioChartData;
@@ -635,7 +650,14 @@ export default function PortfolioRisk() {
           // Check if we have all required stocks in cache
           if (portfolioStocksData.length === stockSymbols.length) {
             // Check if we need compare stock data
-            if (chartType === 'compare' && compareStock) {
+            // If chartType is 'compare' but compareStock is not set, we can't proceed
+            if (chartType === 'compare') {
+              if (!compareStock || !compareStock.trim()) {
+                console.warn('⚠️ Compare chart type selected but no compare stock specified');
+                setError('Please select a stock to compare with');
+                setIsLoadingChart(false);
+                return;
+              }
               const compareSymbol = compareStock.trim().toUpperCase();
               const compareCacheKey = `portfolio-chart-cache-compare-${compareSymbol}-${timeframe}`;
               const cachedCompareStr = sessionStorage.getItem(compareCacheKey);
@@ -652,9 +674,9 @@ export default function PortfolioRisk() {
                 }
               }
               
-              // If no cached data or invalid cached data, fetch compare stock only
+              // If no cached data or invalid cached data, fetch compare stock ONLY (portfolio is already cached)
               if (!compareData || !compareData.chart_data || compareData.chart_data.length === 0) {
-                console.log('📥 Fetching compare stock data:', compareSymbol);
+                console.log('📥 Fetching compare stock data only (portfolio already cached):', compareSymbol);
                 try {
                   compareData = await fetchStockData({ ticker: compareSymbol, period: timeframe });
                   if (compareData && compareData.chart_data && compareData.chart_data.length > 0) {
@@ -694,7 +716,7 @@ export default function PortfolioRisk() {
                   setIsLoadingChart(false);
                   return;
                 } else {
-                  console.warn('Transformed compare chart data is empty');
+                  console.warn('⚠️ Transformed compare chart data is empty - this may indicate data mismatch');
                   setError('No overlapping time points between portfolio and comparison stock');
                   setIsLoadingChart(false);
                   return;
@@ -706,7 +728,8 @@ export default function PortfolioRisk() {
                 return;
               }
             } else {
-              // Transform cached data to requested chart type
+              // Not a compare chart - transform with null compareData
+              // Transform cached data to requested chart type (single or multiple)
               const transformedData = transformCachedDataToChart(
                 cachedData,
                 null,
@@ -723,9 +746,16 @@ export default function PortfolioRisk() {
                 lastThreeDataPoints: transformedData.slice(-3),
                 validEntries: validEntries.map(e => ({ stock: e.stock, shares: e.shares }))
               });
-              setChartData(transformedData);
-              setIsLoadingChart(false);
-              return;
+              
+              // Validate transformed data - if empty, fall through to fetch fresh data
+              if (transformedData.length > 0) {
+                setChartData(transformedData);
+                setIsLoadingChart(false);
+                return;
+              } else {
+                console.warn('⚠️ Cached chart data transformed to empty array, fetching fresh data');
+                // Fall through to fetch fresh data
+              }
             }
           }
         } catch (e) {
@@ -737,13 +767,69 @@ export default function PortfolioRisk() {
       // Need to fetch data (either no cache or incomplete cache)
       shouldCache = true;
       
+      // For compare mode with cached portfolio but missing compare stock, only fetch compare stock
+      if (chartType === 'compare' && compareStock && cachedDataStr) {
+        try {
+          const cachedData = JSON.parse(cachedDataStr);
+          const portfolioStocksData = stockSymbols.map(symbol => cachedData[symbol] || null).filter(Boolean);
+          
+          // If portfolio is cached but we're here, it means compare stock is missing
+          if (portfolioStocksData.length === stockSymbols.length) {
+            const compareSymbol = compareStock.trim().toUpperCase();
+            console.log('📥 Portfolio cached, fetching compare stock only:', compareSymbol);
+            
+            try {
+              const compareData = await fetchStockData({ ticker: compareSymbol, period: timeframe });
+              if (compareData && compareData.chart_data && compareData.chart_data.length > 0) {
+                const compareCacheKey = `portfolio-chart-cache-compare-${compareSymbol}-${timeframe}`;
+                sessionStorage.setItem(compareCacheKey, JSON.stringify(compareData));
+                console.log('✅ Cached compare stock data:', compareSymbol, `(${compareData.chart_data.length} points)`);
+                
+                // Transform with cached portfolio and fetched compare data
+                const transformedData = transformCachedDataToChart(
+                  cachedData,
+                  compareData,
+                  chartType,
+                  validEntries
+                );
+                
+                if (transformedData.length > 0) {
+                  setChartData(transformedData);
+                  setIsLoadingChart(false);
+                  return;
+                } else {
+                  console.warn('⚠️ Transformed compare chart data is empty after fetching compare stock');
+                  setError('No overlapping time points between portfolio and comparison stock');
+                  setIsLoadingChart(false);
+                  return;
+                }
+              } else {
+                console.error('Compare stock data missing chart_data or is empty');
+                setError(`No chart data available for comparison stock: ${compareSymbol}`);
+                setIsLoadingChart(false);
+                return;
+              }
+            } catch (error) {
+              console.error('Failed to fetch compare stock data:', error);
+              setError(`Failed to fetch data for comparison stock: ${compareSymbol}`);
+              setIsLoadingChart(false);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse cached data when checking for compare-only fetch:', e);
+          // Fall through to fetch all stocks
+        }
+      }
+      
       // Add compare stock if in compare mode
       const stocksToFetch = [...stockSymbols];
       if (chartType === 'compare' && compareStock) {
         stocksToFetch.push(compareStock.trim().toUpperCase());
       }
 
-      // Fetch data for all stocks
+      // Fetch data for all stocks (portfolio cache is missing or incomplete)
+      console.log('📥 Fetching all stock data (portfolio cache missing or incomplete):', stocksToFetch);
       const stockDataPromises = stocksToFetch.map(symbol =>
         fetchStockData({ ticker: symbol, period: timeframe })
       );
@@ -774,6 +860,21 @@ export default function PortfolioRisk() {
       const compareStockData = chartType === 'compare' && compareStock 
         ? allStockData[allStockData.length - 1] 
         : null;
+      
+      // Debug: Log the structure of fetched data
+      console.log('🔍 Fetched data structure:', {
+        portfolioStocksCount: portfolioStocksData.length,
+        compareStockData: compareStockData ? {
+          hasChartData: !!compareStockData.chart_data,
+          chartDataLength: compareStockData.chart_data?.length || 0,
+          samplePoint: compareStockData.chart_data?.[0]
+        } : null,
+        portfolioStocksSample: portfolioStocksData[0] ? {
+          hasChartData: !!portfolioStocksData[0].chart_data,
+          chartDataLength: portfolioStocksData[0].chart_data?.length || 0,
+          samplePoint: portfolioStocksData[0].chart_data?.[0]
+        } : null
+      });
       
       // Build cache object for transformation
       const cacheObj: { [key: string]: any } = {};

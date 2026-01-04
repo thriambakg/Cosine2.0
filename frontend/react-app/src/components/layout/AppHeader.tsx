@@ -26,7 +26,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 import { useDialogManager } from '../../contexts/DialogManagerContext';
+import { useEasyMode } from '../../contexts/EasyModeContext';
 import WindowsIcon from '../common/WindowsIcon';
+import { JellyToggle } from '../common/JellyToggle';
 
 export default function AppHeader() {
   const theme = useTheme();
@@ -37,6 +39,7 @@ export default function AppHeader() {
   const { isVisible: isGlobalChatVisible, toggle: toggleGlobalChat } = useGlobalChat();
   const { setDualScreenMode } = useDualScreenMode();
   const { dialogs, restoreDialog, closeDialog } = useDialogManager();
+  const { isEasyMode, toggleEasyMode } = useEasyMode();
   
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [windowsMenuAnchor, setWindowsMenuAnchor] = useState<null | HTMLElement>(null);
@@ -461,6 +464,23 @@ export default function AppHeader() {
                 },
               }}
             >
+              <MenuItem 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleEasyMode();
+                }}
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 2,
+                }}
+              >
+                <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>
+                  Easy Mode
+                </Typography>
+                <JellyToggle checked={isEasyMode} onChange={toggleEasyMode} />
+              </MenuItem>
               <MenuItem onClick={handleLogout}>
                 <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>Logout</Typography>
               </MenuItem>

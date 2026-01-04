@@ -19,8 +19,7 @@ import {
   TextField,
   IconButton,
   Avatar,
-  FormControl,
-  Select,
+  SelectChangeEvent,
   Menu,
   MenuItem,
   Chip,
@@ -47,7 +46,6 @@ import {
   Chat as ChatIcon,
   Add as AddIcon,
   Close as CloseIcon,
-  Psychology as BrainIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
   Dashboard as ContextIcon,
@@ -60,6 +58,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   ViewList as QueueIcon,
+  History as HistoryIcon,
 } from '@mui/icons-material';
 import ChatImportExportDialog from '@/components/dialogs/ChatImportExportDialog';
 
@@ -237,7 +236,7 @@ const TypingText = ({
 
 
 // Hoisted input bar to preserve local state across parent re-renders
-const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, isLoading, onStop }: { disabled: boolean; placeholder: string; onSend: (text: string) => void; onFileClick: () => void; isLoading?: boolean; onStop?: () => void }) => {
+const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, onModelClick, modelLabel, isLoading, onStop }: { disabled: boolean; placeholder: string; onSend: (text: string) => void; onFileClick: () => void; onModelClick: (e: React.MouseEvent<HTMLElement>) => void; modelLabel: string; isLoading?: boolean; onStop?: () => void }) => {
   const [value, setValue] = useState('');
   const onSendClick = () => {
     if (value.trim()) {
@@ -329,10 +328,10 @@ const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, 
           '& .MuiInput-input': {
             color: '#ffffff',
             fontSize: '0.875rem',
-            paddingTop: '5px',
-            paddingBottom: '5px',
-            paddingLeft: '5px',
-            paddingRight: '5px',
+            paddingTop: '3px',
+            paddingBottom: '3px',
+            paddingLeft: '3px',
+            paddingRight: '3px',
             lineHeight: '1.5',
             outline: 'none !important',
             border: 'none !important',
@@ -382,8 +381,45 @@ const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, 
       />
       {/* Icons Row - Below Message Area */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
-        {/* Left Side - Paperclip */}
+        {/* Left Side - Model Selection and Paperclip */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {/* Model Selection Bubble Dropdown */}
+          <Box 
+            sx={{ 
+              px: 1.25,
+              py: 0.5,
+              borderRadius: '9999px', // Pill shape
+              backgroundColor: 'rgba(55, 65, 81, 0.5)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              minWidth: 'fit-content',
+              '&:hover': {
+                backgroundColor: 'rgba(55, 65, 81, 0.7)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+              },
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onModelClick(e);
+            }}
+          >
+            <Typography
+              variant="caption"
+              sx={{
+                color: '#e5e7eb',
+                fontSize: '0.7rem',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+                lineHeight: 1,
+              }}
+            >
+              {modelLabel}
+            </Typography>
+          </Box>
+          {/* File Upload Icon */}
           <Tooltip title="Upload files">
             <IconButton
               size="small"
@@ -630,6 +666,20 @@ export default function ChatPage() {
   
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { selectedModel, setSelectedModel } = usePersistentModel();
+  
+  // Available models with nicknames, tooltips, and cost indicators (1-4 scale)
+  const availableModels = [
+    { value: 'claude-haiku-4-5', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness', cost: 1 },
+    { value: 'gpt-oss-20b', label: 'Smart', tooltip: 'Intelligent reasoning, complex problem-solving, efficient', cost: 2 },
+    { value: 'claude-sonnet-4', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed', cost: 3 },
+    { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos', cost: 3 },
+    { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis', cost: 4 },
+  ];
+
+  const handleModelChange = (event: SelectChangeEvent) => {
+    setSelectedModel(event.target.value);
+  };
+  
   const [missedResponseNotification] = useState<string | null>(null);
   // Typing messages for AI response animation
   const [typingMessages, setTypingMessages] = useState<Set<string>>(new Set());
@@ -660,6 +710,7 @@ export default function ChatPage() {
   }, [currentSession?.session_id, sessionLoadingStates]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Session selection for context
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
@@ -764,6 +815,25 @@ export default function ChatPage() {
       }
     }
   }, [currentSession?.session_id]);
+  
+  // Measure input area height to set messages container padding
+  useEffect(() => {
+    const measureInputArea = () => {
+      if (inputAreaRef.current && !isInputCentered) {
+        const height = inputAreaRef.current.offsetHeight;
+        setInputAreaHeight(height);
+      } else {
+        // When centered, no padding needed
+        setInputAreaHeight(0);
+      }
+    };
+    measureInputArea();
+    window.addEventListener('resize', measureInputArea);
+    // Also measure when queue expands/collapses or files change
+    return () => {
+      window.removeEventListener('resize', measureInputArea);
+    };
+  }, [isInputCentered, uploadedFiles, messageQueue]);
   
   // NEW: Unified messaging system for centralized message handling
   const {
@@ -1205,6 +1275,8 @@ export default function ChatPage() {
   const [visibleCount, setVisibleCount] = useState<number>(50);
   const userNearBottomRef = useRef<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [inputAreaHeight, setInputAreaHeight] = useState(160); // Default height in px
   
   // Clear loading state when session is deleted or changed
   useEffect(() => {
@@ -2427,78 +2499,19 @@ export default function ChatPage() {
           </Box>
 
 
-          {/* AI Model Selector */}
-          <Box sx={{ p: sidebarCollapsed ? 1 : 2, borderTop: '2px solid #374151' }}>
-            {sidebarCollapsed ? (
-              <Box display="flex" alignItems="center" justifyContent="center">
-                <Tooltip title={`AI Model: ${selectedModel}`} placement="right">
-                  <BrainIcon sx={{ color: '#9ca3af' }} />
-                </Tooltip>
-              </Box>
-            ) : (
-              <Box>
-                <Typography variant="caption" color="#9ca3af" sx={{ textTransform: 'uppercase', mb: 1, display: 'block' }}>
-                  AI Model
-                </Typography>
-                <FormControl size="small" fullWidth>
-                  <Select
-                    value={selectedModel || 'claude-sonnet-4'}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    sx={{
-                      color: 'white',
-                      '& .MuiOutlinedInput-notchedOutline': {
-                        borderColor: '#374151',
-                      },
-                      '& .MuiSelect-select': {
-                        padding: '8px 12px',
-                        fontSize: '0.875rem',
-                      },
-                      '&:hover .MuiOutlinedInput-notchedOutline': {
-                        borderColor: '#6b7280',
-                      },
-                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                        borderColor: '#3b82f6',
-                      },
-                    }}
-                  >
-                    <MenuItem value="claude-sonnet-4" title="Strikes ideal balance between intelligence and speed">
-                      Balanced
-                    </MenuItem>
-                    <MenuItem value="claude-haiku-4-5" title="Fastest, most compact model for near-instant responsiveness">
-                      Fast
-                    </MenuItem>
-                    <MenuItem value="nova-lite" title="Multimodal understanding model for text, images, and videos">
-                      Multimodal
-                    </MenuItem>
-                    <MenuItem value="gpt-oss-120b" title="Complex reasoning, extended thinking, sophisticated analysis">
-                      Deep
-                    </MenuItem>
-                    <MenuItem value="gpt-oss-20b" title="Intelligent reasoning, complex problem-solving, efficient">
-                      Smart
-                    </MenuItem>
-                  </Select>
-                </FormControl>
-              </Box>
-            )}
-          </Box>
         </GlassCard>
       </Drawer>
 
       {/* Main Chat Area */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', height: 'calc(100vh - 64px)', maxHeight: 'calc(100vh - 64px)', overflow: 'hidden' }}>
-        {/* Floating Menu - Top Right */}
-        <Box sx={{ 
-          position: 'absolute', 
-          top: 16, 
-          right: 16, 
-          zIndex: 1000,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 1,
-          alignItems: 'flex-end'
-        }}>
-          {/* Sidebar Toggle - Only shows when sidebar is completely closed */}
-          {!sidebarOpen && (
+        {/* Chat History Toggle - Top Left (only shows when sidebar is closed) */}
+        {!sidebarOpen && (
+          <Box sx={{ 
+            position: 'absolute', 
+            top: 16, 
+            left: 16, 
+            zIndex: 1000,
+          }}>
             <Tooltip title="Open Chat History">
               <IconButton 
                 onClick={() => setSidebarOpen(true)}
@@ -2512,11 +2525,23 @@ export default function ChatPage() {
                   },
                 }}
               >
-                <ChatIcon />
+                <HistoryIcon />
               </IconButton>
             </Tooltip>
-          )}
-          
+          </Box>
+        )}
+
+        {/* Floating Menu - Top Right */}
+        <Box sx={{ 
+          position: 'absolute', 
+          top: 16, 
+          right: 16, 
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1,
+          alignItems: 'flex-end'
+        }}>
           {/* Share Button */}
           <Tooltip title="Share Chat Session">
             <IconButton
@@ -2588,6 +2613,7 @@ export default function ChatPage() {
           overflow: 'auto', 
           px: 2,
           py: 1,
+          pb: isInputCentered ? 1 : `${inputAreaHeight + 10}px`, // Add bottom padding to prevent overlap with input area
           minHeight: 0,
           '&::-webkit-scrollbar': {
             width: '6px',
@@ -2976,6 +3002,7 @@ export default function ChatPage() {
 
         {/* Input Area - Bubble Style */}
         <Box
+          ref={inputAreaRef}
           sx={{
             flexShrink: 0,
             position: 'absolute',
@@ -3016,7 +3043,7 @@ export default function ChatPage() {
                 p: 1, // 8px padding inside bubble
                 borderRadius: 0.5, // 4px rounded corners
                 backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
                 boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
               }}
             >
@@ -3071,6 +3098,8 @@ export default function ChatPage() {
               placeholder="Ask me about stocks, crypto, portfolio optimization..."
               onSend={handleSendMessage}
               onFileClick={() => fileInputRef.current?.click()}
+              onModelClick={(e) => setModelMenuAnchor(e.currentTarget)}
+              modelLabel={availableModels.find(m => m.value === selectedModel)?.label || selectedModel || 'Model'}
               isLoading={getCurrentSessionLoading()}
               onStop={() => {
                 if (currentSession?.session_id) {
@@ -3397,6 +3426,84 @@ export default function ChatPage() {
             Add to Context ({selectedSessions.size} selected)
           </ListItemText>
         </MenuItem>
+      </Menu>
+
+      {/* Model Selection Menu */}
+      <Menu
+        anchorEl={modelMenuAnchor}
+        open={Boolean(modelMenuAnchor)}
+        onClose={() => setModelMenuAnchor(null)}
+        anchorOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(55, 65, 81, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: 1,
+            minWidth: 200,
+            mt: 0.5,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          },
+        }}
+      >
+        {availableModels.map((model) => (
+          <MenuItem
+            key={model.value}
+            onClick={() => {
+              handleModelChange({ target: { value: model.value } } as SelectChangeEvent);
+              setModelMenuAnchor(null);
+            }}
+            selected={selectedModel === model.value}
+            sx={{
+              color: '#e5e7eb',
+              '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+              '&.Mui-selected': {
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.3)' },
+              },
+            }}
+          >
+          <ListItemText>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flex: 1 }}>
+                <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                  {model.label}
+                </Typography>
+                <Typography sx={{ color: '#9ca3af', fontSize: '0.65rem', fontWeight: 400 }}>
+                  {model.value}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                {[1, 2, 3, 4].map((level) => (
+                  <Typography
+                    key={level}
+                    component="span"
+                    sx={{
+                      color: level <= (model.cost || 1) ? '#fbbf24' : '#4b5563',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      lineHeight: 1,
+                    }}
+                  >
+                    $
+                  </Typography>
+                ))}
+              </Box>
+            </Box>
+            {model.tooltip && (
+              <Typography sx={{ color: '#9ca3af', fontSize: '0.7rem' }}>
+                {model.tooltip}
+              </Typography>
+            )}
+          </ListItemText>
+          </MenuItem>
+        ))}
       </Menu>
     </Box>
   );

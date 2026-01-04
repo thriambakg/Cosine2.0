@@ -55,6 +55,7 @@ import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleT
 import MultiSelectField from '../MultiSelectField';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 
 interface NewsTileProps {
@@ -160,6 +161,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const { user } = useAuth();
+  const { isEasyMode } = useEasyMode();
   const { openItemDetails } = useDialogManagerHelpers();
   
   // Filter state for client-side filtering - restore from props if available
@@ -204,7 +206,23 @@ const NewsTile: React.FC<NewsTileProps> = ({
     categories?: string[];
     countries?: string[];
     dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
-  }>(searchParams);
+  }>({
+    ...searchParams,
+    dateRange: isEasyMode ? 'all' : searchParams.dateRange,
+  });
+  
+  // Update dateRange when easy mode changes
+  useEffect(() => {
+    if (isEasyMode) {
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        dateRange: 'all',
+        sources: [],
+        categories: [],
+        countries: [],
+      }));
+    }
+  }, [isEasyMode]);
   const [currentResults, setCurrentResults] = useState<NewsArticle[]>(articles);
   const paginationState = initialPaginationState;
   
@@ -865,25 +883,34 @@ const NewsTile: React.FC<NewsTileProps> = ({
         selectedArticles.has(article.id)
       );
 
-      // Save each article to the filesystem with FULL data
+      // Save all articles to the filesystem with FULL data using bulk operation
       // Note: currentResults contains the full article objects from the search API
       // This ensures we save the complete article with all fields
-      for (const article of selectedArticleObjects) {
+      const items = selectedArticleObjects.map(article => {
         const title = article.title || `News Article ${article.id || ''}`;
-        
-        // FULL DATA MODE for filesystem - send complete article object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: article, // Full article object with all fields
           title: title,
-          item_type: 'news_article',
-        });
-      }
+          item_type: 'news_article' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedArticleObjects.length} article(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedArticleObjects.length} of ${selectedArticleObjects.length} article(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} article(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save articles');
+      }
       setSelectedArticles(new Set());
     } catch (error) {
       console.error('Error saving articles to filesystem:', error);
@@ -1214,7 +1241,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
             disableAutocomplete={true}
           />
 
-          {/* Sources Search Field */}
+          {/* Sources Search Field - Hidden in easy mode */}
+          {!isEasyMode && (
           <MultiSelectField<string>
             label="Sources (Search Parameter)"
             selectedItems={currentSearchParams.sources || []}
@@ -1230,8 +1258,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
             placeholder="Enter source names..."
             helperText="Search by news source (e.g., Reuters, BBC, CNN)"
           />
+          )}
 
-          {/* Categories Search Field */}
+          {/* Categories Search Field - Hidden in easy mode */}
+          {!isEasyMode && (
           <FormControl size="small">
             <Autocomplete
               multiple
@@ -1263,8 +1293,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
               }
             />
           </FormControl>
+          )}
 
-          {/* Countries Search Field */}
+          {/* Countries Search Field - Hidden in easy mode */}
+          {!isEasyMode && (
           <FormControl size="small">
             <Autocomplete
               multiple
@@ -1296,8 +1328,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
               }
             />
           </FormControl>
+          )}
 
-          {/* Date Range */}
+          {/* Date Range - Hidden in easy mode (auto-set to 'all') */}
+          {!isEasyMode && (
           <FormControl size="small" fullWidth>
             <InputLabel sx={{ color: '#94a3b8' }}>Date Range</InputLabel>
             <Select
@@ -1333,6 +1367,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               <MenuItem value="all">All Time</MenuItem>
             </Select>
           </FormControl>
+          )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>

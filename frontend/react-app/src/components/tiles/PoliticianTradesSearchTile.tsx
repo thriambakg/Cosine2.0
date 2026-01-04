@@ -55,6 +55,7 @@ import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addTradeToC
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { securitySuggestionsServiceV2 } from '../../services/securitySuggestionsV2';
@@ -161,6 +162,14 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const { user } = useAuth();
   const { activeSessionId } = useGlobalChat();
   const { openItemDetails } = useDialogManagerHelpers();
+  const { isEasyMode } = useEasyMode();
+  
+  // Helper to get 3 months ago date
+  const getThreeMonthsAgo = () => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 3);
+    return date.toISOString().split('T')[0];
+  };
   
   // Debug authentication state
   useEffect(() => {
@@ -196,12 +205,26 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     transactionTypes: initialFilterSettings?.transactionTypes || [],
   });
 
+  const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>({
+    ...searchParams,
+    dateFrom: isEasyMode ? getThreeMonthsAgo() : searchParams.dateFrom,
+  });
+  
+  // Update dateFrom when easy mode changes
+  useEffect(() => {
+    if (isEasyMode) {
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        dateFrom: getThreeMonthsAgo(),
+      }));
+    }
+  }, [isEasyMode]);
+  
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>(searchParams);
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>(results);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
@@ -697,21 +720,32 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         selectedTrades.has(trade.tradeId)
       );
 
-      // Save each trade to the filesystem with FULL data
-      for (const trade of selectedTradeObjects) {
+      // Save all trades to the filesystem with FULL data using bulk operation
+      const items = selectedTradeObjects.map(trade => {
         const title = `${trade.politicianName || 'Politician'} - ${trade.securityName || trade.securitySymbol || 'Trade'}`;
-        
-        // Use full data mode for filesystem - send complete trade object with all fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: trade, // Full trade object with all fields (metadata, formS3Key, etc.)
           title: title,
-          item_type: 'politician_trade',
-        });
-      }
+          item_type: 'politician_trade' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedTradeObjects.length} trade(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedTradeObjects.length} of ${selectedTradeObjects.length} trade(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} trade(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save trades');
+      }
       setSelectedTrades(new Set());
     } catch (error) {
       console.error('Error saving trades to filesystem:', error);
@@ -1294,7 +1328,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             helperText="Search by symbol or company name (e.g., AAPL, Apple, Tesla)"
           />
 
-          {/* Date Range */}
+          {/* Date Range - Hidden in easy mode (auto-set to 3mo ago) */}
+          {!isEasyMode && (
           <Box display="flex" gap={2}>
             <TextField
               label="From Date"
@@ -1359,8 +1394,10 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               }}
             />
           </Box>
+          )}
 
-          {/* Position Filter */}
+          {/* Position Filter - Hidden in easy mode */}
+          {!isEasyMode && (
           <FormControl size="small">
             <Autocomplete
               multiple
@@ -1390,8 +1427,10 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               }
             />
           </FormControl>
+          )}
 
-          {/* Party Filter */}
+          {/* Party Filter - Hidden in easy mode */}
+          {!isEasyMode && (
           <FormControl size="small">
             <Autocomplete
               multiple
@@ -1421,8 +1460,10 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               }
             />
           </FormControl>
+          )}
 
-          {/* Transaction Type Filter */}
+          {/* Transaction Type Filter - Hidden in easy mode */}
+          {!isEasyMode && (
           <FormControl size="small">
             <Autocomplete
               multiple
@@ -1452,6 +1493,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               }
             />
           </FormControl>
+          )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>

@@ -448,19 +448,22 @@ const SidebarMessageInputBar = memo(({
         }}
       />
       {/* Icons Row - Below Message Area */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5 }}> {/* Increased vertical space */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
         {/* Left Side - Model Selection and Paperclip */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           {/* Model Selection Bubble Dropdown */}
           <Box 
             sx={{ 
-              px: 0.75,
-              py: 0.25,
-              borderRadius: 1,
+              px: 1.25,
+              py: 0.5,
+              borderRadius: '9999px', // Pill shape
               backgroundColor: 'rgba(55, 65, 81, 0.5)',
               border: '1px solid rgba(255, 255, 255, 0.1)',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              minWidth: 'fit-content',
               '&:hover': {
                 backgroundColor: 'rgba(55, 65, 81, 0.7)',
                 border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -475,9 +478,10 @@ const SidebarMessageInputBar = memo(({
               variant="caption"
               sx={{
                 color: '#e5e7eb',
-                fontSize: '0.75rem',
+                fontSize: '0.7rem',
                 fontWeight: 500,
                 whiteSpace: 'nowrap',
+                lineHeight: 1,
               }}
             >
               {modelLabel}
@@ -1294,13 +1298,13 @@ const GlobalChatSidebar: React.FC = () => {
   //   // ... complex unified handler logic removed for simplicity
   // }, [activeSessionId, user?.id, addToSharedCache]);
 
-  // Available models with nicknames and tooltips
+  // Available models with nicknames, tooltips, and cost indicators (1-4 scale)
   const availableModels = [
-    { value: 'claude-sonnet-4', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed' },
-    { value: 'claude-haiku-4-5', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness' },
-    { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos' },
-    { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis' },
-    { value: 'gpt-oss-20b', label: 'Smart', tooltip: 'Intelligent reasoning, complex problem-solving, efficient' },
+    { value: 'claude-haiku-4-5', label: 'Fast', tooltip: 'Fastest, most compact model for near-instant responsiveness', cost: 1 },
+    { value: 'gpt-oss-20b', label: 'Smart', tooltip: 'Intelligent reasoning, complex problem-solving, efficient', cost: 2 },
+    { value: 'claude-sonnet-4', label: 'Balanced', tooltip: 'Strikes ideal balance between intelligence and speed', cost: 3 },
+    { value: 'nova-lite', label: 'Multimodal', tooltip: 'Multimodal understanding model for text, images, and videos', cost: 3 },
+    { value: 'gpt-oss-120b', label: 'Deep', tooltip: 'Complex reasoning, extended thinking, sophisticated analysis', cost: 4 },
   ];
 
   // Removed unconditional smooth scroll; handled by guarded effect above
@@ -2813,9 +2817,9 @@ const GlobalChatSidebar: React.FC = () => {
         sx={{
           flex: 1,
           overflowY: 'auto',
-          px: 0.375, // 3px horizontal padding
-          py: 0.375, // 3px from top
-          pb: isInputCentered ? 0.375 : `${inputAreaHeight + 10}px`, // Add bottom padding to prevent overlap with input area
+          px: 1.250, // 5px horizontal padding
+          py: 1.250, // 5px from top
+          pb: isInputCentered ? 1.250 : `${inputAreaHeight + 10}px`, // Add bottom padding to prevent overlap with input area
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
@@ -3025,7 +3029,7 @@ const GlobalChatSidebar: React.FC = () => {
               p: 1, // 8px padding inside bubble
               borderRadius: 0.5, // 4px rounded corners
               backgroundColor: 'rgba(15, 23, 42, 0.95)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
             }}
           >
@@ -3737,9 +3741,32 @@ const GlobalChatSidebar: React.FC = () => {
           }}
         >
           <ListItemText>
-            <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-              {model.label}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flex: 1 }}>
+                <Typography sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                  {model.label}
+                </Typography>
+                <Typography sx={{ color: '#9ca3af', fontSize: '0.65rem', fontWeight: 400 }}>
+                  {model.value}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                {[1, 2, 3, 4].map((level) => (
+                  <Typography
+                    key={level}
+                    component="span"
+                    sx={{
+                      color: level <= (model.cost || 1) ? '#fbbf24' : '#4b5563',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      lineHeight: 1,
+                    }}
+                  >
+                    $
+                  </Typography>
+                ))}
+              </Box>
+            </Box>
             {model.tooltip && (
               <Typography sx={{ color: '#9ca3af', fontSize: '0.7rem' }}>
                 {model.tooltip}

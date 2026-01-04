@@ -43,6 +43,7 @@ import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrad
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
 import { securitySuggestionsServiceV2 } from '../services/securitySuggestionsV2';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { addTradeToContext, addMultipleTradesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
@@ -125,9 +126,17 @@ interface ExpandedFiltersState {
 const PoliticianTradesSearchPage: React.FC = () => {
   const { user } = useAuth();
   const { openItemDetails } = useDialogManagerHelpers();
+  const { isEasyMode } = useEasyMode();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'politician-trades-search-page-state';
+  
+  // Helper to get 3 months ago date
+  const getThreeMonthsAgo = () => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 3);
+    return date.toISOString().split('T')[0];
+  };
 
   // Helper function to load state from sessionStorage
   const loadStateFromStorage = () => {
@@ -148,7 +157,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
   // Search state
   const [searchParams, setSearchParams] = useState<PoliticianTradesSearchParams>(
     savedState?.searchParams || {
-      dateFrom: MIN_DATE,
+      dateFrom: isEasyMode ? getThreeMonthsAgo() : MIN_DATE,
       dateTo: new Date().toISOString().split('T')[0],
       // Initialize all search parameter arrays as empty
       politicianName: [],
@@ -160,6 +169,16 @@ const PoliticianTradesSearchPage: React.FC = () => {
       // amountRange is a single string, not array
     }
   );
+  
+  // Update dateFrom when easy mode changes
+  useEffect(() => {
+    if (isEasyMode && !savedState?.searchParams?.dateFrom) {
+      setSearchParams(prev => ({
+        ...prev,
+        dateFrom: getThreeMonthsAgo(),
+      }));
+    }
+  }, [isEasyMode]);
   
   // Local state for amount min/max (will be converted to amountRange for API)
   const [amountMin, setAmountMin] = useState<number | ''>(savedState?.amountMin || '');
@@ -730,21 +749,32 @@ const PoliticianTradesSearchPage: React.FC = () => {
     try {
       const selectedTradeObjects = currentResults.filter(trade => selectedTrades.has(trade.tradeId));
 
-      // Save each trade to the filesystem with FULL data
-      for (const trade of selectedTradeObjects) {
+      // Save all trades to the filesystem with FULL data using bulk operation
+      const items = selectedTradeObjects.map(trade => {
         const title = `${trade.politicianName || 'Politician'} - ${trade.securityName || trade.securitySymbol || 'Trade'}`;
-        
-        // Use full data mode for filesystem - send complete trade object with all fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: trade, // Full trade object with all fields (metadata, formS3Key, etc.)
           title: title,
-          item_type: 'politician_trade',
-        });
-      }
+          item_type: 'politician_trade' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedTradeObjects.length} trade(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedTradeObjects.length} of ${selectedTradeObjects.length} trade(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} trade(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save trades');
+      }
       setSelectedTrades(new Set());
     } catch (error) {
       console.error('Error saving trades to filesystem:', error);
@@ -1183,7 +1213,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   </IconButton>
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {/* Transaction Date Range */}
+            {/* Transaction Date Range - Hidden in easy mode (auto-set to 3mo ago) */}
+                  {!isEasyMode && (
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <TextField
                 label="Transaction Date From"
@@ -1260,6 +1291,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               />
             </Box>
+                  )}
 
                   {/* Politicians Search */}
                 <MultiSelectField<string>
@@ -1585,7 +1617,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
                     )}
                   </Box>
             
-                  {/* Advanced Search Parameters */}
+                  {/* Advanced Search Parameters - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <Box sx={{ mt: 2 }}>
                     <Box
                       onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
@@ -1767,6 +1800,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
               </Box>
                     </Collapse>
           </Box>
+                  )}
 
 
 

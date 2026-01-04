@@ -45,6 +45,7 @@ import {
 } from '../services/api';
 import { filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
 import { addAwardToContext, addMultipleAwardsToContext } from '../components/tiles/common';
@@ -103,6 +104,7 @@ const GovtContractsSearchPage: React.FC = () => {
   const { user } = useAuth();
   const { openItemDetails } = useDialogManagerHelpers();
   const {} = useGlobalChat();
+  const { isEasyMode } = useEasyMode();
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'govt-contracts-search-page-state';
@@ -145,10 +147,20 @@ const GovtContractsSearchPage: React.FC = () => {
       naics_code: Array.isArray(saved?.naics_code) ? saved.naics_code : [],
       psc_code: Array.isArray(saved?.psc_code) ? saved.psc_code : [],
       cfda_number: Array.isArray(saved?.cfda_number) ? saved.cfda_number : [],
-      date_year: saved?.date_year || undefined,
+      date_year: isEasyMode ? 2025 : (saved?.date_year || undefined),
       // Don't restore legacy date_from/date_to - they're no longer used
     };
   });
+  
+  // Update date_year when easy mode changes
+  useEffect(() => {
+    if (isEasyMode && !savedState?.searchParams?.date_year) {
+      setSearchParams(prev => ({
+        ...prev,
+        date_year: 2025,
+      }));
+    }
+  }, [isEasyMode]);
   
   // Don't restore allSearchResults from saved state to avoid quota issues
   // Results will be re-fetched if needed based on searchParams and lastEvaluatedKey
@@ -1011,27 +1023,36 @@ const GovtContractsSearchPage: React.FC = () => {
         selectedAwards.has(award.award_id)
       );
 
-      // Save each award to the filesystem with FULL data
+      // Save all awards to the filesystem with FULL data using bulk operation
       // Note: currentResults contains the full award objects from the search API
       // This ensures we save the complete award with all fields
-      for (const award of selectedAwardObjects) {
+      const items = selectedAwardObjects.map(award => {
         const title = award.recipient_name 
           ? `Government Contract - ${award.recipient_name}${award.awarding_agency_name ? ` / ${award.awarding_agency_name}` : ''}`
           : `Government Contract ${award.award_id || ''}`;
-        
-        // FULL DATA MODE for filesystem - send complete award object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: award, // Full award object with all fields
           title: title,
-          item_type: 'govt_contract',
-        });
-      }
+          item_type: 'govt_contract' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedAwardObjects.length} award(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedAwardObjects.length} of ${selectedAwardObjects.length} award(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} award(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save awards');
+      }
       setSelectedAwards(new Set());
     } catch (error) {
       console.error('Error saving awards to filesystem:', error);
@@ -1174,7 +1195,8 @@ const GovtContractsSearchPage: React.FC = () => {
                     allowCustomInput={false}
                   />
 
-                  {/* Recipient */}
+                  {/* Recipient - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <MultiSelectField<{ id?: string; name?: string; text?: string; [key: string]: any }>
                     label="Recipient"
                     selectedItems={(() => {
@@ -1216,6 +1238,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Search for recipients..."
                     allowCustomInput={false}
                   />
+                  )}
 
                   {/* State */}
                   <MultiSelectField<string>
@@ -1242,9 +1265,11 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Enter zip codes..."
                     disableAutocomplete={true}
                   />
-                </Box>
+                    </Box>
+                  </Box>
 
-                    {/* Date Range */}
+                    {/* Date Range - Hidden in easy mode (auto-set to 2025) */}
+                    {!isEasyMode && (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                   {/* Date Year */}
                   <TextField
@@ -1277,9 +1302,10 @@ const GovtContractsSearchPage: React.FC = () => {
                     }}
                   />
                 </Box>
-              </Box>
+                    )}
 
-                  {/* Advanced Search Section */}
+                  {/* Advanced Search Section - Hidden in easy mode */}
+                  {!isEasyMode && (
                   <Box sx={{ mt: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
@@ -1462,6 +1488,7 @@ const GovtContractsSearchPage: React.FC = () => {
                   </Box>
                 </Collapse>
               </Box>
+                  )}
 
                     {/* Search and Clear Buttons */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
@@ -1508,7 +1535,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         Clear
                       </Button>
                       </Box>
-                    </Box>
+                </Box>
               </Box>
             </GlassCard>
           ) : (

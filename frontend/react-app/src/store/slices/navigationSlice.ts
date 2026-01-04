@@ -40,13 +40,14 @@ const defaultNavigationItems: NavigationItem[] = [
     icon: 'FolderIcon',
     category: 'main'
   },
-  {
-    id: 'robinhood',
-    label: 'Robinhood',
-    path: '/robinhood',
-    icon: 'AccountBalanceWalletIcon',
-    category: 'portfolio'
-  },
+  // Temporarily hidden - can be re-enabled easily
+  // {
+  //   id: 'robinhood',
+  //   label: 'Robinhood',
+  //   path: '/robinhood',
+  //   icon: 'AccountBalanceWalletIcon',
+  //   category: 'portfolio'
+  // },
   {
     id: 'portfolio-risk',
     label: 'Portfolio Risk',
@@ -61,34 +62,35 @@ const defaultNavigationItems: NavigationItem[] = [
     icon: 'TrendingUpIcon',
     category: 'portfolio'
   },
-  {
-    id: 'stock-volatility',
-    label: 'Stock Volatility',
-    path: '/stock-volatility',
-    icon: 'TrendingUpIcon',
-    category: 'analysis'
-  },
-  {
-    id: 'stock-alerts',
-    label: 'Stock Alerts',
-    path: '/stock-alerts',
-    icon: 'NotificationsIcon',
-    category: 'analysis'
-  },
-  {
-    id: 'option-pricing',
-    label: 'Option Pricing',
-    path: '/option-pricing',
-    icon: 'CalculateIcon',
-    category: 'analysis'
-  },
-  {
-    id: 'heatmap',
-    label: 'Market Heatmap',
-    path: '/heatmap',
-    icon: 'GridOnIcon',
-    category: 'analysis'
-  },
+  // Temporarily hidden - Analysis & Tools section - can be re-enabled easily
+  // {
+  //   id: 'stock-volatility',
+  //   label: 'Stock Volatility',
+  //   path: '/stock-volatility',
+  //   icon: 'TrendingUpIcon',
+  //   category: 'analysis'
+  // },
+  // {
+  //   id: 'stock-alerts',
+  //   label: 'Stock Alerts',
+  //   path: '/stock-alerts',
+  //   icon: 'NotificationsIcon',
+  //   category: 'analysis'
+  // },
+  // {
+  //   id: 'option-pricing',
+  //   label: 'Option Pricing',
+  //   path: '/option-pricing',
+  //   icon: 'CalculateIcon',
+  //   category: 'analysis'
+  // },
+  // {
+  //   id: 'heatmap',
+  //   label: 'Market Heatmap',
+  //   path: '/heatmap',
+  //   icon: 'GridOnIcon',
+  //   category: 'analysis'
+  // },
   {
     id: 'sec-search',
     label: 'SEC Search',

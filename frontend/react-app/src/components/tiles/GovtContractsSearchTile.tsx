@@ -52,6 +52,7 @@ import MultiSelectField from '../MultiSelectField';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 
 // Award type options
 const AWARD_TYPES = [
@@ -185,6 +186,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const [columnMenuAnchor, setColumnMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const { user } = useAuth();
+  const { isEasyMode } = useEasyMode();
   const { openItemDetails } = useDialogManagerHelpers();
   
   // Filter state for client-side filtering - restore from props if available (session persistence)
@@ -217,7 +219,20 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentSearchParams, setCurrentSearchParams] = useState<GovtContractsSearchFilters>(searchParams);
+  const [currentSearchParams, setCurrentSearchParams] = useState<GovtContractsSearchFilters>({
+    ...searchParams,
+    date_year: isEasyMode ? 2025 : searchParams?.date_year,
+  });
+  
+  // Update date_year when easy mode changes
+  useEffect(() => {
+    if (isEasyMode) {
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        date_year: '2025',
+      }));
+    }
+  }, [isEasyMode]);
   const [currentResults, setCurrentResults] = useState<GovtContractAward[]>(results);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
@@ -1041,27 +1056,36 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         selectedAwards.has(award.award_id)
       );
 
-      // Save each award to the filesystem with FULL data
+      // Save all awards to the filesystem with FULL data using bulk operation
       // Note: currentResults contains the full award objects from the search API
       // This ensures we save the complete award with all fields
-      for (const award of selectedAwardObjects) {
+      const items = selectedAwardObjects.map(award => {
         const title = award.recipient_name 
           ? `Government Contract - ${award.recipient_name}${award.awarding_agency_name ? ` / ${award.awarding_agency_name}` : ''}`
           : `Government Contract ${award.award_id || ''}`;
-        
-        // FULL DATA MODE for filesystem - send complete award object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: award, // Full award object with all fields
           title: title,
-          item_type: 'govt_contract',
-        });
-      }
+          item_type: 'govt_contract' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedAwardObjects.length} award(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedAwardObjects.length} of ${selectedAwardObjects.length} award(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} award(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save awards');
+      }
       setSelectedAwards(new Set());
     } catch (error) {
       console.error('Error saving awards to filesystem:', error);
@@ -2128,7 +2152,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               }}
             />
 
-            {/* Funding Agency */}
+            {/* Funding Agency - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
               label="Funding Agency"
               selectedItems={(() => {
@@ -2161,8 +2186,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Search for funding agencies..."
               allowCustomInput={false}
             />
+            )}
 
-            {/* Min/Max Obligation */}
+            {/* Min/Max Obligation - Hidden in easy mode */}
+            {!isEasyMode && (
             <Box display="flex" gap={2}>
               <TextField
                 label="Min Obligation ($)"
@@ -2203,8 +2230,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 }}
               />
             </Box>
+            )}
 
-            {/* Award Type */}
+            {/* Award Type - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="Award Type"
               selectedItems={currentSearchParams.award_type || []}
@@ -2215,8 +2244,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               renderItem={(type) => type}
               placeholder="Select award types..."
             />
+            )}
 
-            {/* NAICS Code */}
+            {/* NAICS Code - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="NAICS Code"
               selectedItems={currentSearchParams.naics_code || []}
@@ -2229,8 +2260,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Enter NAICS codes..."
               disableAutocomplete={true}
             />
+            )}
 
-            {/* PSC Code */}
+            {/* PSC Code - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="PSC Code"
               selectedItems={currentSearchParams.psc_code || []}
@@ -2243,8 +2276,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Enter PSC codes..."
               disableAutocomplete={true}
             />
+            )}
 
-            {/* CFDA Number */}
+            {/* CFDA Number - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="CFDA Number"
               selectedItems={currentSearchParams.cfda_number || []}
@@ -2257,6 +2292,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Enter CFDA numbers..."
               disableAutocomplete={true}
             />
+            )}
           </Box>
         </DialogContent>
         <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>

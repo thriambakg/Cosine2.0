@@ -326,6 +326,81 @@ def add_context_item(user_id: str, folder_path: str, context_data: Dict[str, Any
         logger.error(f"Error adding context item: {str(e)}")
         raise
 
+def add_bulk_context_items(user_id: str, folder_path: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Add multiple context items to the filesystem in a single operation - more efficient than sequential calls"""
+    try:
+        logger.info(f"🔐 Adding {len(items)} context items in bulk: user_id={user_id}, folder_path={folder_path}")
+        
+        # Get folder manifest once (shared for all items)
+        manifest = get_folder_manifest(user_id, folder_path)
+        
+        results = []
+        errors = []
+        
+        # Process all items
+        for idx, item in enumerate(items):
+            try:
+                context_data = item.get('context_data', {})
+                title = item.get('title', 'Untitled')
+                item_type = item.get('item_type', 'context_item')
+                
+                # Generate item ID and S3 key
+                item_id = str(uuid.uuid4())
+                s3_key = f"users/{user_id}/filesys/{folder_path}/{item_id}{CONTEXT_ITEM_EXTENSION}" if folder_path else f"users/{user_id}/filesys/{item_id}{CONTEXT_ITEM_EXTENSION}"
+                
+                # Encrypt and store context data
+                encrypted_data = encrypt_context_data(user_id, context_data)
+                
+                # Upload to S3
+                s3_client.put_object(
+                    Bucket=CHAT_FILES_BUCKET_NAME,
+                    Key=s3_key,
+                    Body=encrypted_data,
+                    ContentType=CONTEXT_ITEM_MIME_TYPE
+                )
+                
+                # Add to manifest
+                item_data = {
+                    'id': item_id,
+                    'name': title,
+                    'type': item_type,
+                    's3_key': s3_key,
+                    'metadata': {
+                        'context_type': item_type,
+                        'data_keys': list(context_data.keys()) if isinstance(context_data, dict) else [],
+                    },
+                    'created_at': int(datetime.now().timestamp()),
+                    'updated_at': int(datetime.now().timestamp())
+                }
+                
+                manifest['items'][item_id] = item_data
+                results.append(item_data)
+                
+            except Exception as e:
+                logger.error(f"Error adding item {idx + 1} of {len(items)}: {str(e)}")
+                errors.append({
+                    'index': idx,
+                    'title': item.get('title', 'Unknown'),
+                    'error': str(e)
+                })
+        
+        # Save manifest once after all items are added
+        if results:
+            save_folder_manifest(user_id, folder_path, manifest)
+            logger.info(f"✅ Successfully saved {len(results)} of {len(items)} items to filesystem")
+        
+        return {
+            'success': len(errors) == 0,
+            'results': results,
+            'errors': errors,
+            'total': len(items),
+            'succeeded': len(results),
+            'failed': len(errors)
+        }
+    except Exception as e:
+        logger.error(f"Error in bulk add context items: {str(e)}")
+        raise
+
 def create_folder(user_id: str, folder_name: str, parent_path: Optional[str] = None) -> Dict[str, Any]:
     """Create a new folder"""
     try:
@@ -507,6 +582,239 @@ def move_item(user_id: str, item_id: str, source_folder_path: str, dest_folder_p
         return item
     except Exception as e:
         logger.error(f"Error moving item: {str(e)}")
+        raise
+
+def delete_bulk_items(user_id: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Delete multiple items and/or folders in a single operation - more efficient than sequential calls"""
+    try:
+        logger.info(f"🗑️ Deleting {len(items)} items in bulk: user_id={user_id}")
+        
+        results = []
+        errors = []
+        
+        # Group items by folder_path to minimize manifest reads/writes
+        items_by_folder: Dict[str, List[Dict[str, Any]]] = {}
+        folders_to_delete: List[Dict[str, Any]] = []
+        
+        for item in items:
+            if item.get('is_folder', False):
+                folders_to_delete.append(item)
+            else:
+                folder_path = item.get('folder_path', '')
+                if folder_path not in items_by_folder:
+                    items_by_folder[folder_path] = []
+                items_by_folder[folder_path].append(item)
+        
+        # Delete folders first (they may contain items)
+        for folder_item in folders_to_delete:
+            try:
+                folder_path = folder_item.get('folder_path', '')
+                if not folder_path:
+                    # If folder_path looks like a UUID (folder_id), try to find the actual path
+                    folder_id = folder_item.get('item_id') or folder_path
+                    if folder_id and len(folder_id) == 36 and folder_id.count('-') == 4:
+                        actual_path = find_folder_by_id(user_id, folder_id, '')
+                        if actual_path:
+                            folder_path = actual_path
+                
+                delete_folder(user_id, folder_path)
+                results.append({
+                    'item_id': folder_item.get('item_id'),
+                    'type': 'folder',
+                    'success': True
+                })
+            except Exception as e:
+                logger.error(f"Error deleting folder {folder_item.get('item_id')}: {str(e)}")
+                errors.append({
+                    'item_id': folder_item.get('item_id'),
+                    'type': 'folder',
+                    'error': str(e)
+                })
+        
+        # Delete items grouped by folder
+        for folder_path, folder_items in items_by_folder.items():
+            try:
+                manifest = get_folder_manifest(user_id, folder_path)
+                manifest_updated = False
+                
+                for item_data in folder_items:
+                    try:
+                        item_id = item_data.get('item_id')
+                        if item_id not in manifest['items']:
+                            errors.append({
+                                'item_id': item_id,
+                                'type': 'item',
+                                'error': f"Item {item_id} not found"
+                            })
+                            continue
+                        
+                        item = manifest['items'][item_id]
+                        s3_key = item.get('s3_key')
+                        
+                        # Delete from S3
+                        if s3_key and validate_s3_key(user_id, s3_key):
+                            try:
+                                s3_client.delete_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
+                            except ClientError as e:
+                                logger.warning(f"Error deleting S3 object {s3_key}: {str(e)}")
+                        
+                        # Remove from manifest
+                        del manifest['items'][item_id]
+                        manifest_updated = True
+                        results.append({
+                            'item_id': item_id,
+                            'type': 'item',
+                            'success': True
+                        })
+                    except Exception as e:
+                        logger.error(f"Error deleting item {item_data.get('item_id')}: {str(e)}")
+                        errors.append({
+                            'item_id': item_data.get('item_id'),
+                            'type': 'item',
+                            'error': str(e)
+                        })
+                
+                # Save manifest once after all items in this folder are processed
+                if manifest_updated:
+                    save_folder_manifest(user_id, folder_path, manifest)
+            except Exception as e:
+                logger.error(f"Error processing folder {folder_path}: {str(e)}")
+                # Mark all items in this folder as failed
+                for item_data in folder_items:
+                    errors.append({
+                        'item_id': item_data.get('item_id'),
+                        'type': 'item',
+                        'error': f"Folder error: {str(e)}"
+                    })
+        
+        logger.info(f"✅ Successfully deleted {len(results)} of {len(items)} items")
+        
+        return {
+            'success': len(errors) == 0,
+            'results': results,
+            'errors': errors,
+            'total': len(items),
+            'succeeded': len(results),
+            'failed': len(errors)
+        }
+    except Exception as e:
+        logger.error(f"Error in bulk delete items: {str(e)}")
+        raise
+
+def move_bulk_items(user_id: str, items: List[Dict[str, Any]], dest_folder_path: str) -> Dict[str, Any]:
+    """Move multiple items to a different folder in a single operation - more efficient than sequential calls"""
+    try:
+        logger.info(f"📦 Moving {len(items)} items to {dest_folder_path}: user_id={user_id}")
+        
+        # Get destination manifest once
+        dest_manifest = get_folder_manifest(user_id, dest_folder_path)
+        
+        # Group items by source folder to minimize manifest reads/writes
+        items_by_source: Dict[str, List[Dict[str, Any]]] = {}
+        
+        for item in items:
+            source_folder_path = item.get('source_folder_path', '')
+            if source_folder_path not in items_by_source:
+                items_by_source[source_folder_path] = []
+            items_by_source[source_folder_path].append(item)
+        
+        results = []
+        errors = []
+        
+        # Process items grouped by source folder
+        for source_folder_path, source_items in items_by_source.items():
+            try:
+                # Skip if source and dest are the same
+                if source_folder_path == dest_folder_path:
+                    for item_data in source_items:
+                        errors.append({
+                            'item_id': item_data.get('item_id'),
+                            'error': 'Source and destination folders are the same'
+                        })
+                    continue
+                
+                source_manifest = get_folder_manifest(user_id, source_folder_path)
+                source_manifest_updated = False
+                dest_manifest_updated = False
+                
+                for item_data in source_items:
+                    try:
+                        item_id = item_data.get('item_id')
+                        
+                        if item_id not in source_manifest['items']:
+                            errors.append({
+                                'item_id': item_id,
+                                'error': f"Item {item_id} not found in source folder"
+                            })
+                            continue
+                        
+                        item = source_manifest['items'][item_id]
+                        old_s3_key = item.get('s3_key')
+                        
+                        # Generate new S3 key
+                        file_extension = os.path.splitext(old_s3_key)[1] if old_s3_key else '.json'
+                        new_s3_key = f"users/{user_id}/filesys/{dest_folder_path}/{item_id}{file_extension}" if dest_folder_path else f"users/{user_id}/filesys/{item_id}{file_extension}"
+                        
+                        # Move in S3 (copy + delete)
+                        if old_s3_key and validate_s3_key(user_id, old_s3_key):
+                            copy_source = {'Bucket': CHAT_FILES_BUCKET_NAME, 'Key': old_s3_key}
+                            s3_client.copy_object(
+                                CopySource=copy_source,
+                                Bucket=CHAT_FILES_BUCKET_NAME,
+                                Key=new_s3_key
+                            )
+                            s3_client.delete_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=old_s3_key)
+                        
+                        # Update item
+                        item['s3_key'] = new_s3_key
+                        item['updated_at'] = int(datetime.now().timestamp())
+                        
+                        # Remove from source manifest
+                        del source_manifest['items'][item_id]
+                        source_manifest_updated = True
+                        
+                        # Add to destination manifest
+                        dest_manifest['items'][item_id] = item
+                        dest_manifest_updated = True
+                        
+                        results.append({
+                            'item_id': item_id,
+                            'success': True,
+                            'result': item
+                        })
+                    except Exception as e:
+                        logger.error(f"Error moving item {item_data.get('item_id')}: {str(e)}")
+                        errors.append({
+                            'item_id': item_data.get('item_id'),
+                            'error': str(e)
+                        })
+                
+                # Save manifests once after all items from this source are processed
+                if source_manifest_updated:
+                    save_folder_manifest(user_id, source_folder_path, source_manifest)
+                if dest_manifest_updated:
+                    save_folder_manifest(user_id, dest_folder_path, dest_manifest)
+            except Exception as e:
+                logger.error(f"Error processing source folder {source_folder_path}: {str(e)}")
+                # Mark all items from this source as failed
+                for item_data in source_items:
+                    errors.append({
+                        'item_id': item_data.get('item_id'),
+                        'error': f"Source folder error: {str(e)}"
+                    })
+        
+        logger.info(f"✅ Successfully moved {len(results)} of {len(items)} items")
+        
+        return {
+            'success': len(errors) == 0,
+            'results': results,
+            'errors': errors,
+            'total': len(items),
+            'succeeded': len(results),
+            'failed': len(errors)
+        }
+    except Exception as e:
+        logger.error(f"Error in bulk move items: {str(e)}")
         raise
 
 def rename_item(user_id: str, folder_path: str, item_id: str, new_name: str) -> Dict[str, Any]:
@@ -979,6 +1287,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             folder_path = body.get('folder_path', '')
             result = add_context_item(user_id, folder_path, context_data, title, item_type)
             
+        elif operation == 'add_bulk_context_items':
+            items = body.get('items', [])
+            folder_path = body.get('folder_path', '')
+            if not items or not isinstance(items, list):
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                }
+            result = add_bulk_context_items(user_id, folder_path, items)
+            
         elif operation == 'create_folder':
             folder_name = body.get('folder_name')
             parent_path = body.get('parent_path')
@@ -988,6 +1307,16 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             folder_path = body.get('folder_path', '')
             item_id = body.get('item_id')
             result = delete_item(user_id, folder_path, item_id)
+            
+        elif operation == 'delete_bulk_items':
+            items = body.get('items', [])
+            if not items or not isinstance(items, list):
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                }
+            result = delete_bulk_items(user_id, items)
             
         elif operation == 'delete_folder':
             folder_path = body.get('folder_path', '')
@@ -1020,6 +1349,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             source_folder_path = body.get('source_folder_path', '')
             dest_folder_path = body.get('dest_folder_path', '')
             result = move_item(user_id, item_id, source_folder_path, dest_folder_path)
+            
+        elif operation == 'move_bulk_items':
+            items = body.get('items', [])
+            dest_folder_path = body.get('dest_folder_path', '')
+            if not items or not isinstance(items, list):
+                return {
+                    'statusCode': 400,
+                    'headers': get_cors_headers(),
+                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                }
+            result = move_bulk_items(user_id, items, dest_folder_path)
             
         elif operation == 'update_item':
             folder_path = body.get('folder_path', '')

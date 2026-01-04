@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/AuthContext';
+import { EasyModeProvider } from './contexts/EasyModeContext';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
 
@@ -10,12 +11,14 @@ import { LandingPageMUI, AppLayout, LoadingPage } from './components';
 import ChatPage from './pages/ChatPage';
 import FilesPage from './pages/FilesPage';
 import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
-import Robinhood from './pages/Robinhood';
+// Temporarily hidden - can be re-enabled easily
+// import Robinhood from './pages/Robinhood';
 import PortfolioRisk from './pages/PortfolioRisk';
-import StockVolatilityPage from './pages/StockVolatilityPage';
-import StockAlertsPage from './pages/StockAlertsPage';
-import OptionPricingPage from './pages/OptionPricingPage';
-import HeatmapPage from './pages/HeatmapPage';
+// Temporarily hidden - Analysis & Tools section - can be re-enabled easily
+// import StockVolatilityPage from './pages/StockVolatilityPage';
+// import StockAlertsPage from './pages/StockAlertsPage';
+// import OptionPricingPage from './pages/OptionPricingPage';
+// import HeatmapPage from './pages/HeatmapPage';
 import SECSearchPage from './pages/SECSearchPage';
 import PoliticianTradesSearchPage from './pages/PoliticianTradesSearchPage';
 import NewsSearchPage from './pages/NewsSearchPage';
@@ -73,17 +76,19 @@ function AppContent() {
                   <FilesPage />
                 </ProtectedRoute>
               } />
-              <Route path="/robinhood" element={
+              {/* Temporarily hidden - can be re-enabled easily */}
+              {/* <Route path="/robinhood" element={
                 <ProtectedRoute>
                   <Robinhood />
                 </ProtectedRoute>
-              } />
+              } /> */}
               <Route path="/portfolio-risk" element={
                 <ProtectedRoute>
                   <PortfolioRisk />
                 </ProtectedRoute>
               } />
-              <Route path="/stock-volatility" element={
+              {/* Temporarily hidden - Analysis & Tools section - can be re-enabled easily */}
+              {/* <Route path="/stock-volatility" element={
                 <ProtectedRoute>
                   <StockVolatilityPage />
                 </ProtectedRoute>
@@ -102,7 +107,7 @@ function AppContent() {
                 <ProtectedRoute>
                   <HeatmapPage />
                 </ProtectedRoute>
-              } />
+              } /> */}
               <Route path="/sec-search" element={
                 <ProtectedRoute>
                   <SECSearchPage />
@@ -157,10 +162,12 @@ function App() {
   return (
     <Provider store={store}>
       <AuthProvider>
-        <DialogManagerProvider>
-          <AppContent />
-          <ConfirmDialog />
-        </DialogManagerProvider>
+        <EasyModeProvider>
+          <DialogManagerProvider>
+            <AppContent />
+            <ConfirmDialog />
+          </DialogManagerProvider>
+        </EasyModeProvider>
       </AuthProvider>
     </Provider>
   );

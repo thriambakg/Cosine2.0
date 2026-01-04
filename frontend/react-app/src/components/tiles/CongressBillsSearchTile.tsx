@@ -44,6 +44,7 @@ import {
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '../../contexts/AuthContext';
+import { useEasyMode } from '../../contexts/EasyModeContext';
 import { filesystemAPI } from '../../services/api';
 import { 
   congressBillsSearchAPI, 
@@ -180,7 +181,15 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
   const { user } = useAuth();
+  const { isEasyMode } = useEasyMode();
   const { openItemDetails } = useDialogManagerHelpers();
+  
+  // Helper to get 3 months ago date
+  const getThreeMonthsAgo = () => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 3);
+    return date.toISOString().split('T')[0];
+  };
   // const { activeSessionId } = useGlobalChat();
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
@@ -195,7 +204,9 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     if (searchParams) {
       return {
         ...searchParams,
-        politician_role: searchParams.politician_role || []
+        politician_role: searchParams.politician_role || [],
+        introduced_date_from: searchParams.introduced_date_from,
+        introduced_date_to: searchParams.introduced_date_to,
       };
     }
     return {
@@ -215,6 +226,17 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       bill_number: undefined,
     };
   });
+  
+  // Update dates when easy mode changes
+  useEffect(() => {
+    if (isEasyMode) {
+      setCurrentSearchParams(prev => ({
+        ...prev,
+        introduced_date_from: getThreeMonthsAgo(),
+        introduced_date_to: new Date().toISOString().split('T')[0],
+      }));
+    }
+  }, [isEasyMode]);
   
   // Store all results for client-side filtering - restore from props if available (session persistence)
   const [allResults, setAllResults] = useState<CongressBill[]>(results || []);
@@ -911,26 +933,35 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         selectedBills.has(bill.bill_id)
       );
 
-      // Save each bill to the filesystem with FULL data
+      // Save all bills to the filesystem with FULL data using bulk operation
       // Note: filteredResults contains the full bill objects from the search API
       // The search API already enriches bills with full data (including oversized bills from S3)
       // This ensures we save the complete bill with all fields: actions_json, cosponsors_json, amendments_json, etc.
-      for (const bill of selectedBillObjects) {
+      const items = selectedBillObjects.map(bill => {
         const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
-        
-        // FULL DATA MODE for filesystem - send complete bill object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: bill, // Full bill object: includes actions_json, cosponsors_json, amendments_json, etc.
           title: title,
-          item_type: 'congress_bill',
-        });
-      }
+          item_type: 'congress_bill' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedBillObjects.length} bill(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedBillObjects.length} of ${selectedBillObjects.length} bill(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} bill(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save bills');
+      }
       setSelectedBills(new Set());
     } catch (error) {
       console.error('Error saving bills to filesystem:', error);
@@ -1823,7 +1854,20 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
             />
 
-            {/* Bill Type - Multi-select */}
+            {/* Sponsor State - Multi-select */}
+            <MultiSelectField<string>
+              label="Sponsor State"
+              selectedItems={currentSearchParams?.sponsor_state || []}
+              onItemsChange={(states) => {
+                setCurrentSearchParams((prev) => ({ ...prev, sponsor_state: states }));
+              }}
+              suggestions={['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC']}
+              renderItem={(state) => state}
+              placeholder="Select states..."
+            />
+
+            {/* Bill Type - Multi-select - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="Bill Type"
               selectedItems={currentSearchParams?.bill_type || []}
@@ -1834,8 +1878,11 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               renderItem={(type) => type}
               placeholder="Select bill types..."
             />
+            )}
 
-            {/* Introduced Date From */}
+            {/* Introduced Date From - Hidden in easy mode (auto-set to 3mo ago) */}
+            {!isEasyMode && (
+            <>
             <TextField
               label="Introduced Date From"
               type="date"
@@ -1868,7 +1915,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               }}
             />
 
-            {/* Introduced Date To */}
+            {/* Introduced Date To - Hidden in easy mode */}
             <TextField
               label="Introduced Date To"
               type="date"
@@ -1892,8 +1939,11 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                 '& .MuiInputLabel-root': { color: '#94a3b8' },
               }}
             />
+            </>
+            )}
 
-            {/* Policy Area - Multi-select with autocomplete */}
+            {/* Policy Area - Multi-select with autocomplete - Hidden in easy mode */}
+            {!isEasyMode && (
             <MultiSelectField<string>
               label="Policy Area"
               selectedItems={currentSearchParams?.policy_area || []}
@@ -1910,8 +1960,10 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               allowCustomInput={false}
               isLoading={!isPolicyAreaDataLoaded}
             />
+            )}
 
-            {/* Advanced Search Section */}
+            {/* Advanced Search Section - Hidden in easy mode */}
+            {!isEasyMode && (
             <Accordion>
               <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#ffffff' }} />}>
                 <Typography variant="subtitle2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
@@ -2147,6 +2199,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                 </Box>
               </AccordionDetails>
             </Accordion>
+            )}
           </Box>
         </DialogContent>
         <DialogActions sx={{ borderTop: '1px solid #334155' }}>

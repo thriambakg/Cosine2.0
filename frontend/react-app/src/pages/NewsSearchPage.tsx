@@ -39,6 +39,7 @@ import {
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../services/api';
 import { filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEasyMode } from '@/contexts/EasyModeContext';
 // import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
@@ -78,6 +79,7 @@ interface ExpandedFiltersState {
 const NewsSearchPage: React.FC = () => {
   // Auth context available for future use
   const { user } = useAuth();
+  const { isEasyMode } = useEasyMode();
   // const { activeSessionId } = useGlobalChat();
   
   // Session persistence key
@@ -114,11 +116,23 @@ const NewsSearchPage: React.FC = () => {
       sources: [],
       categories: [],
       countries: [],
-      dateRange: 'all',
+      dateRange: isEasyMode ? 'all' : 'all',
       dateFrom: '',
       dateTo: '',
     }
   );
+  
+  // Update dateRange when easy mode changes
+  useEffect(() => {
+    if (isEasyMode) {
+      setSearchParams(prev => ({
+        ...prev,
+        dateRange: 'all',
+        dateFrom: '',
+        dateTo: '',
+      }));
+    }
+  }, [isEasyMode]);
   
   const [allSearchResults, setAllSearchResults] = useState<NewsArticle[]>(
     savedState?.allSearchResults || []
@@ -481,25 +495,34 @@ const NewsSearchPage: React.FC = () => {
         selectedArticles.has(article.id)
       );
 
-      // Save each article to the filesystem with FULL data
-      // Note: currentResults contains the full article objects from the search API
+      // Save all articles to the filesystem with FULL data using bulk operation
+      // Note: paginatedResults contains the full article objects from the search API
       // This ensures we save the complete article with all fields
-      for (const article of selectedArticleObjects) {
+      const items = selectedArticleObjects.map(article => {
         const title = article.title || `News Article ${article.id || ''}`;
-        
-        // FULL DATA MODE for filesystem - send complete article object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: article, // Full article object with all fields
           title: title,
-          item_type: 'news_article',
-        });
-      }
+          item_type: 'news_article' as const,
+        };
+      });
       
-      console.log(`✅ Saved ${selectedArticleObjects.length} article(s) to filesystem`);
+      // Use bulk operation for better performance
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ Saved ${result?.succeeded || selectedArticleObjects.length} of ${selectedArticleObjects.length} article(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} article(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save articles');
+      }
       setSelectedArticles(new Set());
     } catch (error) {
       console.error('Error saving articles to filesystem:', error);
@@ -671,7 +694,8 @@ const NewsSearchPage: React.FC = () => {
                     disableAutocomplete={true}
                   />
 
-                  {/* Date Range Preset */}
+                  {/* Date Range Preset - Hidden in easy mode (set to 'all') */}
+                  {!isEasyMode && (
                   <FormControl fullWidth>
                     <InputLabel sx={{ color: '#94a3b8' }}>Date Range (Preset)</InputLabel>
                     <Select
@@ -704,18 +728,21 @@ const NewsSearchPage: React.FC = () => {
                               '&.Mui-selected': { backgroundColor: '#3b82f6' },
                             },
                           },
-                        },
-                      }}
-                    >
-                      <MenuItem value="12h">Last 12 Hours</MenuItem>
-                      <MenuItem value="24h">Last 24 Hours</MenuItem>
-                      <MenuItem value="7d">Last 7 Days</MenuItem>
-                      <MenuItem value="30d">Last 30 Days</MenuItem>
-                      <MenuItem value="all">All Time</MenuItem>
-                    </Select>
-                  </FormControl>
+                      },
+                    }}
+                  >
+                    <MenuItem value="12h">Last 12 Hours</MenuItem>
+                    <MenuItem value="24h">Last 24 Hours</MenuItem>
+                    <MenuItem value="7d">Last 7 Days</MenuItem>
+                    <MenuItem value="30d">Last 30 Days</MenuItem>
+                    <MenuItem value="all">All Time</MenuItem>
+                  </Select>
+                </FormControl>
+                  )}
 
-                  {/* Custom Date Range */}
+                  {/* Custom Date Range - Hidden in easy mode */}
+                  {!isEasyMode && (
+                  <>
                   <Typography variant="body2" sx={{ color: '#9ca3af', mt: 1, mb: 1 }}>
                     Or specify custom date range:
                   </Typography>
@@ -775,6 +802,8 @@ const NewsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
+                  </>
+                  )}
 
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>

@@ -1727,6 +1727,16 @@ export interface FilesystemAddContextItemRequest {
   item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'politician_trade' | 'govt_contract' | 'news_article' | 'stock_result';
 }
 
+export interface FilesystemAddBulkContextItemsRequest {
+  user_id: string;
+  folder_path?: string;
+  items: Array<{
+    context_data: any; // Full JSON object
+    title: string;
+    item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'politician_trade' | 'govt_contract' | 'news_article' | 'stock_result';
+  }>;
+}
+
 export interface FilesystemCreateFolderRequest {
   user_id: string;
   folder_name: string;
@@ -1739,6 +1749,15 @@ export interface FilesystemDeleteItemRequest {
   item_id: string;
 }
 
+export interface FilesystemDeleteBulkItemsRequest {
+  user_id: string;
+  items: Array<{
+    item_id: string;
+    folder_path?: string;
+    is_folder?: boolean;
+  }>;
+}
+
 export interface FilesystemDeleteFolderRequest {
   user_id: string;
   folder_path: string;
@@ -1748,6 +1767,15 @@ export interface FilesystemMoveItemRequest {
   user_id: string;
   item_id: string;
   source_folder_path?: string;
+  dest_folder_path?: string;
+}
+
+export interface FilesystemMoveBulkItemsRequest {
+  user_id: string;
+  items: Array<{
+    item_id: string;
+    source_folder_path?: string;
+  }>;
   dest_folder_path?: string;
 }
 
@@ -1872,6 +1900,39 @@ export const filesystemAPI = {
     }
   },
 
+  addBulkContextItems: async (params: FilesystemAddBulkContextItemsRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'add_bulk_context_items',
+          ...params,
+        }),
+      });
+      
+      // Dispatch success notification
+      if (response.success && response.result) {
+        const result = response.result as any;
+        const itemCount = result.succeeded || params.items.length;
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: itemCount,
+            itemName: itemCount === 1 ? 'Item' : `${itemCount} items`
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem add bulk context items error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to add bulk context items',
+      };
+    }
+  },
+
   createFolder: async (params: FilesystemCreateFolderRequest): Promise<FilesystemResponse> => {
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
@@ -1910,6 +1971,25 @@ export const filesystemAPI = {
     }
   },
 
+  deleteBulkItems: async (params: FilesystemDeleteBulkItemsRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'delete_bulk_items',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem delete bulk items error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to delete bulk items',
+      };
+    }
+  },
+
   deleteFolder: async (params: FilesystemDeleteFolderRequest): Promise<FilesystemResponse> => {
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
@@ -1944,6 +2024,25 @@ export const filesystemAPI = {
       return {
         success: false,
         error: error.message || 'Failed to move item',
+      };
+    }
+  },
+
+  moveBulkItems: async (params: FilesystemMoveBulkItemsRequest): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'move_bulk_items',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem move bulk items error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to move bulk items',
       };
     }
   },
