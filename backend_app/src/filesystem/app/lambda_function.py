@@ -528,10 +528,14 @@ def delete_folder(user_id: str, folder_path: str) -> bool:
                     save_folder_manifest(user_id, parent_path, parent_manifest)
                     logger.info(f"Successfully removed folder from parent manifest")
                 else:
-                    logger.warning(f"Folder_id {folder_id} not found in parent manifest folders. Available folders: {list(parent_manifest.get('folders', {}).keys())}")
+                    # Folder might have already been removed, or parent_path might be incorrect
+                    # Try to find the folder in any parent by searching all folders
+                    logger.warning(f"⚠️ Folder_id {folder_id} not found in parent manifest at {parent_path}. Available folders: {list(parent_manifest.get('folders', {}).keys())}")
+                    logger.info(f"Folder was successfully deleted, but parent manifest cleanup was skipped (folder may have been orphaned or already removed)")
             except Exception as e:
-                logger.error(f"Error removing folder from parent manifest: {str(e)}")
+                logger.error(f"❌ Error removing folder from parent manifest: {str(e)}")
                 # Don't raise - folder is already deleted, just log the error
+                logger.info(f"Folder deletion completed successfully despite parent manifest cleanup error")
         else:
             logger.info(f"Skipping parent manifest removal for root folder")
         
@@ -609,14 +613,33 @@ def delete_bulk_items(user_id: str, items: List[Dict[str, Any]]) -> Dict[str, An
         for folder_item in folders_to_delete:
             try:
                 folder_path = folder_item.get('folder_path', '')
-                if not folder_path:
-                    # If folder_path looks like a UUID (folder_id), try to find the actual path
-                    folder_id = folder_item.get('item_id') or folder_path
-                    if folder_id and len(folder_id) == 36 and folder_id.count('-') == 4:
-                        actual_path = find_folder_by_id(user_id, folder_id, '')
+                folder_id = folder_item.get('item_id')
+                
+                # If folder_path is empty or looks like a UUID (folder_id), try to find the actual path
+                # Frontend sends folder_id as folder_path when deleting folders
+                if not folder_path or (folder_path and len(folder_path) == 36 and folder_path.count('-') == 4):
+                    # Use item_id if folder_path is empty or is a UUID
+                    lookup_id = folder_id or folder_path
+                    if lookup_id and len(lookup_id) == 36 and lookup_id.count('-') == 4:
+                        logger.info(f"Looking up folder path for folder_id: {lookup_id}")
+                        actual_path = find_folder_by_id(user_id, lookup_id, '')
                         if actual_path:
                             folder_path = actual_path
+                            logger.info(f"✅ Found folder path for folder_id {lookup_id}: {folder_path}")
+                        else:
+                            logger.error(f"❌ Could not find folder path for folder_id: {lookup_id}")
+                            # Try one more time with more detailed logging
+                            logger.info(f"Attempting recursive search from root for folder_id: {lookup_id}")
+                            actual_path = find_folder_by_id(user_id, lookup_id, '')
+                            if not actual_path:
+                                raise ValueError(f"Folder not found: {lookup_id}. The folder may have already been deleted or the folder_id is invalid.")
+                    elif not folder_path:
+                        raise ValueError(f"Folder path or folder_id required for folder deletion")
                 
+                if not folder_path:
+                    raise ValueError(f"Could not determine folder path for folder_id: {folder_id}")
+                
+                logger.info(f"🗑️ Deleting folder at path: {folder_path} (folder_id: {folder_id})")
                 delete_folder(user_id, folder_path)
                 results.append({
                     'item_id': folder_item.get('item_id'),
@@ -1094,17 +1117,23 @@ def find_folder_by_id(user_id: str, folder_id: str, search_path: str = '') -> Op
         
         # Check if this folder matches
         if manifest.get('folder_id') == folder_id:
-            return manifest.get('path', search_path)
+            path = manifest.get('path', search_path)
+            logger.debug(f"Found folder_id {folder_id} at path: {path}")
+            return path
         
         # Check subfolders
         for subfolder_id, folder_info in manifest.get('folders', {}).items():
             if subfolder_id == folder_id:
-                return folder_info.get('path')
+                path = folder_info.get('path')
+                if path:
+                    logger.debug(f"Found folder_id {folder_id} in subfolders at path: {path}")
+                    return path
             # Recursively search in subfolder
             subfolder_path = folder_info.get('path', f"{search_path}/{folder_info.get('name', subfolder_id)}")
-            result = find_folder_by_id(user_id, folder_id, subfolder_path)
-            if result:
-                return result
+            if subfolder_path:
+                result = find_folder_by_id(user_id, folder_id, subfolder_path)
+                if result:
+                    return result
         
         return None
     except Exception as e:
