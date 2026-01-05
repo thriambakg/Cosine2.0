@@ -725,6 +725,14 @@ export default function ChatPage() {
       return false;
     }
   });
+  const [sidebarUserOverride, setSidebarUserOverride] = useState(() => {
+    try {
+      const saved = localStorage.getItem('chatpage_sidebarUserOverride');
+      return saved ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -754,14 +762,33 @@ export default function ChatPage() {
       console.warn('Failed to persist sidebarCollapsed state');
     }
   }, [sidebarCollapsed]);
+
+  const markSidebarUserOverride = useCallback(() => {
+    setSidebarUserOverride(true);
+    try {
+      localStorage.setItem('chatpage_sidebarUserOverride', 'true');
+    } catch {
+      console.warn('Failed to persist sidebar override');
+    }
+  }, []);
+
+  const handleSidebarOpen = useCallback(() => {
+    markSidebarUserOverride();
+    setSidebarOpen(true);
+  }, [markSidebarUserOverride]);
+
+  const handleSidebarClose = useCallback(() => {
+    markSidebarUserOverride();
+    setSidebarOpen(false);
+  }, [markSidebarUserOverride]);
   
   // Auto-open sidebar when a session is loaded (except on first load)
   useEffect(() => {
-    if (currentSession?.session_id && sessions.length > 0 && !sidebarOpen) {
+    if (currentSession?.session_id && sessions.length > 0 && !sidebarOpen && !sidebarUserOverride) {
       // Open sidebar when user loads a chat session
       setSidebarOpen(true);
     }
-  }, [currentSession?.session_id, sessions.length, sidebarOpen]);
+  }, [currentSession?.session_id, sessions.length, sidebarOpen, sidebarUserOverride]);
   
   // Persist current session ID so it reloads when user comes back
   useEffect(() => {
@@ -2373,7 +2400,7 @@ export default function ChatPage() {
                 <Box display="flex" alignItems="center" gap={1}>
                   <Tooltip title="Close sidebar">
                     <IconButton 
-                      onClick={() => setSidebarOpen(false)}
+                      onClick={handleSidebarClose}
                       sx={{ color: '#9ca3af' }}
                     >
                       <CloseIcon />
@@ -2600,7 +2627,7 @@ export default function ChatPage() {
           }}>
             <Tooltip title="Open Chat History">
               <IconButton 
-                onClick={() => setSidebarOpen(true)}
+                onClick={handleSidebarOpen}
                 sx={{ 
                   color: '#3b82f6',
                   backgroundColor: 'rgba(15, 23, 42, 0.9)',

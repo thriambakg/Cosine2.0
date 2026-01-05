@@ -442,26 +442,57 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
       }
       
       // Remove from local state regardless of session type
+      let updatedSessions: ChatSession[] = [];
       setSessions(prev => {
         const filtered = prev.filter(s => s.session_id !== sessionId);
+        updatedSessions = filtered;
         console.log(`🔴 DELETE: Removed session from local state. Remaining: ${filtered.length}`);
         return filtered;
       });
-      
-      // Force clear all cached data for this session
-      const cacheKey = `chat_sessions_${userId}`;
-      const cachedSessions = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-      const filteredCached = cachedSessions.filter((s: any) => s.session_id !== sessionId);
-      localStorage.setItem(cacheKey, JSON.stringify(filteredCached));
-      console.log('🔴 DELETE: Cleared session from localStorage cache');
+
+      // Force clear all cached data for this session using the shared cache key
+      try {
+        const cachedRaw = localStorage.getItem(CACHE_KEY);
+        if (cachedRaw) {
+          const cachedData = JSON.parse(cachedRaw);
+          const filteredCached = (cachedData.sessions || []).filter((s: ChatSession) => s.session_id !== sessionId);
+          const cachePayload = {
+            ...cachedData,
+            sessions: filteredCached,
+            currentSessionId: cachedData.currentSessionId === sessionId ? null : cachedData.currentSessionId
+          };
+          localStorage.setItem(CACHE_KEY, JSON.stringify(cachePayload));
+          localStorage.setItem(CACHE_EXPIRY_KEY, (Date.now() + CACHE_DURATION).toString());
+        } else {
+          const cachePayload = {
+            sessions: updatedSessions,
+            currentSessionId: null,
+            timestamp: Date.now()
+          };
+          if (updatedSessions.length > 0) {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(cachePayload));
+            localStorage.setItem(CACHE_EXPIRY_KEY, (Date.now() + CACHE_DURATION).toString());
+          } else {
+            localStorage.removeItem(CACHE_KEY);
+            localStorage.removeItem(CACHE_EXPIRY_KEY);
+          }
+        }
+        console.log('🔴 DELETE: Cleared session from shared cache');
+      } catch (cacheError) {
+        console.warn('🔴 DELETE: Failed to update cache:', cacheError);
+      }
+
+      // Clear any remembered last session reference if it points to the deleted session
+      if (localStorage.getItem('chatpage_lastSessionId') === sessionId) {
+        localStorage.removeItem('chatpage_lastSessionId');
+        console.log('🔴 DELETE: Cleared chatpage_lastSessionId for deleted session');
+      }
       
       // Clear any pending messages cache
       const pendingKey = `pending_messages_${sessionId}`;
       localStorage.removeItem(pendingKey);
       console.log('🔴 DELETE: Cleared pending messages cache');
       
-      // Save updated cached data
-      saveCachedData();
       console.log('✅ DELETE: Session deletion completed successfully');
     } catch (error) {
       console.error('❌ DELETE: Error deleting session:', error);
@@ -469,7 +500,7 @@ export const useChatPersistence = (userId: string): UseChatPersistenceReturn => 
     } finally {
       setIsLoading(false);
     }
-  }, [userId, currentSession, saveCachedData]);
+  }, [userId, currentSession]);
 
   const updateSessionTitle = useCallback(async (sessionId: string, newTitle: string): Promise<void> => {
     if (!userId) return;
