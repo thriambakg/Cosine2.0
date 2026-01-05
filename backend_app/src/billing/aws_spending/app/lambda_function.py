@@ -402,44 +402,10 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                                 continue
                         
                         logger.info(f"📊 Loaded {len(monthly_data)} months with earnings data")
-                        # Legacy fallback: also ingest monthly_summary.csv if present (avoids losing historical months)
-                        try:
-                            response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key='monthly_summary.csv')
-                            legacy_csv = response['Body'].read().decode('utf-8')
-                            reader = csv.DictReader(io.StringIO(legacy_csv))
-                            added_from_legacy = 0
-                            for legacy_row in reader:
-                                month_key = legacy_row.get('month')
-                                if not month_key or month_key in seen_months:
-                                    continue
-                                year = month_key.split('-')[0]
-                                available_years.add(year)
-                                if requested_year and year != requested_year:
-                                    continue
-                                earnings = get_earnings_for_month(month_key)
-                                normalized = {
-                                    'month': month_key,
-                                    'start_date': legacy_row.get('start_date', ''),
-                                    'end_date': legacy_row.get('end_date', ''),
-                                    'blended_cost': legacy_row.get('blended_cost', '0.00'),
-                                    'unblended_cost': legacy_row.get('unblended_cost', '0.00'),
-                                    'usage_quantity': legacy_row.get('usage_quantity', '0.00'),
-                                    'currency': legacy_row.get('currency', 'USD'),
-                                    'updated_at': legacy_row.get('updated_at', datetime.now().isoformat()),
-                                    'total_earnings': f"{earnings['total_earnings']:.2f}",
-                                    'payment_count': str(earnings['payment_count'])
-                                }
-                                monthly_data.append(normalized)
-                                seen_months.add(month_key)
-                                added_from_legacy += 1
-                            if added_from_legacy > 0:
-                                logger.info(f"📚 Added {added_from_legacy} legacy months from monthly_summary.csv")
-                        except ClientError as e:
-                            if e.response['Error']['Code'] != 'NoSuchKey':
-                                logger.warning(f"⚠️ Failed to read legacy monthly_summary.csv: {str(e)}")
-                    # Sort combined data newest first
-                    monthly_data = sorted(monthly_data, key=lambda r: r.get('month', ''), reverse=True)
-                    available_years_list = sorted(list(available_years), reverse=True)
+
+                        # Sort combined data newest first
+                        monthly_data = sorted(monthly_data, key=lambda r: r.get('month', ''), reverse=True)
+                        available_years_list = sorted(list(available_years), reverse=True)
                     except Exception as e:
                         logger.error(f"❌ Error listing spending months: {str(e)}")
                         monthly_data = []
