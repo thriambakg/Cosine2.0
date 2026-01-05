@@ -224,6 +224,30 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   }, [isEasyMode]);
   const [currentResults, setCurrentResults] = useState<NewsArticle[]>(articles);
+  
+  // Ensure defaults are set for display options first (before useCallback)
+  const defaultDisplayOptions = {
+    showTitle: true,
+    showDescription: false,
+    showSource: true,
+    showCategory: true,
+    showDate: true,
+    showImage: true,
+    showResultsTable: true,
+    maxResults: 200,
+    compactView: false,
+  };
+  
+  const [localDisplayOptions, setLocalDisplayOptions] = useState(() => {
+    const merged = {
+      ...defaultDisplayOptions,
+      ...displayOptions
+    };
+    // Always force showImage to true - images should always be visible
+    merged.showImage = true;
+    return merged;
+  });
+  
   const paginationState = initialPaginationState;
   
   // Restore pagination state from prop (session/database persistence)
@@ -248,8 +272,119 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
     return [];
   });
-  const [isRestoringPagination] = useState<boolean>(false);
-  // Note: setIsRestoringPagination will be used when restorePaginationState is implemented
+  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
+  
+  // Restore pagination state by reloading results from saved pagination keys
+  const restorePaginationState = useCallback(async () => {
+    if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
+      return;
+    }
+
+    if (paginationState.totalResultsLoaded <= (currentResults?.length || 0)) {
+      // Already have all results, no need to restore
+      return;
+    }
+
+    console.log('🔄 NewsTile: Restoring pagination state', {
+      totalResultsLoaded: paginationState.totalResultsLoaded,
+      currentResults: currentResults?.length || 0,
+      keysToLoad: paginationState.lastEvaluatedKeys.length,
+    });
+
+    setIsRestoringPagination(true);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      let restoredResults: NewsArticle[] = [...(currentResults || [])];
+      let keysToLoad = [...paginationState.lastEvaluatedKeys];
+      
+      // If we don't have the initial page (currentResults is empty), 
+      // we need to load it first before loading continuation pages
+      if (restoredResults.length === 0 && currentSearchParams) {
+        const searchRequest: NewsSearchRequest = {
+          query: {
+            keywords: currentSearchParams.keywords && currentSearchParams.keywords.length > 0
+              ? currentSearchParams.keywords
+              : undefined,
+          },
+          dateRange: currentSearchParams.dateRange || 'all',
+          limit: 200,
+        };
+
+        const initialResponse = await newsSearchAPI.searchNews(searchRequest);
+
+        if (initialResponse.articles) {
+          const processedResults = initialResponse.articles.map((article, index) => ({
+            ...article,
+            id: article.id || `article_${index}_${Date.now()}`,
+          }));
+          restoredResults = [...processedResults];
+        }
+      }
+
+      // Load each continuation page sequentially until we reach totalResultsLoaded
+      while (restoredResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
+        const nextKey = keysToLoad[0];
+
+        const searchRequest: NewsSearchRequest = {
+          query: {
+            keywords: currentSearchParams?.keywords && currentSearchParams.keywords.length > 0
+              ? currentSearchParams.keywords
+              : undefined,
+          },
+          dateRange: currentSearchParams?.dateRange || 'all',
+          limit: 200,
+          lastEvaluatedKey: nextKey,
+        };
+
+        const response = await newsSearchAPI.searchNews(searchRequest);
+
+        if (response.articles && response.articles.length > 0) {
+          const processedResults = response.articles.map((article, index) => ({
+            ...article,
+            id: article.id || `article_${index}_${Date.now()}`,
+          }));
+          restoredResults = [...restoredResults, ...processedResults];
+          keysToLoad = keysToLoad.slice(1);
+        } else {
+          // No more results or error, stop loading
+          break;
+        }
+      }
+
+      // Update state with restored results
+      setAllResults(restoredResults);
+      setFilteredResults(restoredResults);
+      setCurrentResults(restoredResults);
+      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+      setLastEvaluatedKey(paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] || null);
+      setHasMore(paginationState.hasMore);
+      setHasPerformedInitialSearch(true);
+
+      // Update tile with restored results - include pagination state
+      onUpdate(id, {
+        articles: restoredResults,
+        paginationState: {
+          totalResultsLoaded: restoredResults.length,
+          lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
+          hasMore: paginationState.hasMore,
+        },
+        lastUpdated: Date.now(),
+      });
+
+      console.log('✅ NewsTile: Pagination state restored', {
+        restoredCount: restoredResults.length,
+        targetCount: paginationState.totalResultsLoaded,
+      });
+    } catch (err) {
+      console.error('❌ NewsTile: Error restoring pagination state', err);
+      setError('Failed to restore previous results. Please refresh.');
+    } finally {
+      setIsRestoringPagination(false);
+      setIsLoading(false);
+    }
+  }, [paginationState, currentResults, currentSearchParams, id, onUpdate]);
   const [hasMore, setHasMore] = useState<boolean>(() => {
     // First try to get from paginationState prop
     if (initialPaginationState?.hasMore !== undefined) {
@@ -264,35 +399,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
   });
   
-  
-  // Ensure defaults are set
-  const defaultDisplayOptions = {
-    showTitle: true,
-    showDescription: false,
-    showSource: true,
-    showCategory: true,
-    showDate: true,
-    showImage: true,
-    showResultsTable: true,
-    maxResults: 200,
-    compactView: false,
-  };
-  
-  const [localDisplayOptions, setLocalDisplayOptions] = useState(() => {
-    const merged = {
-      ...defaultDisplayOptions,
-      ...displayOptions
-    };
-    // Always force showImage to true - images should always be visible
-    merged.showImage = true;
-    console.log('📰 NewsTile: Initializing displayOptions (forcing showImage=true):', {
-      default: defaultDisplayOptions.showImage,
-      prop: displayOptions?.showImage,
-      merged: merged.showImage,
-    });
-    return merged;
-  });
-
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState<{
     title: boolean;
@@ -326,11 +432,17 @@ const NewsTile: React.FC<NewsTileProps> = ({
       return newColumns;
     });
   }, [localDisplayOptions, id, onSettingsChange]);
-
   // Persist searchParams when they change
   useEffect(() => {
     onSettingsChange(id, { searchParams: currentSearchParams });
   }, [currentSearchParams, id, onSettingsChange]);
+
+  // Restore pagination state on mount if needed
+  useEffect(() => {
+    if (paginationState && paginationState.totalResultsLoaded > (currentResults?.length || 0) && !isRestoringPagination && !isLoading) {
+      restorePaginationState();
+    }
+  }, [paginationState, currentResults?.length, isRestoringPagination, isLoading, restorePaginationState]);
 
   // Column width state for dynamic sizing
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});

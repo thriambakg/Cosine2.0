@@ -708,8 +708,94 @@ export default function ChatPage() {
   const getCurrentSessionLoading = useCallback(() => {
     return currentSession?.session_id ? sessionLoadingStates[currentSession.session_id] || false : false;
   }, [currentSession?.session_id, sessionLoadingStates]);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Sidebar state with persistence - closed by default on first load (no session)
+  // but remember user's preference after they interact with it
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    // On first load, only open sidebar if there's a loaded session
+    // After first interaction, use persisted preference
+    try {
+      const saved = localStorage.getItem('chatpage_sidebarOpen');
+      if (saved !== null) {
+        return JSON.parse(saved);
+      }
+      // Default: closed (false) - user will see chat interface first
+      return false;
+    } catch {
+      return false;
+    }
+  });
+  
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      const saved = localStorage.getItem('chatpage_sidebarCollapsed');
+      if (saved !== null) {
+        return JSON.parse(saved);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
+  
+  // Persist sidebar state when it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatpage_sidebarOpen', JSON.stringify(sidebarOpen));
+    } catch {
+      console.warn('Failed to persist sidebarOpen state');
+    }
+  }, [sidebarOpen]);
+  
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatpage_sidebarCollapsed', JSON.stringify(sidebarCollapsed));
+    } catch {
+      console.warn('Failed to persist sidebarCollapsed state');
+    }
+  }, [sidebarCollapsed]);
+  
+  // Auto-open sidebar when a session is loaded (except on first load)
+  useEffect(() => {
+    if (currentSession?.session_id && sessions.length > 0 && !sidebarOpen) {
+      // Open sidebar when user loads a chat session
+      setSidebarOpen(true);
+    }
+  }, [currentSession?.session_id, sessions.length, sidebarOpen]);
+  
+  // Persist current session ID so it reloads when user comes back
+  useEffect(() => {
+    if (currentSession?.session_id) {
+      try {
+        localStorage.setItem('chatpage_lastSessionId', currentSession.session_id);
+        console.log('💾 ChatPage: Saved last session ID:', currentSession.session_id);
+      } catch {
+        console.warn('Failed to persist current session ID');
+      }
+    }
+  }, [currentSession?.session_id]);
+  
+  // Restore last session when sessions are loaded for the first time
+  useEffect(() => {
+    if (sessions.length > 0 && !currentSession?.session_id && persistenceLoading === false) {
+      try {
+        const savedSessionId = localStorage.getItem('chatpage_lastSessionId');
+        if (savedSessionId && sessions.some(s => s.session_id === savedSessionId)) {
+          console.log('📂 ChatPage: Restoring last session:', savedSessionId);
+          // Use useCallback-wrapped functions without adding to dependencies to prevent infinite loops
+          (async () => {
+            await loadSession(savedSessionId);
+            await loadSessionFromDatabase(savedSessionId);
+          })();
+        }
+      } catch {
+        console.warn('Failed to restore last session');
+      }
+    }
+    // Only depend on sessions length and currentSession to avoid infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions.length, currentSession?.session_id, persistenceLoading]);
+  
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
   
   // Session selection for context

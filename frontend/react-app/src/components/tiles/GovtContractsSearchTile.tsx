@@ -820,15 +820,38 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       let currentResults = [...(results || [])];
       let keysToLoad = [...paginationState.lastEvaluatedKeys];
       
-      // Skip keys that were already used (if we have more results than initial page)
-      const initialPageSize = localDisplayOptions.maxResults || 50;
-      if (currentResults.length > initialPageSize) {
-        // Calculate how many pages we've already loaded
-        const pagesLoaded = Math.ceil(currentResults.length / initialPageSize);
-        keysToLoad = keysToLoad.slice(pagesLoaded - 1); // Skip already loaded keys
+      // If we don't have the initial page (currentResults is empty), 
+      // we need to load it first before loading continuation pages
+      if (currentResults.length === 0 && currentSearchParams) {
+        const filters: any = { ...currentSearchParams };
+        
+        // Remove legacy date fields (date_from, date_to) - use date_year instead
+        delete filters.date_from;
+        delete filters.date_to;
+        
+        Object.keys(filters).forEach((key) => {
+          const value = filters[key];
+          if (Array.isArray(value) && value.length === 0) {
+            delete filters[key];
+          } else if (value === '' || value === null || value === undefined) {
+            delete filters[key];
+          }
+        });
+        
+        // Load the initial page (no pagination key)
+        const initialSearchRequest = {
+          filters,
+          limit: 125,
+        };
+        
+        const initialResponse = await govtContractsSearchAPI.search(initialSearchRequest);
+        
+        if (initialResponse.success && initialResponse.results) {
+          currentResults = [...initialResponse.results];
+        }
       }
 
-      // Load each page sequentially until we reach totalResultsLoaded
+      // Load each continuation page sequentially until we reach totalResultsLoaded
       while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0 && currentSearchParams) {
         const nextKey = keysToLoad[0];
         

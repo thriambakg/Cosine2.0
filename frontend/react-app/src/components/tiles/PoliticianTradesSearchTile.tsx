@@ -226,10 +226,10 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>(results);
+  const paginationState = _ as any;
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
-  const [isRestoringPagination] = useState<boolean>(false);
-  // Note: setIsRestoringPagination will be used when restorePaginationState is implemented
+  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
   // Ensure defaults are set
   const defaultDisplayOptions = {
@@ -476,6 +476,110 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       setIsLoading(false);
     }
   }, [currentSearchParams, displayOptions.maxResults, id, onUpdate, onSettingsChange]);
+
+  // Restore pagination state by reloading results from saved pagination keys
+  const restorePaginationState = useCallback(async () => {
+    if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
+      return;
+    }
+
+    if (paginationState.totalResultsLoaded <= (currentResults?.length || 0)) {
+      // Already have all results, no need to restore
+      return;
+    }
+
+    console.log('🔄 PoliticianTradesSearchTile: Restoring pagination state', {
+      totalResultsLoaded: paginationState.totalResultsLoaded,
+      currentResults: currentResults?.length || 0,
+      keysToLoad: paginationState.lastEvaluatedKeys.length,
+    });
+
+    setIsRestoringPagination(true);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      let restoredResults = [...(currentResults || [])];
+      let keysToLoad = [...paginationState.lastEvaluatedKeys];
+      
+      // If we don't have the initial page (currentResults is empty), 
+      // we need to load it first before loading continuation pages
+      if (restoredResults.length === 0 && currentSearchParams) {
+        const searchRequest = {
+          ...currentSearchParams,
+          page: 1,
+          pageSize: displayOptions.maxResults,
+        };
+
+        const initialResponse = await politicianTradesSearchAPI.search(searchRequest);
+
+        if (initialResponse.success && initialResponse.results) {
+          const processedResults = initialResponse.results.map((trade, index) => ({
+            ...trade,
+            tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
+          }));
+          restoredResults = [...processedResults];
+        }
+      }
+
+      // Load each continuation page sequentially until we reach totalResultsLoaded
+      while (restoredResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
+        const nextKey = keysToLoad[0];
+
+        const searchRequest = {
+          ...currentSearchParams,
+          page: 1,
+          pageSize: displayOptions.maxResults,
+          lastEvaluatedKey: nextKey,
+        };
+
+        const response = await politicianTradesSearchAPI.search(searchRequest);
+
+        if (response.success && response.results && response.results.length > 0) {
+          const processedResults = response.results.map((trade, index) => ({
+            ...trade,
+            tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
+          }));
+          restoredResults = [...restoredResults, ...processedResults];
+          keysToLoad = keysToLoad.slice(1);
+        } else {
+          // No more results or error, stop loading
+          break;
+        }
+      }
+
+      // Update state with restored results
+      setAllResults(restoredResults);
+      setFilteredResults(restoredResults);
+      setCurrentResults(restoredResults);
+      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+      setLastEvaluatedKey(paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] || null);
+      setHasMore(paginationState.hasMore);
+      setHasPerformedInitialSearch(true);
+
+      // Update tile with restored results - include pagination state
+      onUpdate(id, {
+        results: restoredResults,
+        paginationState: {
+          totalResultsLoaded: restoredResults.length,
+          lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
+          hasMore: paginationState.hasMore,
+        },
+        lastUpdated: Date.now(),
+      });
+
+      console.log('✅ PoliticianTradesSearchTile: Pagination state restored', {
+        restoredCount: restoredResults.length,
+        targetCount: paginationState.totalResultsLoaded,
+      });
+    } catch (err) {
+      console.error('❌ PoliticianTradesSearchTile: Error restoring pagination state', err);
+      setError('Failed to restore previous results. Please refresh.');
+    } finally {
+      setIsRestoringPagination(false);
+      setIsLoading(false);
+    }
+  }, [paginationState, currentResults, currentSearchParams, displayOptions.maxResults, id, onUpdate]);
   
   // Load more results using cursor-based pagination
   const handleLoadMore = useCallback(async () => {
@@ -632,6 +736,13 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       };
     }
   }, [autoRefresh, performSearch, isDragging, isResizing]);
+
+  // Restore pagination state on mount if needed
+  useEffect(() => {
+    if (paginationState && paginationState.totalResultsLoaded > (currentResults?.length || 0) && !isRestoringPagination && !isLoading) {
+      restorePaginationState();
+    }
+  }, [paginationState, currentResults?.length, isRestoringPagination, isLoading, restorePaginationState]);
 
   // Load suggestion data on mount
   useEffect(() => {

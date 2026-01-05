@@ -1,7 +1,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Box,
   Button,
@@ -24,21 +24,29 @@ interface LoginFormProps {
 }
 
 export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose }: LoginFormProps) {
-  const { user, isLoading, isAuthenticated, login, loginWithProvider } = useAuth();
+  const { user, isAuthenticated, login, loginWithProvider } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const emailInputRef = useRef<HTMLInputElement>(null);
 
-           // Redirect if already authenticated
-         useEffect(() => {
-           if (isAuthenticated && user) {
-             navigate('/');
-           }
-    
-    // Check for authentication errors from callback
+  // Only redirect if already authenticated and not in the middle of a login attempt
+  // Add additional check to prevent premature navigation
+  useEffect(() => {
+    if (isAuthenticated && user && !loading && !error) {
+      // Add a small delay to ensure the authentication process is complete
+      const timeoutId = setTimeout(() => {
+        navigate('/');
+      }, 150);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isAuthenticated, user, navigate, loading, error]);
+
+  // Check for authentication errors from callback
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const errorParam = urlParams.get('error');
@@ -48,7 +56,7 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
         setError('There was an error completing authentication. Please try again.');
       }
     }
-  }, [isAuthenticated, user, navigate]);
+  }, []);
 
   // Traditional email/password login
   const handleEmailLogin = async (e: React.FormEvent) => {
@@ -59,13 +67,23 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
     try {
       const result = await login(email, password);
       if (result.success) {
-        navigate('/');
-        onClose();
+        // Clear any previous errors and close modal
+        setError('');
+        // Add small delay to ensure state is stable before navigation
+        setTimeout(() => {
+          navigate('/');
+          onClose();
+        }, 100);
       } else {
-        setError(result.error || 'Login failed');
+        // Display error message - keep modal open and preserve form values
+        setError(result.error || 'Login failed. Please check your credentials and try again.');
+        // Ensure we don't navigate or close modal on failure
+        return;
       }
     } catch (error: any) {
-      setError(error.message || 'Login failed');
+      // Catch any unexpected errors - preserve form state
+      console.error('Unexpected login error:', error);
+      setError(error.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -83,23 +101,6 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
       setLoading(false);
     }
   };
-
-  if (isLoading) {
-    return (
-      <Box sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)'
-      }}>
-        <Box textAlign="center">
-          <CircularProgress sx={{ color: '#dc2626' }} />
-          <Typography sx={{ mt: 1, color: '#e2e8f0' }}>Loading...</Typography>
-        </Box>
-      </Box>
-    );
-  }
 
   return (
     <Card sx={{
@@ -163,16 +164,22 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
           severity="error" 
           sx={{ 
             mb: 3,
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid #dc2626',
+            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+            border: '2px solid #dc2626',
             borderRadius: '0px',
+            animation: 'pulse 2s ease-in-out',
+            boxShadow: '0 0 20px rgba(220, 38, 38, 0.3)',
             '& .MuiAlert-message': {
-              color: '#fca5a5',
-              fontSize: '0.875rem'
+              color: '#fef2f2',
+              fontSize: '0.875rem',
+              fontWeight: 600
+            },
+            '& .MuiAlert-icon': {
+              color: '#dc2626'
             }
           }}
         >
-          {error}
+          <strong>Login Failed:</strong> {error}
         </Alert>
       )}
 
@@ -281,6 +288,7 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Enter your email"
+            inputRef={emailInputRef}
             sx={{
               '& .MuiOutlinedInput-root': {
                 borderRadius: '0px',
@@ -507,6 +515,22 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
           </Typography>
         </Typography>
       </Box>
+
+      {/* CSS Animation for error alerts */}
+      <style>
+        {`
+          @keyframes pulse {
+            0%, 100% {
+              opacity: 1;
+              transform: scale(1);
+            }
+            50% {
+              opacity: 0.9;
+              transform: scale(1.01);
+            }
+          }
+        `}
+      </style>
     </Card>
   );
 }

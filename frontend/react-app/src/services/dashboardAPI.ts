@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
 import { Dashboard } from '../types/dashboardTypes';
+import { cleanupPaginationStates, validateDashboardForSaving } from '../utils/dashboardCleanup';
 
 export interface CryptoTile {
   id: string;
@@ -137,8 +138,27 @@ export const dashboardAPI = {
   // Update entire dashboard configuration
   updateDashboard: async (dashboardConfig: DashboardConfig): Promise<DashboardResponse> => {
     try {
+      // Clean up overly nested pagination states to prevent DynamoDB errors
+      const cleanedConfig = cleanupPaginationStates(dashboardConfig);
+      
+      // Log cleanup impact
+      const originalSize = JSON.stringify(dashboardConfig).length;
+      const cleanedSize = JSON.stringify(cleanedConfig).length;
+      if (originalSize !== cleanedSize) {
+        console.log(`🧹 Dashboard cleanup reduced payload: ${originalSize} -> ${cleanedSize} bytes (${Math.round((1 - cleanedSize/originalSize) * 100)}% reduction)`);
+      }
+      
+      // Validate the dashboard before sending
+      const validation = validateDashboardForSaving(cleanedConfig);
+      if (!validation.isValid) {
+        console.warn('Dashboard validation warnings:', validation.errors);
+        // Log warnings but don't block - the backend cleanup will handle it
+      }
+      
+      console.log('🧹 Sending cleaned dashboard config to backend');
+      
       const response = await axios.put(`${API_CONFIG.BASE_URL}/dashboard`, {
-        dashboard_config: dashboardConfig,
+        dashboard_config: cleanedConfig,
       });
       return response.data;
     } catch (error) {

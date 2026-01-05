@@ -202,11 +202,18 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   // Search state - initialize with default values if searchParams is not provided
   const [currentSearchParams, setCurrentSearchParams] = useState<CongressBillsSearchFilters>(() => {
     if (searchParams) {
+      // Migrate legacy sponsor_name to politician_name for backward compatibility
+      const migratedParams = { ...searchParams };
+      if (migratedParams.sponsor_name && !migratedParams.politician_name) {
+        migratedParams.politician_name = migratedParams.sponsor_name;
+        delete migratedParams.sponsor_name;
+      }
+      
       return {
-        ...searchParams,
-        politician_role: searchParams.politician_role || [],
-        introduced_date_from: searchParams.introduced_date_from,
-        introduced_date_to: searchParams.introduced_date_to,
+        ...migratedParams,
+        politician_role: migratedParams.politician_role || [],
+        introduced_date_from: migratedParams.introduced_date_from,
+        introduced_date_to: migratedParams.introduced_date_to,
       };
     }
     return {
@@ -474,6 +481,14 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         }
       });
       
+      // Clean up legacy sponsor_name field - ensure only politician_name is sent
+      if (filters.sponsor_name) {
+        if (!filters.politician_name) {
+          filters.politician_name = filters.sponsor_name;
+        }
+        delete filters.sponsor_name;
+      }
+      
       // Handle politician_role: normalize to array format
       // - undefined or null -> [] (empty array means 'both' - lambda will handle)
       // - string 'both' -> [] (empty array means 'both')
@@ -598,9 +613,19 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         }
       });
       
+      // Clean up legacy sponsor_name field - ensure only politician_name is sent
+      if (filters.sponsor_name) {
+        if (!filters.politician_name) {
+          filters.politician_name = filters.sponsor_name;
+        }
+        delete filters.sponsor_name;
+      }
+      
       const searchRequest = {
         filters,
         last_evaluated_key: lastEvaluatedKey,
+        limit: 100, // Explicit limit for load more requests
+        is_restoration: false, // Explicitly mark as continuation, not restoration
       };
       
       const response = await congressBillsSearchAPI.search(searchRequest);
@@ -692,15 +717,42 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       let currentResults = [...(results || [])];
       let keysToLoad = [...paginationState.lastEvaluatedKeys];
       
-      // Skip keys that were already used (if we have more results than initial page)
-      const initialPageSize = localDisplayOptions.maxResults || 50;
-      if (currentResults.length > initialPageSize) {
-        // Calculate how many pages we've already loaded
-        const pagesLoaded = Math.ceil(currentResults.length / initialPageSize);
-        keysToLoad = keysToLoad.slice(pagesLoaded - 1); // Skip already loaded keys
+      // If we don't have the initial page (currentResults is empty), 
+      // we need to load it first before loading continuation pages
+      if (currentResults.length === 0 && currentSearchParams) {
+        const filters: any = { ...currentSearchParams };
+        
+        Object.keys(filters).forEach((key) => {
+          const value = filters[key];
+          if (Array.isArray(value) && value.length === 0) {
+            delete filters[key];
+          }
+          if (value === '' || value === null || value === undefined) {
+            delete filters[key];
+          }
+        });
+        
+        // Clean up legacy sponsor_name field
+        if (filters.sponsor_name) {
+          if (!filters.politician_name) {
+            filters.politician_name = filters.sponsor_name;
+          }
+          delete filters.sponsor_name;
+        }
+        
+        // Load the initial page (no pagination key)
+        const initialSearchRequest = {
+          filters,
+        };
+        
+        const initialResponse = await congressBillsSearchAPI.search(initialSearchRequest);
+        
+        if (initialResponse.success && initialResponse.results) {
+          currentResults = [...initialResponse.results];
+        }
       }
 
-      // Load each page sequentially until we reach totalResultsLoaded
+      // Load each continuation page sequentially until we reach totalResultsLoaded
       while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0 && currentSearchParams) {
         const nextKey = keysToLoad[0];
         
@@ -718,10 +770,18 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           }
         });
         
+        // Clean up legacy sponsor_name field - ensure only politician_name is sent
+        if (filters.sponsor_name) {
+          if (!filters.politician_name) {
+            filters.politician_name = filters.sponsor_name;
+          }
+          delete filters.sponsor_name;
+        }
+        
         const searchRequest = {
           filters,
-          limit: localDisplayOptions.maxResults,
           last_evaluated_key: nextKey,
+          is_restoration: true,  // Flag to indicate this is restoring pagination, not continuing
         };
         
         const response = await congressBillsSearchAPI.search(searchRequest);
@@ -739,6 +799,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       setAllResults(currentResults);
       setFilteredResults(currentResults);
       setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+      setLastEvaluatedKey(paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] || null);
       setHasMore(paginationState.hasMore);
       setHasPerformedInitialSearch(true);
       

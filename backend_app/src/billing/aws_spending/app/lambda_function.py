@@ -238,67 +238,6 @@ def store_monthly_spending_csv(cost_data: Dict, month: str, start_date: str, end
         logger.error(f"Error storing monthly spending CSV: {str(e)}")
         raise
 
-def handle_scheduled_event(event: Dict) -> Dict:
-    """Handle scheduled EventBridge event - create monthly summary for previous month"""
-    logger.info("📅 Processing scheduled monthly summary generation")
-    
-    # Calculate previous month's date range
-    today = datetime.now()
-    # First day of current month
-    first_of_current = today.replace(day=1)
-    # Last day of previous month
-    last_of_previous = first_of_current - timedelta(days=1)
-    # First day of previous month
-    first_of_previous = last_of_previous.replace(day=1)
-    
-    start_date = first_of_previous.strftime('%Y-%m-%d')
-    end_date = (last_of_previous + timedelta(days=1)).strftime('%Y-%m-%d')  # Exclusive end date
-    month_key = first_of_previous.strftime('%Y-%m')
-    
-    logger.info(f"📊 Generating monthly summary for {month_key} ({start_date} to {end_date})")
-    
-    try:
-        # Fetch previous month's cost data WITH grouping for detailed breakdown
-        cost_data = get_cost_and_usage(start_date, end_date, include_grouping=True)
-        logger.info(f"📈 Cost Explorer response received for previous month")
-        
-        # Calculate totals
-        totals = calculate_totals(cost_data)
-        
-        # Store monthly detailed CSV
-        monthly_csv_key = store_monthly_spending_csv(cost_data, month_key, start_date, end_date)
-        
-        # Update monthly summary table (include earnings data)
-        summary_key = update_monthly_summary(totals, start_date, end_date, month_key)
-        
-        logger.info(f"✅ Monthly summary generated successfully for {month_key}")
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'success': True,
-                'month': month_key,
-                'period': {
-                    'start': start_date,
-                    'end': end_date
-                },
-                'totals': totals,
-                'stored': {
-                    'monthly_csv': monthly_csv_key,
-                    'summary': summary_key
-                },
-                'message': f'Monthly summary generated for {month_key}'
-            }, default=str)
-        }
-    except Exception as e:
-        logger.error(f"❌ Error generating monthly summary: {str(e)}", exc_info=True)
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'success': False,
-                'error': f'Failed to generate monthly summary: {str(e)}'
-            }, default=str)
-        }
-
 def get_earnings_for_month(month_key: str) -> Dict[str, Any]:
     """Get earnings data for a specific month from earnings_summary.csv"""
     try:
@@ -324,84 +263,12 @@ def get_earnings_for_month(month_key: str) -> Dict[str, Any]:
         'currency': 'USD'
     }
 
-def update_monthly_summary(totals: Dict[str, float], start_date: str, end_date: str, month_key: str = None) -> str:
-    """Update monthly totals in shared summary CSV at root, including earnings data"""
-    if month_key is None:
-        month_key = datetime.now().strftime('%Y-%m')
-    csv_key = "monthly_summary.csv"
-    
-    # Get earnings data for this month
-    earnings_data = get_earnings_for_month(month_key)
-    logger.info(f"💰 Earnings for {month_key}: ${earnings_data['total_earnings']:.2f} ({earnings_data['payment_count']} payments)")
-    
-    # Try to get existing CSV
-    existing_data = []
-    try:
-        response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key=csv_key)
-        csv_content = response['Body'].read().decode('utf-8')
-        reader = csv.DictReader(io.StringIO(csv_content))
-        existing_data = list(reader)
-    except ClientError as e:
-        if e.response['Error']['Code'] != 'NoSuchKey':
-            logger.warning(f"Error reading existing CSV: {str(e)}")
-    
-    # Add new row with earnings data
-    new_row = {
-        'month': month_key,
-        'start_date': start_date,
-        'end_date': end_date,
-        'blended_cost': f"{totals['blended_cost']:.2f}",
-        'unblended_cost': f"{totals['unblended_cost']:.2f}",
-        'usage_quantity': f"{totals['usage_quantity']:.2f}",
-        'total_earnings': f"{earnings_data['total_earnings']:.2f}",
-        'payment_count': str(earnings_data['payment_count']),
-        'currency': 'USD',
-        'updated_at': datetime.now().isoformat()
-    }
-    
-    # Check if month already exists, update if so
-    updated = False
-    for i, row in enumerate(existing_data):
-        if row.get('month') == month_key:
-            existing_data[i] = new_row
-            updated = True
-            break
-    
-    if not updated:
-        existing_data.append(new_row)
-    
-    # Write back to S3
-    output = io.StringIO()
-    fieldnames = ['month', 'start_date', 'end_date', 'blended_cost', 'unblended_cost', 'usage_quantity', 'total_earnings', 'payment_count', 'currency', 'updated_at']
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(existing_data)
-    
-    try:
-        s3_client.put_object(
-            Bucket=SPENDING_BUCKET_NAME,
-            Key=csv_key,
-            Body=output.getvalue(),
-            ContentType='text/csv',
-            ServerSideEncryption='aws:kms'
-        )
-        logger.info(f"✅ Updated monthly summary CSV: {csv_key} (with earnings: ${earnings_data['total_earnings']:.2f})")
-        return csv_key
-    except ClientError as e:
-        logger.error(f"Error storing monthly summary: {str(e)}")
-        raise
-
 def lambda_handler(event: Dict, context: Any) -> Dict:
-    """Main Lambda handler"""
+    """Main Lambda handler - HTTP API Gateway requests only"""
     logger.info(f"📥 Received event: {json.dumps(event, default=str)}")
     
     try:
-        # Check if this is a scheduled EventBridge event
-        if 'source' in event and event.get('source') == 'aws.events':
-            logger.info("📅 Processing scheduled EventBridge event - creating monthly summary")
-            return handle_scheduled_event(event)
-        
-        # Otherwise, handle HTTP API Gateway request
+        # Handle HTTP API Gateway request
         http_method = event.get('httpMethod', 'GET')
         logger.info(f"🔍 Processing {http_method} request")
         
@@ -443,37 +310,88 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                     current_total = totals.get('blended_cost', 0.0)
                     logger.info(f"💰 Current month total (live): ${current_total:.2f}")
                     
-                    # Get historical data from S3 for the table (no fallbacks)
+                    # Store current month data to spendings/YYYY/MM.csv
+                    year_month = current_month.replace('-', '/')
+                    csv_key = f"spendings/{year_month}.csv"
+                    
+                    try:
+                        # Prepare current month CSV
+                        current_month_row = {
+                            'month': current_month,
+                            'start_date': start_date,
+                            'end_date': today.strftime('%Y-%m-%d'),
+                            'blended_cost': f"{current_total:.2f}",
+                            'unblended_cost': f"{totals.get('unblended_cost', 0.0):.2f}",
+                            'usage_quantity': f"{totals.get('usage_quantity', 0.0):.2f}",
+                            'currency': 'USD',
+                            'updated_at': datetime.now().isoformat()
+                        }
+                        
+                        # Write current month CSV
+                        output = io.StringIO()
+                        fieldnames = ['month', 'start_date', 'end_date', 'blended_cost', 'unblended_cost', 'usage_quantity', 'currency', 'updated_at']
+                        writer = csv.DictWriter(output, fieldnames=fieldnames)
+                        writer.writeheader()
+                        writer.writerow(current_month_row)
+                        
+                        s3_client.put_object(
+                            Bucket=SPENDING_BUCKET_NAME,
+                            Key=csv_key,
+                            Body=output.getvalue(),
+                            ContentType='text/csv',
+                            ServerSideEncryption='aws:kms'
+                        )
+                        logger.info(f"✅ Stored current month spending to: {csv_key}")
+                    except ClientError as e:
+                        logger.error(f"⚠️ Failed to store current month CSV: {str(e)}")
+                        # Don't fail the request, just log warning
+                    
+                    # Get all historical spending months from spendings/ folder
                     monthly_data = []
                     try:
-                        response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key='monthly_summary.csv')
-                        csv_content = response['Body'].read().decode('utf-8')
-                        reader = csv.DictReader(io.StringIO(csv_content))
-                        monthly_data = list(reader)
-                        logger.info(f"📚 Found {len(monthly_data)} months of historical data from S3")
+                        # List all YYYY/MM.csv files in spendings/
+                        paginator = s3_client.get_paginator('list_objects_v2')
+                        pages = paginator.paginate(
+                            Bucket=SPENDING_BUCKET_NAME,
+                            Prefix='spendings/'
+                        )
                         
-                        # Update current month in historical data with live value
-                        updated = False
-                        earnings_data = get_earnings_for_month(current_month)
-                        for row in monthly_data:
-                            if row.get('month') == current_month:
-                                row['blended_cost'] = f"{current_total:.2f}"
-                                row['unblended_cost'] = f"{totals.get('unblended_cost', 0.0):.2f}"
-                                row['usage_quantity'] = f"{totals.get('usage_quantity', 0.0):.2f}"
-                                row['total_earnings'] = f"{earnings_data['total_earnings']:.2f}"
-                                row['payment_count'] = str(earnings_data['payment_count'])
-                                row['updated_at'] = datetime.now().isoformat()
-                                updated = True
-                                logger.info(f"🔄 Updated current month in historical data")
-                                break
-                    except ClientError as e:
-                        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-                        if error_code == 'NoSuchKey':
-                            logger.warning("⚠️ monthly_summary.csv not found in S3 - returning empty data. Run scheduled event to generate summary files.")
-                            monthly_data = []
-                        else:
-                            logger.error(f"❌ Error reading monthly summary from S3: {str(e)}")
-                            raise
+                        month_files = []
+                        for page in pages:
+                            if 'Contents' in page:
+                                for obj in page['Contents']:
+                                    key = obj['Key']
+                                    # Match pattern: spendings/YYYY/MM.csv
+                                    if key.endswith('.csv') and key.count('/') == 2:
+                                        month_files.append(key)
+                        
+                        logger.info(f"📚 Found {len(month_files)} month files in spendings/")
+                        
+                        # Read each month file and extract data
+                        for month_file in sorted(month_files, reverse=True):  # Newest first
+                            try:
+                                response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key=month_file)
+                                csv_content = response['Body'].read().decode('utf-8')
+                                reader = csv.DictReader(io.StringIO(csv_content))
+                                
+                                for row in reader:
+                                    month_key = row.get('month')
+                                    if month_key:
+                                        # Get earnings for this month
+                                        earnings = get_earnings_for_month(month_key)
+                                        
+                                        # Add earnings data to spending row
+                                        row['total_earnings'] = f"{earnings['total_earnings']:.2f}"
+                                        row['payment_count'] = str(earnings['payment_count'])
+                                        monthly_data.append(row)
+                            except ClientError as e:
+                                logger.warning(f"⚠️ Failed to read {month_file}: {str(e)}")
+                                continue
+                        
+                        logger.info(f"📊 Loaded {len(monthly_data)} months with earnings data")
+                    except Exception as e:
+                        logger.error(f"❌ Error listing spending months: {str(e)}")
+                        monthly_data = []
                     
                     return create_response(200, {
                         'success': True,
@@ -490,114 +408,12 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                         'error': f'Failed to fetch spending data: {error_message}',
                         'code': error_code
                     })
-            elif query_params.get('list_reports') == 'true':
-                # List all monthly reports available for download
-                logger.info("📋 Listing monthly spending reports")
-                try:
-                    # List all objects in spendings/ prefix
-                    response = s3_client.list_objects_v2(
-                        Bucket=SPENDING_BUCKET_NAME,
-                        Prefix='spendings/',
-                        Delimiter='/'
-                    )
-                    
-                    reports = []
-                    if 'CommonPrefixes' in response:
-                        # Get monthly folders (YYYY/MM/)
-                        for prefix in response['CommonPrefixes']:
-                            folder_path = prefix['Prefix']  # e.g., "spendings/2025/12/"
-                            parts = folder_path.rstrip('/').split('/')
-                            if len(parts) >= 3:
-                                year = parts[1]
-                                month = parts[2]
-                                month_key = f"{year}-{month}"
-                                
-                                # Check if CSV file exists in this folder
-                                csv_key = f"spendings/{year}/{month}.csv"
-                                try:
-                                    s3_client.head_object(Bucket=SPENDING_BUCKET_NAME, Key=csv_key)
-                                    reports.append({
-                                        'month': month_key,
-                                        'year': year,
-                                        'month_num': month,
-                                        's3_key': csv_key,
-                                        'filename': f"{month_key}-spending-report.csv"
-                                    })
-                                except ClientError:
-                                    logger.warning(f"⚠️ Monthly report not found: {csv_key}")
-                    
-                    # Sort by month (newest first)
-                    reports.sort(key=lambda x: x['month'], reverse=True)
-                    
-                    logger.info(f"📊 Found {len(reports)} monthly reports")
-                    return create_response(200, {
-                        'success': True,
-                        'reports': reports
-                    })
-                except ClientError as e:
-                    logger.error(f"❌ Error listing reports: {str(e)}")
-                    return create_response(500, {
-                        'success': False,
-                        'error': f'Failed to list reports: {str(e)}'
-                    })
-            elif query_params.get('download') and query_params.get('month'):
-                # Generate presigned URL for monthly report download
-                month = query_params.get('month')  # Format: YYYY-MM
-                year_month_path = month.replace('-', '/')
-                csv_key = f"spendings/{year_month_path}.csv"
-                
-                logger.info(f"🔗 Generating presigned URL for: {csv_key}")
-                try:
-                    # Verify file exists
-                    s3_client.head_object(Bucket=SPENDING_BUCKET_NAME, Key=csv_key)
-                    
-                    # Generate presigned URL (valid for 1 hour)
-                    presigned_url = s3_client.generate_presigned_url(
-                        'get_object',
-                        Params={'Bucket': SPENDING_BUCKET_NAME, 'Key': csv_key},
-                        ExpiresIn=3600
-                    )
-                    
-                    logger.info(f"✅ Generated presigned URL for {csv_key}")
-                    return create_response(200, {
-                        'success': True,
-                        'month': month,
-                        's3_key': csv_key,
-                        'presigned_url': presigned_url,
-                        'expires_in': 3600
-                    })
-                except ClientError as e:
-                    if e.response.get('Error', {}).get('Code') == '404':
-                        logger.warning(f"⚠️ Report not found: {csv_key}")
-                        return create_response(404, {
-                            'success': False,
-                            'error': f'Monthly report for {month} not found'
-                        })
-                    logger.error(f"❌ Error generating presigned URL: {str(e)}")
-                    return create_response(500, {
-                        'success': False,
-                        'error': f'Failed to generate download URL: {str(e)}'
-                    })
             else:
-                # Default behavior - just return current month summary (no storage)
-                logger.info("🔄 Fetching current month spending data (no storage)")
-                start_date, end_date = get_current_billing_period()
-                today = datetime.now()
-                end_date_live = (today + timedelta(days=1)).strftime('%Y-%m-%d')
-                current_month = today.strftime('%Y-%m')
-                
-                cost_data = get_cost_and_usage(start_date, end_date_live, include_grouping=False)
-                totals = calculate_totals(cost_data)
-                
-                return create_response(200, {
-                    'success': True,
-                    'period': {
-                        'start': start_date,
-                        'end': end_date_live,
-                        'month': current_month
-                    },
-                    'totals': totals,
-                    'message': 'Current month spending data fetched'
+                # No query parameters or unsupported query params - return error
+                logger.warning("❌ Invalid or unsupported query parameters")
+                return create_response(400, {
+                    'success': False,
+                    'error': 'Missing required query parameter: summary=true'
                 })
         else:
             logger.warning(f"❌ Unsupported HTTP method: {http_method}")

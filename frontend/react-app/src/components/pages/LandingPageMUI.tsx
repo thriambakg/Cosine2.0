@@ -13,13 +13,13 @@ import {
   TrendingUp,
   Security as ShieldIcon,
   Bolt as ZapIcon,
-  BarChart as BarChart3Icon,
-  Timeline as ActivityIcon,
   ArrowForward as ArrowRightIcon,
   Star,
   People as UsersIcon,
-  AttachMoney as DollarSignIcon,
   TrendingDown,
+  Gavel as GavelIcon,
+  Description as DescriptionIcon,
+  Article as ArticleIcon,
 } from '@mui/icons-material';
 
 import { AuthModal } from '../auth';
@@ -32,10 +32,10 @@ export default function LandingPageMUI() {
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    if (isAuthenticated && typeof window !== 'undefined') {
+    if (isAuthenticated && typeof window !== 'undefined' && !authModalOpen) {
       window.location.href = '/chat';
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authModalOpen]);
 
   // Check for error parameters and automatically open auth modal
   useEffect(() => {
@@ -167,7 +167,7 @@ export default function LandingPageMUI() {
               <Box sx={{ textAlign: { xs: 'center', lg: 'left' } }}>
                 <Chip
                   icon={<Star sx={{ fontSize: '16px !important', color: '#fbbf24' }} />}
-                  label="Trusted by 10K+ traders"
+                  label="Transparency & Research Platform"
                   sx={{
                     backgroundColor: 'rgba(220, 38, 38, 0.2)',
                     backdropFilter: 'blur(4px)',
@@ -207,8 +207,8 @@ export default function LandingPageMUI() {
                     fontWeight: 500
                   }}
                 >
-                  Experience the future of trading with our advanced AI assistant. Get real-time analysis, 
-                  portfolio optimization, and intelligent insights to maximize your trading potential.
+                  Research government disclosures, track political influence, analyze financial data, and get AI-powered insights. 
+                  Access SEC filings, lobbying disclosures, Congress bills, politician trades, government contracts, and more in one unified platform.
                 </Typography>
                 
                 <Box sx={{ mb: 4 }}>
@@ -251,15 +251,15 @@ export default function LandingPageMUI() {
                 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <ShieldIcon sx={{ fontSize: 20, color: '#22c55e' }} />
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>Bank-Grade Security</Typography>
+                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>Secure & Private</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <UsersIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>10K+ Users</Typography>
+                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>Open Data Access</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <DollarSignIcon sx={{ fontSize: 20, color: '#22c55e' }} />
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>$50M+ Managed</Typography>
+                    <ZapIcon sx={{ fontSize: 20, color: '#22c55e' }} />
+                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>AI-Powered Research</Typography>
                   </Box>
                 </Box>
               </Box>
@@ -276,7 +276,7 @@ export default function LandingPageMUI() {
                 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
                     <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, textTransform: 'uppercase' }}>
-                      Portfolio Dashboard
+                      Research Dashboard
                     </Typography>
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <Box sx={{ width: 12, height: 12, backgroundColor: '#dc2626', borderRadius: '0%' }} />
@@ -294,15 +294,15 @@ export default function LandingPageMUI() {
                     }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                         <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.875rem', fontWeight: 600 }}>
-                          Total Portfolio Value
+                          SEC Filings Found
                         </Typography>
-                        <TrendingUp sx={{ fontSize: 16, color: '#22c55e' }} />
+                        <DescriptionIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
                       </Box>
                       <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 800 }}>
-                        $124,567.89
+                        1,247
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#22c55e', fontSize: '0.875rem', fontWeight: 600 }}>
-                        +12.4% this month
+                      <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.875rem', fontWeight: 600 }}>
+                        Last 30 days
                       </Typography>
                     </Card>
                     
@@ -314,13 +314,13 @@ export default function LandingPageMUI() {
                         border: '1px solid #4b5563'
                       }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                          <BarChart3Icon sx={{ fontSize: 16, color: '#3b82f6' }} />
+                          <GavelIcon sx={{ fontSize: 16, color: '#dc2626' }} />
                           <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600 }}>
-                            AI Score
+                            LDA Disclosures
                           </Typography>
                         </Box>
                         <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 800 }}>
-                          8.7/10
+                          856
                         </Typography>
                       </Card>
                       <Card sx={{
@@ -330,13 +330,13 @@ export default function LandingPageMUI() {
                         border: '1px solid #4b5563'
                       }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                          <ActivityIcon sx={{ fontSize: 16, color: '#a855f7' }} />
+                          <ArticleIcon sx={{ fontSize: 16, color: '#22c55e' }} />
                           <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600 }}>
-                            Risk Level
+                            Congress Bills
                           </Typography>
                         </Box>
                         <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 800 }}>
-                          Moderate
+                          342
                         </Typography>
                       </Card>
                     </Box>
@@ -350,11 +350,11 @@ export default function LandingPageMUI() {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                         <BotIcon sx={{ fontSize: 16, color: '#6366f1' }} />
                         <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.875rem', fontWeight: 600 }}>
-                          AI Recommendation
+                          AI Research Assistant
                         </Typography>
                       </Box>
                       <Typography variant="caption" sx={{ color: '#ffffff', fontSize: '0.75rem' }}>
-                        Consider rebalancing your tech allocation. Current weighting is 35% - recommended 28%.
+                        Ask questions about government data, analyze relationships, and get insights powered by AI.
                       </Typography>
                     </Card>
                   </Box>
@@ -397,10 +397,10 @@ export default function LandingPageMUI() {
           <Container maxWidth="lg">
             <Box sx={{ textAlign: 'center', mb: 6 }}>
               <Typography variant="h4" sx={{ color: '#ffffff', fontWeight: 800, mb: 2, textTransform: 'uppercase' }}>
-                Why Choose Cosine?
+                Powerful Research Tools
               </Typography>
               <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                Advanced AI technology meets intuitive trading
+                Access government data, track political influence, and analyze financial disclosures
               </Typography>
             </Box>
             
@@ -438,10 +438,10 @@ export default function LandingPageMUI() {
                     <BotIcon sx={{ fontSize: 32, color: '#ffffff' }} />
                   </Box>
                   <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
-                    AI-Powered Analysis
+                    Government Data Search
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    Advanced machine learning algorithms analyze market patterns and provide intelligent trading insights.
+                    Search SEC filings, lobbying disclosures, Congress bills, politician trades, and government contracts with advanced filtering.
                   </Typography>
                 </Box>
               </Card>
@@ -475,10 +475,10 @@ export default function LandingPageMUI() {
                     <ShieldIcon sx={{ fontSize: 32, color: '#ffffff' }} />
                   </Box>
                   <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
-                    Bank-Grade Security
+                    AI Research Assistant
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    Enterprise-level security with 2FA, encryption, and compliance with financial regulations.
+                    Get intelligent answers about government data, analyze relationships between entities, and discover insights with AI-powered chat.
                   </Typography>
                 </Box>
               </Card>
@@ -512,10 +512,10 @@ export default function LandingPageMUI() {
                     <ZapIcon sx={{ fontSize: 32, color: '#ffffff' }} />
                   </Box>
                   <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
-                    Real-Time Insights
+                    Comprehensive Data
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    Get instant market analysis, portfolio updates, and trading signals powered by live data feeds.
+                    Access news articles, stock data, portfolio analysis, and organize your research with our integrated filesystem.
                   </Typography>
                 </Box>
               </Card>
@@ -528,7 +528,7 @@ export default function LandingPageMUI() {
           <Container maxWidth="lg">
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 600 }}>
-                © 2025 Cosine AI Trading Platform. All rights reserved.
+                © 2025 Cosine Research Platform. All rights reserved.
               </Typography>
             </Box>
           </Container>

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Box, Typography, Button } from '@mui/material';
+import { Box } from '@mui/material';
 import LoginForm from './LoginForm';
 import RegisterForm from './RegisterForm';
+import PasswordResetForm from './PasswordResetForm';
 import MFASetup from './MFASetup';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -27,12 +28,21 @@ export default function AuthModal({
   
   const { user, isAuthenticated } = useAuth();
 
-  // Close modal if user becomes authenticated
+  // Close modal if user becomes authenticated (but only if they're actually logged in)
+  // Add a small delay to ensure the authentication is stable
   useEffect(() => {
-    if (isAuthenticated && !showMFASetup) {
-      onClose();
+    let timeoutId: NodeJS.Timeout;
+    if (isAuthenticated && user && !showMFASetup) {
+      timeoutId = setTimeout(() => {
+        onClose();
+      }, 100); // Small delay to ensure authentication is stable
     }
-  }, [isAuthenticated, showMFASetup, onClose]);
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [isAuthenticated, user, showMFASetup, onClose]);
 
   // Reset mode when modal opens/closes
   useEffect(() => {
@@ -134,22 +144,10 @@ export default function AuthModal({
           onRegistrationSuccess={onRegistrationSuccess}
         />
       ) : mode === 'reset' ? (
-        <Box sx={{ p: 3, textAlign: 'center', backgroundColor: 'white', borderRadius: 2, boxShadow: 3 }}>
-          <Typography variant="h5" fontWeight={600} color="text.primary" mb={2}>
-            Reset Password
-          </Typography>
-          <Typography variant="body1" color="text.secondary" mb={3}>
-            Password reset functionality will be implemented in the next phase.
-          </Typography>
-          <Button 
-            variant="contained" 
-            onClick={handleSwitchToLogin} 
-            fullWidth
-            sx={{ mt: 2 }}
-          >
-            Back to Login
-          </Button>
-        </Box>
+        <PasswordResetForm
+          onSwitchToLogin={handleSwitchToLogin}
+          onClose={onClose}
+        />
       ) : null}
     </Box>
   );

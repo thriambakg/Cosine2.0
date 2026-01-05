@@ -179,7 +179,14 @@ def apply_python_filter(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         True if item matches all filters, False otherwise
     """
     # Politician name filter (OR logic within field) - checks both sponsor and cosponsor
-    politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
+    # CRITICAL: Remove duplicate sponsor_name if politician_name is present to prevent double filtering
+    politician_name_filter = filters.get('politician_name')
+    if politician_name_filter and filters.get('sponsor_name'):
+        # Both fields present - remove sponsor_name to prevent double filtering
+        filters = filters.copy()  # Don't modify original
+        del filters['sponsor_name']
+    
+    politician_name_filter = politician_name_filter or filters.get('sponsor_name')
     politician_role = normalize_politician_role(filters.get('politician_role'))
     
     if politician_name_filter:
@@ -341,7 +348,15 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     
     # Politician name: searches both sponsor and cosponsor
     # Support both politician_name (new) and sponsor_name (legacy) for backward compatibility
-    politician_name_filter = filters.get('politician_name') or filters.get('sponsor_name')
+    # CRITICAL: Remove duplicate sponsor_name if politician_name is present to prevent double filtering
+    politician_name_filter = filters.get('politician_name')
+    if politician_name_filter and filters.get('sponsor_name'):
+        # Both fields present - remove sponsor_name to prevent double filtering
+        logger.info("Both politician_name and sponsor_name present - removing sponsor_name to prevent duplicate filtering")
+        filters = filters.copy()  # Don't modify original
+        del filters['sponsor_name']
+    
+    politician_name_filter = politician_name_filter or filters.get('sponsor_name')
     politician_role = normalize_politician_role(filters.get('politician_role'))  # Normalize to 'sponsor', 'cosponsor', or 'both'
     
     if politician_name_filter:
@@ -1290,7 +1305,7 @@ def search_by_introduced_date_range(filters: Dict[str, Any], limit: int = 100, l
     }
 
 
-def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None, is_restoration: bool = False) -> Dict[str, Any]:
     """
     Search bills in DynamoDB using filters with multi-GSI intersection approach
     
@@ -1309,13 +1324,19 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     Returns:
         Dictionary with search results and pagination info
     """
+    logger.info(f"🔍 search_bills called: limit={limit}, is_restoration={is_restoration}")
+    if last_evaluated_key:
+        logger.info(f"🔍 last_evaluated_key: {last_evaluated_key}")
+        
     if not bills_table:
         raise Exception("DynamoDB bills table not initialized")
-    
+
     # Check for union_offset pagination BEFORE identifying queryable filters
     # This allows us to continue union queries even if filters are empty
     union_offset = None
     union_offset_metadata = None
+    filtered_offset = None
+    filtered_offset_metadata = None
     if last_evaluated_key and isinstance(last_evaluated_key, dict):
         query_type = last_evaluated_key.get('query_type')
         if query_type == 'union_offset':
@@ -1324,6 +1345,11 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
             logger.info(f"Detected union_offset pagination: offset={union_offset}")
             # If we have union_offset, we need to ensure we have query configs
             # The filters should contain the politician_name to reconstruct the query
+        elif query_type == 'union_politician_filtered_offset':
+            filtered_offset = last_evaluated_key.get('offset', 0)
+            filtered_offset_metadata = last_evaluated_key  # Store full metadata for reconstruction
+            logger.info(f"Detected union_politician_filtered_offset pagination: offset={filtered_offset}, total_filtered={last_evaluated_key.get('total_filtered_count')}")
+            # For filtered offset, we need to re-run the query and slice the results
     
     # Check if this is a date-only query (or date + filters that work well with date range query)
     # For date range queries, use the efficient day-by-day approach
@@ -2554,7 +2580,15 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         all_bill_ids = set()
         
         # Fetch bill IDs from all politician configs and union them
-        fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
+        # Calculate fetch limit - for filtered offset queries, we need to fetch enough IDs to get the required filtered results
+        if filtered_offset is not None:
+            # For filtered offset pagination, we need enough IDs to get filtered_offset + limit filtered results
+            # Since filtering ratio varies, fetch more to be safe
+            target_filtered_results = (filtered_offset if filtered_offset > 0 else 0) + limit
+            fetch_limit = max(target_filtered_results * 3, 1000)  # 3x safety factor
+            logger.info(f"Union all politicians filtered offset: target {target_filtered_results} filtered results, fetching {fetch_limit} IDs")
+        else:
+            fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
         
         for politician_config in politician_configs:
             if politician_config.get('query_type') == 'union_politician':
@@ -2631,7 +2665,15 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # Fetch bill IDs from both queries
         # For union queries, we need to fetch enough IDs to cover offset + limit
         # Calculate how many we need: offset + (limit * multiplier for filtering)
-        fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
+        # Calculate fetch limit - for filtered offset queries, we need to fetch enough IDs to get the required filtered results
+        if filtered_offset is not None:
+            # For filtered offset pagination, we need enough IDs to get filtered_offset + limit filtered results
+            # Since filtering ratio varies, fetch more to be safe
+            target_filtered_results = (filtered_offset if filtered_offset > 0 else 0) + limit
+            fetch_limit = max(target_filtered_results * 3, 1000)  # 3x safety factor
+            logger.info(f"Union politician filtered offset: target {target_filtered_results} filtered results, fetching {fetch_limit} IDs")
+        else:
+            fetch_limit = (union_offset if union_offset is not None else 0) + (limit * 10)
         
         # If continuing from union_offset, preserve has_more flags from previous request
         if union_offset_metadata:
@@ -2862,6 +2904,10 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                     else:
                         del remaining_filters_for_fetch['politician_name']
             
+            # Check if this is a filtered_offset continuation (we have all results, just need to slice)
+            if filtered_offset is not None and filtered_offset_metadata:
+                logger.info(f"Union politician filtered offset: re-processing all IDs and slicing from offset {filtered_offset}")
+            
             # Fetch and filter items in batches - process ALL IDs to get accurate filtered count
             # Then return up to limit, but correctly track if there are more IDs to process
             i = 0
@@ -2906,13 +2952,22 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
                 
                 i += batch_size
                 
-                logger.info(f"Union all politicians pagination: processed {i} IDs, {filtered_count} filtered items so far")
+                logger.info(f"Union politician pagination: processed {i} IDs, {filtered_count} filtered items so far")
             
-            # Return up to limit items
-            items = all_filtered_items[:limit]
+            # Handle filtered offset pagination - slice from the complete filtered results
+            if filtered_offset is not None and filtered_offset > 0:
+                logger.info(f"Union politician filtered offset processing: filtered_offset={filtered_offset}, limit={limit}, is_restoration={is_restoration}, total_filtered={len(all_filtered_items)}")
+                # Always slice from offset, regardless of restoration or continuation
+                # The difference is only in how we calculate the next offset
+                items = all_filtered_items[filtered_offset:filtered_offset + limit]
+                logger.info(f"Union politician filtered offset: sliced {len(items)} items from offset {filtered_offset} (total filtered: {len(all_filtered_items)})")
+            else:
+                # Return up to limit items from the beginning
+                items = all_filtered_items[:limit]
+            
             # Store total filtered count for has_more calculation
             total_filtered_count = len(all_filtered_items)
-            logger.info(f"Union all politicians: processed all {len(bill_ids)} IDs, got {total_filtered_count} filtered items, returning {len(items)} items (limit: {limit})")
+            logger.info(f"Union politician: processed all {len(bill_ids)} IDs, got {total_filtered_count} filtered items, returning {len(items)} items (limit: {limit})")
         else:
             # For single queries (including search_index), fetch items and filter
             remaining_filters_for_fetch = filters.copy()
@@ -3210,7 +3265,10 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
     # For union queries, items are already filtered during fetch
     # For other queries, apply filters now
     if config.get('query_type') in ['union_politician', 'union_all_politicians']:
-        filtered_items = items[:limit]  # Already filtered, just limit to requested count
+        # For restoration, items already contains the full set (don't apply limit again)
+        # For continuation, items is already sliced correctly
+        filtered_items = items  # Already filtered and sliced
+        logger.info(f"Union query: using items directly (len={len(filtered_items)}) without additional limit")
     else:
         filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
         filtered_items = filtered_items[:limit]
@@ -3252,30 +3310,95 @@ def search_bills(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: 
         # AND we've processed all fetched IDs, then there are no more items.
         # Also, if we got fewer items than the limit AND we've processed all IDs AND both sources are exhausted,
         # we should return has_more=False to prevent infinite pagination loops.
+        # IMPORTANT: Check if we have more filtered items than we returned (same as union_all_politicians)
         has_more_union = False
-        if last_processed_index < original_bill_ids_count:
-            # We haven't processed all fetched IDs yet
-            has_more_union = True
-        elif cosponsor_has_more or sponsor_has_more:
-            # One or both sources still have more items to fetch
-            has_more_union = True
-        # If we've processed all IDs AND both sources are exhausted, has_more_union stays False
+        
+        # For filtered_offset pagination, check remaining items from the complete filtered set
+        if filtered_offset is not None:
+            current_offset = filtered_offset if filtered_offset > 0 else 0
+            # For both restoration and continuation: len(items) is the items returned THIS request
+            items_returned_this_request = len(items)
+            items_returned_so_far = current_offset + items_returned_this_request
+            
+            logger.info(f"Union politician filtered offset: current_offset={current_offset}, items_returned_this_request={items_returned_this_request}, items_returned_so_far={items_returned_so_far}, total_filtered={total_filtered_count}")
+            
+            # Check if there are more items in the current filtered batch
+            has_more_from_current_batch = items_returned_so_far < total_filtered_count
+            
+            # Also check if there are more items available from the underlying sources
+            has_more_from_sources = cosponsor_has_more or sponsor_has_more
+            
+            # We have more if either condition is true
+            if has_more_from_current_batch or has_more_from_sources:
+                has_more_union = True
+                logger.info(f"Union politician filtered offset: has_more=True because items_returned_so_far ({items_returned_so_far}) < total_filtered_count ({total_filtered_count}) OR sources_have_more (cosponsor: {cosponsor_has_more}, sponsor: {sponsor_has_more})")
+            else:
+                logger.info(f"Union politician filtered offset: has_more=False because items_returned_so_far ({items_returned_so_far}) >= total_filtered_count ({total_filtered_count}) AND no_more_sources (cosponsor: {cosponsor_has_more}, sponsor: {sponsor_has_more})")
+        else:
+            # Standard pagination logic
+            # First check: Do we have more filtered items than we returned?
+            if 'total_filtered_count' in locals() and total_filtered_count > items_returned:
+                has_more_union = True
+                logger.info(f"Union politician: has_more=True because total_filtered_count ({total_filtered_count}) > items_returned ({items_returned})")
+            # Second check: Have we not processed all fetched IDs yet?
+            elif last_processed_index < original_bill_ids_count:
+                # We haven't processed all fetched IDs yet
+                has_more_union = True
+                logger.info(f"Union politician: has_more=True because last_processed_index ({last_processed_index}) < original_bill_ids_count ({original_bill_ids_count})")
+            # Third check: Do either source still have more items to fetch?
+            elif cosponsor_has_more or sponsor_has_more:
+                # One or both sources still have more items to fetch
+                has_more_union = True
+                logger.info(f"Union politician: has_more=True because cosponsor_has_more ({cosponsor_has_more}) or sponsor_has_more ({sponsor_has_more})")
+            else:
+                logger.info(f"Union politician: has_more=False because all conditions failed - total_filtered: {total_filtered_count if 'total_filtered_count' in locals() else 'N/A'}, items_returned: {items_returned}, processed: {last_processed_index}/{original_bill_ids_count}, sources_exhausted: {not cosponsor_has_more and not sponsor_has_more}")
+        # If we've processed all IDs AND both sources are exhausted AND returned all items, has_more_union stays False
         
         logger.info(f"Union pagination check - last_processed_index: {last_processed_index}, original_bill_ids_count: {original_bill_ids_count}, items_returned: {items_returned}, limit: {limit}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}, has_more_union: {has_more_union}")
         
         if has_more_union:
-            # Return union offset pagination key
-            next_offset = last_processed_index
-            last_eval_key = {
-                'offset': next_offset,
-                'query_type': 'union_offset',
-                'total_ids': original_bill_ids_count,
-                'cosponsor_has_more': cosponsor_has_more,
-                'sponsor_has_more': sponsor_has_more,
-                'politician_name': config.get('politician_name'),  # Store politician name for reconstruction
-                'politician_role': config.get('role', 'both')  # Store role for reconstruction
-            }
-            logger.info(f"Union offset pagination - next offset: {next_offset}, total IDs fetched: {original_bill_ids_count}, processed: {last_processed_index}, cosponsor_has_more: {cosponsor_has_more}, sponsor_has_more: {sponsor_has_more}, politician_name: {config.get('politician_name')}")
+            # CRITICAL: For union_politician queries, we need different pagination strategies based on the state
+            
+            if filtered_offset is not None:
+                # For both restoration and continuation: next offset = current offset + items returned
+                current_offset = filtered_offset if filtered_offset > 0 else 0
+                next_offset = current_offset + len(items)
+                
+                last_eval_key = {
+                    'offset': next_offset,
+                    'query_type': 'union_politician_filtered_offset',
+                    'total_filtered_count': total_filtered_count,
+                    'politician_name': config.get('politician_name'),
+                    'politician_role': config.get('role', 'both'),
+                }
+                logger.info(f"Union politician filtered pagination - next offset: {next_offset} (current {current_offset} + returned {len(items)}), total filtered: {total_filtered_count}")
+            elif 'total_filtered_count' in locals() and total_filtered_count > items_returned and last_processed_index >= original_bill_ids_count and not cosponsor_has_more and not sponsor_has_more:
+                # Case 1: We processed ALL IDs, have ALL filtered results in memory, but need to return them in pages
+                # Use simple offset-based pagination through the complete filtered result set
+                next_offset = items_returned  # Next page starts after the items we returned
+                last_eval_key = {
+                    'offset': next_offset,
+                    'query_type': 'union_politician_filtered_offset',  # Special type for filtered result pagination
+                    'total_filtered_count': total_filtered_count,
+                    'politician_name': config.get('politician_name'),
+                    'politician_role': config.get('role', 'both'),
+                    # Don't need ID processing metadata since we have all results
+                }
+                logger.info(f"Union politician filtered pagination (new) - next offset: {next_offset}, total filtered: {total_filtered_count}, returned: {items_returned}")
+            else:
+                # Case 2: We haven't processed all IDs yet, or sources have more items -> use ID offset pagination
+                next_offset = last_processed_index
+                last_eval_key = {
+                    'offset': next_offset,
+                    'query_type': 'union_offset',
+                    'total_ids': original_bill_ids_count,
+                    'cosponsor_has_more': cosponsor_has_more,
+                    'sponsor_has_more': sponsor_has_more,
+                    'politician_name': config.get('politician_name'),
+                    'politician_role': config.get('role', 'both'),
+                    'total_filtered_count': total_filtered_count if 'total_filtered_count' in locals() else None
+                }
+                logger.info(f"Union politician ID pagination - next offset: {next_offset}, total IDs: {original_bill_ids_count}, processed: {last_processed_index}, sources exhausted: {not cosponsor_has_more and not sponsor_has_more}")
         else:
             last_eval_key = None
             logger.info(f"Union pagination complete - processed all {last_processed_index} of {original_bill_ids_count} fetched IDs, both sources exhausted, no more items available")
@@ -3623,6 +3746,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         filters = body.get('filters', {})
         limit = body.get('limit', 100)
         last_evaluated_key = body.get('last_evaluated_key')
+        is_restoration = body.get('is_restoration', False)  # Flag for restoration vs continuation
         
         # Validate limit
         if limit > 1000:
@@ -3630,22 +3754,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if limit < 1:
             limit = 100
         
-        # For single GSI queries, automatically increase limit to 300 for better pagination
-        # Single GSI queries fetch all items upfront, so returning more per page is efficient
-        # Check if this will be a single GSI query (only one populated filter, not a union/search_index)
+        # For efficient queries, automatically increase limit to 300 for better pagination
+        # This applies to single GSI queries and union politician queries (both fetch efficiently)
+        # Check if this will be an efficient query type
         query_configs = identify_queryable_filters(filters)
-        is_single_gsi_query = (
-            len(query_configs) == 1 and 
-            query_configs[0].get('query_type') not in ['union_politician', 'union_all_politicians', 'search_index'] and
-            query_configs[0].get('index_name')  # Has an index (not a scan)
+        is_efficient_query = (
+            (len(query_configs) == 1 and query_configs[0].get('index_name')) or  # Single GSI query
+            (len(query_configs) == 1 and query_configs[0].get('query_type') in ['union_politician', 'union_all_politicians'])  # Union politician query
         )
         
-        if is_single_gsi_query and limit < 300:
-            logger.info(f"Single GSI query detected, increasing limit from {limit} to 300 for better pagination")
+        if is_efficient_query and limit < 300:
+            logger.info(f"Efficient query detected, increasing limit from {limit} to 300 for better pagination")
             limit = 300
         
         # Perform search
-        result = search_bills(filters, limit, last_evaluated_key)
+        result = search_bills(filters, limit, last_evaluated_key, is_restoration)
         
         # Ensure result is fully JSON-serializable (convert any remaining Decimals, etc.)
         def json_serializer(obj):

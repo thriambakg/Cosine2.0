@@ -221,7 +221,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string, mfaCode?: string) => {
     try {
-      setIsLoading(true);
+      // Don't set global loading for login attempts as it interferes with modal UX
+      // setIsLoading(true);
       
       const result = await signIn({ 
         username: email.toLowerCase().trim(), 
@@ -266,7 +267,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await new Promise(resolve => setTimeout(resolve, 500));
       
       const cognitoUser = await getCurrentUser();
+      if (!cognitoUser) {
+        throw new Error('Failed to get user data after successful sign-in');
+      }
+      
       const userData = await convertCognitoUser(cognitoUser);
+      if (!userData) {
+        throw new Error('Failed to convert user data');
+      }
+      
+      // Only set user if we have valid user data
       setUser(userData);
       
       // Log successful login
@@ -280,6 +290,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       console.error('Login error:', error);
       
+      // Explicitly clear user state on login failure to ensure clean state
+      setUser(null);
+      
       // Log failed login attempt
       await logSecurityEvent('login_failed', { 
         email, 
@@ -287,12 +300,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         timestamp: new Date().toISOString() 
       });
       
+      // Translate AWS Cognito errors to user-friendly messages
+      let errorMessage = 'Login failed. Please try again.';
+      
+      if (error.name === 'NotAuthorizedException') {
+        errorMessage = 'Incorrect username or password. Please check your credentials and try again.';
+      } else if (error.name === 'UserNotConfirmedException') {
+        errorMessage = 'Your account has not been verified. Please check your email for a verification link.';
+      } else if (error.name === 'UserNotFoundException') {
+        errorMessage = 'No account found with this email address. Please check your email or sign up for a new account.';
+      } else if (error.name === 'TooManyRequestsException') {
+        errorMessage = 'Too many login attempts. Please wait a few minutes and try again.';
+      } else if (error.name === 'InvalidParameterException') {
+        errorMessage = 'Invalid email or password format. Please check your input and try again.';
+      } else if (error.name === 'PasswordResetRequiredException') {
+        errorMessage = 'Password reset is required. Please reset your password and try again.';
+      } else if (error.name === 'UserLambdaValidationException') {
+        errorMessage = 'Account validation failed. Please contact support if this issue persists.';
+      } else if (error.message) {
+        // Use the error message if available, but make it more user-friendly
+        errorMessage = error.message;
+      }
+      
       return { 
         success: false, 
-        error: error.message || 'Login failed'
+        error: errorMessage
       };
     } finally {
-      setIsLoading(false);
+      // Don't reset global loading since we're not setting it for login attempts
+      // setIsLoading(false);
     }
   };
 
@@ -440,9 +476,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     } catch (error: any) {
       console.error('Reset password error:', error);
+      
+      let errorMessage = 'Failed to send reset email. Please try again.';
+      
+      if (error.name === 'UserNotFoundException') {
+        errorMessage = 'No account found with this email address. Please check your email or sign up for a new account.';
+      } else if (error.name === 'InvalidParameterException') {
+        errorMessage = 'Invalid email address. Please enter a valid email.';
+      } else if (error.name === 'LimitExceededException') {
+        errorMessage = 'Too many requests. Please wait a few minutes before trying again.';
+      } else if (error.name === 'TooManyRequestsException') {
+        errorMessage = 'Too many reset attempts. Please wait before trying again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       return { 
         success: false, 
-        error: error.message || 'Failed to reset password' 
+        error: errorMessage
       };
     }
   };
@@ -463,9 +514,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     } catch (error: any) {
       console.error('Confirm reset password error:', error);
+      
+      let errorMessage = 'Failed to reset password. Please try again.';
+      
+      if (error.name === 'CodeMismatchException') {
+        errorMessage = 'Invalid confirmation code. Please check the code from your email and try again.';
+      } else if (error.name === 'ExpiredCodeException') {
+        errorMessage = 'Confirmation code has expired. Please request a new password reset.';
+      } else if (error.name === 'InvalidPasswordException') {
+        errorMessage = 'Password does not meet requirements. Password must be at least 8 characters with uppercase, lowercase, numbers, and special characters.';
+      } else if (error.name === 'InvalidParameterException') {
+        errorMessage = 'Invalid input. Please check all fields and try again.';
+      } else if (error.name === 'LimitExceededException') {
+        errorMessage = 'Too many attempts. Please wait before trying again.';
+      } else if (error.name === 'UserNotFoundException') {
+        errorMessage = 'Account not found. Please ensure you\'re using the correct email address.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       return { 
         success: false, 
-        error: error.message || 'Failed to confirm password reset' 
+        error: errorMessage
       };
     }
   };

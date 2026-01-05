@@ -743,25 +743,28 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       let currentResults = [...(results || [])];
       let keysToLoad = [...paginationState.lastEvaluatedKeys];
       
-      // Skip keys that were already used
-      // The first page (100 results) doesn't use a key, so:
-      // - 100 results = 1 page loaded, 0 keys used -> skip 0 keys
-      // - 200 results = 2 pages loaded, 1 key used -> skip 1 key
-      // - 300 results = 3 pages loaded, 2 keys used -> skip 2 keys
-      // lastEvaluatedKeys contains: [key1, key2, key3, ...] where:
-      // - key1 was used to load page 2
-      // - key2 was used to load page 3
-      // - key3 is for loading page 4 (not used yet)
-      const initialPageSize = 100;
-      if (currentResults.length > initialPageSize) {
-        // Calculate how many pages beyond the first have been loaded
-        // Each page after the first uses one key from the array
-        const totalPages = Math.ceil(currentResults.length / initialPageSize);
-        const keysUsed = totalPages - 1; // Number of keys used (pages beyond first)
-        keysToLoad = keysToLoad.slice(keysUsed); // Skip keys that were already used
+      // If we don't have the initial page (currentResults is empty), 
+      // we need to load it first before loading continuation pages
+      if (currentResults.length === 0 && localCriteria) {
+        const { industries, ...criteriaWithoutIndustries } = localCriteria;
+        const backendCriteria = {
+          ...criteriaWithoutIndustries,
+          sectors: industries,
+        };
+        
+        const initialRequestPayload = {
+          criteria: backendCriteria,
+          maxResults: 100,
+        };
+        
+        const initialResponse = await executeScreener(initialRequestPayload);
+        
+        if (initialResponse?.results) {
+          currentResults = [...initialResponse.results];
+        }
       }
 
-      // Load each page sequentially until we reach totalResultsLoaded
+      // Load each continuation page sequentially until we reach totalResultsLoaded
       // Stop when we have enough results OR when we run out of keys
       while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
         const nextKey = keysToLoad[0];

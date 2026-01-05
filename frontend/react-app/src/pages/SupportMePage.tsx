@@ -19,7 +19,7 @@ import {
   Tooltip,
   IconButton,
 } from '@mui/material';
-import { Refresh as RefreshIcon, Download as DownloadIcon, Info as InfoIcon } from '@mui/icons-material';
+import { Refresh as RefreshIcon, Info as InfoIcon } from '@mui/icons-material';
 import { api } from '../services/api';
 import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
 import { Elements, CardNumberElement, CardExpiryElement, CardCvcElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -209,7 +209,6 @@ const PaymentForm: React.FC<{ amount: number; onSuccess: () => void; onError: (e
 const SupportMePage: React.FC = () => {
   const [currentSpending, setCurrentSpending] = useState<number>(0);
   const [monthlySpending, setMonthlySpending] = useState<MonthlySpending[]>([]);
-  const [monthlyReports, setMonthlyReports] = useState<Array<{ month: string; year: string; month_num: string; s3_key: string; filename: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [donationAmount, setDonationAmount] = useState<string>('10');
@@ -243,12 +242,6 @@ const SupportMePage: React.FC = () => {
       if (spendingResponse.success) {
         setCurrentSpending(spendingResponse.current_month_total);
         setMonthlySpending(spendingResponse.monthly_data || []);
-      }
-
-      // Fetch monthly reports list
-      const reportsResponse = await api.billing.listMonthlyReports();
-      if (reportsResponse.success) {
-        setMonthlyReports(reportsResponse.reports || []);
       }
     } catch (error: any) {
       console.error('Error loading billing data:', error);
@@ -297,30 +290,6 @@ const SupportMePage: React.FC = () => {
       message: error,
       severity: 'error',
     });
-  };
-
-  const handleDownloadReport = async (month: string) => {
-    try {
-      const response = await api.billing.getMonthlyReportDownloadUrl(month);
-      if (response.success && response.presigned_url) {
-        // Open download URL in new window/tab
-        window.open(response.presigned_url, '_blank');
-        setSnackbar({
-          open: true,
-          message: `Downloading report for ${month}`,
-          severity: 'success',
-        });
-      } else {
-        throw new Error('Failed to generate download URL');
-      }
-    } catch (error: any) {
-      console.error('Error downloading report:', error);
-      setSnackbar({
-        open: true,
-        message: error.message || 'Failed to download report',
-        severity: 'error',
-      });
-    }
   };
 
   const formatCurrency = (amount: number | string) => {
@@ -426,13 +395,12 @@ const SupportMePage: React.FC = () => {
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Unblended Cost</TableCell>
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Usage Quantity</TableCell>
                   <TableCell align="right" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Donations</TableCell>
-                  <TableCell align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>Report</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {monthlySpending.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>
+                    <TableCell colSpan={5} align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>
                       No spending data available
                     </TableCell>
                   </TableRow>
@@ -440,7 +408,6 @@ const SupportMePage: React.FC = () => {
                   monthlySpending
                     .sort((a, b) => b.month.localeCompare(a.month))
                     .map((row) => {
-                      const reportExists = monthlyReports.some(r => r.month === row.month);
                       const earnings = row.total_earnings ? parseFloat(row.total_earnings) : 0;
                       return (
                         <TableRow key={row.month}>
@@ -456,30 +423,6 @@ const SupportMePage: React.FC = () => {
                           </TableCell>
                           <TableCell align="right" sx={{ color: earnings > 0 ? '#10b981' : '#6b7280', borderColor: '#374151' }}>
                             {formatCurrency(earnings)}
-                          </TableCell>
-                          <TableCell align="center" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                            {reportExists ? (
-                              <Button
-                                size="small"
-                                startIcon={<DownloadIcon />}
-                                onClick={() => handleDownloadReport(row.month)}
-                                sx={{
-                                  color: '#3b82f6',
-                                  borderColor: '#3b82f6',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                    borderColor: '#2563eb',
-                                  },
-                                }}
-                                variant="outlined"
-                              >
-                                Download
-                              </Button>
-                            ) : (
-                              <Typography variant="body2" sx={{ color: '#6b7280' }}>
-                                Not available
-                              </Typography>
-                            )}
                           </TableCell>
                         </TableRow>
                       );

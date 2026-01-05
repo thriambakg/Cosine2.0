@@ -2624,50 +2624,6 @@ module "billing_spending_lambda" {
   tags = var.common_tags
 }
 
-# EventBridge Scheduler for monthly spending summary
-module "billing_spending_monthly_scheduler" {
-  source = "./modules/eventbridge-scheduler"
-
-  rule_name            = "${var.project_name}-billing-spending-monthly-${var.environment}"
-  rule_description     = "Trigger monthly spending summary generation on the 1st of each month"
-  schedule_expression  = "cron(0 0 1 * ? *)" # 00:00 UTC on the 1st of every month
-  enabled              = true
-  target_arn           = module.billing_spending_lambda.function_arn
-  target_id            = "BillingSpendingMonthlySummaryTarget"
-  target_type          = "lambda"
-  target_function_name = module.billing_spending_lambda.function_name
-  target_input = jsonencode({
-    source        = "aws.events"
-    "detail-type" = "Scheduled Event"
-    action        = "generate_monthly_summary"
-  })
-  purpose     = "MonthlySpendingSummary"
-  environment = var.environment
-  tags        = var.common_tags
-}
-
-# EventBridge Scheduler for monthly earnings summary
-module "billing_payment_monthly_scheduler" {
-  source = "./modules/eventbridge-scheduler"
-
-  rule_name            = "${var.project_name}-billing-payment-monthly-${var.environment}"
-  rule_description     = "Trigger monthly earnings summary calculation on the 1st of each month"
-  schedule_expression  = "cron(0 0 1 * ? *)" # 00:00 UTC on the 1st of every month
-  enabled              = true
-  target_arn           = module.billing_payment_lambda.function_arn
-  target_id            = "BillingPaymentMonthlySummaryTarget"
-  target_type          = "lambda"
-  target_function_name = module.billing_payment_lambda.function_name
-  target_input = jsonencode({
-    source        = "aws.events"
-    "detail-type" = "Scheduled Event"
-    action        = "calculate_monthly_earnings"
-  })
-  purpose     = "MonthlyEarningsSummary"
-  environment = var.environment
-  tags        = var.common_tags
-}
-
 # Billing Payment Lambda Function
 # NOTE: Stripe library is not in any existing layer. Using utility_layer for now.
 # TODO: Create a dedicated payment_layer in base infrastructure with stripe>=7.0.0

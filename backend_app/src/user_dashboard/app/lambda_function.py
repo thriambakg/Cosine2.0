@@ -39,6 +39,129 @@ def convert_floats_to_decimals(obj):
     else:
         return obj
 
+def simplify_pagination_state(pagination_state):
+    """Simplify pagination state only if it has problematic nesting issues
+    
+    Only simplifies pagination states that would cause DynamoDB nesting errors.
+    For normal, working pagination states, preserves the original structure.
+    """
+    if not pagination_state or not isinstance(pagination_state, dict):
+        return pagination_state
+    
+    last_eval_keys = pagination_state.get('lastEvaluatedKeys', [])
+    
+    # Check if this pagination state has problematic nesting
+    has_nesting_issues = False
+    
+    if isinstance(last_eval_keys, list):
+        for key in last_eval_keys:
+            if isinstance(key, dict):
+                # Check for deep nesting (like the recursive sponsor_last_key issue)
+                depth = check_object_depth(key)
+                if depth > 8:  # Only simplify if deeply nested
+                    has_nesting_issues = True
+                    logger.warning(f"🚨 Found problematic pagination nesting (depth: {depth})")
+                    break
+                
+                # Check for recursive patterns specifically
+                if key.get('query_type') == 'union_politician_pagination':
+                    if has_recursive_sponsor_keys(key):
+                        has_nesting_issues = True
+                        logger.warning(f"🚨 Found recursive sponsor_last_key pattern")
+                        break
+    
+    # If no nesting issues, preserve original pagination state
+    if not has_nesting_issues:
+        logger.info("✅ Pagination state is clean, preserving original structure")
+        return pagination_state
+    
+    # Only if there are nesting issues, simplify to load more count
+    total_loaded = pagination_state.get('totalResultsLoaded', 0)
+    
+    # Auto-detect page size from offset pattern if available
+    results_per_page = 25  # Default fallback
+    
+    if last_eval_keys and isinstance(last_eval_keys, list) and len(last_eval_keys) > 0:
+        first_key = last_eval_keys[0]
+        if isinstance(first_key, dict) and 'offset' in first_key:
+            detected_page_size = first_key['offset']
+            if detected_page_size > 0:
+                results_per_page = detected_page_size
+    
+    # Calculate load more count
+    if total_loaded <= results_per_page:
+        load_more_count = 0
+    else:
+        load_more_count = (total_loaded - results_per_page) // results_per_page
+    
+    logger.info(f"🧹 Simplifying problematic pagination: {total_loaded} results → {load_more_count} load mores (page size: {results_per_page})")
+    
+    # Return simplified state for problematic cases only
+    return {
+        'loadMoreCount': load_more_count,
+        'totalResultsLoaded': total_loaded,
+        'hasMore': pagination_state.get('hasMore', False),
+        'pageSize': results_per_page,
+        '_simplified': True  # Mark as simplified so frontend knows
+    }
+
+def check_object_depth(obj, current_depth=0):
+    """Check the nesting depth of an object"""
+    if not obj or not isinstance(obj, dict) or current_depth > 20:
+        return current_depth
+    
+    max_depth = current_depth
+    for value in obj.values():
+        if isinstance(value, dict):
+            depth = check_object_depth(value, current_depth + 1)
+            max_depth = max(max_depth, depth)
+    
+    return max_depth
+
+def has_recursive_sponsor_keys(obj, max_depth=3):
+    """Check if object has recursive sponsor_last_key pattern"""
+    current = obj
+    depth = 0
+    
+    while current and isinstance(current, dict) and 'sponsor_last_key' in current:
+        current = current['sponsor_last_key']
+        depth += 1
+        if depth >= max_depth:
+            return True
+    
+    return False
+
+def simplify_dashboard_pagination(dashboard_config):
+    """Simplify all pagination states in a dashboard config"""
+    if not dashboard_config or not isinstance(dashboard_config, dict):
+        return dashboard_config
+    
+    config = dashboard_config.copy()
+    
+    # Process all tabs
+    for tab in config.get('tabs', []):
+        if not isinstance(tab, dict):
+            continue
+            
+        # Process all tiles in the tab
+        for tile in tab.get('tiles', []):
+            if not isinstance(tile, dict):
+                continue
+                
+            # Simplify pagination state if it exists
+            if 'paginationState' in tile:
+                original_state = tile['paginationState']
+                simplified_state = simplify_pagination_state(original_state)
+                
+                # Log if we made significant changes
+                if original_state != simplified_state:
+                    tile_title = tile.get('title', tile.get('customTitle', 'Unknown'))
+                    logger.info(f"🧹 Simplified pagination for tile '{tile_title}'")
+                    
+                tile['paginationState'] = simplified_state
+    
+    return config
+
 def lambda_handler(event, context):
     """
     Lambda handler for user dashboard operations with clean data structure
@@ -374,6 +497,9 @@ def handle_update_dashboard(user_id: str, event: Dict) -> Dict:
         
         # Clean up any old data structure
         dashboard_config = cleanup_old_data_structure(dashboard_config)
+        
+        # Simplify pagination states to prevent DynamoDB nesting issues
+        dashboard_config = simplify_dashboard_pagination(dashboard_config)
         
         # Log the cleaned config
         logger.info(f"TabGroups after cleanup: {[{'id': g.get('id'), 'name': g.get('name'), 'tabs': g.get('tabs', []), 'tabIds': g.get('tabIds', [])} for g in dashboard_config.get('tabGroups', [])]}")
@@ -1422,8 +1548,11 @@ def save_user_dashboard(user_id: str, dashboard_config: Dict) -> bool:
         tab_ids_to_save = [tab.get('id') for tab in tabs_to_save if tab.get('id')]
         logger.info(f"💾 Saving dashboard with {len(tabs_to_save)} tabs, IDs: {tab_ids_to_save}")
         
+        # Simplify pagination states before saving to prevent DynamoDB nesting issues
+        simplified_config = simplify_dashboard_pagination(dashboard_config)
+        
         # Convert floats to Decimals for DynamoDB
-        config_to_save = convert_floats_to_decimals(dashboard_config)
+        config_to_save = convert_floats_to_decimals(simplified_config)
         
         # Verify tabs are still present after conversion
         tabs_after_convert = config_to_save.get('tabs', [])
