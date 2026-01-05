@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -9,6 +9,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   TextField,
   Button,
   Card,
@@ -18,6 +19,10 @@ import {
   Snackbar,
   Tooltip,
   IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { Refresh as RefreshIcon, Info as InfoIcon } from '@mui/icons-material';
 import { api } from '../services/api';
@@ -218,6 +223,10 @@ const SupportMePage: React.FC = () => {
     message: '',
     severity: 'success',
   });
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [availableYears, setAvailableYears] = useState<string[]>([]);
+  const [selectedYear, setSelectedYear] = useState<string>('');
   const hasLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -229,19 +238,28 @@ const SupportMePage: React.FC = () => {
     loadData();
   }, []);
 
-  const loadData = async (isRefresh = false) => {
+  const loadData = async (isRefresh = false, yearOverride?: string) => {
     try {
       if (!isRefresh) {
         setLoading(true);
       } else {
         setRefreshing(true);
       }
-      
+
+      const effectiveYear = yearOverride ?? (selectedYear || undefined);
       // Fetch spending data
-      const spendingResponse = await api.billing.getSpendingSummary();
+      const spendingResponse = await api.billing.getSpendingSummary(effectiveYear);
       if (spendingResponse.success) {
         setCurrentSpending(spendingResponse.current_month_total);
         setMonthlySpending(spendingResponse.monthly_data || []);
+        const years = spendingResponse.available_years || [];
+        setAvailableYears(years);
+        if (yearOverride) {
+          setSelectedYear(yearOverride);
+        } else if (!selectedYear && years.length > 0) {
+          setSelectedYear(years[0]);
+        }
+        setPage(0);
       }
     } catch (error: any) {
       console.error('Error loading billing data:', error);
@@ -300,6 +318,20 @@ const SupportMePage: React.FC = () => {
       minimumFractionDigits: 2,
     }).format(num);
   };
+
+  const sortedMonthlySpending = useMemo(
+    () => [...monthlySpending].sort((a, b) => b.month.localeCompare(a.month)),
+    [monthlySpending]
+  );
+
+  const paginatedRows = useMemo(
+    () =>
+      sortedMonthlySpending.slice(
+        page * rowsPerPage,
+        page * rowsPerPage + rowsPerPage
+      ),
+    [sortedMonthlySpending, page, rowsPerPage]
+  );
 
   if (loading) {
     return (
@@ -386,6 +418,37 @@ const SupportMePage: React.FC = () => {
           <Typography variant="h6" sx={{ color: '#e5e7eb', mb: 2 }}>
             Monthly Spending History
           </Typography>
+          {availableYears.length > 0 && (
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+              <FormControl size="small" sx={{ minWidth: 140 }}>
+                <InputLabel id="year-select-label" sx={{ color: '#9ca3af' }}>
+                  Year
+                </InputLabel>
+                <Select
+                  labelId="year-select-label"
+                  value={selectedYear || availableYears[0]}
+                  label="Year"
+                  onChange={(event) => {
+                    const yearValue = event.target.value as string;
+                    setSelectedYear(yearValue);
+                    loadData(true, yearValue);
+                  }}
+                  sx={{
+                    color: '#e5e7eb',
+                    '.MuiOutlinedInput-notchedOutline': { borderColor: '#374151' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#4b5563' },
+                    '.MuiSvgIcon-root': { color: '#9ca3af' },
+                  }}
+                >
+                  {availableYears.map((year) => (
+                    <MenuItem key={year} value={year}>
+                      {year}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          )}
           <TableContainer>
             <Table>
               <TableHead>
@@ -398,39 +461,51 @@ const SupportMePage: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {monthlySpending.length === 0 ? (
+                {sortedMonthlySpending.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} align="center" sx={{ color: '#9ca3af', borderColor: '#374151' }}>
                       No spending data available
                     </TableCell>
                   </TableRow>
                 ) : (
-                  monthlySpending
-                    .sort((a, b) => b.month.localeCompare(a.month))
-                    .map((row) => {
-                      const earnings = row.total_earnings ? parseFloat(row.total_earnings) : 0;
-                      return (
-                        <TableRow key={row.month}>
-                          <TableCell sx={{ color: '#e5e7eb', borderColor: '#374151' }}>{row.month}</TableCell>
-                          <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                            {formatCurrency(row.blended_cost)}
-                          </TableCell>
-                          <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                            {formatCurrency(row.unblended_cost)}
-                          </TableCell>
-                          <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
-                            {parseFloat(row.usage_quantity).toFixed(2)}
-                          </TableCell>
-                          <TableCell align="right" sx={{ color: earnings > 0 ? '#10b981' : '#6b7280', borderColor: '#374151' }}>
-                            {formatCurrency(earnings)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
+                  paginatedRows.map((row) => {
+                    const earnings = row.total_earnings ? parseFloat(row.total_earnings) : 0;
+                    return (
+                      <TableRow key={row.month}>
+                        <TableCell sx={{ color: '#e5e7eb', borderColor: '#374151' }}>{row.month}</TableCell>
+                        <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                          {formatCurrency(row.blended_cost)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                          {formatCurrency(row.unblended_cost)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: '#e5e7eb', borderColor: '#374151' }}>
+                          {parseFloat(row.usage_quantity).toFixed(2)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: earnings > 0 ? '#10b981' : '#6b7280', borderColor: '#374151' }}>
+                          {formatCurrency(earnings)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </TableContainer>
+          <TablePagination
+            component="div"
+            count={sortedMonthlySpending.length}
+            page={page}
+            onPageChange={(_, newPage) => setPage(newPage)}
+            rowsPerPage={rowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(parseInt(event.target.value, 10));
+              setPage(0);
+            }}
+            labelRowsPerPage="Rows per page"
+            sx={{ color: '#9ca3af', borderColor: '#374151' }}
+          />
         </CardContent>
       </Card>
 

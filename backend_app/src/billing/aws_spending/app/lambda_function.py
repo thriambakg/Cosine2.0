@@ -284,6 +284,7 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
             logger.info(f"📋 Query parameters: {query_params}")
             
             if query_params.get('summary') == 'true':
+                requested_year = query_params.get('year')
                 # Fetch live spending data from AWS Cost Explorer
                 logger.info("📊 Fetching live spending data from AWS Cost Explorer")
                 
@@ -348,6 +349,8 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                     
                     # Get all historical spending months from spendings/ folder
                     monthly_data = []
+                    seen_months = set()
+                    available_years = set()
                     try:
                         # List all YYYY/MM.csv files in spendings/
                         paginator = s3_client.get_paginator('list_objects_v2')
@@ -376,7 +379,16 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                                 
                                 for row in reader:
                                     month_key = row.get('month')
+                                    if not month_key:
+                                        # Derive from key if missing
+                                        parts = month_file.split('/')
+                                        if len(parts) >= 3:
+                                            month_key = f"{parts[1]}-{parts[2].replace('.csv', '')}"
                                     if month_key:
+                                        year = month_key.split('-')[0]
+                                        available_years.add(year)
+                                        if requested_year and year != requested_year:
+                                            continue
                                         # Get earnings for this month
                                         earnings = get_earnings_for_month(month_key)
                                         
@@ -384,19 +396,61 @@ def lambda_handler(event: Dict, context: Any) -> Dict:
                                         row['total_earnings'] = f"{earnings['total_earnings']:.2f}"
                                         row['payment_count'] = str(earnings['payment_count'])
                                         monthly_data.append(row)
+                                        seen_months.add(month_key)
                             except ClientError as e:
                                 logger.warning(f"⚠️ Failed to read {month_file}: {str(e)}")
                                 continue
                         
                         logger.info(f"📊 Loaded {len(monthly_data)} months with earnings data")
+                        # Legacy fallback: also ingest monthly_summary.csv if present (avoids losing historical months)
+                        try:
+                            response = s3_client.get_object(Bucket=SPENDING_BUCKET_NAME, Key='monthly_summary.csv')
+                            legacy_csv = response['Body'].read().decode('utf-8')
+                            reader = csv.DictReader(io.StringIO(legacy_csv))
+                            added_from_legacy = 0
+                            for legacy_row in reader:
+                                month_key = legacy_row.get('month')
+                                if not month_key or month_key in seen_months:
+                                    continue
+                                year = month_key.split('-')[0]
+                                available_years.add(year)
+                                if requested_year and year != requested_year:
+                                    continue
+                                earnings = get_earnings_for_month(month_key)
+                                normalized = {
+                                    'month': month_key,
+                                    'start_date': legacy_row.get('start_date', ''),
+                                    'end_date': legacy_row.get('end_date', ''),
+                                    'blended_cost': legacy_row.get('blended_cost', '0.00'),
+                                    'unblended_cost': legacy_row.get('unblended_cost', '0.00'),
+                                    'usage_quantity': legacy_row.get('usage_quantity', '0.00'),
+                                    'currency': legacy_row.get('currency', 'USD'),
+                                    'updated_at': legacy_row.get('updated_at', datetime.now().isoformat()),
+                                    'total_earnings': f"{earnings['total_earnings']:.2f}",
+                                    'payment_count': str(earnings['payment_count'])
+                                }
+                                monthly_data.append(normalized)
+                                seen_months.add(month_key)
+                                added_from_legacy += 1
+                            if added_from_legacy > 0:
+                                logger.info(f"📚 Added {added_from_legacy} legacy months from monthly_summary.csv")
+                        except ClientError as e:
+                            if e.response['Error']['Code'] != 'NoSuchKey':
+                                logger.warning(f"⚠️ Failed to read legacy monthly_summary.csv: {str(e)}")
+                    # Sort combined data newest first
+                    monthly_data = sorted(monthly_data, key=lambda r: r.get('month', ''), reverse=True)
+                    available_years_list = sorted(list(available_years), reverse=True)
                     except Exception as e:
                         logger.error(f"❌ Error listing spending months: {str(e)}")
                         monthly_data = []
+                        available_years_list = []
                     
                     return create_response(200, {
                         'success': True,
                         'current_month_total': current_total,
                         'monthly_data': monthly_data,
+                        'available_years': available_years_list,
+                        'requested_year': requested_year,
                         'live_data': True
                     })
                 except ClientError as e:

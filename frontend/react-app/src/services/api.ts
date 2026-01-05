@@ -2251,8 +2251,9 @@ export const api = {
   fileReturn: fileReturnAPI,
   filesystem: filesystemAPI,
   billing: {
-    getSpendingSummary: async (): Promise<{ success: boolean; current_month_total: number; monthly_data: any[] }> => {
-      return apiRequest<{ success: boolean; current_month_total: number; monthly_data: any[] }>(`/billing-spending?summary=true`, {
+    getSpendingSummary: async (year?: string): Promise<{ success: boolean; current_month_total: number; monthly_data: any[]; available_years?: string[]; requested_year?: string | null }> => {
+      const yearParam = year ? `&year=${year}` : '';
+      return apiRequest<{ success: boolean; current_month_total: number; monthly_data: any[]; available_years?: string[]; requested_year?: string | null }>(`/billing-spending?summary=true${yearParam}`, {
         method: 'GET',
       });
     },
