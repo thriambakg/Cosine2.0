@@ -54,11 +54,6 @@ import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEasyMode } from '@/contexts/EasyModeContext';
 
-// Award type options
-const AWARD_TYPES = [
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'IDV', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
-];
-
 // US States
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -221,18 +216,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [currentSearchParams, setCurrentSearchParams] = useState<GovtContractsSearchFilters>({
     ...searchParams,
-    date_year: isEasyMode ? 2025 : searchParams?.date_year,
   });
-  
-  // Update date_year when easy mode changes
-  useEffect(() => {
-    if (isEasyMode) {
-      setCurrentSearchParams(prev => ({
-        ...prev,
-        date_year: '2025',
-      }));
-    }
-  }, [isEasyMode]);
   const [currentResults, setCurrentResults] = useState<GovtContractAward[]>(results);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
@@ -2253,20 +2237,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 }}
               />
             </Box>
-            )}
-
-            {/* Award Type - Hidden in easy mode */}
-            {!isEasyMode && (
-            <MultiSelectField<string>
-              label="Award Type"
-              selectedItems={currentSearchParams.award_type || []}
-              onItemsChange={(awardTypes) => {
-                setCurrentSearchParams((prev) => ({ ...prev, award_type: awardTypes }));
-              }}
-              suggestions={AWARD_TYPES}
-              renderItem={(type) => type}
-              placeholder="Select award types..."
-            />
             )}
 
             {/* NAICS Code - Hidden in easy mode */}

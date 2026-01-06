@@ -1140,8 +1140,7 @@ const LDASearchPage: React.FC = () => {
                     />
                   </Box>
 
-                  {/* Date Range - Hidden in easy mode (query whole table) */}
-                  {!isEasyMode && (
+                  {/* Date Range */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <TextField
                       label="Date From"
@@ -1200,7 +1199,6 @@ const LDASearchPage: React.FC = () => {
                       }}
                     />
                   </Box>
-                  )}
 
                   {/* Amount Range - Hidden in easy mode */}
                   {!isEasyMode && (

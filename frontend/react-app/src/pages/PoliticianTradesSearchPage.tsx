@@ -130,13 +130,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'politician-trades-search-page-state';
-  
-  // Helper to get 3 months ago date
-  const getThreeMonthsAgo = () => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 3);
-    return date.toISOString().split('T')[0];
-  };
 
   // Helper function to load state from sessionStorage
   const loadStateFromStorage = () => {
@@ -157,7 +150,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
   // Search state
   const [searchParams, setSearchParams] = useState<PoliticianTradesSearchParams>(
     savedState?.searchParams || {
-      dateFrom: isEasyMode ? getThreeMonthsAgo() : MIN_DATE,
+      dateFrom: MIN_DATE,
       dateTo: new Date().toISOString().split('T')[0],
       // Initialize all search parameter arrays as empty
       politicianName: [],
@@ -170,15 +163,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
     }
   );
   
-  // Update dateFrom when easy mode changes
-  useEffect(() => {
-    if (isEasyMode && !savedState?.searchParams?.dateFrom) {
-      setSearchParams(prev => ({
-        ...prev,
-        dateFrom: getThreeMonthsAgo(),
-      }));
-    }
-  }, [isEasyMode]);
   
   // Local state for amount min/max (will be converted to amountRange for API)
   const [amountMin, setAmountMin] = useState<number | ''>(savedState?.amountMin || '');
@@ -1213,9 +1197,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   </IconButton>
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {/* Transaction Date Range - Hidden in easy mode (auto-set to 3mo ago) */}
-                  {!isEasyMode && (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Transaction Date Range */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <TextField
                 label="Transaction Date From"
                 type="date"
@@ -1291,7 +1274,6 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 }}
               />
             </Box>
-                  )}
 
                   {/* Politicians Search */}
                 <MultiSelectField<string>

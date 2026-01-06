@@ -76,11 +76,6 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
   );
 };
 
-// Award type options
-const AWARD_TYPES = [
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'IDV', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
-];
-
 // US States
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -147,20 +142,10 @@ const GovtContractsSearchPage: React.FC = () => {
       naics_code: Array.isArray(saved?.naics_code) ? saved.naics_code : [],
       psc_code: Array.isArray(saved?.psc_code) ? saved.psc_code : [],
       cfda_number: Array.isArray(saved?.cfda_number) ? saved.cfda_number : [],
-      date_year: isEasyMode ? 2025 : (saved?.date_year || undefined),
+      date_year: saved?.date_year || undefined,
       // Don't restore legacy date_from/date_to - they're no longer used
     };
   });
-  
-  // Update date_year when easy mode changes
-  useEffect(() => {
-    if (isEasyMode && !savedState?.searchParams?.date_year) {
-      setSearchParams(prev => ({
-        ...prev,
-        date_year: 2025,
-      }));
-    }
-  }, [isEasyMode]);
   
   // Don't restore allSearchResults from saved state to avoid quota issues
   // Results will be re-fetched if needed based on searchParams and lastEvaluatedKey
@@ -1268,8 +1253,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     </Box>
                   </Box>
 
-                    {/* Date Range - Hidden in easy mode (auto-set to 2025) */}
-                    {!isEasyMode && (
+                    {/* Date Range */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                   {/* Date Year */}
                   <TextField
@@ -1302,7 +1286,6 @@ const GovtContractsSearchPage: React.FC = () => {
                     }}
                   />
                 </Box>
-                    )}
 
                   {/* Advanced Search Section - Hidden in easy mode */}
                   {!isEasyMode && (
@@ -1430,18 +1413,6 @@ const GovtContractsSearchPage: React.FC = () => {
                       }}
                     />
                   </Box>
-
-                  {/* Award Type */}
-                  <MultiSelectField<string>
-                    label="Award Type"
-                    selectedItems={searchParams.award_type || []}
-                    onItemsChange={(awardTypes) => {
-                      setSearchParams((prev) => ({ ...prev, award_type: awardTypes }));
-                    }}
-                    suggestions={AWARD_TYPES}
-                    renderItem={(type) => type}
-                    placeholder="Select award types..."
-                  />
 
                   {/* NAICS Code - Direct search, no autocomplete */}
                   <MultiSelectField<string>

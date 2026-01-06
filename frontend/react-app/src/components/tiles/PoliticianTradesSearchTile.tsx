@@ -164,13 +164,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const { openItemDetails } = useDialogManagerHelpers();
   const { isEasyMode } = useEasyMode();
   
-  // Helper to get 3 months ago date
-  const getThreeMonthsAgo = () => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 3);
-    return date.toISOString().split('T')[0];
-  };
-  
   // Debug authentication state
   useEffect(() => {
     console.log('🔐 PoliticianTradesSearchTile Auth State:', { 
@@ -207,18 +200,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
 
   const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>({
     ...searchParams,
-    dateFrom: isEasyMode ? getThreeMonthsAgo() : searchParams.dateFrom,
   });
-  
-  // Update dateFrom when easy mode changes
-  useEffect(() => {
-    if (isEasyMode) {
-      setCurrentSearchParams(prev => ({
-        ...prev,
-        dateFrom: getThreeMonthsAgo(),
-      }));
-    }
-  }, [isEasyMode]);
   
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -1439,8 +1421,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             helperText="Search by symbol or company name (e.g., AAPL, Apple, Tesla)"
           />
 
-          {/* Date Range - Hidden in easy mode (auto-set to 3mo ago) */}
-          {!isEasyMode && (
+          {/* Date Range */}
           <Box display="flex" gap={2}>
             <TextField
               label="From Date"
@@ -1505,7 +1486,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               }}
             />
           </Box>
-          )}
 
           {/* Position Filter - Hidden in easy mode */}
           {!isEasyMode && (

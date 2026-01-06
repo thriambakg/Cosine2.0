@@ -1041,8 +1041,7 @@ const CongressBillsSearchPage: React.FC = () => {
                   />
                   )}
 
-                  {/* Introduced Date From - Hidden in easy mode */}
-                  {!isEasyMode && (
+                  {/* Introduced Date From */}
                   <TextField
                     label="Introduced Date From"
                     type="date"
@@ -1076,10 +1075,8 @@ const CongressBillsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
-                  )}
 
-                  {/* Introduced Date To - Hidden in easy mode */}
-                  {!isEasyMode && (
+                  {/* Introduced Date To */}
                   <TextField
                     label="Introduced Date To"
                     type="date"
@@ -1105,7 +1102,6 @@ const CongressBillsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
-                  )}
 
                   {/* Policy Area - Dropdown multi-select with autocomplete - Hidden in easy mode */}
                   {!isEasyMode && (

@@ -39,7 +39,6 @@ import {
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../services/api';
 import { filesystemAPI } from '../services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEasyMode } from '@/contexts/EasyModeContext';
 // import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addArticleToContext, addMultipleArticlesToContext } from '../components/tiles/common';
 import MultiSelectField from '../components/MultiSelectField';
@@ -79,7 +78,6 @@ interface ExpandedFiltersState {
 const NewsSearchPage: React.FC = () => {
   // Auth context available for future use
   const { user } = useAuth();
-  const { isEasyMode } = useEasyMode();
   // const { activeSessionId } = useGlobalChat();
   
   // Session persistence key
@@ -116,23 +114,11 @@ const NewsSearchPage: React.FC = () => {
       sources: [],
       categories: [],
       countries: [],
-      dateRange: isEasyMode ? 'all' : 'all',
+      dateRange: 'all',
       dateFrom: '',
       dateTo: '',
     }
   );
-  
-  // Update dateRange when easy mode changes
-  useEffect(() => {
-    if (isEasyMode) {
-      setSearchParams(prev => ({
-        ...prev,
-        dateRange: 'all',
-        dateFrom: '',
-        dateTo: '',
-      }));
-    }
-  }, [isEasyMode]);
   
   const [allSearchResults, setAllSearchResults] = useState<NewsArticle[]>(
     savedState?.allSearchResults || []
@@ -694,8 +680,7 @@ const NewsSearchPage: React.FC = () => {
                     disableAutocomplete={true}
                   />
 
-                  {/* Date Range Preset - Hidden in easy mode (set to 'all') */}
-                  {!isEasyMode && (
+                  {/* Date Range Preset */}
                   <FormControl fullWidth>
                     <InputLabel sx={{ color: '#94a3b8' }}>Date Range (Preset)</InputLabel>
                     <Select
@@ -738,10 +723,8 @@ const NewsSearchPage: React.FC = () => {
                     <MenuItem value="all">All Time</MenuItem>
                   </Select>
                 </FormControl>
-                  )}
 
-                  {/* Custom Date Range - Hidden in easy mode */}
-                  {!isEasyMode && (
+                  {/* Custom Date Range */}
                   <>
                   <Typography variant="body2" sx={{ color: '#9ca3af', mt: 1, mb: 1 }}>
                     Or specify custom date range:
@@ -803,7 +786,6 @@ const NewsSearchPage: React.FC = () => {
                     }}
                   />
                   </>
-                  )}
 
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>

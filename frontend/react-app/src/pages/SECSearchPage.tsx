@@ -695,13 +695,6 @@ const SECSearchPage: React.FC = () => {
   
   // Session persistence key
   const SESSION_STORAGE_KEY = 'sec-search-page-state';
-  
-  // Helper to get 3 months ago date
-  const getThreeMonthsAgo = () => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 3);
-    return date.toISOString().split('T')[0];
-  };
 
   // Helper function to load state from sessionStorage
   const loadStateFromStorage = () => {
@@ -722,7 +715,7 @@ const SECSearchPage: React.FC = () => {
   // Separate search parameters (applied on Search button click) from filters (applied immediately)
   const [searchParams, setSearchParams] = useState<SECSearchParams>(
     savedState?.searchParams || {
-      dateFrom: isEasyMode ? getThreeMonthsAgo() : '2001-01-01',
+      dateFrom: '2001-01-01',
       dateTo: new Date().toISOString().split('T')[0],
       // Include filers, keywords, and form types in search params
       cik: savedState?.searchParams?.cik || undefined,
@@ -737,15 +730,7 @@ const SECSearchPage: React.FC = () => {
     }
   );
   
-  // Update dateFrom when easy mode changes
-  useEffect(() => {
-    if (isEasyMode) {
-      setSearchParams(prev => ({
-        ...prev,
-        dateFrom: getThreeMonthsAgo(),
-      }));
-    }
-  }, [isEasyMode]);
+  
   
   // Multi-select state for filers and keywords (part of search parameters)
   const [selectedFilers, setSelectedFilers] = useState<SECAutocompleteSuggestion[]>(
@@ -2163,8 +2148,7 @@ const SECSearchPage: React.FC = () => {
               </FormControl>
               )}
 
-              {/* Date Range - Hidden in easy mode (auto-set to 3mo ago) */}
-              {!isEasyMode && (
+              {/* Date Range */}
                 <>
                 <TextField
                   label="Filed from"
@@ -2211,7 +2195,6 @@ const SECSearchPage: React.FC = () => {
                   }}
                 />
                 </>
-              )}
 
           {/* Search Button and Stop Button */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

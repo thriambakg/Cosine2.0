@@ -208,13 +208,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const { openItemDetails } = useDialogManagerHelpers();
   const { isEasyMode } = useEasyMode();
   
-  // Helper to get 3 months ago date
-  const getThreeMonthsAgo = () => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 3);
-    return date.toISOString().split('T')[0];
-  };
-  
   // Debug authentication state
   useEffect(() => {
     console.log('🔐 SECSearchTile Auth State:', { 
@@ -251,7 +244,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   };
   
   const [currentSearchParams, setCurrentSearchParams] = useState<SECSearchParams>({
-    dateFrom: initialSearchParams.dateFrom || (isEasyMode ? getThreeMonthsAgo() : '2001-01-01'),
+    dateFrom: initialSearchParams.dateFrom || '2001-01-01',
     dateTo: initialSearchParams.dateTo || new Date().toISOString().split('T')[0],
     cik: initialSearchParams.cik,
     entityName: normalizeEntityName(initialSearchParams.entityName),
@@ -259,16 +252,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     formTypes: initialSearchParams.formTypes,
     located: initialSearchParams.located,
   });
-  
-  // Update dateFrom when easy mode changes
-  useEffect(() => {
-    if (isEasyMode && !initialSearchParams.dateFrom) {
-      setCurrentSearchParams(prev => ({
-        ...prev,
-        dateFrom: getThreeMonthsAgo(),
-      }));
-    }
-  }, [isEasyMode]);
   // Store all results for client-side filtering
   const [allResults, setAllResults] = useState<SECSearchResult[]>([]);
 
@@ -1370,8 +1353,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             )}
           </Box>
 
-          {/* Row 2: Date Range - Filed from and Filed to - Hidden in easy mode (auto-set to 3mo ago) */}
-          {!isEasyMode && (
+          {/* Row 2: Date Range - Filed from and Filed to */}
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
             <TextField
               label="Filed from"
@@ -1397,7 +1379,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
               }}
             />
           </Box>
-          )}
 
           {/* Row 3: Form Types and Location - Hidden in easy mode */}
           {!isEasyMode && (

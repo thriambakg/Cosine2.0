@@ -208,21 +208,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
   }>({
     ...searchParams,
-    dateRange: isEasyMode ? 'all' : searchParams.dateRange,
   });
-  
-  // Update dateRange when easy mode changes
-  useEffect(() => {
-    if (isEasyMode) {
-      setCurrentSearchParams(prev => ({
-        ...prev,
-        dateRange: 'all',
-        sources: [],
-        categories: [],
-        countries: [],
-      }));
-    }
-  }, [isEasyMode]);
   const [currentResults, setCurrentResults] = useState<NewsArticle[]>(articles);
   
   // Ensure defaults are set for display options first (before useCallback)
@@ -1442,8 +1428,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
           </FormControl>
           )}
 
-          {/* Date Range - Hidden in easy mode (auto-set to 'all') */}
-          {!isEasyMode && (
+          {/* Date Range */}
           <FormControl size="small" fullWidth>
             <InputLabel sx={{ color: '#94a3b8' }}>Date Range</InputLabel>
             <Select
@@ -1479,7 +1464,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               <MenuItem value="all">All Time</MenuItem>
             </Select>
           </FormControl>
-          )}
+          
         </Box>
       </DialogContent>
       <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>

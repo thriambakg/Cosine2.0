@@ -183,13 +183,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   const { user } = useAuth();
   const { isEasyMode } = useEasyMode();
   const { openItemDetails } = useDialogManagerHelpers();
-  
-  // Helper to get 3 months ago date
-  const getThreeMonthsAgo = () => {
-    const date = new Date();
-    date.setMonth(date.getMonth() - 3);
-    return date.toISOString().split('T')[0];
-  };
   // const { activeSessionId } = useGlobalChat();
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   
@@ -233,17 +226,6 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       bill_number: undefined,
     };
   });
-  
-  // Update dates when easy mode changes
-  useEffect(() => {
-    if (isEasyMode) {
-      setCurrentSearchParams(prev => ({
-        ...prev,
-        introduced_date_from: getThreeMonthsAgo(),
-        introduced_date_to: new Date().toISOString().split('T')[0],
-      }));
-    }
-  }, [isEasyMode]);
   
   // Store all results for client-side filtering - restore from props if available (session persistence)
   const [allResults, setAllResults] = useState<CongressBill[]>(results || []);
@@ -1941,8 +1923,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
             />
             )}
 
-            {/* Introduced Date From - Hidden in easy mode (auto-set to 3mo ago) */}
-            {!isEasyMode && (
+            {/* Introduced Date From */}
             <>
             <TextField
               label="Introduced Date From"
@@ -1976,7 +1957,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               }}
             />
 
-            {/* Introduced Date To - Hidden in easy mode */}
+            {/* Introduced Date To */}
             <TextField
               label="Introduced Date To"
               type="date"
@@ -2001,7 +1982,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
               }}
             />
             </>
-            )}
+            
 
             {/* Policy Area - Multi-select with autocomplete - Hidden in easy mode */}
             {!isEasyMode && (
