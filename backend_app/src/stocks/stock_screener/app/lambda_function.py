@@ -19,6 +19,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+origin = None
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1496,6 +1498,10 @@ def lambda_handler(event, context):
         }]
     }
     """
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
+
     # Track if this is from SQS (for completion notification)
     is_sqs_event = False
     job_id = None

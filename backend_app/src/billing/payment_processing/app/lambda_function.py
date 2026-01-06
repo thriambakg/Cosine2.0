@@ -19,6 +19,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+# Origin is set per request within lambda_handler
+origin = None
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -489,6 +492,9 @@ def handle_scheduled_event(event: Dict) -> Dict:
 def lambda_handler(event: Dict, context: Any) -> Dict:
     """Main Lambda handler"""
     logger.info(f"📥 Received event: {json.dumps(event, default=str)}")
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
     
     try:
         # Check if this is a scheduled EventBridge event

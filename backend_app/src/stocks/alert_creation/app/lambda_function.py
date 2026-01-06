@@ -13,6 +13,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+origin = None
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -206,6 +208,10 @@ def lambda_handler(event, context):
     Handle stock alert operations (GET, POST, DELETE) using the new alerts table
     Supports SQS events from wrapper Lambda
     """
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
+
     completion_sns_topic = os.environ.get('STOCK_ALERTS_COMPLETION_SNS_TOPIC_ARN')
     
     # Handle SQS events (from wrapper Lambda when worker is at concurrency)

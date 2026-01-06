@@ -18,6 +18,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+origin = None
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +33,9 @@ def process_robinhood_request(event: Dict[str, Any], context: Any) -> Dict[str, 
     Process Robinhood request (extracted from lambda_handler for reuse)
     """
     try:
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
+
         # Parse the request body
         body = json.loads(event.get('body', '{}'))
         action = body.get('action')

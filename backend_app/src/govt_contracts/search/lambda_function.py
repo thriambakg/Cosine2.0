@@ -3018,6 +3018,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     job_id = None
     request_id = None
     completion_sns_topic = os.environ.get('USASPENDING_SEARCH_COMPLETION_SNS_TOPIC_ARN')
+    origin = None
     
     # Handle SQS events (from wrapper Lambda when worker is at concurrency)
     if 'Records' in event and isinstance(event.get('Records'), list) and len(event.get('Records', [])) > 0:

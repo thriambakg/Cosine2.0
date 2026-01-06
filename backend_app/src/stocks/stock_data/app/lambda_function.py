@@ -14,6 +14,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+origin = None
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -321,6 +323,10 @@ def lambda_handler(event, context):
     - Volatility
     - Chart data for visualization
     """
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
+
     completion_sns_topic = os.environ.get('STOCK_DATA_COMPLETION_SNS_TOPIC_ARN')
     
     # Handle SQS events (from wrapper Lambda when worker is at concurrency)

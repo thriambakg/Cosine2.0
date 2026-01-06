@@ -16,6 +16,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+# Origin is populated per request inside lambda_handler
+origin = None
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -270,6 +273,9 @@ def get_earnings_for_month(month_key: str) -> Dict[str, Any]:
 def lambda_handler(event: Dict, context: Any) -> Dict:
     """Main Lambda handler - HTTP API Gateway requests only"""
     logger.info(f"📥 Received event: {json.dumps(event, default=str)}")
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
     
     try:
         # Handle HTTP API Gateway request

@@ -27,6 +27,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+origin = None
+
     generate_query_hash, get_cached_query_with_validation,
     store_cached_query, update_cached_query_results
 )
@@ -2811,6 +2813,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Main Lambda handler - routes requests based on path
     Also handles async job processing and SQS events
     """
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
+
     # Log ALL invocations at the very start
     logger.info(f"🔵🔵🔵 LAMBDA HANDLER ENTRY POINT 🔵🔵🔵")
     logger.info(f"📥 Event keys: {list(event.keys())}")

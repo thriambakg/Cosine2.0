@@ -579,7 +579,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response appropriate for event type
     """
-    
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
+
     # CORS headers for REST API responses (defined at top level for use in exception handler)
     cors_headers = {
         **get_cors_headers(origin),

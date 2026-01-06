@@ -233,6 +233,9 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
     Supports both chat session files and SEC filings
     """
     try:
+        headers = event.get('headers', {}) if event else {}
+        origin = headers.get('Origin') or headers.get('origin')
+
         # Extract request parameters
         session_id = body.get('session_id') or None  # Normalize empty string to None
         user_id = body.get('user_id')
@@ -574,6 +577,9 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
     This avoids CORS issues when fetching files from S3
     """
     try:
+        headers = event.get('headers', {}) if event else {}
+        origin = headers.get('Origin') or headers.get('origin')
+
         user_id = body.get('user_id')
         s3_key = body.get('s3_key')
         bucket_name = body.get('bucket')
@@ -668,6 +674,9 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
     Supports context items (JSON), images, PDFs, and text files
     """
     try:
+        headers = event.get('headers', {}) if event else {}
+        origin = headers.get('Origin') or headers.get('origin')
+
         # Extract request parameters
         user_id = body.get('user_id')
         s3_key = body.get('s3_key')

@@ -20,6 +20,9 @@ def process_crypto_stats_request(event, context):
     Uses cryptocompare library with fallback to direct API calls.
     """
     try:
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
+
         # Parse query parameters
         query_params = event.get('queryStringParameters', {}) or {}
         symbols = query_params.get('symbols', 'BTC,ETH,BNB,ADA,SOL,DOT,AVAX,MATIC,LINK,UNI')

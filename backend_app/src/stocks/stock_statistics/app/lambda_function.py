@@ -19,6 +19,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
+origin = None
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -702,6 +704,10 @@ def lambda_handler(event, context):
     Returns:
         dict: HTTP response with portfolio analysis or error
     """
+    global origin
+    headers = event.get('headers', {}) if isinstance(event, dict) else {}
+    origin = headers.get('Origin') or headers.get('origin')
+
     debug_print("=== Portfolio Analysis Lambda Handler Started ===")
     debug_print(f"Event keys: {list(event.keys())}")
     
