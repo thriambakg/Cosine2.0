@@ -12,7 +12,6 @@ import bisect
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
 
@@ -463,5 +462,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # Regular API Gateway or direct invocation
     return process_autocomplete_request(event, context)
+
 
 

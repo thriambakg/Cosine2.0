@@ -15,7 +15,6 @@ from decimal import Decimal
 import boto3
 from botocore.exceptions import ClientError
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 
 
@@ -838,4 +837,5 @@ def lambda_handler(event, context):
     
     # Regular API Gateway or direct invocation
     return process_session_request(event, context)
+
 
