@@ -17,6 +17,9 @@ from botocore.exceptions import ClientError
 import sys
 from cors_helper import get_cors_headers, validate_origin
 
+# origin is set per-request inside process_session_request
+origin = None
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -78,6 +81,7 @@ def process_session_request(event, context):
     Process session request (extracted from lambda_handler for reuse)
     """
     try:
+        global origin
         # Extract origin from request headers for CORS validation
         headers = event.get('headers', {})
         origin = headers.get('Origin') or headers.get('origin')

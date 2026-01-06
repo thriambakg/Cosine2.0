@@ -14,6 +14,9 @@ import boto3
 import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
 
 # Import async job handler
 from async_job_handler import (
@@ -23,15 +26,11 @@ from async_job_handler import (
 
 # Import query cache helper
 from query_cache import (
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from cors_helper import get_cors_headers, validate_origin
-
-origin = None
-
     generate_query_hash, get_cached_query_with_validation,
     store_cached_query, update_cached_query_results
 )
+
+origin = None
 
 # DynamoDB configuration for query cache table (for storing request_id)
 QUERY_CACHE_TABLE_NAME = os.environ.get('SEC_SEARCH_QUERY_CACHE_TABLE')
