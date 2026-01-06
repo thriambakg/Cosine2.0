@@ -9,6 +9,10 @@ from decimal import Decimal
 from botocore.exceptions import ClientError
 from typing import Dict, Any
 import logging
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -181,7 +185,7 @@ def process_alert_request(event, context):
             logger.error(f"Method '{http_method}' not allowed")
             return {
                 "statusCode": 405,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "Method not allowed"})
             }
     except Exception as e:
@@ -192,7 +196,7 @@ def process_alert_request(event, context):
         logger.error(f"Full traceback: {traceback.format_exc()}")
         return {
             "statusCode": 500,
-            "headers": {"Access-Control-Allow-Origin": "*"},
+            "headers": {**get_cors_headers(origin)},
             "body": json.dumps({"message": "Internal server error"})
         }
 
@@ -287,7 +291,7 @@ def handle_get_alerts(event):
         if not user_id:
             return {
                 "statusCode": 400,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "Missing userId parameter"})
             }
         
@@ -296,7 +300,7 @@ def handle_get_alerts(event):
         if 'Item' not in user_response:
             return {
                 "statusCode": 404,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "User not found"})
             }
         
@@ -304,7 +308,7 @@ def handle_get_alerts(event):
         if not user_email:
             return {
                 "statusCode": 400,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "User email not found"})
             }
         
@@ -353,7 +357,7 @@ def handle_get_alerts(event):
         
         return {
             "statusCode": 200,
-            "headers": {"Access-Control-Allow-Origin": "*"},
+            "headers": {**get_cors_headers(origin)},
             "body": json.dumps({"alerts": formatted_alerts})
         }
         
@@ -361,7 +365,7 @@ def handle_get_alerts(event):
         logger.error(f"Error getting alerts: {str(e)}")
         return {
             "statusCode": 500,
-            "headers": {"Access-Control-Allow-Origin": "*"},
+            "headers": {**get_cors_headers(origin)},
             "body": json.dumps({"message": "Internal server error"})
         }
 
@@ -377,7 +381,7 @@ def handle_delete_alert(event):
         if not user_id or not alert_id:
             return {
                 "statusCode": 400,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "Missing userId or alertId parameter"})
             }
         
@@ -393,7 +397,7 @@ def handle_delete_alert(event):
         if not response.get('Items'):
             return {
                 "statusCode": 404,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "Alert not found"})
             }
         
@@ -404,7 +408,7 @@ def handle_delete_alert(event):
         if 'Item' not in user_response:
             return {
                 "statusCode": 404,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "User not found"})
             }
         
@@ -415,7 +419,7 @@ def handle_delete_alert(event):
         if user_email not in notification_emails:
             return {
                 "statusCode": 403,
-                "headers": {"Access-Control-Allow-Origin": "*"},
+                "headers": {**get_cors_headers(origin)},
                 "body": json.dumps({"message": "Access denied"})
             }
         
@@ -454,7 +458,7 @@ def handle_delete_alert(event):
         
         return {
             "statusCode": 200,
-            "headers": {"Access-Control-Allow-Origin": "*"},
+            "headers": {**get_cors_headers(origin)},
             "body": json.dumps({"message": "Alert deleted successfully"})
         }
         
@@ -462,7 +466,7 @@ def handle_delete_alert(event):
         logger.error(f"Error deleting alert: {str(e)}")
         return {
             "statusCode": 500,
-            "headers": {"Access-Control-Allow-Origin": "*"},
+            "headers": {**get_cors_headers(origin)},
             "body": json.dumps({"message": "Internal server error"})
         }
 
@@ -503,7 +507,7 @@ def handle_create_alert(event):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Access-Control-Allow-Origin": "*",
+                    **get_cors_headers(origin),
                     "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
@@ -516,7 +520,7 @@ def handle_create_alert(event):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Access-Control-Allow-Origin": "*",
+                    **get_cors_headers(origin),
                     "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
@@ -533,7 +537,7 @@ def handle_create_alert(event):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Access-Control-Allow-Origin": "*",
+                    **get_cors_headers(origin),
                     "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
@@ -550,7 +554,7 @@ def handle_create_alert(event):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Access-Control-Allow-Origin": "*",
+                    **get_cors_headers(origin),
                     "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
@@ -570,7 +574,7 @@ def handle_create_alert(event):
             return {
                 "statusCode": 404,
                 "headers": {
-                    "Access-Control-Allow-Origin": "*",
+                    **get_cors_headers(origin),
                     "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
@@ -592,7 +596,7 @@ def handle_create_alert(event):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Access-Control-Allow-Origin": "*",
+                    **get_cors_headers(origin),
                     "Access-Control-Allow-Headers": "Content-Type",
                     "Access-Control-Allow-Methods": "POST"
                 },
@@ -621,7 +625,7 @@ def handle_create_alert(event):
                 return {
                     "statusCode": 500,
                     "headers": {
-                        "Access-Control-Allow-Origin": "*",
+                        **get_cors_headers(origin),
                         "Access-Control-Allow-Headers": "Content-Type",
                         "Access-Control-Allow-Methods": "POST"
                     },
@@ -678,7 +682,7 @@ def handle_create_alert(event):
         return {
             "statusCode": 201,
             "headers": {
-                "Access-Control-Allow-Origin": "*",
+                **get_cors_headers(origin),
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "POST"
             },
@@ -694,7 +698,7 @@ def handle_create_alert(event):
         return {
             "statusCode": 500,
             "headers": {
-                "Access-Control-Allow-Origin": "*",
+                **get_cors_headers(origin),
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "POST"
             },

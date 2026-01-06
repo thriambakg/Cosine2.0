@@ -14,6 +14,10 @@ import requests
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
 from datetime import datetime, timezone
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -40,11 +44,11 @@ _global_session = None
 _last_api_call_time = 0
 
 
-def get_cors_headers():
+def build_cors_headers(origin: str = None):
     """Get CORS headers for API responses"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
     }
@@ -1079,11 +1083,15 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
 def process_enrichment_request(event, context):
     """Process enrichment request (extracted from lambda_handler for reuse)"""
     try:
+        # Extract origin from request headers for CORS validation
+        headers = event.get('headers', {})
+        origin = headers.get('Origin') or headers.get('origin')
+        
         # Handle CORS preflight
         if event.get('httpMethod') == 'OPTIONS':
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'message': 'CORS preflight'})
             }
         
@@ -1110,7 +1118,7 @@ def process_enrichment_request(event, context):
         if not award_id:
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({
                     'success': False,
                     'error': 'award_id is required'
@@ -1124,7 +1132,7 @@ def process_enrichment_request(event, context):
         
         return {
             'statusCode': status_code,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps(result, default=str)
         }
         
@@ -1132,7 +1140,7 @@ def process_enrichment_request(event, context):
         logger.error(f"Error processing enrichment request: {str(e)}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({
                 'success': False,
                 'error': f'Internal server error: {str(e)}'
@@ -1206,4 +1214,5 @@ def lambda_handler(event, context):
     
     # Regular API Gateway or direct invocation
     return process_enrichment_request(event, context)
+
 

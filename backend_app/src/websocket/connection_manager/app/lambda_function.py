@@ -9,6 +9,10 @@ import logging
 import boto3
 from datetime import datetime, timedelta
 from decimal import Decimal
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()

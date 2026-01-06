@@ -11,6 +11,10 @@ from typing import Dict, List, Any, Optional
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,11 +33,11 @@ GSI_QUERY_BATCH_SIZE = 125  # Limit all GSI queries to 125 items per batch
 filings_table = dynamodb.Table(FILINGS_TABLE_NAME) if FILINGS_TABLE_NAME else None
 
 
-def get_cors_headers():
+def build_cors_headers(origin: str = None):
     """Get CORS headers for API responses"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
     }
@@ -2914,7 +2918,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }]
     }
     """
-    cors_headers = get_cors_headers()
+    # Extract origin from request headers for CORS validation
+    headers = event.get('headers', {})
+    origin = headers.get('Origin') or headers.get('origin')
+    
+    cors_headers = build_cors_headers(origin)
     
     # Handle OPTIONS preflight request
     if event.get('httpMethod') == 'OPTIONS':
@@ -3034,4 +3042,5 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'message': str(e)
             })
         }
+
 

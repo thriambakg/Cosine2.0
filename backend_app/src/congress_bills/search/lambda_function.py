@@ -13,6 +13,10 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -30,11 +34,11 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-pr
 bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
 
 
-def get_cors_headers():
-    """Get CORS headers for API responses"""
+def build_cors_headers(origin: str = None):
+    """Build CORS headers for API responses using cors_helper for origin validation"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
     }
@@ -3729,11 +3733,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }
     
     try:
+        # Extract origin from request headers for CORS validation
+        headers = event.get('headers', {})
+        origin = headers.get('Origin') or headers.get('origin')
+        
         # Handle CORS preflight
         if event.get('httpMethod') == 'OPTIONS':
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({})
             }
         
@@ -3819,7 +3827,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # For direct API Gateway calls, return full response
         return {
             'statusCode': 200,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps(result, default=json_serializer)
         }
         
@@ -3879,7 +3887,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({
                 'success': False,
                 'error': str(e)

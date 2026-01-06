@@ -15,6 +15,10 @@ import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlencode, quote
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1577,7 +1581,7 @@ def lambda_handler(event, context):
                 'headers': {
                     'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                     'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Max-Age': '1728000',
                     'Content-Type': 'application/json'
                 },
@@ -1665,7 +1669,7 @@ def lambda_handler(event, context):
                 'headers': {
                     'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                     'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Max-Age': '1728000',
                     'Content-Type': 'application/json'
                 },
@@ -1730,7 +1734,7 @@ def lambda_handler(event, context):
                 'headers': {
                     'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                     'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Max-Age': '1728000',
                     'Content-Type': 'application/json'
                 },
@@ -1746,7 +1750,7 @@ def lambda_handler(event, context):
             'headers': {
                 'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                 'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Max-Age': '1728000',
                 'Content-Type': 'application/json'
             },
@@ -1773,7 +1777,7 @@ def lambda_handler(event, context):
             'headers': {
                 'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                 'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Max-Age': '1728000',
                 'Content-Type': 'application/json'
             },

@@ -6,6 +6,10 @@ from datetime import datetime
 from typing import List, Dict, Any
 import ccxt
 import cryptocompare
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # AWS clients
 sns_client = boto3.client('sns')
@@ -59,7 +63,7 @@ def process_crypto_stats_request(event, context):
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
                 'Access-Control-Allow-Methods': 'GET,OPTIONS'
             },
@@ -72,7 +76,7 @@ def process_crypto_stats_request(event, context):
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
                 'Access-Control-Allow-Methods': 'GET,OPTIONS'
             },

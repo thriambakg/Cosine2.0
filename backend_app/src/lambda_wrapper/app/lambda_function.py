@@ -11,6 +11,10 @@ import uuid
 import time
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -239,7 +243,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     # CORS headers for API Gateway responses
     cors_headers = {
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
         'Content-Type': 'application/json'

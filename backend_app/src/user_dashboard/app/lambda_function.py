@@ -6,6 +6,10 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 import logging
 from decimal import Decimal
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 # Removed migration imports - using clean data structure
 
 # Configure logging
@@ -1792,7 +1796,7 @@ def create_response(status_code: int, body: Dict) -> Dict:
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            **get_cors_headers(origin),
             'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-User-ID',
             'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
         },

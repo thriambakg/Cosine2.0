@@ -15,6 +15,10 @@ import time
 import random
 import boto3
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -740,7 +744,7 @@ def lambda_handler(event, context):
         # CORS headers
         headers = {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            **get_cors_headers(origin),
             'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
             'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
         }
@@ -1046,7 +1050,7 @@ def lambda_handler(event, context):
             'statusCode': 400,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': 'Invalid JSON in request body',
@@ -1103,7 +1107,7 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps(error_response)
         }

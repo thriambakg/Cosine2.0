@@ -11,6 +11,10 @@ import boto3
 import bisect
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -39,11 +43,11 @@ FIELD_TYPE_TO_S3_KEY = {
 _txt_cache: Dict[str, List[str]] = {}
 
 
-def get_cors_headers():
+def build_cors_headers(origin: str = None):
     """Get CORS headers for API responses"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
     }
@@ -275,7 +279,11 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
     """
     Process autocomplete request (extracted from lambda_handler for reuse)
     """
-    cors_headers = get_cors_headers()
+    # Extract origin from request headers for CORS validation
+    headers = event.get('headers', {})
+    origin = headers.get('Origin') or headers.get('origin')
+    
+    cors_headers = build_cors_headers(origin)
     
     # Handle OPTIONS preflight request
     if event.get('httpMethod') == 'OPTIONS':
@@ -455,4 +463,5 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # Regular API Gateway or direct invocation
     return process_autocomplete_request(event, context)
+
 

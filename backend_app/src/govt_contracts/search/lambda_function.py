@@ -14,6 +14,10 @@ from decimal import Decimal
 from datetime import datetime
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -31,11 +35,11 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-usaspending-data-produ
 awards_table = dynamodb.Table(AWARDS_TABLE_NAME) if AWARDS_TABLE_NAME else None
 
 
-def get_cors_headers():
+def build_cors_headers(origin: str = None):
     """Get CORS headers for API responses"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
     }
@@ -3045,7 +3049,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }
     
     try:
-        headers = get_cors_headers()
+        # Extract origin from request headers for CORS validation
+        request_headers = event.get('headers', {})
+        origin = request_headers.get('Origin') or request_headers.get('origin')
+        
+        headers = build_cors_headers(origin)
         
         # Handle CORS preflight
         if event.get('httpMethod') == 'OPTIONS':
@@ -3217,10 +3225,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({
                 'error': 'Internal server error',
                 'message': str(e)
             })
         }
+
 

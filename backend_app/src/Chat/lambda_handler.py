@@ -26,6 +26,10 @@ logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # Import agent_logger - will be initialized with session context when available
 from agent_logger import get_agent_logger
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 
 # Simple import test - consolidated logging
@@ -578,7 +582,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # CORS headers for REST API responses (defined at top level for use in exception handler)
     cors_headers = {
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
         'Content-Type': 'application/json'
@@ -716,7 +720,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     }
             
             return handle_rest_api_request(event, {
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
                 'Content-Type': 'application/json'

@@ -15,6 +15,10 @@ from botocore.exceptions import ClientError
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -129,11 +133,11 @@ def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise
 
-def get_cors_headers():
+def build_cors_headers(origin: str = None):
     """Get CORS headers for API responses"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
         'Access-Control-Allow-Methods': 'POST,OPTIONS'
     }
@@ -284,7 +288,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if not s3_key:
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Missing required parameter: s3_key'})
                 }
             
@@ -294,7 +298,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to access filesys file {s3_key}")
                 return {
                     'statusCode': 403,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
                 }
             
@@ -310,7 +314,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 if e.response['Error']['Code'] == '404':
                     return {
                         'statusCode': 404,
-                        'headers': get_cors_headers(),
+                        'headers': build_cors_headers(origin),
                         'body': json.dumps({'error': 'File not found'})
                     }
                 else:
@@ -401,7 +405,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({
                     'download_url': presigned_url,
                     'filename': filename,
@@ -414,7 +418,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             logger.error("❌ Missing user_id for non-public filing")
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Missing required parameter: user_id'})
             }
         
@@ -423,7 +427,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             logger.error(f"❌ Missing session_id for non-public filing: is_public_filing={is_public_filing}, session_id={session_id}")
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Missing required parameter: session_id (required for chat files)'})
             }
         
@@ -433,7 +437,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to download file for user {user_id}")
             return {
                 'statusCode': 403,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Forbidden: User mismatch'})
             }
         
@@ -443,7 +447,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
                 logger.error(f"❌ Missing s3_key or filename for SEC filing: s3_key={s3_key}, filename={filename}")
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
                 }
             
@@ -456,7 +460,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if not s3_key or not filename:
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
                 }
             
@@ -469,7 +473,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if not s3_key or not filename:
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
                 }
             
@@ -482,7 +486,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if not s3_key or not filename:
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
                 }
             
@@ -495,7 +499,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if not filename:
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Missing required parameter: filename'})
                 }
             
@@ -503,7 +507,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if not validate_session_access(user_id, session_id):
                 return {
                     'statusCode': 403,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Forbidden: Session access denied'})
                 }
             
@@ -523,7 +527,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             if e.response['Error']['Code'] == '404':
                 return {
                     'statusCode': 404,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'File not found'})
                 }
             else:
@@ -546,7 +550,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         
         return {
             'statusCode': 200,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({
                 'download_url': presigned_url,
                 'filename': filename,
@@ -561,7 +565,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({'error': 'Internal server error'})
         }
 
@@ -580,7 +584,7 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
         if not s3_key:
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Missing required parameter: s3_key'})
             }
         
@@ -594,7 +598,7 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to access filesys file {s3_key}")
                 return {
                     'statusCode': 403,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
                 }
             target_bucket = S3_BUCKET
@@ -611,7 +615,7 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
             if e.response['Error']['Code'] == '404':
                 return {
                     'statusCode': 404,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'File not found'})
                 }
             else:
@@ -632,7 +636,7 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
             
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({
                     'file_content': file_content_base64,
                     'filename': filename,
@@ -644,7 +648,7 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
             logger.error(f"❌ Error reading file from S3: {str(e)}")
             return {
                 'statusCode': 500,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Failed to read file from S3'})
             }
             
@@ -655,7 +659,7 @@ def handle_file_content(event: Dict[str, Any], body: Dict[str, Any], authenticat
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({'error': 'Internal server error'})
         }
 
@@ -676,7 +680,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
         if not user_id:
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Missing required parameter: user_id'})
             }
         
@@ -685,7 +689,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
             logger.warning(f"🚫 Security violation: User {authenticated_user_id} attempted to preview file for user {user_id}")
             return {
                 'statusCode': 403,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Forbidden: User mismatch'})
             }
         
@@ -693,7 +697,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
         if not s3_key:
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Missing required parameter: s3_key'})
             }
         
@@ -703,7 +707,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
             logger.warning(f"🚫 Security violation: User {user_id} attempted to access file {s3_key}")
             return {
                 'statusCode': 403,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Forbidden: File does not belong to user'})
             }
         
@@ -716,7 +720,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
             if e.response['Error']['Code'] == '404':
                 return {
                     'statusCode': 404,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'File not found'})
                 }
             else:
@@ -760,7 +764,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                         
                         return {
                             'statusCode': 200,
-                            'headers': get_cors_headers(),
+                            'headers': build_cors_headers(origin),
                             'body': json.dumps({
                                 'preview_type': 'context_item',
                                 'encrypted': False,
@@ -783,7 +787,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                         logger.error(f"❌ Encrypted data length: {len(content_bytes)} bytes")
                         return {
                             'statusCode': 500,
-                            'headers': get_cors_headers(),
+                            'headers': build_cors_headers(origin),
                             'body': json.dumps({
                                 'error': 'Failed to decrypt encrypted context item. File may be corrupted or from a different user.',
                                 'details': str(decrypt_error) if logger.level == logging.DEBUG else None
@@ -796,7 +800,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                     
                     return {
                         'statusCode': 200,
-                        'headers': get_cors_headers(),
+                        'headers': build_cors_headers(origin),
                         'body': json.dumps({
                             'preview_type': 'context_item',
                             'encrypted': False,
@@ -814,7 +818,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 logger.error(f"Error reading context item: {str(e)}")
                 return {
                     'statusCode': 500,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Failed to read context item'})
                 }
         
@@ -847,7 +851,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
             
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({
                     'preview_type': 'image',
                     'preview_url': preview_url,
@@ -887,7 +891,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
             
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({
                     'preview_type': 'pdf',
                     'preview_url': preview_url,
@@ -918,7 +922,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 
                 return {
                     'statusCode': 200,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({
                         'preview_type': 'text',
                         'content': content,
@@ -932,7 +936,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 logger.error(f"Error reading text file: {str(e)}")
                 return {
                     'statusCode': 500,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'Failed to read file'})
                 }
         
@@ -952,7 +956,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
             
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({
                     'preview_type': 'download_only',
                     'preview_url': None,
@@ -971,7 +975,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({'error': 'Internal server error'})
         }
 
@@ -980,6 +984,10 @@ def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str
     Process file return request (extracted from lambda_handler for reuse)
     """
     try:
+        # Extract origin from request headers for CORS validation
+        headers = event.get('headers', {})
+        origin = headers.get('Origin') or headers.get('origin')
+        
         logger.info(f"🔍 File return request: {json.dumps(event, default=str)}")
         
         # Check if this is a direct Lambda invocation or API Gateway request
@@ -995,7 +1003,7 @@ def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str
         if not authenticated_user_id:
             return {
                 'statusCode': 401,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Authentication failed: No authenticated user ID found in request'})
             }
         
@@ -1019,7 +1027,7 @@ def process_file_return_request(event: Dict[str, Any], context: Any) -> Dict[str
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({'error': 'Internal server error'})
         }
 
@@ -1098,14 +1106,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     # Return error response with CORS headers instead of raising
                     return {
                         'statusCode': 500,
-                        'headers': get_cors_headers(),
+                        'headers': build_cors_headers(origin),
                         'body': json.dumps({'error': 'Internal server error'})
                     }
             except Exception as e:
                 logger.error(f"❌ Error parsing SQS message: {e}", exc_info=True)
                 return {
                     'statusCode': 500,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
                 }
     
@@ -1116,6 +1124,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.error(f"❌ Unhandled error in lambda_handler: {str(e)}", exc_info=True)
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({'error': 'Internal server error'})
         }
+

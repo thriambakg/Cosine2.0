@@ -14,6 +14,10 @@ import os
 # Add the parent directory to the path to import existing modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..', 'stock_statistics', 'app'))
 from lambda_function import calculate_portfolio_metrics
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +38,7 @@ def process_robinhood_request(event: Dict[str, Any], context: Any) -> Dict[str, 
         # CORS headers for frontend integration
         headers = {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            **get_cors_headers(origin),
             'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
             'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
         }
@@ -62,7 +66,7 @@ def process_robinhood_request(event: Dict[str, Any], context: Any) -> Dict[str, 
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': f'Internal server error: {str(e)}'

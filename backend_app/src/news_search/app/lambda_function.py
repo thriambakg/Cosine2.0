@@ -11,6 +11,11 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
+import sys
+
+# Add parent directory to path to import cors_helper
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
 
 # Configure logging
 logger = logging.getLogger()
@@ -730,13 +735,14 @@ def lambda_handler(event, context):
                     'body': json.dumps({'error': f'Failed to parse SQS message: {str(e)}'})
                 }
     
-    # CORS headers
+    # Get origin from headers for CORS validation
+    headers = event.get('headers', {})
+    origin = headers.get('Origin') or headers.get('origin')
+    
+    # Get CORS headers - only allows whitelisted origins
     cors_headers = {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
-        'Access-Control-Allow-Methods': 'POST,OPTIONS,GET',
-        'Access-Control-Allow-Credentials': 'true'
+        **get_cors_headers(origin)
     }
     
     # Handle OPTIONS preflight request

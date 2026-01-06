@@ -10,6 +10,10 @@ import requests
 import boto3
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -620,7 +624,7 @@ def handle_glossary_autocomplete(request_body: Dict[str, Any]) -> Dict[str, Any]
     return call_usaspending_api(endpoint, method='POST', body=body)
 
 
-def get_cors_headers() -> Dict[str, str]:
+def build_cors_headers(origin) -> Dict[str, str]:
     """
     Get CORS headers for API Gateway responses
     
@@ -628,7 +632,7 @@ def get_cors_headers() -> Dict[str, str]:
         Dictionary of CORS headers
     """
     return {
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
     }
@@ -682,7 +686,11 @@ def process_autocomplete_request(event: Dict[str, Any], context: Any) -> Dict[st
     """
     Process autocomplete request (extracted from lambda_handler for reuse)
     """
-    cors_headers = get_cors_headers()
+    # Extract origin from request headers for CORS validation
+    headers = event.get('headers', {})
+    origin = headers.get('Origin') or headers.get('origin')
+    
+    cors_headers = build_cors_headers(origin)
     
     # Handle OPTIONS preflight request
     if event.get('httpMethod') == 'OPTIONS':
@@ -923,4 +931,5 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # Regular API Gateway or direct invocation
     return process_autocomplete_request(event, context)
+
 

@@ -23,6 +23,10 @@ from async_job_handler import (
 
 # Import query cache helper
 from query_cache import (
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
     generate_query_hash, get_cached_query_with_validation,
     store_cached_query, update_cached_query_results
 )
@@ -2157,7 +2161,7 @@ def handle_autocomplete(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2172,7 +2176,7 @@ def handle_autocomplete(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Access-Control-Allow-Methods': 'GET,OPTIONS'
             },
@@ -2186,7 +2190,7 @@ def handle_autocomplete(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': str(e)
@@ -2251,7 +2255,7 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
                     'statusCode': 202,  # Accepted
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
+                        **get_cors_headers(origin),
                         'Access-Control-Allow-Headers': 'Content-Type',
                         'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
                     },
@@ -2272,7 +2276,7 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
                         'statusCode': 200,  # OK - results available
                         'headers': {
                             'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
+                            **get_cors_headers(origin),
                             'Access-Control-Allow-Headers': 'Content-Type',
                             'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
                         },
@@ -2338,7 +2342,7 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 202,  # Accepted
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
             },
@@ -2355,7 +2359,7 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'success': False,
@@ -2378,7 +2382,7 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2413,7 +2417,7 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2426,7 +2430,7 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps(job_status)
         }
@@ -2436,7 +2440,7 @@ def handle_job_status(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': str(e)
@@ -2456,7 +2460,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2473,7 +2477,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                     'statusCode': 404,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
+                        **get_cors_headers(origin)
                     },
                     'body': json.dumps({
                         'error': 'Job not found'
@@ -2485,7 +2489,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                     'statusCode': 404,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
+                        **get_cors_headers(origin)
                     },
                     'body': json.dumps({
                         'error': 'Results not found in S3'
@@ -2498,7 +2502,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2518,7 +2522,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2530,7 +2534,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2546,7 +2550,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 403 if error_code == 'AccessDenied' else 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2560,7 +2564,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2574,7 +2578,7 @@ def handle_fetch_results(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': str(e)
@@ -2604,7 +2608,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2620,7 +2624,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2634,7 +2638,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2649,7 +2653,7 @@ def handle_job_cancel(event: Dict[str, Any]) -> Dict[str, Any]:
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': str(e)
@@ -2898,7 +2902,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'GET,OPTIONS'
                 },
@@ -2917,7 +2921,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                **get_cors_headers(origin)
             },
             'body': json.dumps({
                 'error': str(e)

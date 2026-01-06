@@ -17,6 +17,10 @@ from datetime import datetime
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -109,11 +113,11 @@ def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
             logger.error(f"❌ Error decrypting context data with all methods: {str(e)}")
             raise
 
-def get_cors_headers():
+def build_cors_headers(origin: str = None):
     """Get CORS headers for API responses"""
     return {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
         'Access-Control-Allow-Methods': 'POST,OPTIONS,GET,PUT,DELETE'
     }
@@ -1261,11 +1265,15 @@ def get_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for file system operations"""
     try:
+        # Extract origin from request headers for CORS validation
+        headers = event.get('headers', {})
+        origin = headers.get('Origin') or headers.get('origin')
+        
         # Handle CORS preflight
         if event.get('httpMethod') == 'OPTIONS':
             return {
                 'statusCode': 200,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': ''
             }
         
@@ -1274,7 +1282,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not user_id:
             return {
                 'statusCode': 401,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Authentication failed'})
             }
         
@@ -1288,7 +1296,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not operation:
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': 'Operation is required'})
             }
         
@@ -1322,7 +1330,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not items or not isinstance(items, list):
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'items must be a non-empty array'})
                 }
             result = add_bulk_context_items(user_id, folder_path, items)
@@ -1342,7 +1350,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not items or not isinstance(items, list):
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'items must be a non-empty array'})
                 }
             result = delete_bulk_items(user_id, items)
@@ -1385,7 +1393,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not items or not isinstance(items, list):
                 return {
                     'statusCode': 400,
-                    'headers': get_cors_headers(),
+                    'headers': build_cors_headers(origin),
                     'body': json.dumps({'error': 'items must be a non-empty array'})
                 }
             result = move_bulk_items(user_id, items, dest_folder_path)
@@ -1433,13 +1441,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             return {
                 'statusCode': 400,
-                'headers': get_cors_headers(),
+                'headers': build_cors_headers(origin),
                 'body': json.dumps({'error': f'Unknown operation: {operation}'})
             }
         
         return {
             'statusCode': 200,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({
                 'success': True,
                 'result': result
@@ -1453,6 +1461,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
+            'headers': build_cors_headers(origin),
             'body': json.dumps({'error': str(e)})
         }
+

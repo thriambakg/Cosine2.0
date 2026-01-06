@@ -13,6 +13,10 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key, Attr
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -1799,7 +1803,7 @@ def lambda_handler(event, context):
     # CORS headers
     cors_headers = {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        **get_cors_headers(origin),
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With',
         'Access-Control-Allow-Methods': 'POST,OPTIONS,GET',
         'Access-Control-Allow-Credentials': 'true'

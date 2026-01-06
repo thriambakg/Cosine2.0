@@ -10,6 +10,10 @@ import time
 import random
 import hashlib
 import boto3
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -213,7 +217,7 @@ def process_stock_data_request(event, context):
                 'headers': {
                     'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                     'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Max-Age': '1728000',
                     'Content-Type': 'application/json'
                 },
@@ -238,7 +242,7 @@ def process_stock_data_request(event, context):
                 'headers': {
                     'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                     'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Max-Age': '1728000',
                     'Content-Type': 'application/json'
                 },
@@ -260,7 +264,7 @@ def process_stock_data_request(event, context):
             'headers': {
                 'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                 'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Max-Age': '1728000',
                 'Content-Type': 'application/json'
             },
@@ -280,7 +284,7 @@ def process_stock_data_request(event, context):
             'headers': {
                 'Access-Control-Allow-Headers': 'Origin,X-Requested-With,Content-Type,Authorization,X-Amz-Date,X-amz-security-token,token',
                 'Access-Control-Allow-Methods': 'HEAD,OPTIONS,POST,GET',
-                'Access-Control-Allow-Origin': '*',
+                **get_cors_headers(origin),
                 'Access-Control-Max-Age': '1728000',
                 'Content-Type': 'application/json'
             },

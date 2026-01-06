@@ -11,6 +11,10 @@ import uuid
 from datetime import datetime
 import logging
 import base64
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cors_helper import get_cors_headers, validate_origin
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -78,7 +82,7 @@ class FileUploadHandler:
                         'statusCode': 400,
                         'headers': {
                             'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
+                            **get_cors_headers(origin),
                             'Access-Control-Allow-Headers': 'Content-Type',
                             'Access-Control-Allow-Methods': 'POST, OPTIONS'
                         },
@@ -104,7 +108,7 @@ class FileUploadHandler:
                     'statusCode': 400,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
+                        **get_cors_headers(origin),
                         'Access-Control-Allow-Headers': 'Content-Type',
                         'Access-Control-Allow-Methods': 'POST, OPTIONS'
                     },
@@ -118,7 +122,7 @@ class FileUploadHandler:
                     'statusCode': 400,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
+                        **get_cors_headers(origin),
                         'Access-Control-Allow-Headers': 'Content-Type',
                         'Access-Control-Allow-Methods': 'POST, OPTIONS'
                     },
@@ -132,7 +136,7 @@ class FileUploadHandler:
                     'statusCode': 400,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
+                        **get_cors_headers(origin),
                         'Access-Control-Allow-Headers': 'Content-Type',
                         'Access-Control-Allow-Methods': 'POST, OPTIONS'
                     },
@@ -206,7 +210,7 @@ class FileUploadHandler:
                     'statusCode': 500,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
+                        **get_cors_headers(origin),
                         'Access-Control-Allow-Headers': 'Content-Type',
                         'Access-Control-Allow-Methods': 'POST, OPTIONS'
                     },
@@ -280,7 +284,7 @@ class FileUploadHandler:
                 'statusCode': 200,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'POST, OPTIONS'
                 },
@@ -293,7 +297,7 @@ class FileUploadHandler:
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
+                    **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Allow-Methods': 'POST, OPTIONS'
                 },

@@ -148,7 +148,7 @@ resource "aws_api_gateway_integration_response" "this" {
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "method.response.header.Access-Control-Allow-Origin"      = "'*'"
+    "method.response.header.Access-Control-Allow-Origin"      = "method.request.header.Origin"
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
 
@@ -265,7 +265,7 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "method.response.header.Access-Control-Allow-Origin"      = "'*'"
+    "method.response.header.Access-Control-Allow-Origin"      = "method.request.header.Origin"
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
 
