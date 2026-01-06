@@ -224,7 +224,7 @@ const SupportMePage: React.FC = () => {
     severity: 'success',
   });
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage] = useState(12);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>('');
   const hasLoadedRef = useRef(false);
@@ -498,12 +498,7 @@ const SupportMePage: React.FC = () => {
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            onRowsPerPageChange={(event) => {
-              setRowsPerPage(parseInt(event.target.value, 10));
-              setPage(0);
-            }}
-            labelRowsPerPage="Rows per page"
+            rowsPerPageOptions={[]}
             sx={{ color: '#9ca3af', borderColor: '#374151' }}
           />
         </CardContent>
