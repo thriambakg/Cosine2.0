@@ -396,7 +396,7 @@ export interface NewsSearchRequest {
   query: {
     keywords?: string[]; // Simplified: just array of keywords
   };
-  dateRange: '12h' | '24h' | '7d' | '30d' | 'all';
+  dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
   limit?: number;
   offset?: number; // Kept for backward compatibility
   lastEvaluatedKey?: { published_date?: string; SK?: string }; // Cursor for "load more" pagination

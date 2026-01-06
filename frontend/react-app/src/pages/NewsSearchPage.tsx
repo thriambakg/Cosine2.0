@@ -105,7 +105,6 @@ const NewsSearchPage: React.FC = () => {
     sources?: string[];
     categories?: string[];
     countries?: string[];
-    dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
     dateFrom?: string;
     dateTo?: string;
   }>(
@@ -114,7 +113,6 @@ const NewsSearchPage: React.FC = () => {
       sources: [],
       categories: [],
       countries: [],
-      dateRange: 'all',
       dateFrom: '',
       dateTo: '',
     }
@@ -314,7 +312,6 @@ const NewsSearchPage: React.FC = () => {
             ? searchParams.keywords
             : undefined,
         },
-        dateRange: searchParams.dateRange || 'all',
         dateFrom: searchParams.dateFrom || undefined,
         dateTo: searchParams.dateTo || undefined,
         limit: fetchPageSize,
@@ -378,7 +375,6 @@ const NewsSearchPage: React.FC = () => {
             ? searchParams.keywords
             : undefined,
         },
-        dateRange: searchParams.dateRange || 'all',
         dateFrom: searchParams.dateFrom || undefined,
         dateTo: searchParams.dateTo || undefined,
         limit: fetchPageSize,
@@ -680,54 +676,10 @@ const NewsSearchPage: React.FC = () => {
                     disableAutocomplete={true}
                   />
 
-                  {/* Date Range Preset */}
-                  <FormControl fullWidth>
-                    <InputLabel sx={{ color: '#94a3b8' }}>Date Range (Preset)</InputLabel>
-                    <Select
-                      value={searchParams.dateRange || 'all'}
-                      onChange={(e) => {
-                        setSearchParams(prev => ({ 
-                          ...prev, 
-                          dateRange: e.target.value as '12h' | '24h' | '7d' | '30d' | 'all',
-                          // Clear custom dates when using preset
-                          dateFrom: '',
-                          dateTo: '',
-                        }));
-                      }}
-                      label="Date Range (Preset)"
-                      sx={{
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#475569' },
-                        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#64748b' },
-                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' },
-                        '& .MuiSelect-icon': { color: '#94a3b8' },
-                      }}
-                      MenuProps={{
-                        PaperProps: {
-                          sx: {
-                            backgroundColor: '#1e293b',
-                            '& .MuiMenuItem-root': {
-                              color: '#ffffff',
-                              '&:hover': { backgroundColor: '#334155' },
-                              '&.Mui-selected': { backgroundColor: '#3b82f6' },
-                            },
-                          },
-                      },
-                    }}
-                  >
-                    <MenuItem value="12h">Last 12 Hours</MenuItem>
-                    <MenuItem value="24h">Last 24 Hours</MenuItem>
-                    <MenuItem value="7d">Last 7 Days</MenuItem>
-                    <MenuItem value="30d">Last 30 Days</MenuItem>
-                    <MenuItem value="all">All Time</MenuItem>
-                  </Select>
-                </FormControl>
-
                   {/* Custom Date Range */}
                   <>
                   <Typography variant="body2" sx={{ color: '#9ca3af', mt: 1, mb: 1 }}>
-                    Or specify custom date range:
+                    Specify custom date range:
                   </Typography>
                   
                   <TextField
@@ -738,8 +690,6 @@ const NewsSearchPage: React.FC = () => {
                       setSearchParams(prev => ({ 
                         ...prev, 
                         dateFrom: e.target.value,
-                        // Clear preset when using custom dates
-                        dateRange: e.target.value ? undefined : (prev.dateRange || 'all'),
                       }));
                     }}
                     InputLabelProps={{
@@ -766,8 +716,6 @@ const NewsSearchPage: React.FC = () => {
                       setSearchParams(prev => ({ 
                         ...prev, 
                         dateTo: e.target.value,
-                        // Clear preset when using custom dates
-                        dateRange: e.target.value ? undefined : (prev.dateRange || 'all'),
                       }));
                     }}
                     InputLabelProps={{
@@ -812,7 +760,6 @@ const NewsSearchPage: React.FC = () => {
                           sources: [],
                           categories: [],
                           countries: [],
-                          dateRange: 'all',
                           dateFrom: '',
                           dateTo: '',
                         });

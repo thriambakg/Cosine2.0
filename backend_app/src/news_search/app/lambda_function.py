@@ -67,76 +67,103 @@ def convert_to_dynamodb_format(value: Any) -> Any:
     return value
 
 
-def calculate_date_filter(date_range: str = None, date_from: str = None, date_to: str = None) -> Optional[tuple]:
+def calculate_date_filter(date_from: str = None, date_to: str = None) -> Optional[tuple]:
     """
-    Calculate date filter based on date range string or explicit date_from/date_to.
+    Calculate date filter based on explicit date_from/date_to.
     
     Args:
-        date_range: Date range string ('12h', '24h', '7d', '30d', 'all')
         date_from: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
         date_to: End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
     
     Returns:
         Tuple of (start_date, end_date) in ISO format strings, or (None, None) if no filter
     """
-    # If explicit date_from/date_to provided, use those
-    if date_from or date_to:
-        start_date_str = date_from
-        end_date_str = date_to
-        
-        # If only one is provided, set defaults
-        if date_from and not date_to:
-            # If only start date, no end date filter
-            end_date_str = None
-        elif date_to and not date_from:
-            # If only end date, set start to a very early date
-            start_date_str = '1970-01-01T00:00:00Z'
-        
-        # Ensure dates are in ISO format with Z suffix
-        if start_date_str and not start_date_str.endswith('Z'):
-            if 'T' in start_date_str:
-                start_date_str = start_date_str + 'Z'
-            else:
-                start_date_str = start_date_str + 'T00:00:00Z'
-        
-        if end_date_str and not end_date_str.endswith('Z'):
-            if 'T' in end_date_str:
-                end_date_str = end_date_str + 'Z'
-            else:
-                end_date_str = end_date_str + 'T23:59:59Z'
-        
-        return (start_date_str, end_date_str)
-    
-    # Otherwise, use date_range string
-    if not date_range or date_range == 'all':
+    if not date_from and not date_to:
         return (None, None)
     
-    now = datetime.utcnow()
-    start_date = None
+    start_date_str = date_from
+    end_date_str = date_to
     
-    if date_range == '1h':
-        start_date = now - timedelta(hours=1)
-    elif date_range == '12h':
-        start_date = now - timedelta(hours=12)
-    elif date_range == '24h':
-        start_date = now - timedelta(days=1)
-    elif date_range == '7d':
-        start_date = now - timedelta(days=7)
-    elif date_range == '30d':
-        start_date = now - timedelta(days=30)
-    else:
-        return (None, None)
+    # If only one is provided, set defaults
+    if date_from and not date_to:
+        end_date_str = None  # No end date filter
+    elif date_to and not date_from:
+        start_date_str = '1970-01-01T00:00:00Z'  # Very early date
     
-    return (start_date.isoformat() + 'Z', None)  # No end date for preset ranges
+    # Ensure dates are in ISO format with Z suffix
+    if start_date_str and not start_date_str.endswith('Z'):
+        if 'T' in start_date_str:
+            start_date_str = start_date_str + 'Z'
+        else:
+            start_date_str = start_date_str + 'T00:00:00Z'
+    
+    if end_date_str and not end_date_str.endswith('Z'):
+        if 'T' in end_date_str:
+            end_date_str = end_date_str + 'Z'
+        else:
+            end_date_str = end_date_str + 'T23:59:59Z'
+    
+    return (start_date_str, end_date_str)
+
+
+def prioritize_keyword_matches(articles: List[Dict[str, Any]], keyword: str) -> List[Dict[str, Any]]:
+    """
+    Prioritize articles by match quality:
+    1. Exact match (case-insensitive) in title
+    2. Begins with (case-insensitive) in title
+    3. Contains (case-insensitive) in title
+    4. Exact match in description or GSI5SK
+    5. Begins with in description or GSI5SK
+    6. Contains in description or GSI5SK
+    
+    Args:
+        articles: List of article items
+        keyword: Search keyword
+    
+    Returns:
+        Sorted list of articles by match priority
+    """
+    keyword_lower = keyword.lower()
+    
+    exact_title = []
+    begins_title = []
+    contains_title = []
+    exact_other = []
+    begins_other = []
+    contains_other = []
+    
+    for article in articles:
+        title = (article.get('title') or '').lower()
+        description = (article.get('description') or '').lower()
+        gsi5sk = (article.get('GSI5SK') or '').lower()
+        
+        # Check title matches
+        if title == keyword_lower:
+            exact_title.append(article)
+        elif title.startswith(keyword_lower):
+            begins_title.append(article)
+        elif keyword_lower in title:
+            contains_title.append(article)
+        # Check description/GSI5SK matches
+        elif description == keyword_lower or gsi5sk == keyword_lower:
+            exact_other.append(article)
+        elif description.startswith(keyword_lower) or gsi5sk.startswith(keyword_lower):
+            begins_other.append(article)
+        elif keyword_lower in description or keyword_lower in gsi5sk:
+            contains_other.append(article)
+    
+    # Combine in priority order, maintaining date sort within each group
+    return exact_title + begins_title + contains_title + exact_other + begins_other + contains_other
 
 
 def search_by_keyword(keyword: str, date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Search articles by keyword using GSI5 query.
-    GSI5PK = 'TITLE_SEARCH' for all articles.
+    Search articles by keyword using table Scan with case-insensitive contains filter.
+    Continues scanning until enough matches found or table exhausted.
+    Results are prioritized: exact match > begins_with > contains.
     
     Args:
-        keyword: Search keyword (lowercase)
+        keyword: Search keyword
         date_filter: Optional tuple of (start_date, end_date) in ISO format strings
         limit: Maximum number of results to return
         last_evaluated_key: DynamoDB LastEvaluatedKey for pagination
@@ -145,77 +172,86 @@ def search_by_keyword(keyword: str, date_filter: Optional[tuple], limit: int, la
         dict with 'articles', 'last_evaluated_key', 'has_more'
     """
     try:
-        from boto3.dynamodb.conditions import Key, Attr
+        from boto3.dynamodb.conditions import Attr
         
         keyword_lower = keyword.lower()
         
-        # Query GSI5 using the partition key (GSI5PK = 'TITLE_SEARCH')
-        query_params = {
-            'IndexName': 'GSI5',
-            'KeyConditionExpression': Key('GSI5PK').eq('TITLE_SEARCH'),
-            'Limit': limit * 2,  # Fetch more to account for client-side filtering
-            'ScanIndexForward': False  # Sort by published_date descending
-        }
+        logger.info(f"🔍 Scanning table for keyword: '{keyword}' (date_filter: {date_filter}, limit: {limit})")
         
-        # Add date filter if provided
-        if date_filter:
-            start_date, end_date = date_filter
-            filter_conditions = []
-            if start_date:
-                filter_conditions.append(Attr('published_date').gte(start_date))
-            if end_date:
-                filter_conditions.append(Attr('published_date').lte(end_date))
-            
-            if filter_conditions:
-                if len(filter_conditions) == 1:
-                    query_params['FilterExpression'] = filter_conditions[0]
-                else:
-                    query_params['FilterExpression'] = filter_conditions[0] & filter_conditions[1]
-        
-        # Use cursor if provided
-        if last_evaluated_key:
-            query_params['ExclusiveStartKey'] = convert_to_dynamodb_format(last_evaluated_key)
-        
-        logger.info(f"🔍 Querying GSI5 for keyword: '{keyword}' (date_filter: {date_filter}, limit: {limit})")
-        
-        # Execute query
-        response = table.query(**query_params)
-        all_articles = response.get('Items', [])
-        
-        # Check if there are more results
-        has_more = 'LastEvaluatedKey' in response
-        next_cursor = response.get('LastEvaluatedKey')
-        
-        # Filter client-side for case-insensitive title/description matching
+        # Collect matching articles by scanning until we have enough or exhausted table
         matching_articles = []
-        for article in all_articles:
-            title = (article.get('title') or '').lower()
-            description = (article.get('description') or '').lower()
-            gsi5sk = (article.get('GSI5SK') or '').lower()
+        scan_cursor = convert_to_dynamodb_format(last_evaluated_key) if last_evaluated_key else None
+        total_scanned = 0
+        
+        # Continue scanning until we have enough matches or no more items
+        while len(matching_articles) < limit:
+            scan_params = {
+                'Limit': 1000  # Scan in large batches
+            }
             
-            # Check if keyword is in title, description, or GSI5SK
-            if keyword_lower in title or keyword_lower in description or keyword_lower in gsi5sk:
-                matching_articles.append(article)
+            # Add date filter if provided
+            if date_filter:
+                start_date, end_date = date_filter
+                filter_conditions = []
+                if start_date:
+                    filter_conditions.append(Attr('published_date').gte(start_date))
+                if end_date:
+                    filter_conditions.append(Attr('published_date').lte(end_date))
+                
+                if filter_conditions:
+                    combined = filter_conditions[0]
+                    for cond in filter_conditions[1:]:
+                        combined = combined & cond
+                    scan_params['FilterExpression'] = combined
+            
+            # Use cursor if provided
+            if scan_cursor:
+                scan_params['ExclusiveStartKey'] = scan_cursor
+            
+            # Execute scan
+            response = table.scan(**scan_params)
+            batch_articles = response.get('Items', [])
+            total_scanned += len(batch_articles)
+            
+            # Client-side filter for case-insensitive keyword matching
+            for article in batch_articles:
+                title = (article.get('title') or '').lower()
+                description = (article.get('description') or '').lower()
+                gsi5sk = (article.get('GSI5SK') or '').lower()
+                
+                if keyword_lower in title or keyword_lower in description or keyword_lower in gsi5sk:
+                    matching_articles.append(article)
+                    
+                    # Stop if we have enough
+                    if len(matching_articles) >= limit * 2:  # Get extra for prioritization
+                        break
+            
+            # Check if there are more items to scan
+            if 'LastEvaluatedKey' not in response:
+                # No more items in table
+                scan_cursor = None
+                break
+            else:
+                scan_cursor = response['LastEvaluatedKey']
         
-        # Apply limit to matching articles
-        limited_articles = matching_articles[:limit]
+        # Sort by published_date descending (most recent first)
+        matching_articles.sort(key=lambda x: x.get('published_date', ''), reverse=True)
         
-        # Update cursor if we have more matching articles or more from DynamoDB
-        final_cursor = None
-        final_has_more = False
+        # Prioritize by match quality
+        prioritized_articles = prioritize_keyword_matches(matching_articles, keyword)
         
-        if len(matching_articles) > limit or has_more:
-            # If we filtered out articles, we might need to fetch more
-            # For now, use the DynamoDB cursor
-            final_cursor = next_cursor
-            final_has_more = has_more or len(matching_articles) > limit
+        # Apply limit
+        limited_articles = prioritized_articles[:limit]
         
-        logger.info(f"✅ Found {len(limited_articles)} articles for keyword '{keyword}' (queried {len(all_articles)} total, has_more: {final_has_more})")
+        # has_more is true only if we have more matched articles OR more to scan
+        has_more = len(prioritized_articles) > limit or scan_cursor is not None
+        
+        logger.info(f"✅ Found {len(limited_articles)} articles for keyword '{keyword}' (scanned {total_scanned}, matched {len(matching_articles)}, has_more: {has_more})")
         
         return {
             'articles': limited_articles,
-            'last_evaluated_key': final_cursor,
-            'has_more': final_has_more
+            'last_evaluated_key': convert_from_dynamodb_format(scan_cursor) if scan_cursor else None,
+            'has_more': has_more
         }
         
     except Exception as e:
@@ -231,110 +267,15 @@ def search_by_keyword(keyword: str, date_filter: Optional[tuple], limit: int, la
 
 def search_multiple_keywords(keywords: List[str], date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Search articles across multiple keywords using individual GSI queries and union results.
-    Similar to search_multiple_politicians in politician trades search.
+    Search articles across multiple keywords using table scan.
+    Continues scanning until enough matches found or table exhausted.
+    Client-side filtering with priority: exact > begins_with > contains.
     
     Args:
         keywords: List of keywords to search for
         date_filter: Optional tuple of (start_date, end_date) in ISO format strings
         limit: Maximum number of results to return
-        last_evaluated_key: Cursor for pagination (contains published_date and SK)
-    
-    Returns:
-        dict with 'articles', 'last_evaluated_key', 'has_more'
-    """
-    all_results = []
-    seen_article_ids = set()
-    
-    logger.info(f"🔄 Starting multi-keyword search for {len(keywords)} keywords: {keywords}")
-    
-    # For cursor-based pagination, we need to fetch more results and filter
-    fetch_limit = 1000 if not last_evaluated_key else 2000  # Fetch more if continuing
-    
-    for keyword in keywords:
-        logger.info(f"🔍 Querying GSI5 for keyword: {keyword}")
-        
-        try:
-            result = search_by_keyword(keyword, date_filter, fetch_limit, None)
-            keyword_articles = result.get('articles', [])
-            
-            logger.info(f"📊 Found {len(keyword_articles)} results for keyword {keyword}")
-            
-            # Deduplicate by SK (article ID) and add to results
-            for article in keyword_articles:
-                article_id = article.get('SK')
-                if article_id and article_id not in seen_article_ids:
-                    seen_article_ids.add(article_id)
-                    all_results.append(article)
-                    
-            # Stop if we've reached a reasonable limit
-            if len(all_results) >= fetch_limit:
-                logger.info(f"🛑 Reached fetch limit: {fetch_limit}")
-                break
-                
-        except Exception as e:
-            logger.error(f"❌ Error querying for keyword {keyword}: {str(e)}")
-            continue
-    
-    # Sort by published_date descending (most recent first), then by SK for stability
-    all_results.sort(key=lambda x: (x.get('published_date', ''), x.get('SK', '')), reverse=True)
-    
-    # Apply cursor-based pagination if cursor provided
-    if last_evaluated_key:
-        cursor_date = last_evaluated_key.get('published_date')
-        cursor_sk = last_evaluated_key.get('SK')
-        if cursor_date is not None:
-            # Filter items that come AFTER the cursor in descending sort order
-            filtered_items = []
-            for item in all_results:
-                item_date = item.get('published_date', '')
-                item_sk = item.get('SK', '')
-                # Include items that are strictly older than the cursor date
-                if item_date < cursor_date:
-                    filtered_items.append(item)
-                # If dates are the same, include items with a SK lexicographically smaller than the cursor's SK
-                elif item_date == cursor_date and item_sk < cursor_sk:
-                    filtered_items.append(item)
-                # Skip the cursor item itself and any items that come before it
-                elif item_date == cursor_date and item_sk >= cursor_sk:
-                    continue
-                # Skip items that are strictly newer than the cursor date
-                elif item_date > cursor_date:
-                    continue
-            all_results = filtered_items
-            logger.info(f"📄 Applied cursor filter, {len(all_results)} items remaining after cursor")
-    
-    # Apply pagination (always take first limit items after cursor)
-    paginated_items = all_results[:limit]
-    
-    # Convert from DynamoDB format
-    converted_items = [convert_from_dynamodb_format(item) for item in paginated_items]
-    
-    # Generate cursor for next page if we have more items
-    next_cursor = None
-    if len(all_results) > limit:
-        last_item = paginated_items[-1]
-        next_cursor = {
-            'published_date': last_item.get('published_date'),
-            'SK': last_item.get('SK')
-        }
-    
-    logger.info(f"✅ Multi-keyword search complete - results_count: {len(converted_items)}, total_found: {len(all_results)}, has_more: {next_cursor is not None}")
-    return {
-        'articles': converted_items,
-        'last_evaluated_key': next_cursor,
-        'has_more': next_cursor is not None
-    }
-
-
-def scan_all_articles(date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Scan all articles with date filter, only fetching a limited batch for pagination.
-    
-    Args:
-        date_filter: Optional tuple of (start_date, end_date) in ISO format strings
-        limit: Maximum number of results to return
-        last_evaluated_key: DynamoDB LastEvaluatedKey for pagination (must have PK and SK)
+        last_evaluated_key: Cursor for pagination
     
     Returns:
         dict with 'articles', 'last_evaluated_key', 'has_more'
@@ -342,67 +283,203 @@ def scan_all_articles(date_filter: Optional[tuple], limit: int, last_evaluated_k
     try:
         from boto3.dynamodb.conditions import Attr
         
-        scan_params = {
-            'Limit': limit
-            # Note: ScanIndexForward is only valid for query operations, not scan
-            # Scans don't support ordering - results are returned in arbitrary order
-        }
+        logger.info(f"🔄 Starting multi-keyword search for {len(keywords)} keywords: {keywords}")
         
-        filter_conditions = [Attr('PK').exists()]
-        if date_filter:
-            start_date, end_date = date_filter
-            if start_date:
-                filter_conditions.append(Attr('published_date').gte(start_date))
-            if end_date:
-                filter_conditions.append(Attr('published_date').lte(end_date))
+        # Collect matching articles by scanning until we have enough or exhausted table
+        matching_articles = []
+        seen_ids = set()
+        scan_cursor = convert_to_dynamodb_format(last_evaluated_key) if last_evaluated_key else None
+        total_scanned = 0
         
-        if len(filter_conditions) == 1:
-            scan_params['FilterExpression'] = filter_conditions[0]
-        elif len(filter_conditions) > 1:
-            combined = filter_conditions[0]
-            for condition in filter_conditions[1:]:
-                combined = combined & condition
-            scan_params['FilterExpression'] = combined
+        # Continue scanning until we have enough matches or no more items
+        while len(matching_articles) < limit:
+            scan_params = {
+                'Limit': 1000  # Scan in large batches
+            }
+            
+            # Add date filter if provided
+            if date_filter:
+                start_date, end_date = date_filter
+                filter_conditions = []
+                if start_date:
+                    filter_conditions.append(Attr('published_date').gte(start_date))
+                if end_date:
+                    filter_conditions.append(Attr('published_date').lte(end_date))
+                
+                if filter_conditions:
+                    combined = filter_conditions[0]
+                    for cond in filter_conditions[1:]:
+                        combined = combined & cond
+                    scan_params['FilterExpression'] = combined
+            
+            # Use cursor if provided
+            if scan_cursor:
+                scan_params['ExclusiveStartKey'] = scan_cursor
+            
+            logger.info(f"🔍 Scanning batch (cursor: {scan_cursor is not None})")
+            
+            # Execute scan
+            response = table.scan(**scan_params)
+            batch_articles = response.get('Items', [])
+            total_scanned += len(batch_articles)
+            
+            # Client-side filter for all keywords (OR logic, case-insensitive)
+            for article in batch_articles:
+                title = (article.get('title') or '').lower()
+                description = (article.get('description') or '').lower()
+                gsi5sk = (article.get('GSI5SK') or '').lower()
+                article_id = article.get('SK')
+                
+                # Check if any keyword matches
+                for keyword in keywords:
+                    keyword_lower = keyword.lower()
+                    if keyword_lower in title or keyword_lower in description or keyword_lower in gsi5sk:
+                        if article_id not in seen_ids:
+                            seen_ids.add(article_id)
+                            matching_articles.append(article)
+                        break
+                
+                # Stop if we have enough
+                if len(matching_articles) >= limit * 2:  # Get extra for prioritization
+                    break
+            
+            # Check if there are more items to scan
+            if 'LastEvaluatedKey' not in response:
+                # No more items in table
+                scan_cursor = None
+                break
+            else:
+                scan_cursor = response['LastEvaluatedKey']
         
-        # Use cursor if provided - must be in table format (PK, SK)
-        if last_evaluated_key:
-            # If it's our custom format, extract the DynamoDB cursor
-            if isinstance(last_evaluated_key, dict) and '_dynamodb_cursor' in last_evaluated_key:
-                dynamodb_cursor = last_evaluated_key['_dynamodb_cursor']
-                if dynamodb_cursor and isinstance(dynamodb_cursor, dict) and 'PK' in dynamodb_cursor and 'SK' in dynamodb_cursor:
-                    if 'GSI5PK' not in dynamodb_cursor:
-                        scan_params['ExclusiveStartKey'] = convert_to_dynamodb_format(dynamodb_cursor)
-            # If it's already in DynamoDB table format (has PK and SK), use it directly
-            elif isinstance(last_evaluated_key, dict) and 'PK' in last_evaluated_key and 'SK' in last_evaluated_key:
-                if 'GSI5PK' not in last_evaluated_key:
-                    scan_params['ExclusiveStartKey'] = convert_to_dynamodb_format(last_evaluated_key)
+        # Sort by published_date descending
+        matching_articles.sort(key=lambda x: x.get('published_date', ''), reverse=True)
         
-        # Scan limited batch
-        response = table.scan(**scan_params)
-        articles = response.get('Items', [])
+        # Prioritize by match quality for first keyword (primary keyword)
+        if keywords:
+            matching_articles = prioritize_keyword_matches(matching_articles, keywords[0])
         
-        # Check if there are more results
-        has_more = 'LastEvaluatedKey' in response
-        next_cursor = response.get('LastEvaluatedKey')
+        # Apply limit
+        limited_articles = matching_articles[:limit]
         
+        # has_more is true only if we have more matched articles OR more to scan
+        has_more = len(matching_articles) > limit or scan_cursor is not None
+    
         # Convert from DynamoDB format
-        converted_articles = [convert_from_dynamodb_format(item) for item in articles]
+        converted_articles = [convert_from_dynamodb_format(item) for item in limited_articles]
         
-        # Convert LastEvaluatedKey to JSON-serializable format
-        serializable_cursor = None
-        if next_cursor:
-            serializable_cursor = convert_from_dynamodb_format(next_cursor)
-        
-        logger.info(f"📊 Scanned {len(converted_articles)} articles (has_more: {has_more})")
+        logger.info(f"✅ Multi-keyword search complete - results_count: {len(converted_articles)}, total_scanned: {total_scanned}, matched: {len(matching_articles)}, has_more: {has_more}")
         
         return {
             'articles': converted_articles,
-            'last_evaluated_key': serializable_cursor,
+            'last_evaluated_key': convert_from_dynamodb_format(scan_cursor) if scan_cursor else None,
+            'has_more': has_more
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in multi-keyword search: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            'articles': [],
+            'last_evaluated_key': None,
+            'has_more': False
+        }
+
+
+def scan_all_articles(date_filter: Optional[tuple], limit: int, last_evaluated_key: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Fetch articles by date range using PK queries (NEWS#{date}).
+    More efficient than scanning when no keywords provided.
+    
+    Args:
+        date_filter: Tuple of (start_date, end_date) in ISO format strings (YYYY-MM-DD...)
+        limit: Maximum number of results to return
+        last_evaluated_key: Custom cursor with 'current_date' for date iteration
+    
+    Returns:
+        dict with 'articles', 'last_evaluated_key', 'has_more'
+    """
+    try:
+        from boto3.dynamodb.conditions import Key
+        from datetime import datetime, timedelta
+        
+        # Parse date filter
+        start_date_str, end_date_str = date_filter if date_filter else (None, None)
+        
+        # Default to today if no end date
+        if end_date_str:
+            end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00')).date()
+        else:
+            end_date = datetime.utcnow().date()
+        
+        # Default to 30 days ago if no start date
+        if start_date_str:
+            start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')).date()
+        else:
+            start_date = end_date - timedelta(days=30)
+        
+        # Resume from cursor if provided
+        if last_evaluated_key and 'current_date' in last_evaluated_key:
+            current_date_str = last_evaluated_key['current_date']
+            current_date = datetime.strptime(current_date_str, '%Y-%m-%d').date()
+        else:
+            current_date = end_date
+        
+        logger.info(f"📅 Querying by date range: {start_date} to {end_date}, current: {current_date}")
+        
+        all_articles = []
+        
+        # Query each date starting from current_date and going backwards
+        while current_date >= start_date and len(all_articles) < limit:
+            date_str = current_date.strftime('%Y-%m-%d')
+            pk = f"NEWS#{date_str}"
+            
+            logger.info(f"🔍 Querying PK: {pk}")
+            
+            # Query for this specific date
+            response = table.query(
+                KeyConditionExpression=Key('PK').eq(pk),
+                ScanIndexForward=False  # Most recent first within the day
+            )
+            
+            items = response.get('Items', [])
+            logger.info(f"📊 Found {len(items)} articles for {date_str}")
+            
+            all_articles.extend(items)
+            
+            # Move to previous day
+            current_date -= timedelta(days=1)
+            
+            # Stop if we've collected enough
+            if len(all_articles) >= limit:
+                break
+        
+        # Apply limit
+        limited_articles = all_articles[:limit]
+        
+        # Check if there are more dates to query
+        has_more = current_date >= start_date
+        
+        # Generate cursor for next batch
+        next_cursor = None
+        if has_more:
+            next_cursor = {
+                'current_date': current_date.strftime('%Y-%m-%d')
+            }
+        
+        # Convert from DynamoDB format
+        converted_articles = [convert_from_dynamodb_format(item) for item in limited_articles]
+        
+        logger.info(f"✅ Date range query complete - results_count: {len(converted_articles)}, has_more: {has_more}")
+        
+        return {
+            'articles': converted_articles,
+            'last_evaluated_key': next_cursor,
             'has_more': has_more
         }
     
     except Exception as e:
-        logger.error(f"❌ Error scanning articles: {str(e)}")
+        logger.error(f"❌ Error querying articles by date: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return {
@@ -504,7 +581,6 @@ def extract_terms_from_query_node(node: Any) -> List[str]:
 
 def search_articles(
     query_filters: Dict[str, Any],
-    date_range: str = '12h',
     date_from: str = None,
     date_to: str = None,
     limit: int = 200,
@@ -514,8 +590,7 @@ def search_articles(
     Search articles based on query filters.
     
     Args:
-        query_filters: Dictionary with 'keywords' key (list of strings or complex query structure)
-        date_range: Date range filter ('12h', '24h', '7d', '30d', 'all') - used if date_from/date_to not provided
+        query_filters: Dictionary with 'keywords' key (list of strings)
         date_from: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
         date_to: End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
         limit: Maximum number of results to return
@@ -547,10 +622,10 @@ def search_articles(
         Dictionary with results and metadata including last_evaluated_key for next page
     """
     try:
-        logger.info(f"🔍 Starting search_articles with filters: {json.dumps(query_filters, default=str)}, date_range: {date_range}, date_from: {date_from}, date_to: {date_to}, limit: {limit}")
+        logger.info(f"🔍 Starting search_articles with filters: {json.dumps(query_filters, default=str)}, date_from: {date_from}, date_to: {date_to}, limit: {limit}")
         
         # Calculate date filter (returns tuple of (start_date, end_date))
-        date_filter = calculate_date_filter(date_range=date_range, date_from=date_from, date_to=date_to)
+        date_filter = calculate_date_filter(date_from=date_from, date_to=date_to)
         
         # Extract keywords from filters
         keywords = extract_keywords_from_query(query_filters)
@@ -692,7 +767,6 @@ def lambda_handler(event, context):
             logger.warning(f"⚠️ query is not a dict, got {type(query_filters)}: {query_filters}")
             query_filters = {}
         
-        date_range = body.get('dateRange', '12h')
         date_from = body.get('dateFrom') or body.get('date_from')  # Support both camelCase and snake_case
         date_to = body.get('dateTo') or body.get('date_to')  # Support both camelCase and snake_case
         limit = min(int(body.get('limit', 200)), MAX_RESULTS)
@@ -700,10 +774,10 @@ def lambda_handler(event, context):
         
         logger.info(f"📄 Pagination - limit: {limit}, has_cursor: {last_evaluated_key is not None}")
         logger.info(f"📋 Query filters type: {type(query_filters)}, value: {json.dumps(query_filters, default=str)}")
-        logger.info(f"📅 Date filters - date_range: {date_range}, date_from: {date_from}, date_to: {date_to}")
+        logger.info(f"📅 Date filters - date_from: {date_from}, date_to: {date_to}")
         
         # Perform search
-        result = search_articles(query_filters, date_range, date_from, date_to, limit, last_evaluated_key)
+        result = search_articles(query_filters, date_from, date_to, limit, last_evaluated_key)
         
         logger.info(f"✅ Search complete - success: {result.get('success')}, results_count: {len(result.get('articles', []))}, total: {result.get('total', 0)}")
         

@@ -16,7 +16,6 @@ import {
   DialogActions,
   Checkbox,
   Autocomplete,
-  Select,
   Table,
   TableBody,
   TableCell,
@@ -33,7 +32,6 @@ import {
   AccordionSummary,
   AccordionDetails,
   Link,
-  InputLabel,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -78,7 +76,6 @@ interface NewsTileProps {
     sources?: string[];
     categories?: string[];
     countries?: string[];
-    dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
   };
   filterSettings?: {
     sources?: string[];
@@ -126,7 +123,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     sources: [],
     categories: [],
     countries: [],
-    dateRange: 'all',
   },
   filterSettings: initialFilterSettings,
   paginationState: initialPaginationState = {
@@ -205,7 +201,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     sources?: string[];
     categories?: string[];
     countries?: string[];
-    dateRange?: '12h' | '24h' | '7d' | '30d' | 'all';
   }>({
     ...searchParams,
   });
@@ -294,7 +289,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
               ? currentSearchParams.keywords
               : undefined,
           },
-          dateRange: currentSearchParams.dateRange || 'all',
           limit: 200,
         };
 
@@ -319,7 +313,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
               ? currentSearchParams.keywords
               : undefined,
           },
-          dateRange: currentSearchParams?.dateRange || 'all',
           limit: 200,
           lastEvaluatedKey: nextKey,
         };
@@ -510,7 +503,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             ? currentSearchParams.keywords
             : undefined,
         },
-        dateRange: currentSearchParams.dateRange || 'all',
         limit: localDisplayOptions.maxResults || 200,
       };
       
@@ -623,7 +615,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             ? currentSearchParams.keywords
             : undefined,
         },
-        dateRange: currentSearchParams.dateRange || 'all',
         limit: localDisplayOptions.maxResults || 200,
         lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
       };
@@ -1427,43 +1418,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
             />
           </FormControl>
           )}
-
-          {/* Date Range */}
-          <FormControl size="small" fullWidth>
-            <InputLabel sx={{ color: '#94a3b8' }}>Date Range</InputLabel>
-            <Select
-              value={currentSearchParams.dateRange || 'all'}
-              onChange={(e) => {
-                setCurrentSearchParams(prev => ({ 
-                  ...prev, 
-                  dateRange: e.target.value as '12h' | '24h' | '7d' | '30d' | 'all' 
-                }));
-              }}
-              sx={{
-                backgroundColor: '#334155',
-                color: '#ffffff',
-                '& .MuiSelect-icon': { color: '#94a3b8' },
-              }}
-              MenuProps={{
-                PaperProps: {
-                  sx: {
-                    backgroundColor: '#1e293b',
-                    '& .MuiMenuItem-root': {
-                      color: '#ffffff',
-                      '&:hover': { backgroundColor: '#334155' },
-                      '&.Mui-selected': { backgroundColor: '#3b82f6' },
-                    },
-                  },
-                },
-              }}
-            >
-              <MenuItem value="12h">Last 12 Hours</MenuItem>
-              <MenuItem value="24h">Last 24 Hours</MenuItem>
-              <MenuItem value="7d">Last 7 Days</MenuItem>
-              <MenuItem value="30d">Last 30 Days</MenuItem>
-              <MenuItem value="all">All Time</MenuItem>
-            </Select>
-          </FormControl>
           
         </Box>
       </DialogContent>
