@@ -874,6 +874,9 @@ module "api_gateway" {
 
   tags = var.common_tags
 
+  # API Key Authorizer Lambda
+  authorizer_lambda_arn = module.api_key_authorizer_lambda.function_arn
+
   # Deployment trigger - increment this when you want to force a redeployment
   deployment_trigger = "82" # Updated for billing payment GET method and logging
 }

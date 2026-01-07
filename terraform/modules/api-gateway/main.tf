@@ -13,6 +13,18 @@ resource "aws_api_gateway_rest_api" "this" {
   tags = var.tags
 }
 
+# API Gateway Authorizer (Lambda Authorizer)
+resource "aws_api_gateway_authorizer" "this" {
+  count = var.authorizer_lambda_arn != null ? 1 : 0
+
+  name            = "${var.api_name}-authorizer"
+  type            = "TOKEN"
+  authorizer_uri  = "arn:aws:apigateway:${data.aws_region.current.name}:lambda:path/2015-03-31/functions/${var.authorizer_lambda_arn}/invocations"
+  identity_source = "method.request.header.Authorization"
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+}
+
 # API Gateway deployment
 resource "aws_api_gateway_deployment" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
@@ -69,9 +81,13 @@ resource "aws_api_gateway_method" "this" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.this[each.value.resource_key].id
   http_method   = each.value.http_method
-  authorization = "NONE"
+  authorization = var.authorizer_lambda_arn != null ? "CUSTOM" : "NONE"
+  authorizer_id = var.authorizer_lambda_arn != null ? aws_api_gateway_authorizer.this[0].id : null
 
-  request_parameters = each.value.request_parameters
+  request_parameters = merge(
+    each.value.request_parameters,
+    var.authorizer_lambda_arn != null ? { "method.request.header.Authorization" = true } : {}
+  )
 
   lifecycle {
     create_before_destroy = true

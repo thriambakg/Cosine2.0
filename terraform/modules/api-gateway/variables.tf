@@ -66,3 +66,16 @@ variable "deployment_trigger" {
   type        = string
   default     = "1"
 }
+
+# Authorizer configuration
+variable "authorizer_lambda_arn" {
+  description = "ARN of the Lambda function to use as authorizer"
+  type        = string
+  default     = null
+}
+
+variable "authorizer_lambda_function_name" {
+  description = "Name of the Lambda function to use as authorizer"
+  type        = string
+  default     = null
+}
