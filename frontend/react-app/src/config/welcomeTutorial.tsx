@@ -61,7 +61,7 @@ export const welcomeTutorialSteps: Step[] = [
         </p>
         <div style={{ margin: '8px 0', color: '#9ca3af', fontSize: '0.9rem' }}>
           <p style={{ margin: '6px 0' }}>• Create custom tiles for stocks, crypto, portfolios, and research</p>
-          <p style={{ margin: '6px 0' }}>• Organize tiles into multiple tabs and groups</p>
+          <p style={{ margin: '6px 0' }}>• Organize tiles into custom dashboards and group those dashboards together</p>
           <p style={{ margin: '6px 0' }}>• Access all your research in one unified view</p>
           <p style={{ margin: '6px 0' }}>• Build research context for your AI assistant</p>
         </div>
