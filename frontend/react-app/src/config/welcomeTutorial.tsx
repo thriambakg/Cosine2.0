@@ -5,7 +5,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: 'body',
     placement: 'center',
-    title: 'Welcome to Cosine',
     content: (
       <div>
         <h2 style={{ margin: 0, color: '#ffffff', fontSize: '1.5rem' }}>Welcome to Cosine</h2>
@@ -22,7 +21,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: 'body',
     placement: 'center',
-    title: 'What is Cosine?',
     content: (
       <div>
         <h3 style={{ margin: 0, color: '#ffffff' }}>What is Cosine?</h3>
@@ -39,7 +37,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: 'body',
     placement: 'center',
-    title: 'Key Capabilities',
     content: (
       <div>
         <h3 style={{ margin: 0, color: '#ffffff' }}>Key Capabilities</h3>
@@ -56,7 +53,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: 'body',
     placement: 'center',
-    title: 'Your Dashboard',
     content: (
       <div>
         <h3 style={{ margin: 0, color: '#ffffff' }}>Your Dashboard</h3>
@@ -76,7 +72,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: '[data-tutorial="chat-button"]',
     placement: 'left',
-    title: 'AI Chat Assistant',
     content: (
       <div>
         <h3 style={{ margin: 0, color: '#ffffff' }}>Your AI Research Partner</h3>
@@ -99,7 +94,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: '[data-tutorial="hamburger-menu"]',
     placement: 'right',
-    title: 'Explore Features',
     content: (
       <div>
         <h3 style={{ margin: 0, color: '#ffffff' }}>Explore the Platform</h3>
@@ -119,7 +113,6 @@ export const welcomeTutorialSteps: Step[] = [
   {
     target: 'body',
     placement: 'center',
-    title: 'Get Started',
     content: (
       <div>
         <h2 style={{ margin: 0, color: '#ffffff' }}>You're Ready! 🚀</h2>
