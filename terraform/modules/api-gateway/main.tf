@@ -306,10 +306,8 @@ resource "aws_api_gateway_method_settings" "protected_endpoints" {
 
   settings {
     # Throttle settings: 5 requests per second, burst of 10
-    throttle_settings {
-      burst_limit = var.throttle_burst_limit
-      rate_limit  = var.throttle_rate_limit
-    }
+    throttling_burst_limit = var.throttle_burst_limit
+    throttling_rate_limit  = var.throttle_rate_limit
 
     # Logging
     logging_level      = "ERROR"
