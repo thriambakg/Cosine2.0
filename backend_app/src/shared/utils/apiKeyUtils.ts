@@ -4,10 +4,11 @@
  */
 
 /**
- * Generate a new API key in format: sk_{uuid}_{uuid}
- * Total length: ~67 characters (3 + 32 + 1 + 32)
+ * Generate a new API key in format: sk_{user_id}_{random_uuid}
+ * This embeds the user_id for efficient PK lookups
+ * Total length: variable based on user_id length + 32 chars random
  */
-export function generateApiKey(): string {
+export function generateApiKey(userId: string): string {
   const generateUUID = () => {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
@@ -16,28 +17,44 @@ export function generateApiKey(): string {
     });
   };
 
-  const uuid1 = generateUUID().replace(/-/g, '');
-  const uuid2 = generateUUID().replace(/-/g, '');
+  const randomPart = generateUUID().replace(/-/g, '');
   
-  return `sk_${uuid1}_${uuid2}`;
+  return `sk_${userId}_${randomPart}`;
 }
 
 /**
  * Validate API key format
- * Must start with sk_ and be approximately 67 characters
+ * Must start with sk_ and contain user_id and random parts
+ * Format: sk_{user_id}_{32_hex_chars}
  */
 export function isValidApiKeyFormat(apiKey: string): boolean {
   if (!apiKey) return false;
   if (!apiKey.startsWith('sk_')) return false;
-  if (apiKey.length < 60 || apiKey.length > 70) return false;
-  return /^sk_[a-f0-9_]+$/.test(apiKey);
+  if (apiKey.length < 60) return false;
+  
+  // Format: sk_{user_id}_{random}
+  const parts = apiKey.split('_');
+  if (parts.length < 3) return false; // Must have at least sk, user_id, random
+  
+  return true;
 }
 
 /**
- * Get API key prefix for indexing (first 8 characters)
+ * Extract user_id from API key
+ * Format: sk_{user_id}_{random}
  */
-export function getApiKeyPrefix(apiKey: string): string {
-  return apiKey.substring(0, 8);
+export function extractUserId(apiKey: string): string | null {
+  if (!apiKey || !apiKey.startsWith('sk_')) return null;
+  
+  const parts = apiKey.split('_');
+  if (parts.length < 3) return null;
+  
+  // Remove 'sk' and last part (random), join remaining as user_id
+  // This handles user_ids that might contain underscores
+  parts.shift(); // Remove 'sk'
+  parts.pop();   // Remove random part
+  
+  return parts.join('_');
 }
 
 /**

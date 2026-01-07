@@ -356,13 +356,26 @@ def lambda_handler(event, context):
 def extract_user_id(event: Dict) -> Optional[str]:
     """
     Extract user ID from the request
-    TODO: Implement proper authentication/authorization
+    Priority order:
+    1. Lambda Authorizer context (extracted from API key)
+    2. Query parameters (for backward compatibility)
+    3. Path parameters (for backward compatibility)
+    4. Headers (for backward compatibility)
     """
-    # Check query parameters first (for GET requests)
+    # First, check Lambda Authorizer context (most secure)
+    request_context = event.get('requestContext', {})
+    authorizer = request_context.get('authorizer', {})
+    user_id = authorizer.get('userId')
+    if user_id:
+        print(f"✅ User ID from API key authorizer: {user_id}")
+        return user_id
+    
+    # Check query parameters (backward compatibility)
     query_params = event.get('queryStringParameters', {})
     if query_params:
         user_id = query_params.get('userId')
         if user_id:
+            print(f"⚠️ User ID from query params (deprecated): {user_id}")
             return user_id
     
     # Check path parameters
@@ -370,11 +383,14 @@ def extract_user_id(event: Dict) -> Optional[str]:
     if path_params:
         user_id = path_params.get('userId')
         if user_id:
+            print(f"⚠️ User ID from path params (deprecated): {user_id}")
             return user_id
     
-    # Fallback to header (for testing)
+    # Fallback to header (for testing/backward compatibility)
     headers = event.get('headers', {})
     user_id = headers.get('X-User-ID')
+    if user_id:
+        print(f"⚠️ User ID from header (deprecated): {user_id}")
     
     return user_id
 

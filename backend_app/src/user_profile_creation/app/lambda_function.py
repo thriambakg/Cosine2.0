@@ -38,10 +38,9 @@ def lambda_handler(event, context):
             )
             print(f"Updated last login for user: {user_id}")
         else:
-            # New user - generate API key
-            # Format: sk_{uuid}_{uuid} = 64 random hex chars with prefix
-            api_key = f"sk_{uuid.uuid4().hex}_{uuid.uuid4().hex}"
-            api_key_prefix = api_key[:8]  # "sk_" + first 5 chars
+            # New user - generate API key with embedded user_id
+            # Format: sk_{user_id}_{random_uuid}
+            api_key = f"sk_{user_id}_{uuid.uuid4().hex}"
             
             # Hash the API key using bcrypt
             api_key_hash = bcrypt.hashpw(api_key.encode('utf-8'), bcrypt.gensalt(rounds=10))
@@ -51,7 +50,6 @@ def lambda_handler(event, context):
                 Item={
                     'user_id': user_id,
                     'email': email,
-                    'api_key_prefix': api_key_prefix,
                     'api_key_hash': api_key_hash.decode('utf-8'),
                     'api_key_created_at': datetime.utcnow().isoformat(),
                     'created_at': datetime.utcnow().isoformat(),
@@ -67,7 +65,7 @@ def lambda_handler(event, context):
             )
             
             print(f"Created new user profile for: {user_id}")
-            print(f"API key generated (prefix: {api_key_prefix})")
+            print(f"API key generated with user_id embedded")
             
             # In production, you would send the API key to the user via email
             # For now, the signup endpoint will return it once
