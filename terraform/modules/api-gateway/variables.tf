@@ -82,3 +82,22 @@ variable "cognito_authorizer_id" {
   default     = null
 }
 
+# Rate limiting configuration
+variable "throttle_rate_limit" {
+  description = "Throttle rate limit (requests per second)"
+  type        = number
+  default     = 5
+}
+
+variable "throttle_burst_limit" {
+  description = "Throttle burst limit"
+  type        = number
+  default     = 10
+}
+
+variable "daily_quota_limit" {
+  description = "Daily API quota per user"
+  type        = number
+  default     = 50000
+}
+

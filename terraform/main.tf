@@ -111,12 +111,7 @@ module "cognito_authorizer" {
 
   api_name              = "${var.project_name}-api-${var.environment}"
   rest_api_id           = module.api_gateway.rest_api_id
-  stage_name            = var.environment
   cognito_user_pool_arn = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_arn, null)
-
-  throttle_rate_limit  = var.api_throttle_rate_limit
-  throttle_burst_limit = var.api_throttle_burst_limit
-  daily_quota_limit    = var.api_daily_quota_limit
 
   tags = var.common_tags
 
@@ -899,12 +894,14 @@ module "api_gateway" {
     }
   }
 
-
   cognito_authorizer_id = module.cognito_authorizer.cognito_authorizer_id
+  throttle_rate_limit   = var.api_throttle_rate_limit
+  throttle_burst_limit  = var.api_throttle_burst_limit
+  daily_quota_limit     = var.api_daily_quota_limit
   tags                  = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "82" # Updated for billing payment GET method and logging
+  deployment_trigger = "83" # Updated for billing payment GET method and logging
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager

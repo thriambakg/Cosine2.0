@@ -27,3 +27,14 @@ output "stage_name" {
   description = "Name of the API Gateway stage"
   value       = aws_api_gateway_stage.this.stage_name
 }
+
+output "internal_api_key" {
+  description = "Internal API key for machine-to-machine communication"
+  value       = aws_api_gateway_api_key.internal.value
+  sensitive   = true
+}
+
+output "internal_api_key_id" {
+  description = "Internal API key ID"
+  value       = aws_api_gateway_api_key.internal.id
+}
