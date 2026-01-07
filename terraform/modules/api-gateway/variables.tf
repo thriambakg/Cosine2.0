@@ -44,7 +44,9 @@ variable "methods" {
     integration_http_method = string
     lambda_arn              = optional(string)
     request_parameters      = optional(map(bool), {})
-    timeout_milliseconds    = optional(number, 29000) # Default 29 seconds, max for API Gateway
+    timeout_milliseconds    = optional(number, 29000)  # Default 29 seconds, max for API Gateway
+    authorization_type      = optional(string, "NONE") # "NONE" or "COGNITO_USER_POOLS"
+    authorization_scopes    = optional(list(string), [])
   }))
   default = {}
 }
@@ -67,22 +69,16 @@ variable "deployment_trigger" {
   default     = "1"
 }
 
-# Authorizer configuration
-variable "authorizer_lambda_arn" {
-  description = "ARN of the Lambda function to use as authorizer"
+# Cognito User Pool authorizer (REST API)
+variable "cognito_user_pool_arn" {
+  description = "ARN of the Cognito User Pool for authorizer"
   type        = string
   default     = null
 }
 
-variable "authorizer_lambda_function_name" {
-  description = "Name of the Lambda function to use as authorizer"
+variable "cognito_authorizer_id" {
+  description = "ID of the Cognito authorizer in API Gateway"
   type        = string
   default     = null
 }
 
-# Which header carries the token for the Lambda authorizer
-variable "authorizer_identity_header" {
-  description = "Header name to read token from (e.g., Authorization or X-API-Key)"
-  type        = string
-  default     = "Authorization"
-}

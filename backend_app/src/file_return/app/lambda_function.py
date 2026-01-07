@@ -152,25 +152,16 @@ def validate_user_identity(event: Dict[str, Any]) -> str:
             if user_id:
                 return user_id
         
-        # Option 1: From Lambda Authorizer context (most secure - extracted from API key)
-        if 'requestContext' in event:
-            authorizer = event['requestContext'].get('authorizer', {})
-            user_id = authorizer.get('userId')
-            if user_id:
-                logger.info(f"✅ User ID from API key authorizer: {user_id}")
-                return user_id
-        
-        # Option 2: From API Gateway request context (Cognito)
+        # Option 2: From API Gateway request context
         if 'requestContext' in event and 'identity' in event['requestContext']:
             user_id = event['requestContext']['identity'].get('cognitoIdentityId')
             if user_id:
                 return user_id
         
-        # Option 3: From headers (backward compatibility)
+        # Option 3: From headers
         if 'headers' in event:
             user_id = event['headers'].get('x-user-id') or event['headers'].get('X-User-Id')
             if user_id:
-                logger.warning(f"⚠️ User ID from header (deprecated): {user_id}")
                 return user_id
         
         # Option 4: From direct Lambda invocation payload

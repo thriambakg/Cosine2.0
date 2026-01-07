@@ -103,6 +103,27 @@ module "domain" {
 }
 
 # ============================================================================
+# COGNITO AUTHORIZER FOR API GATEWAY
+# ============================================================================
+
+module "cognito_authorizer" {
+  source = "./modules/cognito-authorizer"
+
+  api_name              = "${var.project_name}-api-${var.environment}"
+  rest_api_id           = module.api_gateway.rest_api_id
+  stage_name            = var.environment
+  cognito_user_pool_arn = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_arn, null)
+
+  throttle_rate_limit  = var.api_throttle_rate_limit
+  throttle_burst_limit = var.api_throttle_burst_limit
+  daily_quota_limit    = var.api_daily_quota_limit
+
+  tags = var.common_tags
+
+  depends_on = [module.api_gateway]
+}
+
+# ============================================================================
 # MINIMAL BACKEND API INFRASTRUCTURE - Only Stock Volatility
 # ============================================================================
 
@@ -503,6 +524,7 @@ module "api_gateway" {
       lambda_arn              = module.sec_search_lambda.wrapper_function_arn != null ? module.sec_search_lambda.wrapper_function_arn : module.sec_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # GET method for SEC search autocomplete
     sec_search_autocomplete_get = {
@@ -549,6 +571,7 @@ module "api_gateway" {
       lambda_arn              = module.politician_trades_search_lambda.wrapper_function_arn != null ? module.politician_trades_search_lambda.wrapper_function_arn : module.politician_trades_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # POST method for USAspending autocomplete (uses wrapper Lambda for SQS integration)
     usaspending_autocomplete_post = {
@@ -559,6 +582,7 @@ module "api_gateway" {
       lambda_arn              = module.usaspending_autocomplete_lambda.wrapper_function_arn != null ? module.usaspending_autocomplete_lambda.wrapper_function_arn : module.usaspending_autocomplete_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # POST method for USAspending search (uses wrapper Lambda for SQS integration)
     usaspending_search_post = {
@@ -569,6 +593,7 @@ module "api_gateway" {
       lambda_arn              = module.usaspending_search_lambda.wrapper_function_arn != null ? module.usaspending_search_lambda.wrapper_function_arn : module.usaspending_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # POST method for USAspending enrichment (uses wrapper Lambda for SQS integration)
     usaspending_enrichment_post = {
@@ -579,6 +604,7 @@ module "api_gateway" {
       lambda_arn              = module.usaspending_enrichment_lambda.wrapper_function_arn != null ? module.usaspending_enrichment_lambda.wrapper_function_arn : module.usaspending_enrichment_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # POST method for Congress Bills search
     congress_bills_search_post = {
@@ -589,6 +615,7 @@ module "api_gateway" {
       lambda_arn              = module.congress_bills_search_lambda.wrapper_function_arn != null ? module.congress_bills_search_lambda.wrapper_function_arn : module.congress_bills_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # POST method for LDA search (uses wrapper Lambda for SQS integration)
     lda_search_post = {
@@ -599,6 +626,7 @@ module "api_gateway" {
       lambda_arn              = module.lda_search_lambda.wrapper_function_arn != null ? module.lda_search_lambda.wrapper_function_arn : module.lda_search_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+      authorization_type      = "COGNITO_USER_POOLS"
     }
     # POST method for LDA autocomplete (uses wrapper Lambda for SQS integration)
     lda_autocomplete_post = {
@@ -872,14 +900,11 @@ module "api_gateway" {
   }
 
 
-  tags = var.common_tags
-
-  # API Key Authorizer Lambda
-  authorizer_lambda_arn      = module.api_key_authorizer_lambda.function_arn
-  authorizer_identity_header = "X-API-Key"
+  cognito_authorizer_id = module.cognito_authorizer.cognito_authorizer_id
+  tags                  = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "84" # Force redeploy after authorizer header change
+  deployment_trigger = "82" # Updated for billing payment GET method and logging
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
@@ -2662,71 +2687,6 @@ module "billing_payment_lambda" {
   reserved_concurrent_executions = 10
 
   tags = var.common_tags
-}
-
-# IAM Policy for API Key Authorizer to access user_profiles table
-resource "aws_iam_policy" "api_key_authorizer_dynamodb_policy" {
-  name        = "${var.project_name}-api-key-authorizer-dynamodb-${var.environment}"
-  description = "Policy for API Key Authorizer to access user_profiles table"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:Query"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*"
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-# API Key Authorizer Lambda Function
-module "api_key_authorizer_lambda" {
-  source = "./modules/lambda"
-
-  function_name = "${var.project_name}-api-key-authorizer-${var.environment}"
-  description   = "Lambda Authorizer for validating API keys"
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 30
-  memory_size   = 256
-
-  source_dir = "../backend_app/src/authorizers/api_key_authorizer"
-
-  # Lambda layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.utility_layer_arn
-  ]
-
-  # Environment variables
-  environment_variables = {
-    USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
-  }
-
-  # IAM policies for DynamoDB access
-  additional_policy_arns = [
-    aws_iam_policy.api_key_authorizer_dynamodb_policy.arn
-  ]
-
-  tags = var.common_tags
-}
-
-# Lambda permission for API Gateway to invoke authorizer
-resource "aws_lambda_permission" "api_gateway_invoke_authorizer" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = module.api_key_authorizer_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "arn:aws:execute-api:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*/*"
 }
 
 # News Search Lambda Function (with SQS and wrapper support)

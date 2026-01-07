@@ -170,3 +170,22 @@ variable "encryption_secret" {
   default     = ""
   sensitive   = true
 }
+
+# API Gateway Authorization and Rate Limiting
+variable "api_throttle_rate_limit" {
+  description = "API Gateway throttle rate limit (requests per second)"
+  type        = number
+  default     = 5
+}
+
+variable "api_throttle_burst_limit" {
+  description = "API Gateway throttle burst limit"
+  type        = number
+  default     = 10
+}
+
+variable "api_daily_quota_limit" {
+  description = "API Gateway daily quota per user"
+  type        = number
+  default     = 50000
+}
