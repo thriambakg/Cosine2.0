@@ -15,6 +15,7 @@ import {
   signInWithRedirect,
   AuthUser
 } from 'aws-amplify/auth';
+import { dashboardAPI } from '../services/api';
 
 export interface User {
   id: string;
@@ -94,6 +95,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initializeAuth();
   }, []);
+
+  // After authentication, ensure a default dashboard exists for the user
+  useEffect(() => {
+    const ensureDefaultDashboard = async () => {
+      if (!user || isLoading) return;
+      try {
+        const initKey = `dashboard_initialized_${user.id}`;
+        const alreadyInitialized = typeof window !== 'undefined' ? localStorage.getItem(initKey) : null;
+        if (alreadyInitialized) return;
+
+        // Call backend to fetch (and create if missing) the dashboard
+        await dashboardAPI.getDashboard(user.id);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(initKey, 'true');
+        }
+      } catch (e) {
+        console.warn('Failed to ensure default dashboard on login:', e);
+      }
+    };
+
+    ensureDefaultDashboard();
+  }, [user, isLoading]);
 
   // Handle OAuth callbacks
   useEffect(() => {
