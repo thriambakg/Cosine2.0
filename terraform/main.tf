@@ -2660,6 +2660,31 @@ module "billing_payment_lambda" {
   tags = var.common_tags
 }
 
+# IAM Policy for API Key Authorizer to access user_profiles table
+resource "aws_iam_policy" "api_key_authorizer_dynamodb_policy" {
+  name        = "${var.project_name}-api-key-authorizer-dynamodb-${var.environment}"
+  description = "Policy for API Key Authorizer to access user_profiles table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:Query"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
 # API Key Authorizer Lambda Function
 module "api_key_authorizer_lambda" {
   source = "./modules/lambda"
@@ -2680,7 +2705,7 @@ module "api_key_authorizer_lambda" {
 
   # IAM policies for DynamoDB access
   additional_policy_arns = [
-    data.terraform_remote_state.base_infra.outputs.user_profiles_table_policy_arn
+    aws_iam_policy.api_key_authorizer_dynamodb_policy.arn
   ]
 
   tags = var.common_tags
