@@ -2,6 +2,7 @@
 // This service handles all API calls to the AWS API Gateway endpoints
 
 import { API_CONFIG, logApiConfig } from '../config/api';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import axios from 'axios';
 import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
 
@@ -29,8 +30,24 @@ export const apiRequest = async <T>(
   console.log(`🌐 Making API request to: ${url}`);
   
   try {
-    // Merge custom headers with default headers
-    const headers = { ...getHeaders(options.userId), ...options.headers } as any;
+    // Attempt to fetch Cognito session and attach Bearer token
+    let authHeader: Record<string, string> = {};
+    try {
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken?.toString();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const bearer = idToken || accessToken;
+      if (bearer) {
+        authHeader = { Authorization: `Bearer ${bearer}` };
+      } else {
+        console.warn('🔒 No Cognito tokens found; proceeding without Authorization header');
+      }
+    } catch (authErr) {
+      console.warn('🔒 Failed to fetch Cognito session; proceeding unauthenticated:', authErr);
+    }
+
+    // Merge custom headers with default headers and auth header
+    const headers = { ...getHeaders(options.userId), ...authHeader, ...options.headers } as any;
     
     console.log(`📡 Request config:`, {
       method: options.method || 'GET',

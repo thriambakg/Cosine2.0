@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import Joyride, { Step, CallBackProps, STATUS, EVENTS } from 'react-joyride';
+import { useLocation } from 'react-router-dom';
 import { chatPageSteps } from '../config/chatPageTutorial';
 import { filesPageSteps } from '../config/filesPageTutorial';
 import { secSearchPageSteps } from '../config/secSearchPageTutorial';
@@ -14,6 +15,7 @@ import { filePreviewTutorialSteps } from '../config/filePreviewTutorial';
 import { itemDetailsTutorialSteps } from '../config/itemDetailsTutorial';
 import { welcomeTutorialSteps } from '../config/welcomeTutorial';
 import TutorialMockDialogs from '../components/tutorial/MockDialogs';
+import { useAuth } from './AuthContext';
 
 interface TutorialContextType {
   startTutorial: (page?: string) => void;
@@ -37,12 +39,21 @@ interface TutorialProviderProps {
 }
 
 const TUTORIAL_STORAGE_KEY = 'cosine_tutorial_completed';
+const WELCOME_TUTORIAL_KEY_PREFIX = 'cosine_welcome_shown_';
 const PAGE_TUTORIAL_PREFIX = 'cosine_tutorial_page_';
 
 export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) => {
   const [run, setRun] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
+  const location = useLocation();
+  const { isAuthenticated, user } = useAuth();
+
+  const userWelcomeKey = React.useMemo(() => {
+    if (!user) return null;
+    const id = user.cognitoSub || user.email;
+    return `${WELCOME_TUTORIAL_KEY_PREFIX}${id}`;
+  }, [user]);
 
   // Get steps based on current page
   const getStepsForPage = (page: string): Step[] => {
@@ -187,24 +198,24 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   const handleJoyrideCallback = useCallback((data: CallBackProps) => {
     const { status, index, type } = data;
 
-    // Update step index
     if (type === EVENTS.STEP_AFTER || type === EVENTS.TARGET_NOT_FOUND) {
       setStepIndex(index + 1);
     }
 
-    // Handle tutorial completion or skip
     if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status as any)) {
       setRun(false);
       setStepIndex(0);
-      
-      // Mark tutorial as completed in localStorage
-      if (status === STATUS.FINISHED) {
-        localStorage.setItem(TUTORIAL_STORAGE_KEY, 'true');
-        // Also mark page-specific tutorial as completed
-        localStorage.setItem(`${PAGE_TUTORIAL_PREFIX}${currentPage}`, 'true');
+
+      // Mark tutorials as completed to prevent auto-restart
+      localStorage.setItem(TUTORIAL_STORAGE_KEY, 'true');
+      localStorage.setItem(`${PAGE_TUTORIAL_PREFIX}${currentPage}`, 'true');
+
+      // For welcome tutorial, set per-user completion key
+      if (currentPage === 'welcome' && userWelcomeKey) {
+        localStorage.setItem(userWelcomeKey, 'true');
       }
     }
-  }, [currentPage]);
+  }, [currentPage, userWelcomeKey]);
 
   const startTutorial = useCallback((page: string = 'dashboard') => {
     setCurrentPage(page);
@@ -237,17 +248,22 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     setRun(false);
   }, []);
 
-  // Check if user is new and hasn't completed tutorial
+  // Auto-start Welcome tutorial only after first successful login
   React.useEffect(() => {
-    const hasCompletedTutorial = localStorage.getItem(TUTORIAL_STORAGE_KEY);
-    if (!hasCompletedTutorial) {
-      // Wait a bit for the page to load before starting tutorial
+    if (!isAuthenticated || !userWelcomeKey) return;
+
+    // Avoid running during auth callback route
+    if (location.pathname === '/auth/callback') return;
+
+    const globalSeen = localStorage.getItem(TUTORIAL_STORAGE_KEY);
+    const seen = localStorage.getItem(userWelcomeKey);
+    if (!seen && !globalSeen) {
       const timer = setTimeout(() => {
         startTutorial('welcome');
-      }, 1000);
+      }, 800);
       return () => clearTimeout(timer);
     }
-  }, [startTutorial]);
+  }, [isAuthenticated, userWelcomeKey, location.pathname, startTutorial]);
 
   return (
     <TutorialContext.Provider
