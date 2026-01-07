@@ -2660,6 +2660,41 @@ module "billing_payment_lambda" {
   tags = var.common_tags
 }
 
+# API Key Authorizer Lambda Function
+module "api_key_authorizer_lambda" {
+  source = "./modules/lambda"
+
+  function_name = "${var.project_name}-api-key-authorizer-${var.environment}"
+  description   = "Lambda Authorizer for validating API keys"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 30
+  memory_size   = 256
+
+  source_dir = "../backend_app/src/authorizers/api_key_authorizer"
+
+  # Environment variables
+  environment_variables = {
+    USER_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.user_profiles_table_name
+  }
+
+  # IAM policies for DynamoDB access
+  additional_policy_arns = [
+    data.terraform_remote_state.base_infra.outputs.user_profiles_table_policy_arn
+  ]
+
+  tags = var.common_tags
+}
+
+# Lambda permission for API Gateway to invoke authorizer
+resource "aws_lambda_permission" "api_gateway_invoke_authorizer" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.api_key_authorizer_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "arn:aws:execute-api:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*/*"
+}
+
 # News Search Lambda Function (with SQS and wrapper support)
 module "news_search_lambda" {
   source = "./modules/lambda-sqs"
