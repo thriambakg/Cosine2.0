@@ -38,3 +38,8 @@ output "internal_api_key_id" {
   description = "Internal API key ID"
   value       = aws_api_gateway_api_key.internal.id
 }
+
+output "cognito_authorizer_id" {
+  description = "ID of the Cognito authorizer"
+  value       = aws_api_gateway_authorizer.cognito.id
+}

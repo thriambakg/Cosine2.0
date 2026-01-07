@@ -106,18 +106,6 @@ module "domain" {
 # COGNITO AUTHORIZER FOR API GATEWAY
 # ============================================================================
 
-module "cognito_authorizer" {
-  source = "./modules/cognito-authorizer"
-
-  api_name              = "${var.project_name}-api-${var.environment}"
-  rest_api_id           = module.api_gateway.rest_api_id
-  cognito_user_pool_arn = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_arn, null)
-
-  tags = var.common_tags
-
-  depends_on = [module.api_gateway]
-}
-
 # ============================================================================
 # MINIMAL BACKEND API INFRASTRUCTURE - Only Stock Volatility
 # ============================================================================
@@ -126,9 +114,11 @@ module "cognito_authorizer" {
 module "api_gateway" {
   source = "./modules/api-gateway"
 
-  api_name        = "${var.project_name}-api-${var.environment}"
-  api_description = "Backend API for ${var.project_name} ${var.environment}"
-  stage_name      = var.environment
+  api_name                    = "${var.project_name}-api-${var.environment}"
+  api_description             = "Backend API for ${var.project_name} ${var.environment}"
+  stage_name                  = var.environment
+  cognito_user_pool_arn       = try(data.terraform_remote_state.base_infra.outputs.cognito_user_pool_arn, null)
+  force_cognito_authorization = true
 
   # Resources configuration
   resources = {
@@ -894,11 +884,10 @@ module "api_gateway" {
     }
   }
 
-  cognito_authorizer_id = module.cognito_authorizer.cognito_authorizer_id
-  throttle_rate_limit   = var.api_throttle_rate_limit
-  throttle_burst_limit  = var.api_throttle_burst_limit
-  daily_quota_limit     = var.api_daily_quota_limit
-  tags                  = var.common_tags
+  throttle_rate_limit  = var.api_throttle_rate_limit
+  throttle_burst_limit = var.api_throttle_burst_limit
+  daily_quota_limit    = var.api_daily_quota_limit
+  tags                 = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
   deployment_trigger = "83" # Updated for billing payment GET method and logging

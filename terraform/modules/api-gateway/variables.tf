@@ -73,13 +73,6 @@ variable "deployment_trigger" {
 variable "cognito_user_pool_arn" {
   description = "ARN of the Cognito User Pool for authorizer"
   type        = string
-  default     = null
-}
-
-variable "cognito_authorizer_id" {
-  description = "ID of the Cognito authorizer in API Gateway"
-  type        = string
-  default     = null
 }
 
 # Rate limiting configuration
@@ -99,5 +92,12 @@ variable "daily_quota_limit" {
   description = "Daily API quota per user"
   type        = number
   default     = 50000
+}
+
+# Force Cognito authorization for all methods
+variable "force_cognito_authorization" {
+  description = "When true, all methods use Cognito authorizer regardless of per-method config"
+  type        = bool
+  default     = true
 }
 

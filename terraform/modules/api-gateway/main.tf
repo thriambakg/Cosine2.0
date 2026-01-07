@@ -13,6 +13,18 @@ resource "aws_api_gateway_rest_api" "this" {
   tags = var.tags
 }
 
+# Cognito Authorizer (required)
+resource "aws_api_gateway_authorizer" "cognito" {
+  name            = "${var.api_name}-cognito-authorizer"
+  rest_api_id     = aws_api_gateway_rest_api.this.id
+  type            = "COGNITO_USER_POOLS"
+  provider_arns   = [var.cognito_user_pool_arn]
+  identity_source = "method.request.header.Authorization"
+
+  # Cache auth results for 5 minutes to reduce Cognito calls
+  authorizer_result_ttl_in_seconds = 300
+}
+
 # API Gateway deployment
 resource "aws_api_gateway_deployment" "this" {
   rest_api_id = aws_api_gateway_rest_api.this.id
@@ -69,8 +81,8 @@ resource "aws_api_gateway_method" "this" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   resource_id   = aws_api_gateway_resource.this[each.value.resource_key].id
   http_method   = each.value.http_method
-  authorization = each.value.authorization_type
-  authorizer_id = each.value.authorization_type == "COGNITO_USER_POOLS" ? var.cognito_authorizer_id : null
+  authorization = var.force_cognito_authorization ? "COGNITO_USER_POOLS" : each.value.authorization_type
+  authorizer_id = var.force_cognito_authorization || each.value.authorization_type == "COGNITO_USER_POOLS" ? aws_api_gateway_authorizer.cognito.id : null
 
   authorization_scopes = each.value.authorization_scopes
 
