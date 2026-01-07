@@ -79,3 +79,10 @@ variable "authorizer_lambda_function_name" {
   type        = string
   default     = null
 }
+
+# Which header carries the token for the Lambda authorizer
+variable "authorizer_identity_header" {
+  description = "Header name to read token from (e.g., Authorization or X-API-Key)"
+  type        = string
+  default     = "Authorization"
+}

@@ -20,7 +20,7 @@ resource "aws_api_gateway_authorizer" "this" {
   name            = "${var.api_name}-authorizer"
   type            = "TOKEN"
   authorizer_uri  = "arn:aws:apigateway:${data.aws_region.current.name}:lambda:path/2015-03-31/functions/${var.authorizer_lambda_arn}/invocations"
-  identity_source = "method.request.header.Authorization"
+  identity_source = "method.request.header.${var.authorizer_identity_header}"
 
   rest_api_id = aws_api_gateway_rest_api.this.id
 }
@@ -86,7 +86,7 @@ resource "aws_api_gateway_method" "this" {
 
   request_parameters = merge(
     each.value.request_parameters,
-    var.authorizer_lambda_arn != null ? { "method.request.header.Authorization" = true } : {}
+    var.authorizer_lambda_arn != null ? { "method.request.header.${var.authorizer_identity_header}" = true } : {}
   )
 
   lifecycle {

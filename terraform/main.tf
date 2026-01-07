@@ -875,10 +875,11 @@ module "api_gateway" {
   tags = var.common_tags
 
   # API Key Authorizer Lambda
-  authorizer_lambda_arn = module.api_key_authorizer_lambda.function_arn
+  authorizer_lambda_arn      = module.api_key_authorizer_lambda.function_arn
+  authorizer_identity_header = "X-API-Key"
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "83" # Updated to attach API key authorizer
+  deployment_trigger = "84" # Force redeploy after authorizer header change
 }
 
 # IAM Policy for Lambda functions to access Secrets Manager
