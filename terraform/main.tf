@@ -2702,7 +2702,7 @@ module "api_key_authorizer_lambda" {
   source_dir = "../backend_app/src/authorizers/api_key_authorizer"
 
   # Lambda layers
-  layer_arns = [
+  layers = [
     data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
