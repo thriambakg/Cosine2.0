@@ -606,8 +606,13 @@ export default function AppHeader() {
                       key={item.key}
                       onClick={() => {
                         handleHelpMenuClose();
-                        navigate(item.path);
-                        setTimeout(() => startTutorial(item.key), 300);
+                        // Dialog tutorials don't need to navigate, they appear on current page
+                        if (item.key !== 'file-preview' && item.key !== 'item-details') {
+                          navigate(item.path);
+                          setTimeout(() => startTutorial(item.key), 300);
+                        } else {
+                          startTutorial(item.key);
+                        }
                       }}
                     >
                       <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>{item.label}</Typography>
