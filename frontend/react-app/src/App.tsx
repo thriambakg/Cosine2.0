@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/AuthContext';
 import { EasyModeProvider } from './contexts/EasyModeContext';
+import { TutorialProvider } from './contexts/TutorialContext';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
 
@@ -164,8 +165,10 @@ function App() {
       <AuthProvider>
         <EasyModeProvider>
           <DialogManagerProvider>
-            <AppContent />
-            <ConfirmDialog />
+            <TutorialProvider>
+              <AppContent />
+              <ConfirmDialog />
+            </TutorialProvider>
           </DialogManagerProvider>
         </EasyModeProvider>
       </AuthProvider>

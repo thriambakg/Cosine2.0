@@ -27,6 +27,7 @@ import {
   Folder as FolderIcon,
   Minimize as MinimizeIcon,
 } from '@mui/icons-material';
+import TutorialHelpIcon from './TutorialHelpIcon';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
@@ -3665,6 +3666,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           {/* Title bar - draggable */}
           <Box
             data-title-bar
+            data-tutorial="item-details-titlebar"
             onMouseDown={handleDragStart}
             sx={{
               color: '#ffffff',
@@ -3843,7 +3845,12 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         )}
         
         {/* Universal Action Bar - Right side (appears for all item types) */}
-        <Box sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Box
+          sx={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 0.5 }}
+          data-tutorial="item-details-actions"
+        >
+          {/* Tutorial Help */}
+          <TutorialHelpIcon tutorialKey="item-details" title="Details window tutorial" />
           {/* Add to Context (Sidebar) */}
           <Tooltip title="Add to Context">
             <IconButton
@@ -3952,6 +3959,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 backgroundColor: '#2563eb',
               },
             }}
+            data-tutorial="item-details-content"
           >
         {/* Enrichment status messages (for Government Contracts) */}
         {itemType === 'govt_contract' && (

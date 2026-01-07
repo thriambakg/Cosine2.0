@@ -977,6 +977,7 @@ const CongressBillsSearchPage: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Politician Name - Free text multi-select with autocomplete */}
+                  <Box data-tutorial="politician-search">
                   <MultiSelectField<string>
                     label="Politician Name"
                     selectedItems={(() => {
@@ -1026,9 +1027,11 @@ const CongressBillsSearchPage: React.FC = () => {
                     allowCustomInput={false}
                     isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
                   />
+                  </Box>
 
                   {/* Bill Type - Dropdown multi-select - Hidden in easy mode */}
                   {!isEasyMode && (
+                  <Box data-tutorial="bill-type">
                   <MultiSelectField<string>
                     label="Bill Type"
                     selectedItems={searchParams.bill_type || []}
@@ -1039,9 +1042,11 @@ const CongressBillsSearchPage: React.FC = () => {
                     renderItem={(type) => type}
                     placeholder="Select bill types..."
                   />
+                  </Box>
                   )}
 
                   {/* Introduced Date From */}
+                  <Box data-tutorial="introduced-date" sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <TextField
                     label="Introduced Date From"
                     type="date"
@@ -1102,9 +1107,11 @@ const CongressBillsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
+                  </Box>
 
                   {/* Policy Area - Dropdown multi-select with autocomplete - Hidden in easy mode */}
                   {!isEasyMode && (
+                  <Box data-tutorial="policy-area">
                   <MultiSelectField<string>
                     label="Policy Area"
                     selectedItems={searchParams.policy_area || []}
@@ -1121,11 +1128,12 @@ const CongressBillsSearchPage: React.FC = () => {
                     allowCustomInput={false}
                     isLoading={!isPolicyAreaDataLoaded}
                   />
+                  </Box>
                   )}
 
                   {/* Advanced Search Section - Hidden in easy mode */}
                   {!isEasyMode && (
-                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #374151' }}>
+                  <Box data-tutorial="advanced-search" sx={{ mt: 2, pt: 2, borderTop: '1px solid #374151' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
                         Advanced Search
@@ -1356,6 +1364,7 @@ const CongressBillsSearchPage: React.FC = () => {
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                     <Button
+                      data-tutorial="search-button"
                       variant="contained"
                       onClick={handleSearch}
                       disabled={isSearching}
@@ -1614,7 +1623,7 @@ const CongressBillsSearchPage: React.FC = () => {
                     ))}
                   </Menu>
 
-                  <TableContainer
+                  <TableContainer data-tutorial="results-table"
               sx={{
                 '&::-webkit-scrollbar': {
                   width: '6px',

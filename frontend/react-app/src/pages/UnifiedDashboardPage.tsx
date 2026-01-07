@@ -2260,17 +2260,19 @@ const UnifiedDashboardPage: React.FC = () => {
             </Typography>
           </Box>
         ) : (
-          <GridDashboard
-            tiles={tiles}
-            dashboardContext={currentDashboardId}
-            onRemoveTile={handleRemoveTile}
-            onUpdateTile={handleUpdateTile}
-            onSettingsChange={handleSettingsChange}
-            onResizeTile={handleResizeTile}
-            onMoveTile={handleMoveTile}
-            onDuplicateTile={handleDuplicateTile}
-            zoomLevel={zoomLevel}
-          />
+          <Box data-tutorial="dashboard-grid">
+            <GridDashboard
+              tiles={tiles}
+              dashboardContext={currentDashboardId}
+              onRemoveTile={handleRemoveTile}
+              onUpdateTile={handleUpdateTile}
+              onSettingsChange={handleSettingsChange}
+              onResizeTile={handleResizeTile}
+              onMoveTile={handleMoveTile}
+              onDuplicateTile={handleDuplicateTile}
+              zoomLevel={zoomLevel}
+            />
+          </Box>
         )}
 
         {/* New Add Tile Menu */}
@@ -2573,6 +2575,7 @@ const UnifiedDashboardPage: React.FC = () => {
         <Fab
           color="primary"
           aria-label="add tile"
+          data-tutorial="new-tile-button"
           onClick={handleAddTileClick}
           sx={{
             position: 'fixed',

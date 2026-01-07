@@ -1144,6 +1144,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     </Typography>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Awarding Agency */}
+                  <Box data-tutorial="awarding-agency">
                   <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
                     label="Awarding Agency"
                     selectedItems={(() => {
@@ -1179,9 +1180,11 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Search for awarding agencies..."
                     allowCustomInput={false}
                   />
+                  </Box>
 
                   {/* Recipient - Hidden in easy mode */}
                   {!isEasyMode && (
+                  <Box data-tutorial="recipient">
                   <MultiSelectField<{ id?: string; name?: string; text?: string; [key: string]: any }>
                     label="Recipient"
                     selectedItems={(() => {
@@ -1223,9 +1226,11 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Search for recipients..."
                     allowCustomInput={false}
                   />
+                  </Box>
                   )}
 
-                  {/* State */}
+                  {/* Recipient Location (State & Zip) */}
+                  <Box data-tutorial="recipient-location" sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <MultiSelectField<string>
                     label="Recipient State"
                     selectedItems={searchParams.recipient_location_state || []}
@@ -1237,7 +1242,6 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Select states..."
                   />
 
-                  {/* Zip Code */}
                   <MultiSelectField<string>
                     label="Recipient Zip Code"
                     selectedItems={searchParams.recipient_zip_code || []}
@@ -1250,12 +1254,14 @@ const GovtContractsSearchPage: React.FC = () => {
                     placeholder="Enter zip codes..."
                     disableAutocomplete={true}
                   />
+                  </Box>
                     </Box>
                   </Box>
 
                     {/* Date Range */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                   {/* Date Year */}
+                  <Box data-tutorial="fiscal-year">
                   <TextField
                     label="Fiscal Year"
                     type="number"
@@ -1285,11 +1291,12 @@ const GovtContractsSearchPage: React.FC = () => {
                       '& .MuiInputLabel-root': { color: '#94a3b8' },
                     }}
                   />
+                  </Box>
                 </Box>
 
                   {/* Advanced Search Section - Hidden in easy mode */}
                   {!isEasyMode && (
-                  <Box sx={{ mt: 2 }}>
+                  <Box data-tutorial="advanced-search" sx={{ mt: 2 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6" sx={{ color: '#e2e8f0', fontSize: '1rem' }}>
                         Advanced Search
@@ -1464,6 +1471,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     {/* Search and Clear Buttons */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                       <Button
+                        data-tutorial="search-button"
                         variant="contained"
                         onClick={handleSearch}
                         disabled={isSearching}
@@ -1733,9 +1741,9 @@ const GovtContractsSearchPage: React.FC = () => {
                   </Menu>
 
                 {/* Results Table */}
-                {currentResults.length > 0 ? (
+                    {currentResults.length > 0 ? (
                   <>
-                  <TableContainer sx={{ 
+                  <TableContainer data-tutorial="results-table" sx={{ 
                         backgroundColor: 'transparent',
                         borderRadius: 0,
                         boxShadow: 'none',

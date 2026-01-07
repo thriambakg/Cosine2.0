@@ -939,6 +939,7 @@ const DashboardTabBar: React.FC<DashboardTabBarProps> = ({
         {/* Add tab button */}
         <IconButton
           onClick={onTabCreate}
+          data-tutorial="new-tab-button"
           sx={{
             color: '#9ca3af',
             flexShrink: 0,

@@ -10,6 +10,7 @@ import ContextSessionHandler from './ContextSessionHandler';
 import ContextSuccessNotification from '../common/ContextSuccessNotification';
 import FilesystemSuccessNotification from '../common/FilesystemSuccessNotification';
 import ManagedDialogRenderer from '../common/ManagedDialogRenderer';
+import PageTutorialHelp from '../common/PageTutorialHelp';
 // import { WebSocketProvider } from '../../contexts/WebSocketContext'; // COMMENTED OUT: Replaced by UnifiedMessageHandler
 import { GlobalChatProvider } from '../../contexts/GlobalChatContext';
 import { DualScreenModeProvider, useDualScreenMode } from '../../contexts/DualScreenModeContext';
@@ -50,6 +51,8 @@ const AppLayoutContent: React.FC<AppLayoutProps> = ({ children }) => {
         }}
       >
         {children}
+        {/* Small floating help icon to trigger the current page tutorial */}
+        <PageTutorialHelp />
       </Box>
       
       {/* Global Chat Sidebar */}

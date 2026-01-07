@@ -660,85 +660,88 @@ const NewsSearchPage: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Keywords Search Parameter */}
-                  <MultiSelectField<string>
-                    label="Keywords"
-                    selectedItems={searchParams.keywords || []}
-                    onItemsChange={(keywords) => {
-                      setSearchParams(prev => ({ ...prev, keywords }));
-                    }}
-                    suggestions={[]}
-                    onSearch={() => {
-                      return [];
-                    }}
-                    renderItem={(keyword) => keyword}
-                    placeholder="Enter keywords to search..."
-                    allowCustomInput={true}
-                    disableAutocomplete={true}
-                  />
+                  <Box data-tutorial="keywords-search">
+                    <MultiSelectField<string>
+                      label="Keywords"
+                      selectedItems={searchParams.keywords || []}
+                      onItemsChange={(keywords) => {
+                        setSearchParams(prev => ({ ...prev, keywords }));
+                      }}
+                      suggestions={[]}
+                      onSearch={() => {
+                        return [];
+                      }}
+                      renderItem={(keyword) => keyword}
+                      placeholder="Enter keywords to search..."
+                      allowCustomInput={true}
+                      disableAutocomplete={true}
+                    />
+                  </Box>
 
                   {/* Custom Date Range */}
-                  <>
-                  <Typography variant="body2" sx={{ color: '#9ca3af', mt: 1, mb: 1 }}>
-                    Specify custom date range:
-                  </Typography>
-                  
-                  <TextField
-                    label="Date From"
-                    type="date"
-                    value={searchParams.dateFrom || ''}
-                    onChange={(e) => {
-                      setSearchParams(prev => ({ 
-                        ...prev, 
-                        dateFrom: e.target.value,
-                      }));
-                    }}
-                    InputLabelProps={{
-                      shrink: true,
-                    }}
-                    fullWidth
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        '& fieldset': { borderColor: '#475569' },
-                        '&:hover fieldset': { borderColor: '#64748b' },
-                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                      },
-                      '& .MuiInputLabel-root': { color: '#94a3b8' },
-                    }}
-                  />
+                  <Box data-tutorial="date-range">
+                    <Typography variant="body2" sx={{ color: '#9ca3af', mt: 1, mb: 1 }}>
+                      Specify custom date range:
+                    </Typography>
+                    
+                    <TextField
+                      label="Date From"
+                      type="date"
+                      value={searchParams.dateFrom || ''}
+                      onChange={(e) => {
+                        setSearchParams(prev => ({ 
+                          ...prev, 
+                          dateFrom: e.target.value,
+                        }));
+                      }}
+                      InputLabelProps={{
+                        shrink: true,
+                      }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          color: '#e2e8f0',
+                          '& fieldset': { borderColor: '#475569' },
+                          '&:hover fieldset': { borderColor: '#64748b' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      }}
+                    />
 
-                  <TextField
-                    label="Date To"
-                    type="date"
-                    value={searchParams.dateTo || ''}
-                    onChange={(e) => {
-                      setSearchParams(prev => ({ 
-                        ...prev, 
-                        dateTo: e.target.value,
-                      }));
-                    }}
-                    InputLabelProps={{
-                      shrink: true,
-                    }}
-                    fullWidth
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                        color: '#e2e8f0',
-                        '& fieldset': { borderColor: '#475569' },
-                        '&:hover fieldset': { borderColor: '#64748b' },
-                        '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                      },
-                      '& .MuiInputLabel-root': { color: '#94a3b8' },
-                    }}
-                  />
-                  </>
+                    <TextField
+                      label="Date To"
+                      type="date"
+                      value={searchParams.dateTo || ''}
+                      onChange={(e) => {
+                        setSearchParams(prev => ({ 
+                          ...prev, 
+                          dateTo: e.target.value,
+                        }));
+                      }}
+                      InputLabelProps={{
+                        shrink: true,
+                      }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          color: '#e2e8f0',
+                          '& fieldset': { borderColor: '#475569' },
+                          '&:hover fieldset': { borderColor: '#64748b' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      }}
+                    />
+                  </Box>
 
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                     <Button
                       variant="contained"
+                      data-tutorial="search-button"
                       onClick={handleSearch}
                       disabled={isSearching}
                       startIcon={isSearching ? <CircularProgress size={20} /> : <SearchIcon />}
@@ -818,7 +821,7 @@ const NewsSearchPage: React.FC = () => {
           )}
 
           {/* Middle - Results Table */}
-          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }}>
+          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }} data-tutorial="results-section">
             {/* Error Alert */}
             {searchError && (
               <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
@@ -954,7 +957,7 @@ const NewsSearchPage: React.FC = () => {
                 {/* Results Table */}
                 {currentResults.length > 0 ? (
                   <>
-                  <TableContainer sx={{ 
+                  <TableContainer data-tutorial="results-table" sx={{ 
                         backgroundColor: 'transparent',
                         borderRadius: 0,
                         boxShadow: 'none',
@@ -1317,7 +1320,7 @@ const NewsSearchPage: React.FC = () => {
 
           {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
           {allSearchResults.length > 0 && (
-                <GlassCard sx={{ 
+                <GlassCard data-tutorial="client-filters" sx={{ 
                   p: 2, 
                   minWidth: 280, 
                   maxWidth: 320,

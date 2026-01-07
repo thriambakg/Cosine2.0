@@ -1198,7 +1198,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Transaction Date Range */}
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box data-tutorial="date-range" sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <TextField
                 label="Transaction Date From"
                 type="date"
@@ -1276,6 +1276,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
             </Box>
 
                   {/* Politicians Search */}
+                <Box data-tutorial="politician-search">
                 <MultiSelectField<string>
                     label="Politicians"
                   selectedItems={(() => {
@@ -1337,8 +1338,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   allowCustomInput={false}
                   isLoading={!isPoliticianDataLoaded}
                 />
+                </Box>
 
                   {/* Securities Search */}
+                <Box data-tutorial="security-search">
                 <MultiSelectField<string>
                     label="Securities"
                   selectedItems={(() => {
@@ -1438,9 +1441,10 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   placeholder="Search for stocks by ticker or company name..."
                   allowCustomInput={false}
                 />
+                </Box>
 
                   {/* Amount Range - Two Separate Dropdowns */}
-                  <Box>
+                  <Box data-tutorial="amount-range">
                     <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
                       Amount Range
                     </Typography>
@@ -1601,7 +1605,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
             
                   {/* Advanced Search Parameters - Hidden in easy mode */}
                   {!isEasyMode && (
-                  <Box sx={{ mt: 2 }}>
+                  <Box data-tutorial="advanced-search" sx={{ mt: 2 }}>
                     <Box
                       onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
                       sx={{
@@ -1769,6 +1773,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 />
 
                         {/* Transaction Types */}
+                <Box data-tutorial="transaction-type">
                 <MultiSelectField<string>
                           label="Transaction Types"
                   selectedItems={Array.isArray(searchParams.transactionType) ? searchParams.transactionType : (searchParams.transactionType ? [searchParams.transactionType] : [])}
@@ -1779,6 +1784,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                           placeholder="Select transaction types..."
                   allowCustomInput={false}
                 />
+                </Box>
               </Box>
                     </Collapse>
           </Box>
@@ -1789,6 +1795,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                     <Button
+                      data-tutorial="search-button"
                       variant="contained"
                       onClick={handleSearch}
                       disabled={isSearching}
@@ -1906,6 +1913,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                       <Tooltip title={`Add ${selectedTrades.size > 0 ? `${selectedTrades.size} trade(s)` : 'selected trades'} to context`}>
                         <span>
                           <IconButton
+                            data-tutorial="add-to-context-button"
                             size="small"
                             onClick={(e) => {
                               if (selectedTrades.size === 0) {
@@ -2103,7 +2111,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
 
                 {currentResults.length > 0 ? (
                   <>
-                  <TableContainer sx={{ 
+                  <TableContainer data-tutorial="results-table" sx={{ 
                     backgroundColor: 'transparent',
                     borderRadius: 0,
                     boxShadow: 'none',

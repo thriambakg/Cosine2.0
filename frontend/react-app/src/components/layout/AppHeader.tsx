@@ -18,6 +18,7 @@ import {
   NavigateNext as NavigateNextIcon,
   Chat as ChatIcon,
   Close as CloseIcon,
+  HelpOutline as HelpIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
@@ -27,6 +28,7 @@ import { useGlobalChat } from '../../contexts/GlobalChatContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 import { useDialogManager } from '../../contexts/DialogManagerContext';
 import { useEasyMode } from '../../contexts/EasyModeContext';
+import { useTutorial } from '../../contexts/TutorialContext';
 import WindowsIcon from '../common/WindowsIcon';
 import { JellyToggle } from '../common/JellyToggle';
 
@@ -40,8 +42,10 @@ export default function AppHeader() {
   const { setDualScreenMode } = useDualScreenMode();
   const { dialogs, restoreDialog, closeDialog } = useDialogManager();
   const { isEasyMode, toggleEasyMode } = useEasyMode();
+  const { startTutorial } = useTutorial();
   
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [helpMenuAnchor, setHelpMenuAnchor] = useState<null | HTMLElement>(null);
   const [windowsMenuAnchor, setWindowsMenuAnchor] = useState<null | HTMLElement>(null);
   const [shouldJump, setShouldJump] = useState(false);
   
@@ -82,6 +86,14 @@ export default function AppHeader() {
     setAnchorEl(null);
   };
 
+  const handleHelpMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setHelpMenuAnchor(event.currentTarget);
+  };
+
+  const handleHelpMenuClose = () => {
+    setHelpMenuAnchor(null);
+  };
+
   const handleLogout = async () => {
     await logout();
     handleMenuClose();
@@ -117,6 +129,48 @@ export default function AppHeader() {
   const activeDialogs = dialogs.filter(d => !d.isMinimized);
   const totalDialogCount = dialogs.length;
 
+  const helpSections = [
+    {
+      title: 'Main',
+      items: [
+        { label: 'Welcome Tutorial', path: '/', key: 'welcome' },
+        { label: 'Dashboard Tutorial', path: '/', key: 'dashboard' },
+        { label: 'Chat Tutorial', path: '/chat', key: 'chat' },
+        { label: 'Files Tutorial', path: '/files', key: 'files' },
+      ],
+    },
+    {
+      title: 'Portfolio',
+      items: [
+        { label: 'Portfolio Risk Tutorial', path: '/portfolio-risk', key: 'portfolio-risk' },
+        { label: 'Stock Screener Tutorial', path: '/stock-screener-search', key: 'stock-screener-search' },
+      ],
+    },
+    {
+      title: 'Government Data',
+      items: [
+        { label: 'SEC Search Tutorial', path: '/sec-search', key: 'sec-search' },
+        { label: 'Politician Trades Tutorial', path: '/politician-trades-search', key: 'politician-trades' },
+        { label: 'Gov Contracts Tutorial', path: '/govt-contracts-search', key: 'govt-contracts' },
+        { label: 'Congress Bills Tutorial', path: '/congress-bills-search', key: 'congress-bills' },
+        { label: 'LDA Search Tutorial', path: '/lda-search', key: 'lda-search' },
+      ],
+    },
+    {
+      title: 'News',
+      items: [
+        { label: 'News Search Tutorial', path: '/news-search', key: 'news-search' },
+      ],
+    },
+    {
+      title: 'Dialogs',
+      items: [
+        { label: 'File Preview Tutorial', path: '/files', key: 'file-preview' },
+        { label: 'Details Window Tutorial', path: '/files', key: 'item-details' },
+      ],
+    },
+  ];
+
   return (
     <>
       <AppBar
@@ -151,6 +205,7 @@ export default function AppHeader() {
               color="inherit"
               aria-label="open drawer"
               edge="start"
+              data-tutorial="hamburger-menu"
               onClick={() => dispatch(toggleSidebar())}
               sx={{
                 color: '#ffffff',
@@ -379,6 +434,7 @@ export default function AppHeader() {
 
             <IconButton
               color="inherit"
+              data-tutorial="chat-button"
               onClick={() => {
                 // Toggle chat visibility - this will automatically manage dual screen mode
                 toggleGlobalChat();
@@ -408,6 +464,30 @@ export default function AppHeader() {
               }}
             >
               <ChatIcon />
+            </IconButton>
+
+            {/* Help Button */}
+            <IconButton
+              color="inherit"
+              onClick={handleHelpMenuOpen}
+              sx={{
+                color: helpMenuAnchor ? '#3b82f6' : '#8b8b8b',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                width: 44,
+                height: 44,
+                borderRadius: '8px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: '#3b82f6',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                },
+              }}
+            >
+              <HelpIcon />
             </IconButton>
             
             <IconButton 
@@ -484,6 +564,57 @@ export default function AppHeader() {
               <MenuItem onClick={handleLogout}>
                 <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>Logout</Typography>
               </MenuItem>
+            </Menu>
+
+            {/* Help Menu */}
+            <Menu
+              anchorEl={helpMenuAnchor}
+              open={Boolean(helpMenuAnchor)}
+              onClose={handleHelpMenuClose}
+              transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+              anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+              PaperProps={{
+                sx: {
+                  mt: 1,
+                  backgroundColor: 'rgba(15, 15, 20, 0.95)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '8px',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  '& .MuiMenuItem-root': {
+                    color: '#ffffff',
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                    },
+                  },
+                },
+              }}
+            >
+              {helpSections.map((section, sectionIdx) => (
+                <Box key={section.title} sx={{ 
+                  borderTop: sectionIdx === 0 ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
+                  pt: sectionIdx === 0 ? 0 : 0.5,
+                  mt: sectionIdx === 0 ? 0 : 0.5,
+                }}>
+                  <Typography variant="caption" sx={{ color: '#9ca3af', px: 2, py: 1, display: 'block', fontWeight: 700, letterSpacing: '0.5px' }}>
+                    {section.title}
+                  </Typography>
+                  {section.items.map(item => (
+                    <MenuItem 
+                      key={item.key}
+                      onClick={() => {
+                        handleHelpMenuClose();
+                        navigate(item.path);
+                        setTimeout(() => startTutorial(item.key), 300);
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ color: '#ffffff', fontWeight: 500 }}>{item.label}</Typography>
+                    </MenuItem>
+                  ))}
+                </Box>
+              ))}
             </Menu>
           </Box>
         </Toolbar>

@@ -5,6 +5,7 @@ import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { sessionManagementAPI } from '@/services/api';
 import { ContextItem } from '@/components/tiles/common/contextManager';
+import TutorialHelpIcon from '@/components/common/TutorialHelpIcon';
 import ContextItemRow from '@/components/context/ContextItemRow';
 // NEW: Import shared file upload service
 import { FileUploadService, UploadedFile } from '@/services/fileUploadService';
@@ -643,6 +644,7 @@ const MessageEditInput = memo(({
 export default function ChatPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
+  // const { startTutorial } = useTutorial?.() ?? { startTutorial: () => {} };
   // Clock context available if needed in the future
   // const { clockTimezone, clockMilitaryTime } = useClock();
   const { openWithSession } = useGlobalChat();
@@ -754,6 +756,32 @@ export default function ChatPage() {
       console.warn('Failed to persist sidebarOpen state');
     }
   }, [sidebarOpen]);
+  
+  // Auto-start tutorial for first-time users - DISABLED FOR NOW
+  // React.useEffect(() => {
+  //   const hasCompletedChatTutorial = localStorage.getItem('cosine_tutorial_page_chat');
+  //   if (!hasCompletedChatTutorial) {
+  //     const timer = setTimeout(() => {
+  //       startTutorial('chat');
+  //     }, 1500);
+  //     return () => clearTimeout(timer);
+  //   }
+  // }, [startTutorial]);
+  
+  // Listen for tutorial start event to open sidebar
+  useEffect(() => {
+    const handleTutorialStart = (event: CustomEvent) => {
+      if (event.detail.page === 'chat') {
+        setSidebarOpen(true);
+        setSidebarCollapsed(false);
+      }
+    };
+    
+    window.addEventListener('tutorial-started', handleTutorialStart as EventListener);
+    return () => {
+      window.removeEventListener('tutorial-started', handleTutorialStart as EventListener);
+    };
+  }, []);
   
   useEffect(() => {
     try {
@@ -2418,6 +2446,7 @@ export default function ChatPage() {
                 fullWidth
                 variant="outlined"
                 startIcon={<AddIcon />}
+                data-tutorial="new-chat-button"
                 onClick={() => createNewSession()}
                 disabled={persistenceLoading}
                 sx={{
@@ -2437,6 +2466,7 @@ export default function ChatPage() {
                 fullWidth
                 variant="outlined"
                 startIcon={<UploadIcon />}
+                data-tutorial="import-chat-button"
                 onClick={() => {
                   setImportExportMode('import');
                   setImportExportDialogOpen(true);
@@ -2480,6 +2510,7 @@ export default function ChatPage() {
           {/* Chat Sessions */}
           <Box 
             onContextMenu={handleSessionContextMenu}
+            data-tutorial="chat-sessions-list"
             sx={{ 
               flex: 1, 
               overflow: 'auto', 
@@ -2658,6 +2689,7 @@ export default function ChatPage() {
           {/* Share Button */}
           <Tooltip title="Share Chat Session">
             <IconButton
+              data-tutorial="share-button"
               onClick={(e) => setShareMenuAnchor(e.currentTarget)}
               disabled={!currentSession?.session_id}
               sx={{
@@ -2680,6 +2712,7 @@ export default function ChatPage() {
           {/* Context Button */}
           <Tooltip title={isContextDrawerOpen ? 'Hide Context' : `Show Context (${sessionContext.length})`}>
             <IconButton
+              data-tutorial="context-menu-button"
               onClick={() => {
                 setIsContextDrawerOpen((v) => !v);
                 if (!isContextDrawerOpen) setIsFilesDrawerOpen(false);
@@ -2701,6 +2734,7 @@ export default function ChatPage() {
           {/* Files Button */}
           <Tooltip title={isFilesDrawerOpen ? 'Hide Files' : 'Show Files'}>
             <IconButton
+              data-tutorial="file-menu-button"
               onClick={() => {
                 setIsFilesDrawerOpen((v) => !v);
                 if (!isFilesDrawerOpen) setIsContextDrawerOpen(false);
@@ -3206,7 +3240,12 @@ export default function ChatPage() {
                 ))}
               </Box>
             )}
-            <ChatMessageInputBar
+            {/* Chat help: positioned to the top-right of the chat input area and moves with it */}
+            <Box sx={{ position: 'relative' }}>
+              <Box sx={{ position: 'absolute', top: -36, right: 0, zIndex: 2 }}>
+                <TutorialHelpIcon tutorialKey="chat" title="Chat tutorial" size="small" />
+              </Box>
+              <ChatMessageInputBar
               disabled={getCurrentSessionLoading()}
               placeholder="Ask me about stocks, crypto, portfolio optimization..."
               onSend={handleSendMessage}
@@ -3220,7 +3259,8 @@ export default function ChatPage() {
                   unifiedMessageHandler.cancelAllMessagesForSession(currentSession.session_id);
                 }
               }}
-            />
+              />
+            </Box>
           </Box>
         </Box>
       </Box>

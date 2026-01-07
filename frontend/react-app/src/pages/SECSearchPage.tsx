@@ -1982,6 +1982,7 @@ const SECSearchPage: React.FC = () => {
               {/* Search Parameters - Vertical Layout */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               {/* Multi-Select Filers */}
+              <Box data-tutorial="filer-search">
               <MultiSelectField<SECAutocompleteSuggestion>
                 label="Filers (Companies/Individuals)"
                 selectedItems={selectedFilers}
@@ -1994,9 +1995,11 @@ const SECSearchPage: React.FC = () => {
                 isLoading={autocompleteLoading}
                 onSearch={handleFilerSearch}
               />
+              </Box>
 
               {/* Multi-Select Keywords - Hidden in easy mode */}
               {!isEasyMode && (
+                <Box data-tutorial="keywords-search">
                 <MultiSelectField<string>
                   label="Keywords"
                   selectedItems={selectedKeywords}
@@ -2009,11 +2012,12 @@ const SECSearchPage: React.FC = () => {
                   isLoading={false}
                   disableAutocomplete={true}
                 />
+                </Box>
               )}
 
               {/* Form Types - Button to open modal - Hidden in easy mode */}
               {!isEasyMode && (
-              <Box>
+              <Box data-tutorial="form-types">
                 <TextField
                   label="Filing category"
                   value={
@@ -2149,7 +2153,7 @@ const SECSearchPage: React.FC = () => {
               )}
 
               {/* Date Range */}
-                <>
+                <Box data-tutorial="date-range">
                 <TextField
                   label="Filed from"
                   type="date"
@@ -2194,11 +2198,12 @@ const SECSearchPage: React.FC = () => {
                     '& .MuiInputBase-input': { color: '#ffffff' },
                   }}
                 />
-                </>
+                </Box>
 
           {/* Search Button and Stop Button */}
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Button
+              data-tutorial="search-button"
               variant="contained"
               onClick={() => handleSearch()}
               disabled={searchLoading || searchState.isSearching}
@@ -2538,6 +2543,7 @@ const SECSearchPage: React.FC = () => {
                         <Tooltip title={`Add ${selectedFilings.size > 0 ? `${selectedFilings.size} filing(s)` : 'selected filings'} to context`}>
                           <span>
                             <IconButton
+                              data-tutorial="add-to-context-button"
                               size="small"
                               onClick={(e) => {
                                 if (selectedFilings.size === 0) {
@@ -2710,6 +2716,7 @@ const SECSearchPage: React.FC = () => {
 
                 {currentResults.length > 0 ? (
                   <TableContainer 
+                    data-tutorial="results-table"
                     sx={{ 
                       backgroundColor: 'transparent',
                       borderRadius: 0,

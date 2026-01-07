@@ -33,10 +33,14 @@ import {
   Chat as SidebarChatIcon,
   ViewColumn as ViewColumnIcon,
   Dashboard as AddToContextIcon,
+  InfoOutlined as InfoIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { useStockScreener } from '../hooks/useAPI';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addStockToContext, addMultipleStocksToContext } from '../components/tiles/common';
+import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -87,8 +91,8 @@ interface StockResult {
 }
 
 const StockScreenerSearchPage: React.FC = () => {
-  // const { user } = useAuth(); // Unused for now
-  // const { openItemDetails } = useDialogManagerHelpers(); // Unused for now
+  const { user } = useAuth();
+  const { openItemDetails, openFilePreview } = useDialogManagerHelpers();
   const {} = useGlobalChat();
   
   // Session persistence key
@@ -134,6 +138,39 @@ const StockScreenerSearchPage: React.FC = () => {
   const [hasMore, setHasMore] = useState<boolean>(savedState?.hasMore || false);
   const [selectedStocks, setSelectedStocks] = useState<Set<string>>(new Set());
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+
+  const handleOpenStockDetails = useCallback((stock: StockResult) => {
+    openItemDetails(
+      'stock_result',
+      { ...stock, timeframe: criteria.timeframe },
+      `${stock.symbol} Details`
+    );
+  }, [criteria.timeframe, openItemDetails]);
+
+  const handleOpenStockPreview = useCallback((stock: StockResult) => {
+    if (!user?.id) {
+      console.warn('Cannot open stock preview without a user id');
+      return;
+    }
+
+    const previewItem = {
+      id: `stock_${stock.symbol}_${Date.now()}`,
+      name: `${stock.symbol} - ${stock.name}`,
+      type: 'context_item' as const,
+      metadata: {
+        type: 'stock_result',
+        title: `${stock.symbol} - ${stock.name}`,
+        subtitle: `${(criteria.timeframe || '1d').toUpperCase()} • ${stock.industry || 'Unknown industry'}`,
+        data: {
+          ...stock,
+          timeframe: criteria.timeframe,
+        },
+      },
+      parentId: null,
+    };
+
+    openFilePreview(previewItem, user.id, 'stock-screener');
+  }, [criteria.timeframe, openFilePreview, user?.id]);
   
   // Column visibility state
   const AVAILABLE_COLUMNS = [
@@ -729,7 +766,7 @@ const StockScreenerSearchPage: React.FC = () => {
         <Box sx={{ display: 'flex', gap: 3 }}>
           {/* Left Sidebar - Search Filters (Collapsible) */}
           {searchSidebarVisible ? (
-            <GlassCard sx={{ 
+            <GlassCard data-tutorial="criteria-panel" sx={{ 
               minWidth: 320, 
               maxWidth: 380,
               width: 320,
@@ -755,7 +792,7 @@ const StockScreenerSearchPage: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Industries */}
-                  <FormControl fullWidth>
+                  <FormControl fullWidth data-tutorial="industries">
                     <InputLabel sx={{ color: '#94a3b8' }}>Industries (Sectors)</InputLabel>
                     <Select
                       multiple
@@ -781,7 +818,7 @@ const StockScreenerSearchPage: React.FC = () => {
                   </FormControl>
 
                   {/* Volatility Range */}
-                  <Box>
+                  <Box data-tutorial="range-sliders">
                     <Typography sx={{ color: '#f1f5f9', mb: 1 }}>Volatility: {criteria.volatilityRange[0]}% - {criteria.volatilityRange[1]}%</Typography>
                     <Slider
                       value={criteria.volatilityRange}
@@ -863,7 +900,7 @@ const StockScreenerSearchPage: React.FC = () => {
                   </Box>
 
                   {/* Timeframe */}
-                  <FormControl fullWidth>
+                  <FormControl fullWidth data-tutorial="timeframe">
                     <InputLabel sx={{ color: '#94a3b8' }}>Timeframe</InputLabel>
                     <Select
                       value={criteria.timeframe}
@@ -881,6 +918,7 @@ const StockScreenerSearchPage: React.FC = () => {
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                     <Button
+                      data-tutorial="search-button"
                       variant="contained"
                       onClick={runScreener}
                       disabled={isSearching}
@@ -953,7 +991,7 @@ const StockScreenerSearchPage: React.FC = () => {
           )}
 
           {/* Middle - Results Table */}
-          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }}>
+          <Box sx={{ flex: 1, minWidth: 0, transition: 'flex 0.3s ease-in-out' }} data-tutorial="results-section">
             {/* Error Alert */}
             {searchError && (
               <Alert severity="error" sx={{ mb: 3, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
@@ -969,6 +1007,7 @@ const StockScreenerSearchPage: React.FC = () => {
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <Tooltip title="Select columns to display">
                         <IconButton
+                          data-tutorial="column-picker"
                           onClick={(e) => setColumnMenuAnchor(e.currentTarget)}
                           sx={{ color: '#94a3b8' }}
                           size="small"
@@ -983,6 +1022,7 @@ const StockScreenerSearchPage: React.FC = () => {
                         <Tooltip title={`Add ${selectedStocks.size > 0 ? `${selectedStocks.size} stock(s)` : 'selected stocks'} to context`}>
                           <span>
                             <IconButton
+                              data-tutorial="add-to-context"
                               size="small"
                               onClick={handleContextMenuClick}
                               disabled={selectedStocks.size === 0}
@@ -1080,7 +1120,7 @@ const StockScreenerSearchPage: React.FC = () => {
                   {/* Results Table */}
                   {filteredResults.length > 0 ? (
                     <>
-                      <TableContainer sx={{ 
+                      <TableContainer data-tutorial="results-table" sx={{ 
                         backgroundColor: 'transparent',
                         borderRadius: 0,
                         boxShadow: 'none',
@@ -1139,12 +1179,14 @@ const StockScreenerSearchPage: React.FC = () => {
                               {visibleColumns.includes('dividendYield') && (
                                 <TableCell sx={{ color: '#f1f5f9', fontWeight: 600 }}>Dividend Yield</TableCell>
                               )}
+                              <TableCell sx={{ color: '#f1f5f9', fontWeight: 600 }} align="right">Actions</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
                             {currentResults.map((stock) => (
                               <TableRow
                                 key={stock.symbol}
+                                onDoubleClick={() => handleOpenStockDetails(stock)}
                                 onClick={(e) => {
                                   // Don't select if clicking on checkbox (checkbox handles its own selection)
                                   if ((e.target as HTMLElement).closest('input[type="checkbox"]') || (e.target as HTMLElement).closest('span.MuiCheckbox-root')) {
@@ -1201,6 +1243,34 @@ const StockScreenerSearchPage: React.FC = () => {
                                     {stock.dividendYield ? `${stock.dividendYield.toFixed(2)}%` : 'N/A'}
                                   </TableCell>
                                 )}
+                                <TableCell align="right" sx={{ color: '#cbd5e1' }}>
+                                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
+                                    <Tooltip title="View details">
+                                      <IconButton
+                                        size="small"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenStockDetails(stock);
+                                        }}
+                                        sx={{ color: '#94a3af', '&:hover': { color: '#3b82f6' } }}
+                                      >
+                                        <InfoIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Open preview">
+                                      <IconButton
+                                        size="small"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenStockPreview(stock);
+                                        }}
+                                        sx={{ color: '#94a3af', '&:hover': { color: '#3b82f6' } }}
+                                      >
+                                        <OpenInNewIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </Box>
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -1297,7 +1367,7 @@ const StockScreenerSearchPage: React.FC = () => {
 
           {/* Right Sidebar - Client-side Filter Box (Only when results exist) */}
           {allResults.length > 0 && (
-            <GlassCard sx={{ 
+            <GlassCard data-tutorial="refine-filters" sx={{ 
               p: 2, 
               minWidth: 280, 
               maxWidth: 320,

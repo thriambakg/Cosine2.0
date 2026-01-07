@@ -1056,7 +1056,7 @@ const LDASearchPage: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* General Text Search */}
-                  <Box>
+                  <Box data-tutorial="general-search">
                     <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
                       General Search
                     </Typography>
@@ -1141,7 +1141,7 @@ const LDASearchPage: React.FC = () => {
                   </Box>
 
                   {/* Date Range */}
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box data-tutorial="date-range" sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <TextField
                       label="Date From"
                       type="date"
@@ -1202,7 +1202,7 @@ const LDASearchPage: React.FC = () => {
 
                   {/* Amount Range - Hidden in easy mode */}
                   {!isEasyMode && (
-                  <Box>
+                  <Box data-tutorial="amount-range">
                     <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1, fontSize: '0.875rem' }}>
                       Amount Range
                     </Typography>
@@ -1253,7 +1253,7 @@ const LDASearchPage: React.FC = () => {
 
                   {/* Advanced Search - Hidden in easy mode */}
                   {!isEasyMode && (
-                  <Box sx={{ mt: 2 }}>
+                  <Box data-tutorial="advanced-search" sx={{ mt: 2 }}>
                     <Box
                       onClick={() => setAdvancedSearchExpanded(!advancedSearchExpanded)}
                       sx={{
@@ -1635,6 +1635,7 @@ const LDASearchPage: React.FC = () => {
                   {/* Search and Clear Buttons */}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                     <Button
+                      data-tutorial="search-button"
                       variant="contained"
                       onClick={handleSearch}
                       disabled={isSearching}
@@ -1893,7 +1894,7 @@ const LDASearchPage: React.FC = () => {
                   {/* Results Table */}
                   {currentResults.length > 0 ? (
                     <>
-                      <TableContainer sx={{ 
+                      <TableContainer data-tutorial="results-table" sx={{ 
                         backgroundColor: 'transparent',
                         borderRadius: 0,
                         boxShadow: 'none',

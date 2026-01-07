@@ -135,6 +135,7 @@ export default function PortfolioRisk() {
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   const [isSecurityDataLoaded, setIsSecurityDataLoaded] = useState(false);
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([]);
+  const calculatorButtonRef = useRef<HTMLButtonElement | null>(null);
   
   // Track if this is the initial mount with restored state
   const initialMountRef = useRef(true);
@@ -1061,12 +1062,28 @@ export default function PortfolioRisk() {
     setCalculatorAnchor(null);
   };
 
+  useEffect(() => {
+    const handleTutorialStarted = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.page === 'portfolio-risk' && calculatorButtonRef.current) {
+        setCalculatorAnchor(calculatorButtonRef.current);
+      }
+    };
+
+    window.addEventListener('tutorial-started', handleTutorialStarted as EventListener);
+    return () => {
+      window.removeEventListener('tutorial-started', handleTutorialStarted as EventListener);
+    };
+  }, []);
+
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
         {/* Calculator Bubble Button - Top Right */}
         <Box sx={{ position: 'relative', mb: 2 }}>
           <IconButton
+            data-tutorial="open-calculator"
+            ref={calculatorButtonRef}
             onClick={handleCalculatorClick}
             disabled={isLoading}
             sx={{
@@ -1140,6 +1157,7 @@ export default function PortfolioRisk() {
                 </Typography>
                 
                 <FormControl 
+                  data-tutorial="timeframe"
                   size="small"
                   sx={{ 
                     minWidth: 120,
@@ -1187,20 +1205,21 @@ export default function PortfolioRisk() {
                 </FormControl>
               </Box>
 
-              {entries.map((entry, index) => (
-                <Box 
-                  key={index} 
-                  sx={{ 
-                    display: 'flex', 
-                    gap: 2, 
-                    mb: 2, 
-                    alignItems: 'center',
-                    p: 2,
-                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(255, 255, 255, 0.05)',
-                  }}
-                >
+              <Box data-tutorial="holdings-list">
+                {entries.map((entry, index) => (
+                  <Box 
+                    key={index} 
+                    sx={{ 
+                      display: 'flex', 
+                      gap: 2, 
+                      mb: 2, 
+                      alignItems: 'center',
+                      p: 2,
+                      backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 255, 255, 0.05)',
+                    }}
+                  >
                   <Autocomplete
                     value={isSecurityDataLoaded && entry.stock
                       ? securitySuggestionsServiceV2.findBySymbol(entry.stock.toUpperCase()) ?? entry.stock
@@ -1411,9 +1430,11 @@ export default function PortfolioRisk() {
                   </IconButton>
                 </Box>
               ))}
+              </Box>
 
               <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
                 <Button
+                  data-tutorial="add-stock"
                   variant="outlined"
                   size="small"
                   startIcon={<AddIcon />}
@@ -1430,6 +1451,7 @@ export default function PortfolioRisk() {
                   Add Stock
                 </Button>
                 <Button
+                  data-tutorial="calculate-risk"
                   variant="contained"
                   size="small"
                   startIcon={<CalculateIcon />}
@@ -1514,6 +1536,7 @@ export default function PortfolioRisk() {
             {/* Chart Section - Expanded */}
             {entries.some(e => e.stock && e.shares > 0) && (
               <Paper
+                data-tutorial="performance-chart"
                 sx={{
                   p: 3,
                   backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1665,7 +1688,7 @@ export default function PortfolioRisk() {
                     </LineChart>
                   </ResponsiveContainer>
                   {/* Chart Type Icon Selector - Bottom Left */}
-                  <Box sx={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10, display: 'flex', gap: 0.5 }}>
+                  <Box data-tutorial="chart-type-toggle" sx={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10, display: 'flex', gap: 0.5 }}>
                     <Tooltip title="Combined Portfolio">
                       <IconButton
                         size="small"
@@ -1853,6 +1876,7 @@ export default function PortfolioRisk() {
             <Box sx={{ display: 'flex', gap: 3, flex: '1 1 35%', minHeight: 400 }}>
               {/* Stock Details Table - Bottom Left */}
               <Paper
+                data-tutorial="stock-details"
                 sx={{
                   p: 3,
                   backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1949,6 +1973,7 @@ export default function PortfolioRisk() {
 
               {/* Advanced Metrics Table - Bottom Right */}
               <Paper
+                data-tutorial="advanced-metrics"
                 sx={{
                   p: 3,
                   backgroundColor: 'rgba(15, 23, 42, 0.95)',

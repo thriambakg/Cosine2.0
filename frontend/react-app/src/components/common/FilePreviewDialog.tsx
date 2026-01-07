@@ -29,6 +29,7 @@ import {
   Minimize as MinimizeIcon,
   Dashboard as DashboardIcon,
 } from '@mui/icons-material';
+import TutorialHelpIcon from './TutorialHelpIcon';
 import { fileReturnAPI } from '@/services/api';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
@@ -3203,6 +3204,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           {/* Title bar - draggable */}
           <Box
             data-title-bar
+            data-tutorial="file-preview-titlebar"
             onMouseDown={handleDragStart}
             sx={{
               display: 'flex',
@@ -3223,6 +3225,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <TutorialHelpIcon tutorialKey="file-preview" title="File Preview tutorial" />
               <Tooltip title="Add to Context">
                 <IconButton 
                   onClick={(e) => {
@@ -3277,12 +3280,16 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
               mt: 2,
               position: 'relative',
             }}
+            data-tutorial="file-preview-content"
           >
             {renderPreview()}
           </Box>
 
           {/* Actions */}
-          <Box sx={{ borderTop: '1px solid #374151', p: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+          <Box
+            sx={{ borderTop: '1px solid #374151', p: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}
+            data-tutorial="file-preview-actions"
+          >
             <Button
               onClick={onClose}
               sx={{

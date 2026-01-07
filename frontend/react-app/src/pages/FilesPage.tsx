@@ -96,6 +96,7 @@ interface FileItem extends FileSystemItem {
 const FilesPage: React.FC = () => {
   const { user } = useAuth();
   const { openFilePreview } = useDialogManagerHelpers();
+  // const { startTutorial } = useTutorial?.() ?? { startTutorial: () => {} };
   
   // File system state (stored in memory/cache for now)
   const [items, setItems] = useState<Map<string, FileSystemItem>>(new Map());
@@ -230,6 +231,17 @@ const FilesPage: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedItems, selectedItem, clipboard]);
+
+  // Auto-start tutorial for first-time users - DISABLED FOR NOW
+  // React.useEffect(() => {
+  //   const hasCompletedFilesTutorial = localStorage.getItem('cosine_tutorial_page_files');
+  //   if (!hasCompletedFilesTutorial) {
+  //     const timer = setTimeout(() => {
+  //       startTutorial('files');
+  //     }, 1500);
+  //     return () => clearTimeout(timer);
+  //   }
+  // }, [startTutorial]);
 
   // Load filesystem data from API
   React.useEffect(() => {
@@ -1600,6 +1612,7 @@ const FilesPage: React.FC = () => {
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
             startIcon={<CreateFolderIcon />}
+            data-tutorial="new-folder-button"
             onClick={() => setCreateFolderDialogOpen(true)}
             sx={{
               backgroundColor: 'transparent',
@@ -1628,6 +1641,7 @@ const FilesPage: React.FC = () => {
           </Button>
           <Button
             startIcon={<AddIcon />}
+            data-tutorial="add-file-button"
             onClick={() => setAddFileDialogOpen(true)}
             sx={{
               backgroundColor: 'transparent',
@@ -1710,6 +1724,7 @@ const FilesPage: React.FC = () => {
 
       {/* File System View */}
       <Box
+        data-tutorial="files-list"
         onContextMenu={(e) => {
           // Only show context menu on empty area if no items are selected
           if (selectedItems.size === 0 && !selectedItem) {
