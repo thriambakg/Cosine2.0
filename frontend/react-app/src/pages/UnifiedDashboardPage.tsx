@@ -23,6 +23,7 @@ import {
   CircularProgress
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
+import { useDualScreenMode } from '../contexts/DualScreenModeContext';
 import { 
   Add as AddIcon, 
   TrendingUp as TrendingUpIcon,
@@ -304,6 +305,7 @@ const tileCategories: TileCategory[] = [
 
 const UnifiedDashboardPage: React.FC = () => {
   const { user } = useAuth();
+  const { isDualScreenMode, sidebarWidth } = useDualScreenMode();
   const [configValid, setConfigValid] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   
@@ -2580,7 +2582,7 @@ const UnifiedDashboardPage: React.FC = () => {
           sx={{
             position: 'fixed',
             bottom: 24,
-            right: 24,
+            right: isDualScreenMode ? sidebarWidth + 24 : 24,
             backgroundColor: '#f59e0b',
             color: 'white',
             '&:hover': {
@@ -2588,6 +2590,7 @@ const UnifiedDashboardPage: React.FC = () => {
             },
             zIndex: 1000,
             boxShadow: '0 4px 20px rgba(245, 158, 11, 0.3)',
+            transition: 'right 0.3s ease-in-out',
           }}
         >
           <AddIcon />

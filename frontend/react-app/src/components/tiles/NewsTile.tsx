@@ -1522,33 +1522,29 @@ const NewsTile: React.FC<NewsTileProps> = ({
           
           <Chip
             label={
-              isLoadingMore 
-                ? 'Loading...' 
-                : hasMore && allResults.length > 0 && filteredResults.length === allResults.length
+              isLoadingMore
+                ? 'Loading...'
+                : hasMore
                   ? `Load More (${allResults.length} loaded)`
-                  : allResults.length > 0 && currentResults.length !== allResults.length 
+                  : allResults.length > 0 && currentResults.length !== allResults.length
                     ? `${currentResults.length} of ${allResults.length} results`
                     : `${currentResults.length} results`
             }
             size="small"
             onClick={
-              hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
-                ? handleLoadMore
-                : undefined
+              hasMore && !isLoadingMore && !isLoading ? handleLoadMore : undefined
             }
-            disabled={isLoadingMore || isLoading || !hasMore || filteredResults.length !== allResults.length}
+            disabled={isLoadingMore || isLoading || !hasMore}
             sx={{
-              backgroundColor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+              backgroundColor: hasMore && !isLoadingMore && !isLoading
                 ? 'rgba(59, 130, 246, 0.3)'
                 : 'rgba(59, 130, 246, 0.2)',
               color: '#3b82f6',
               border: '1px solid #3b82f6',
               fontSize: '0.75rem',
               height: '20px',
-              cursor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
-                ? 'pointer'
-                : 'default',
-              '&:hover': hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+              cursor: hasMore && !isLoadingMore && !isLoading ? 'pointer' : 'default',
+              '&:hover': hasMore && !isLoadingMore && !isLoading
                 ? {
                     backgroundColor: 'rgba(59, 130, 246, 0.4)',
                     transform: 'scale(1.05)',
