@@ -893,6 +893,7 @@ module "api_gateway" {
   deployment_trigger = "83" # Updated for billing payment GET method and logging
 }
 
+
 # IAM Policy for Lambda functions to access Secrets Manager
 resource "aws_iam_policy" "lambda_secrets_policy" {
   name        = "${var.project_name}-lambda-secrets-policy-${var.environment}"
