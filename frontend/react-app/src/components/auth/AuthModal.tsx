@@ -11,7 +11,6 @@ interface AuthModalProps {
   onClose: () => void;
   defaultMode?: 'login' | 'register';
   requireMFA?: boolean;
-  onRegistrationSuccess?: () => void;
 }
 
 type AuthModalMode = 'login' | 'register' | 'reset' | 'mfa-setup';
@@ -20,8 +19,7 @@ export default function AuthModal({
   isOpen, 
   onClose, 
   defaultMode = 'login',
-  requireMFA = false,
-  onRegistrationSuccess
+  requireMFA = false
 }: AuthModalProps) {
   const [mode, setMode] = useState<AuthModalMode>(defaultMode);
   const [showMFASetup, setShowMFASetup] = useState(false);

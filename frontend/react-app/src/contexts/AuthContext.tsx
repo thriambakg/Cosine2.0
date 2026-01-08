@@ -113,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log('🔄 AuthContext: Polling detected user:', {
               userId: cognitoUser.userId,
               email: attributes.email,
+              email_verified: attributes.email_verified,
               isVerified
             });
             
@@ -121,17 +122,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               const userData = await convertCognitoUser(cognitoUser);
               setUser(userData);
               setAuthError(null);
-              console.log('✅ AuthContext: Auto-login complete');
+              console.log('✅ AuthContext: Auto-login complete, user:', userData.email);
               clearInterval(checkAuthInterval);
             } else {
-              console.log('⏳ AuthContext: User exists but not verified yet, continuing to poll...');
+              console.log('⏳ AuthContext: User exists but email_verified=false, continuing to poll...');
+            }
+          } else {
+            // Only log every 10th poll to avoid spam
+            if (Math.random() < 0.1) {
+              console.log('🔄 AuthContext: Polling - no authenticated user yet');
             }
           }
         } catch (error) {
           // User still not authenticated or not verified, continue polling
           // Only log every 10th poll to avoid spam
           if (Math.random() < 0.1) {
-            console.log('🔄 AuthContext: Polling - no authenticated user yet');
+            console.log('🔄 AuthContext: Polling error:', error instanceof Error ? error.message : error);
           }
         }
       }, 2000);

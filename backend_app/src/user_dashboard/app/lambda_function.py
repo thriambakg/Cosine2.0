@@ -1448,8 +1448,38 @@ def cleanup_old_data_structure(config: Dict) -> Dict:
     
     # Ensure tabs key exists (preserve existing tabs if they exist)
     if 'tabs' not in cleaned_config:
-        logger.warning("Missing 'tabs' key in dashboard config, initializing with empty array")
-        cleaned_config['tabs'] = []
+        logger.warning("Missing 'tabs' key in dashboard config, initializing with default dashboard")
+        cleaned_config['tabs'] = [
+            {
+                'id': str(uuid.uuid4()),
+                'name': 'My Dashboard',
+                'color': '#3b82f6',
+                'isPinned': False,
+                'tiles': [],
+                'layout': 'grid',
+                'created_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }
+        ]
+        if 'activeTabId' not in cleaned_config:
+            cleaned_config['activeTabId'] = cleaned_config['tabs'][0]['id']
+    elif len(cleaned_config.get('tabs', [])) == 0:
+        # If tabs array exists but is empty, initialize with default dashboard
+        logger.warning("Tabs array is empty, initializing with default dashboard")
+        cleaned_config['tabs'] = [
+            {
+                'id': str(uuid.uuid4()),
+                'name': 'My Dashboard',
+                'color': '#3b82f6',
+                'isPinned': False,
+                'tiles': [],
+                'layout': 'grid',
+                'created_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }
+        ]
+        if 'activeTabId' not in cleaned_config:
+            cleaned_config['activeTabId'] = cleaned_config['tabs'][0]['id']
     else:
         # Verify we're preserving all tabs
         preserved_tabs_count = len(cleaned_config['tabs'])

@@ -107,12 +107,6 @@ export default function LandingPageMUI() {
     setAuthModalOpen(true);
   };
 
-  const handleRegistrationSuccess = () => {
-    console.log('🏠 LandingPage: handleRegistrationSuccess called - CLOSING MODAL');
-    setAuthModalOpen(false);
-    // Show success message - user will get email with verification link
-  };
-
   return (
     <Box sx={{
       minHeight: '100vh',
@@ -621,7 +615,6 @@ export default function LandingPageMUI() {
           setAuthModalOpen(false);
         }}
         defaultMode={authMode}
-        onRegistrationSuccess={handleRegistrationSuccess}
       />
     </Box>
   );

@@ -17,6 +17,7 @@ import {
   LinearProgress
 } from '@mui/material';
 import { Close, Check, Clear } from '@mui/icons-material';
+import VerificationSuccessModal from './VerificationSuccessModal';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -35,7 +36,8 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [showVerificationSuccess, setShowVerificationSuccess] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState('');
 
   // Password strength calculation
   const getPasswordStrength = () => {
@@ -123,12 +125,9 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
       
       if (result.success) {
         if (result.verificationRequired) {
-          console.log('✅ RegisterForm: Verification required - showing success message');
-          setSuccessMessage(
-            'Account created successfully! Please check your email (including spam folder) for a verification link. ' +
-            'After verifying, you will be automatically signed in if you keep this page open.'
-          );
-          console.log('📝 RegisterForm: Modal should stay open, NOT calling onClose or onRegistrationSuccess');
+          console.log('✅ RegisterForm: Verification required - showing success modal');
+          setVerificationEmail(result.email || email);
+          setShowVerificationSuccess(true);
         } else {
           console.log('✅ RegisterForm: Registration complete - redirecting to dashboard');
           navigate('/');
@@ -161,7 +160,27 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
   };
 
   return (
-    <Card sx={{
+    <>
+      {/* Success Modal - shown after registration */}
+      {showVerificationSuccess && (
+        <VerificationSuccessModal
+          email={verificationEmail}
+          onLoginClick={() => {
+            console.log('📝 RegisterForm: User clicked "Ready to Log In" from success modal');
+            // Store the email for the login form to auto-fill
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('pendingLoginEmail', verificationEmail);
+            }
+            // Switch to login mode and close the success modal
+            setShowVerificationSuccess(false);
+            onSwitchToLogin();
+          }}
+        />
+      )}
+    
+      {/* Registration Form - hidden when success modal is shown */}
+      {!showVerificationSuccess && (
+      <Card sx={{
       maxWidth: 448,
       width: '100%',
       p: 4,
@@ -232,24 +251,6 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
           }}
         >
           {error}
-        </Alert>
-      )}
-
-      {successMessage && (
-        <Alert 
-          severity="success" 
-          sx={{ 
-            mb: 3,
-            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-            border: '1px solid #22c55e',
-            borderRadius: '0px',
-            '& .MuiAlert-message': {
-              color: '#86efac',
-              fontSize: '0.875rem'
-            }
-          }}
-        >
-          {successMessage}
         </Alert>
       )}
 
@@ -547,7 +548,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
 
           {/* Password Strength Indicator */}
           {password && (
-            <Box sx={{ mt: 1, mb: 2 }}>
+            <Box sx={{ mt: 1, mb: 3 }}>
               {/* Strength Bar */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                 <LinearProgress
@@ -618,7 +619,8 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
               fontSize: '0.875rem',
               fontWeight: 600,
               color: '#e2e8f0',
-              mb: 0.5
+              mb: 0.5,
+              mt: 2
             }}
           >
             Confirm Password
@@ -791,5 +793,7 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
         </Typography>
       </Box>
     </Card>
+      )}
+    </>
   );
 }

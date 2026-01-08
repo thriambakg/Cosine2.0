@@ -26,12 +26,30 @@ interface LoginFormProps {
 export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose }: LoginFormProps) {
   const { user, isAuthenticated, login, loginWithProvider } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const hasReadStorageRef = useRef(false);
+  const [email, setEmail] = useState(() => {
+    // Auto-fill email from registration if available
+    if (typeof window !== 'undefined' && !hasReadStorageRef.current) {
+      const pendingEmail = localStorage.getItem('pendingLoginEmail');
+      if (pendingEmail) {
+        hasReadStorageRef.current = true;
+        return pendingEmail;
+      }
+    }
+    return '';
+  });
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const emailInputRef = useRef<HTMLInputElement>(null);
+
+  // Clear localStorage after reading email
+  useEffect(() => {
+    if (email && hasReadStorageRef.current) {
+      localStorage.removeItem('pendingLoginEmail');
+    }
+  }, [email]);
 
   // Only redirect if already authenticated and not in the middle of a login attempt
   // Add additional check to prevent premature navigation
