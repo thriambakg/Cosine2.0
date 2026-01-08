@@ -2143,8 +2143,8 @@ module "stock_screener_lambda" {
     ENVIRONMENT           = var.environment
     LOG_LEVEL             = var.environment == "development" ? "DEBUG" : "INFO"
     STOCK_DATA_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.stock_data_table_name
-    YFINANCE_USE_CURL     = "false" # Disable curl_cffi, use requests instead
-    # trigger redeploy to latest financial layer
+    YFINANCE_USE_CURL     = "false" # Disable curl_cffi, use requests instead (keep dist-info metadata)
+    # trigger redeploy to latest financial layer after metadata fix
   }
 
   # Attach core and financial layers
