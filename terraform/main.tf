@@ -2143,6 +2143,7 @@ module "stock_screener_lambda" {
     ENVIRONMENT           = var.environment
     LOG_LEVEL             = var.environment == "development" ? "DEBUG" : "INFO"
     STOCK_DATA_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.stock_data_table_name
+    YFINANCE_USE_CURL     = "false" # Disable curl_cffi, use requests instead
   }
 
   # Attach core and financial layers
@@ -2195,8 +2196,9 @@ module "stock_data_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    ENVIRONMENT       = var.environment
+    LOG_LEVEL         = var.environment == "development" ? "DEBUG" : "INFO"
+    YFINANCE_USE_CURL = "false" # Disable curl_cffi, use requests instead
   }
 
   # Attach core and financial layers
@@ -2294,8 +2296,9 @@ module "volatility_fetch_lambda" {
 
   # Environment variables
   environment_variables = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
+    ENVIRONMENT       = var.environment
+    LOG_LEVEL         = var.environment == "development" ? "DEBUG" : "INFO"
+    YFINANCE_USE_CURL = "false" # Disable curl_cffi, use requests instead
   }
 
   # Attach core and financial layers
