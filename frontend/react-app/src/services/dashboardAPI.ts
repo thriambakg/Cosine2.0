@@ -201,6 +201,23 @@ export const dashboardAPI = {
       throw error;
     }
   },
+
+  // Import a tile with full configuration (from file or duplicate)
+  importTile: async (tileData: any, tabId: string, userId: string): Promise<any> => {
+    try {
+      return await apiRequest<any>(`/dashboard-import?userId=${userId}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'import_tile',
+          tabId: tabId,
+          tileData: tileData
+        })
+      });
+    } catch (error) {
+      console.error('Error importing tile:', error);
+      throw error;
+    }
+  },
 };
 
 // Helper functions

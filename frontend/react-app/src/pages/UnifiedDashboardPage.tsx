@@ -937,6 +937,33 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
+  const handleImportTile = async (tileData: any) => {
+    if (!activeTab || !user?.id) {
+      console.warn('No active tab or user ID found, cannot import tile');
+      throw new Error('No active tab or user');
+    }
+
+    try {
+      // Import the tile with its full configuration (preserves pagination state, search params, etc.)
+      const response = await dashboardAPI.importTile(
+        tileData,
+        activeTab.id,
+        user.id
+      );
+
+      if (response.success) {
+        // Reload data from database after tile is imported
+        await reloadFromDatabase();
+        setAddTileMenuOpen(false);
+      } else {
+        throw new Error(response.error || 'Failed to import tile');
+      }
+    } catch (error: any) {
+      console.error(`Failed to import tile:`, error);
+      throw error;
+    }
+  };
+
   // Navigation handlers for hierarchical tile selection - OLD SYSTEM (commented out)
   // These are kept for reference but not used with the new AddTileMenu component
   /*
@@ -2282,6 +2309,7 @@ const UnifiedDashboardPage: React.FC = () => {
           open={addTileMenuOpen}
           onClose={() => setAddTileMenuOpen(false)}
           onAddTile={handleAddTile}
+          onImportTile={handleImportTile}
           tileCategories={tileCategories}
         />
 

@@ -821,6 +821,17 @@ export const dashboardAPI = {
       body: JSON.stringify(requestBody),
     });
   },
+
+  importTile: async (tileData: any, tabId: string, userId: string): Promise<any> => {
+    return apiRequest<any>(`/dashboard-import?userId=${userId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'import_tile',
+        tabId: tabId,
+        tileData: tileData
+      })
+    });
+  },
 };
 
 // SEC Search API

@@ -256,6 +256,8 @@ def lambda_handler(event, context):
         # Route to appropriate handler based on path and method
         if path.startswith('/share') or '/dashboard-share' in path or path.endswith('/share'):
             result = handle_share_dashboard(user_id, http_method, event)
+        elif path.startswith('/import-tiles') or '/dashboard-import-tiles' in path:
+            result = handle_extract_tiles_from_file(user_id, http_method, event)
         elif path.startswith('/import') or '/dashboard-import' in path or path.endswith('/import'):
             result = handle_import_dashboard(user_id, http_method, event)
         elif path.startswith('/tiles') or '/dashboard-tiles' in path or '/tiles' in path:
@@ -960,6 +962,100 @@ def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
         logger.error(f"Error removing tile: {str(e)}")
         return create_response(500, {"error": "Failed to remove tile"})
 
+def handle_extract_tiles_from_file(user_id: str, http_method: str, event: Dict) -> Dict:
+    """Extract tiles from an encrypted .cosine file for preview/selection before import"""
+    try:
+        if http_method != 'POST':
+            return create_response(400, {'error': 'Only POST requests are supported'})
+        
+        from importer import DashboardImporter
+        
+        body = json.loads(event.get('body', '{}'))
+        file_content = body.get('fileContent')
+        
+        if not file_content:
+            return create_response(400, {'error': 'fileContent is required'})
+        
+        # Decode base64 file content
+        try:
+            import base64
+            file_bytes = base64.b64decode(file_content)
+        except Exception as e:
+            return create_response(400, {'error': f'Invalid file content encoding: {str(e)}'})
+        
+        # Decrypt and parse dashboard file
+        importer = DashboardImporter()
+        result = importer.import_from_file(file_bytes, user_id)
+        
+        if not result.get('success'):
+            return create_response(400, {
+                'success': False,
+                'error': result.get('error', 'Failed to decrypt dashboard file')
+            })
+        
+        dashboard_data = result.get('dashboard_data', {})
+        
+        # Extract tiles from all tabs
+        tiles = []
+        tab_data = dashboard_data.get('tab', {})
+        source_tiles = tab_data.get('tiles', [])
+        
+        for source_tile in source_tiles:
+            tile_type = source_tile.get('type', 'unknown')
+            
+            # Build a descriptive title
+            title = source_tile.get('customTitle', f'{tile_type.replace("_", " ").title()}')
+            
+            # Build description from tile properties
+            description_parts = [f'Type: {tile_type}']
+            
+            # Add relevant properties based on tile type
+            if tile_type == 'news' and source_tile.get('filters'):
+                keywords = source_tile['filters'].get('keywords', [])
+                if keywords:
+                    description_parts.append(f'Keywords: {", ".join(keywords[:3])}')
+            elif tile_type == 'stock_screener' and source_tile.get('criteria'):
+                description_parts.append('Stock Screener')
+            elif tile_type == 'politician_trades' and source_tile.get('filters'):
+                description_parts.append('Politician Trades')
+            elif tile_type == 'sec_search' and source_tile.get('filters'):
+                description_parts.append('SEC Search')
+            elif tile_type == 'govt_contracts' and source_tile.get('filters'):
+                description_parts.append('Government Contracts')
+            elif tile_type == 'congress_bills' and source_tile.get('filters'):
+                description_parts.append('Congress Bills')
+            elif source_tile.get('symbol'):
+                description_parts.append(f'Symbol: {source_tile["symbol"]}')
+            
+            description = ' | '.join(description_parts)
+            
+            tiles.append({
+                'id': source_tile.get('id', f'tile_{uuid.uuid4()}'),
+                'type': tile_type,
+                'title': title,
+                'description': description,
+                'tileData': source_tile  # Include full tile data for import
+            })
+        
+        if not tiles:
+            return create_response(400, {
+                'success': False,
+                'error': 'No tiles found in the dashboard file'
+            })
+        
+        return create_response(200, {
+            'success': True,
+            'tiles': tiles,
+            'count': len(tiles)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error extracting tiles from file: {str(e)}", exc_info=True)
+        return create_response(500, {
+            'success': False,
+            'error': f'Failed to extract tiles: {str(e)}'
+        })
+
 def handle_import_tiles(user_id: str, event: Dict) -> Dict:
     """Import tiles from a dashboard export (file or share link)"""
     try:
@@ -1050,11 +1146,17 @@ def handle_import_tiles(user_id: str, event: Dict) -> Dict:
             new_tile['updated_at'] = now
             
             # Remove runtime-specific data (results, etc.)
-            # Keep all configuration (searchParams, filterSettings, portfolioData, etc.)
+            # Keep all configuration (searchParams, filterSettings, portfolioData, paginationState, etc.)
             if 'articles' in new_tile:
                 del new_tile['articles']
             if 'trades' in new_tile:
                 del new_tile['trades']
+            if 'results' in new_tile:
+                del new_tile['results']
+            if 'allResults' in new_tile:
+                del new_tile['allResults']
+            if 'filteredResults' in new_tile:
+                del new_tile['filteredResults']
             
             # For portfolio tiles, preserve portfolioData but remove results
             if 'portfolioData' in new_tile and isinstance(new_tile['portfolioData'], dict):
@@ -1062,6 +1164,10 @@ def handle_import_tiles(user_id: str, event: Dict) -> Dict:
                 if 'results' in portfolio_data:
                     del portfolio_data['results']
                 new_tile['portfolioData'] = portfolio_data
+            
+            # IMPORTANT: Preserve paginationState for all tiles that have pagination
+            # This allows news tiles, govt contracts tiles, etc. to restore pagination on import
+            # paginationState should NOT be deleted as it's needed for load more functionality
             
             imported_tiles.append(new_tile)
         
@@ -1158,6 +1264,12 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
             del duplicated_tile['articles']
         if 'trades' in duplicated_tile:
             del duplicated_tile['trades']
+        if 'results' in duplicated_tile:
+            del duplicated_tile['results']
+        if 'allResults' in duplicated_tile:
+            del duplicated_tile['allResults']
+        if 'filteredResults' in duplicated_tile:
+            del duplicated_tile['filteredResults']
         
         # For portfolio tiles, preserve portfolioData but remove results
         if 'portfolioData' in duplicated_tile and isinstance(duplicated_tile['portfolioData'], dict):
@@ -1165,6 +1277,9 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
             if 'results' in portfolio_data:
                 del portfolio_data['results']
             duplicated_tile['portfolioData'] = portfolio_data
+        
+        # IMPORTANT: Preserve paginationState for all tiles that have pagination
+        # This allows news tiles, govt contracts tiles, etc. to restore pagination
         
         # Use provided position or calculate next available position
         provided_position = body.get('gridPosition')
