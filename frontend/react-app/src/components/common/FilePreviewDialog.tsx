@@ -3275,10 +3275,23 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           <Box
             sx={{
               flex: 1,
-              overflow: 'hidden',
+              overflow: 'auto', // Changed from 'hidden' to 'auto' to enable scrolling
               p: 0,
               mt: 2,
               position: 'relative',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': {
+                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+              },
             }}
             data-tutorial="file-preview-content"
           >
