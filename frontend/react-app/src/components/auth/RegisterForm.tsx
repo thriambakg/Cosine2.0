@@ -21,10 +21,9 @@ import { Close, Check, Clear } from '@mui/icons-material';
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
   onClose: () => void;
-  onRegistrationSuccess?: () => void;
 }
 
-export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationSuccess }: RegisterFormProps) {
+export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormProps) {
   const { register, loginWithProvider } = useAuth();
   const navigate = useNavigate();
   
@@ -106,31 +105,45 @@ export default function RegisterForm({ onSwitchToLogin, onClose, onRegistrationS
     }
     
     try {
+      console.log('📝 RegisterForm: Starting registration for:', email);
       const result = await register({
         email,
         password,
         firstName,
         lastName,
         termsAccepted: agreeToTerms,
-        marketingConsent: false // You can add this field to the form if needed
+        marketingConsent: false
       });
+      
+      console.log('📝 RegisterForm: Registration result:', {
+        success: result.success,
+        verificationRequired: result.verificationRequired,
+        email: result.email
+      });
+      
       if (result.success) {
         if (result.verificationRequired) {
-          // Show success message - user will get verification email
-          setSuccessMessage('Account created! Please check your email to verify your account. You can then sign in.');
-          onRegistrationSuccess?.();
-                       } else {
-                 // Registration complete, redirect to dashboard
-                 navigate('/');
-                 onClose();
-               }
+          console.log('✅ RegisterForm: Verification required - showing success message');
+          setSuccessMessage(
+            'Account created successfully! Please check your email (including spam folder) for a verification link. ' +
+            'After verifying, you will be automatically signed in if you keep this page open.'
+          );
+          console.log('📝 RegisterForm: Modal should stay open, NOT calling onClose or onRegistrationSuccess');
+        } else {
+          console.log('✅ RegisterForm: Registration complete - redirecting to dashboard');
+          navigate('/');
+          onClose();
+        }
       } else {
+        console.error('❌ RegisterForm: Registration failed:', result.error);
         setError(result.error || 'Registration failed');
       }
     } catch (error: any) {
+      console.error('❌ RegisterForm: Registration exception:', error);
       setError(error.message || 'Registration failed');
     } finally {
       setLoading(false);
+      console.log('📝 RegisterForm: Registration flow complete, loading=false');
     }
   };
 

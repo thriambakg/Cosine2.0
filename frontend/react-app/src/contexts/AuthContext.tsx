@@ -96,6 +96,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initializeAuth();
   }, []);
 
+  // Listen for auth state changes (e.g., after email verification) and auto-login
+  useEffect(() => {
+    // Poll for auth state changes every 2 seconds when user is not authenticated
+    // This allows auto-login after email verification if the tab is still open
+    if (!user && typeof window !== 'undefined') {
+      console.log('🔄 AuthContext: Starting auth polling (checking every 2s for verified user)');
+      const checkAuthInterval = setInterval(async () => {
+        try {
+          const cognitoUser = await getCurrentUser();
+          if (cognitoUser) {
+            // Check if the user is verified before auto-logging in
+            const attributes = await fetchUserAttributes();
+            const isVerified = attributes.email_verified === 'true';
+            
+            console.log('🔄 AuthContext: Polling detected user:', {
+              userId: cognitoUser.userId,
+              email: attributes.email,
+              isVerified
+            });
+            
+            if (isVerified) {
+              console.log('✅ AuthContext: User is verified! Auto-logging in...');
+              const userData = await convertCognitoUser(cognitoUser);
+              setUser(userData);
+              setAuthError(null);
+              console.log('✅ AuthContext: Auto-login complete');
+              clearInterval(checkAuthInterval);
+            } else {
+              console.log('⏳ AuthContext: User exists but not verified yet, continuing to poll...');
+            }
+          }
+        } catch (error) {
+          // User still not authenticated or not verified, continue polling
+          // Only log every 10th poll to avoid spam
+          if (Math.random() < 0.1) {
+            console.log('🔄 AuthContext: Polling - no authenticated user yet');
+          }
+        }
+      }, 2000);
+      
+      return () => {
+        console.log('🔄 AuthContext: Stopping auth polling');
+        clearInterval(checkAuthInterval);
+      };
+    }
+  }, [user]);
+
   // After authentication, ensure a default dashboard exists for the user
   useEffect(() => {
     const ensureDefaultDashboard = async () => {
@@ -377,7 +424,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (userData: RegisterData) => {
     try {
-      setIsLoading(true);
+      console.log('🔐 AuthContext: Starting registration for:', userData.email);
+      // Don't set global isLoading during registration to avoid showing LoadingPage
+      // Registration has local loading state in RegisterForm
       
       // Generate a unique username since User Pool has email alias enabled
       // Cognito will handle email separately as an alias
@@ -385,6 +434,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const randomSuffix = Math.random().toString(36).substring(2, 8);
       const uniqueUsername = `user_${timestamp}_${randomSuffix}`;
       
+      console.log('🔐 AuthContext: Calling Cognito signUp with username:', uniqueUsername);
       const result = await signUp({
         username: uniqueUsername,
         password: userData.password,
@@ -402,9 +452,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       });
 
-      // TODO: After Cognito registration, send firstName, lastName, phoneNumber to backend/DynamoDB
+      console.log('🔐 AuthContext: Cognito signUp result:', {
+        userId: result.userId,
+        isSignUpComplete: result.isSignUpComplete,
+        nextStep: result.nextStep
+      });
       
-      // No need to store registration data - user will click email link to verify
+      // Check current user state immediately after registration
+      try {
+        const currentUser = await getCurrentUser();
+        console.log('🔐 AuthContext: Current user after registration:', currentUser ? 'EXISTS' : 'NULL');
+        if (currentUser) {
+          const attrs = await fetchUserAttributes();
+          console.log('🔐 AuthContext: User attributes after registration:', {
+            email: attrs.email,
+            email_verified: attrs.email_verified,
+            sub: attrs.sub
+          });
+        }
+      } catch (e) {
+        console.log('🔐 AuthContext: No current user session after registration (expected)');
+      }
 
       // Log successful registration
       await logSecurityEvent('registration_success', { 
@@ -413,13 +481,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         timestamp: new Date().toISOString() 
       });
       
-      return { 
+      const returnValue = { 
         success: true, 
         verificationRequired: !result.isSignUpComplete,
         email: userData.email.toLowerCase().trim()
       };
+      
+      console.log('🔐 AuthContext: Returning registration result:', returnValue);
+      return returnValue;
     } catch (error: any) {
-      console.error('Registration error:', error);
+      console.error('❌ AuthContext: Registration error:', error);
       
       // Log failed registration
       await logSecurityEvent('registration_failed', { 
@@ -432,8 +503,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         success: false, 
         error: error.message || 'Registration failed' 
       };
-    } finally {
-      setIsLoading(false);
     }
   };
 

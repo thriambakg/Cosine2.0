@@ -28,25 +28,40 @@ export default function AuthModal({
   
   const { user, isAuthenticated } = useAuth();
 
-  // Close modal if user becomes authenticated (but only if they're actually logged in)
-  // Add a small delay to ensure the authentication is stable
+  // Close modal if user becomes authenticated AND verified
+  // Don't close if user is registered but not yet verified (emailVerified = false)
   useEffect(() => {
+    console.log('🚪 AuthModal: Checking if should close:', {
+      isAuthenticated,
+      hasUser: !!user,
+      emailVerified: user?.emailVerified,
+      showMFASetup,
+      mode
+    });
+    
     let timeoutId: NodeJS.Timeout;
-    if (isAuthenticated && user && !showMFASetup) {
+    // Only close if user is authenticated, has user data, is verified, and not in MFA setup
+    if (isAuthenticated && user && user.emailVerified && !showMFASetup) {
+      console.log('🚪 AuthModal: User is authenticated and verified - closing modal in 100ms');
       timeoutId = setTimeout(() => {
+        console.log('🚪 AuthModal: Executing onClose()');
         onClose();
-      }, 100); // Small delay to ensure authentication is stable
+      }, 100);
+    } else if (isAuthenticated && user && !user.emailVerified) {
+      console.log('🚪 AuthModal: User is authenticated but NOT verified - keeping modal open');
     }
     return () => {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
     };
-  }, [isAuthenticated, user, showMFASetup, onClose]);
+  }, [isAuthenticated, user, showMFASetup, onClose, mode]);
 
   // Reset mode when modal opens/closes
   useEffect(() => {
+    console.log('🔄 AuthModal: isOpen or defaultMode changed:', { isOpen, defaultMode, currentMode: mode });
     if (isOpen) {
+      console.log('🔄 AuthModal: Resetting mode to:', defaultMode);
       setMode(defaultMode);
       setShowMFASetup(false);
     }
@@ -74,10 +89,12 @@ export default function AuthModal({
   };
 
   const handleSwitchToRegister = () => {
+    console.log('🔄 AuthModal: handleSwitchToRegister called');
     setMode('register');
   };
 
   const handleSwitchToLogin = () => {
+    console.log('🔄 AuthModal: handleSwitchToLogin called');
     setMode('login');
   };
 
@@ -86,9 +103,12 @@ export default function AuthModal({
   };
 
   const handleAuthSuccess = () => {
+    console.log('✅ AuthModal: handleAuthSuccess called', { requireMFA, hasUser: !!user, mfaEnabled: user?.mfaEnabled });
     if (requireMFA && user && !user.mfaEnabled) {
+      console.log('✅ AuthModal: Showing MFA setup');
       setShowMFASetup(true);
     } else {
+      console.log('✅ AuthModal: Calling onClose from handleAuthSuccess');
       onClose();
     }
   };

@@ -26,13 +26,60 @@ import { AuthModal } from '../auth';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LandingPageMUI() {
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  // Use localStorage to persist modal state across component remounts
+  const [authModalOpen, setAuthModalOpenRaw] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('authModalOpen');
+      return saved === 'true';
+    }
+    return false;
+  });
+  const [authMode, setAuthModeRaw] = useState<'login' | 'register'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('authMode');
+      return (saved as 'login' | 'register') || 'login';
+    }
+    return 'login';
+  });
   const { isAuthenticated } = useAuth();
   const [searchParams] = useSearchParams();
 
+  // Wrapper functions to log where state is being changed from AND persist to localStorage
+  const setAuthModalOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    const stack = new Error().stack || '';
+    const caller = stack.split('\n')[2] || 'unknown';
+    console.log(`🏠 LandingPage: setAuthModalOpen(${value}) called from:`, caller);
+    setAuthModalOpenRaw(prevValue => {
+      const newValue = typeof value === 'function' ? value(prevValue) : value;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('authModalOpen', String(newValue));
+      }
+      return newValue;
+    });
+  };
+
+  const setAuthMode = (mode: 'login' | 'register' | ((prev: 'login' | 'register') => 'login' | 'register')) => {
+    const stack = new Error().stack || '';
+    const caller = stack.split('\n')[2] || 'unknown';
+    console.log(`🏠 LandingPage: setAuthMode(${mode}) called from:`, caller);
+    setAuthModeRaw(prevMode => {
+      const newMode = typeof mode === 'function' ? mode(prevMode) : mode;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('authMode', newMode);
+      }
+      return newMode;
+    });
+  };
+
+  // Log auth modal state changes
+  useEffect(() => {
+    console.log('🏠 LandingPage: useEffect [authModalOpen, authMode] fired with:', { authModalOpen, authMode });
+    console.log('🏠 LandingPage: Dependencies changed - checking what changed');
+  }, [authModalOpen, authMode]);
+
   useEffect(() => {
     if (isAuthenticated && typeof window !== 'undefined' && !authModalOpen) {
+      console.log('🏠 LandingPage: User authenticated and modal not open - redirecting to /chat');
       window.location.href = '/chat';
     }
   }, [isAuthenticated, authModalOpen]);
@@ -40,23 +87,28 @@ export default function LandingPageMUI() {
   // Check for error parameters and automatically open auth modal
   useEffect(() => {
     const error = searchParams.get('error');
+    console.log('🏠 LandingPage: searchParams effect running, error param:', error, 'searchParams:', Object.fromEntries(searchParams));
     if (error) {
+      console.log('🏠 LandingPage: Error param detected, opening login modal:', error);
       setAuthMode('login');
       setAuthModalOpen(true);
     }
   }, [searchParams]);
 
   const handleGetStarted = () => {
+    console.log('🏠 LandingPage: handleGetStarted called');
     setAuthMode('register');
     setAuthModalOpen(true);
   };
 
   const handleSignIn = () => {
+    console.log('🏠 LandingPage: handleSignIn called');
     setAuthMode('login');
     setAuthModalOpen(true);
   };
 
   const handleRegistrationSuccess = () => {
+    console.log('🏠 LandingPage: handleRegistrationSuccess called - CLOSING MODAL');
     setAuthModalOpen(false);
     // Show success message - user will get email with verification link
   };
@@ -563,7 +615,11 @@ export default function LandingPageMUI() {
       {/* Authentication Modal */}
       <AuthModal
         isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
+        onClose={() => {
+          console.log('🏠 LandingPage: AuthModal onClose callback triggered');
+          console.trace('🏠 LandingPage: onClose call stack');
+          setAuthModalOpen(false);
+        }}
         defaultMode={authMode}
         onRegistrationSuccess={handleRegistrationSuccess}
       />
