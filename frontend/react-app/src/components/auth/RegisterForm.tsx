@@ -175,6 +175,11 @@ export default function RegisterForm({ onSwitchToLogin, onClose }: RegisterFormP
             setShowVerificationSuccess(false);
             onSwitchToLogin();
           }}
+          onClose={() => {
+            console.log('📝 RegisterForm: User clicked close button on success modal');
+            setShowVerificationSuccess(false);
+            onClose();
+          }}
         />
       )}
     

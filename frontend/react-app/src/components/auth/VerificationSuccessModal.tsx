@@ -1,12 +1,13 @@
-import { Box, Typography } from '@mui/material';
-import { Check } from '@mui/icons-material';
+import { Box, IconButton, Typography } from '@mui/material';
+import { Check, Close } from '@mui/icons-material';
 
 interface VerificationSuccessModalProps {
   email: string;
   onLoginClick: () => void;
+  onClose?: () => void;
 }
 
-export default function VerificationSuccessModal({ email, onLoginClick }: VerificationSuccessModalProps) {
+export default function VerificationSuccessModal({ email, onLoginClick, onClose }: VerificationSuccessModalProps) {
   return (
     <Box
       sx={{
@@ -47,7 +48,24 @@ export default function VerificationSuccessModal({ email, onLoginClick }: Verifi
         border: '2px solid #374151',
         backdropFilter: 'blur(16px)',
         textAlign: 'center',
+        position: 'relative',
       }}>
+        {/* Close Button */}
+        {onClose && (
+          <IconButton
+            onClick={onClose}
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+              color: '#e2e8f0',
+              '&:hover': { backgroundColor: 'rgba(220, 38, 38, 0.2)' }
+            }}
+          >
+            <Close sx={{ fontSize: 18 }} />
+          </IconButton>
+        )}
+
         {/* Success Icon */}
         <Box sx={{ mb: 3 }}>
           <Box
