@@ -161,7 +161,6 @@ export default function AuthModal({
         <RegisterForm
           onSwitchToLogin={handleSwitchToLogin}
           onClose={handleAuthSuccess}
-          onRegistrationSuccess={onRegistrationSuccess}
         />
       ) : mode === 'reset' ? (
         <PasswordResetForm
