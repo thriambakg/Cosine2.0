@@ -169,9 +169,15 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
     
     # Get kill flag from shared registry (for real-time WebSocket kill signals)
+    kill_flag_registry_available = False
+    clear_kill_flag_func = None
+    is_killed_func = None
     try:
         from kill_signal_registry import get_kill_flag, is_killed, clear_kill_flag
-        # Clear any stale kill flags from previous invocations
+        kill_flag_registry_available = True
+        clear_kill_flag_func = clear_kill_flag
+        is_killed_func = is_killed
+        # Clear any stale kill flags from previous invocations before starting new processing
         clear_kill_flag(session_id)
         kill_flag = get_kill_flag(session_id)
         logger.info(f"Using shared kill flag registry for session {session_id} (cleared stale flags)")
@@ -179,10 +185,15 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         # Fallback: create local kill flag if registry not available
         logger.warning("Kill signal registry not available, using local kill flag")
         kill_flag = threading.Event()
-        is_killed = lambda sid: False
+        is_killed_func = lambda sid: False
+        clear_kill_flag_func = None
     
     def check_kill_signal():
         """Monitor kill signal from shared registry (real-time WebSocket signals)"""
+        if not kill_flag_registry_available or not is_killed_func:
+            # No registry available, skip monitoring
+            return
+        
         check_interval = 0.5  # Check every 500ms for faster response
         max_checks = 1800  # Maximum 1800 checks (15 minutes total)
         check_count = 0
@@ -190,7 +201,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         while not kill_flag.is_set() and check_count < max_checks:
             try:
                 # Check shared registry for kill signal (fast, real-time)
-                if is_killed(session_id):
+                if is_killed_func(session_id):
                     logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in registry for session {session_id}")
                     kill_flag.set()
                     break
@@ -484,6 +495,14 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                     # Cancel the future if possible
                     future.cancel()
                     
+                    # CRITICAL: Clear kill flag in registry after detection so followup messages aren't killed
+                    if kill_flag_registry_available and clear_kill_flag_func:
+                        try:
+                            clear_kill_flag_func(session_id)
+                            logger.info(f"✅ KILL SIGNAL: Cleared kill flag in registry for session {session_id}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to clear kill flag in registry: {str(e)}")
+                    
                     # Send kill acknowledgment via WebSocket to frontend
                     if ws_handler:
                         try:
@@ -514,6 +533,15 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             
             result = future.result()
             
+            # CRITICAL: Clear kill flag in registry after successful completion
+            # This ensures the flag is cleared even if a kill signal was set during processing but not detected
+            if kill_flag_registry_available and clear_kill_flag_func:
+                try:
+                    clear_kill_flag_func(session_id)
+                    logger.debug(f"Cleared kill flag in registry after successful processing for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to clear kill flag in registry after completion: {str(e)}")
+            
             # Send final completion signal if streaming was used
             if ai_message_id and ws_handler and accumulated_streaming_content.get('value'):
                 try:
@@ -531,6 +559,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         error_str = str(e)
         if "Session has been terminated" in error_str:
             logger.warning(f"Agent processing terminated for session {session_id}")
+            # Kill flag already cleared in the kill signal handler above, but ensure it's cleared here too
+            if kill_flag_registry_available and clear_kill_flag_func:
+                try:
+                    clear_kill_flag_func(session_id)
+                    logger.debug(f"Cleared kill flag in registry after termination exception for session {session_id}")
+                except Exception as clear_error:
+                    logger.error(f"Failed to clear kill flag in registry after termination: {str(clear_error)}")
             raise e
         elif "Read timed out" in error_str or "TimeoutError" in error_str:
             logger.error(f"Network timeout during agent processing for session {session_id}")
@@ -542,6 +577,15 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             logger.error(f"Error in kill-monitored processing: {str(e)}")
             raise e
     finally:
+        # CRITICAL: Always clear kill flag in registry in finally block to ensure it's cleared regardless of how processing ends
+        # This is a safety net to ensure the flag is cleared even if processing ends abnormally
+        if kill_flag_registry_available and clear_kill_flag_func:
+            try:
+                clear_kill_flag_func(session_id)
+                logger.debug(f"Cleared kill flag in registry in finally block for session {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to clear kill flag in registry in finally block: {str(e)}")
+        
         # Signal the monitor thread to stop
         kill_flag.set()
         monitor_thread.join(timeout=1.0)  # Wait up to 1 second for thread to finish

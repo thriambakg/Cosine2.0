@@ -31,6 +31,18 @@ except ImportError as e:
     def extract_context_summary(context_items):
         return {'total_items': len(context_items) if context_items else 0}
 
+# Import kill signal registry for handling kill signals
+try:
+    from kill_signal_registry import set_kill_flag
+    logger.info("✅ Successfully imported kill_signal_registry")
+    KILL_SIGNAL_REGISTRY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import kill_signal_registry: {e}")
+    KILL_SIGNAL_REGISTRY_AVAILABLE = False
+    # Fallback function if import fails
+    def set_kill_flag(session_id: str, reason: str = 'user_cancellation'):
+        logger.warning(f"Kill signal registry not available, cannot set kill flag for session {session_id}")
+
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 
@@ -309,9 +321,21 @@ class WebSocketHandler:
             message_type = message_data.get('type', 'chat')
             logger.info(f"Processing WebSocket message: type={message_type}, sessionId={session_id}")
 
-            # Handle kill signal - immediately terminate Lambda invocation
+            # Handle kill signal - set kill flag in registry and terminate Lambda invocation
             if message_type == 'kill_signal':
-                logger.warning(f"🔴 KILL SIGNAL: Received kill signal for session {session_id}, terminating Lambda")
+                reason = message_data.get('reason', 'user_cancellation')
+                logger.warning(f"🔴 KILL SIGNAL: Received kill signal for session {session_id}, reason: {reason}")
+                
+                # CRITICAL: Set kill flag in shared registry so ongoing agent processing can detect it
+                if session_id and KILL_SIGNAL_REGISTRY_AVAILABLE:
+                    try:
+                        set_kill_flag(session_id, reason)
+                        logger.info(f"✅ KILL SIGNAL: Set kill flag in registry for session {session_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to set kill flag in registry: {str(e)}")
+                elif session_id:
+                    logger.warning(f"⚠️ KILL SIGNAL: Kill signal registry not available, kill flag not set for session {session_id}")
+                
                 return {
                     'statusCode': 200,
                     'body': json_dumps_safe({'message': 'Kill signal received, terminating'})
