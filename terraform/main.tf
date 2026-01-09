@@ -146,6 +146,10 @@ module "api_gateway" {
     dashboard_tiles = {
       path_part = "dashboard-tiles"
     }
+    dashboard_tiles_tileId = {
+      path_part           = "{tileId}"
+      parent_resource_key = "dashboard_tiles"
+    }
     dashboard_share = {
       path_part = "dashboard-share"
     }
@@ -375,6 +379,29 @@ module "api_gateway" {
       lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
+    }
+    # Dashboard Tiles with tileId parameter
+    tiles_tileId_delete = {
+      resource_key            = "dashboard_tiles_tileId"
+      http_method             = "DELETE"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      request_parameters = {
+        "integration.request.path.tileId" = "method.request.path.tileId"
+      }
+      timeout_milliseconds = 29000 # 29 seconds - max for API Gateway
+    }
+    tiles_tileId_put = {
+      resource_key            = "dashboard_tiles_tileId"
+      http_method             = "PUT"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      request_parameters = {
+        "integration.request.path.tileId" = "method.request.path.tileId"
+      }
+      timeout_milliseconds = 29000 # 29 seconds - max for API Gateway
     }
     # Dashboard Share method
     dashboard_share_post = {
