@@ -45,7 +45,7 @@ import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 // import { useWebSocket } from '../../contexts/WebSocketContext';
 import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext } from '../tiles/common/contextManager';
 import ContextItemRow from '../context/ContextItemRow';
-import { sessionManagementAPI } from '../../services/api';
+import { sessionManagementAPI, fileReturnAPI } from '../../services/api';
 // COMMENTED OUT: useMessagingService (replaced with unified architecture)
 // import { useMessagingService } from '../../hooks/useMessagingService';
 // NEW: Import unified messaging system
@@ -3612,12 +3612,30 @@ const GlobalChatSidebar: React.FC = () => {
                       <IconButton size="small" className="remove-file-btn" onClick={async () => {
                         if (!activeSessionId || !user?.id) return;
                         try {
-                          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                          const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key }) });
-                          if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
-                          const { download_url } = await response.json();
-                          const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-                        } catch (error) { console.error('❌ Agent file download failed:', error); }
+                          const resp = await fileReturnAPI.downloadFile({
+                            user_id: user.id,
+                            session_id: activeSessionId,
+                            filename: file.filename,
+                            s3_key: file.s3_key,
+                            bucket: file.bucket,
+                          });
+
+                          if (!resp.success || !resp.data?.download_url) {
+                            const err = resp.error || 'Download URL missing';
+                            console.error('❌ Agent file download failed:', err, resp);
+                            return;
+                          }
+
+                          const link = document.createElement('a');
+                          link.href = resp.data.download_url;
+                          link.download = file.filename;
+                          link.target = '_blank';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        } catch (error) {
+                          console.error('❌ Agent file download failed:', error);
+                        }
                       }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#22c55e', '&:hover': { color: '#16a34a' } }}>
                         <DownloadIcon fontSize="small" />
                       </IconButton>

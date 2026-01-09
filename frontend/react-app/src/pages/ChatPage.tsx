@@ -2016,6 +2016,8 @@ export default function ChatPage() {
   const handleDeleteSession = async (sessionId: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent triggering the session load
     try {
+      // Send kill before deleting to stop any in-flight processing for this session
+      unifiedMessageHandler.killSession(sessionId, 'user_deleted_session');
       await deleteSession(sessionId);
       console.log('📋 Session deleted:', sessionId);
     } catch (error) {

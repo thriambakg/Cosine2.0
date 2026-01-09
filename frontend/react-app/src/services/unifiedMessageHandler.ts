@@ -58,6 +58,7 @@ class UnifiedMessageHandlerService {
   private webSocketConnections: Map<string, WebSocket> = new Map(); // sessionId -> WebSocket connection
   private cancelledMessages: Set<string> = new Set(); // messageId -> cancelled messages
   private cancelledSessions: Set<string> = new Set(); // sessionId -> cancelled sessions (stops all processing)
+  private sentKillSignals: Set<string> = new Set(); // track outbound kill signals per session
   private requestIdCounter: number = 0; // For generating unique request IDs
   private sessionUserIds: Map<string, string> = new Map(); // sessionId -> userId mapping
   private recentSendTimestamps: Map<string, number> = new Map(); // queueKey -> last send timestamp (prevents rapid duplicates)
@@ -108,6 +109,8 @@ class UnifiedMessageHandlerService {
       // Clear cancelled status for all message types except edit (which is handled above)
       if (messageData.type !== 'edit_message') {
         console.log(`🔄 UnifiedMessageHandler: Clearing cancelled status for session (${messageData.type}):`, messageData.sessionId);
+        // Clear backend kill flag before resuming
+        this.sendClearKillSignal(messageData.sessionId);
         this.cancelledSessions.delete(messageData.sessionId);
       }
     }
@@ -197,13 +200,6 @@ class UnifiedMessageHandlerService {
   cancelAllMessagesForSession(sessionId: string): void {
     const requestId = `cancel_all_${++this.requestIdCounter}_${Date.now()}`;
     console.log(`🚫 UnifiedMessageHandler: Cancelling all messages for session [${requestId}]:`, sessionId);
-    // Log the stack to find where this is being called from
-    try {
-      const err = new Error('CANCEL STACK TRACE');
-      console.error('🚫 CANCEL CALLED FROM:', err.stack);
-    } catch (e) {
-      console.log('🚫 Could not capture stack trace');
-    }
     
     // Mark session as cancelled immediately (stops all frontend processing)
     this.cancelledSessions.add(sessionId);
@@ -230,7 +226,19 @@ class UnifiedMessageHandlerService {
     console.log(`🚫 UnifiedMessageHandler: Found ${sessionKeys.length} processing queue items to cancel for session ${sessionId}`);
     sessionKeys.forEach(key => this.processingQueue.delete(key));
     
-    // NOTE: Kill signal sending logic has been removed for fresh reimplementation
+    // Send kill signal to backend to stop agent processing
+    this.sendKillSignal(sessionId, 'user_cancellation');
+  }
+
+  /**
+   * Explicitly kill a session (used when deleting a chat or force stopping)
+   */
+  killSession(sessionId: string, reason: string = 'user_cancellation'): void {
+    this.cancelledSessions.add(sessionId);
+    this.stopAllStreamingForSession(sessionId);
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
+    this.sendKillSignal(sessionId, reason);
   }
 
   /**
@@ -247,36 +255,66 @@ class UnifiedMessageHandlerService {
   }
 
   /**
-   * Send kill signal via API as fallback
+   * Send kill signal via WebSocket (preferred) or API fallback
    */
-  private async sendKillSignalViaAPI(sessionId: string, reason: string): Promise<void> {
+  private async sendKillSignal(sessionId: string, reason: string): Promise<void> {
     try {
-      // Get user ID from the current session or use a default
+      console.log(`🚫 UnifiedMessageHandler: Sending kill signal for session ${sessionId}, reason: ${reason}`);
+      this.sentKillSignals.add(sessionId);
+      
+      const ws = this.webSocketConnections.get(sessionId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const killMessage = {
+          action: 'kill_session',
+          type: 'kill_signal',
+          sessionId,
+          reason,
+          timestamp: new Date().toISOString()
+        };
+        ws.send(JSON.stringify(killMessage));
+        console.log(`🚫 UnifiedMessageHandler: Sent kill signal via WebSocket for session ${sessionId}`);
+        return;
+      }
+      
+      // Fallback: send via REST
       const userId = this.getCurrentUserId();
       if (!userId) {
         console.error('❌ UnifiedMessageHandler: No user ID available for kill signal');
         return;
       }
-
       const response = await fetch(`${API_CONFIG.BASE_URL}/sessions?user_id=${userId}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'kill_session',
-          session_id: sessionId,
-          reason: reason
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'kill_session', session_id: sessionId, reason })
       });
-      
-      if (response.ok) {
-        console.log(`✅ UnifiedMessageHandler: Successfully sent kill signal via API for session ${sessionId}`);
-      } else {
+      if (!response.ok) {
         console.error(`❌ UnifiedMessageHandler: Failed to send kill signal via API for session ${sessionId}:`, response.status);
+      } else {
+        console.log(`✅ UnifiedMessageHandler: Sent kill signal via API for session ${sessionId}`);
       }
     } catch (error) {
-      console.error('❌ UnifiedMessageHandler: Error sending kill signal via API:', error);
+      console.error('❌ UnifiedMessageHandler: Error sending kill signal:', error);
+    }
+  }
+
+  /**
+   * Send clear kill signal to backend (reset registry)
+   */
+  private sendClearKillSignal(sessionId: string): void {
+    try {
+      const ws = this.webSocketConnections.get(sessionId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const clearKillMessage = {
+          action: 'clear_kill_signal',
+          type: 'clear_kill_signal',
+          sessionId,
+          timestamp: new Date().toISOString()
+        };
+        ws.send(JSON.stringify(clearKillMessage));
+        console.log(`🔄 UnifiedMessageHandler: Sent clear kill signal via WebSocket for session ${sessionId}`);
+      }
+    } catch (error) {
+      console.error('❌ UnifiedMessageHandler: Error sending clear kill signal:', error);
     }
   }
 
@@ -1009,6 +1047,9 @@ class UnifiedMessageHandlerService {
         // Handle user message with files confirmation from backend
         this.handleUserMessageWithFiles(sessionId, data);
         break;
+      case 'kill_signal_acknowledged':
+        this.handleKillSignalAcknowledgment(sessionId, data);
+        break;
       case 'error':
         this.handleErrorMessage(sessionId, data);
         break;
@@ -1184,6 +1225,41 @@ class UnifiedMessageHandlerService {
     this.clearAgentLog(sessionId);
     
     console.log('✅ UnifiedMessageHandler: Added AI response to local cache:', message_id);
+  }
+
+  /**
+   * Handle kill signal acknowledgment from backend
+   */
+  private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
+    const wasExpected = this.sentKillSignals.has(sessionId);
+    console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason, 'expected:', wasExpected);
+    
+    // Always clear tracking
+    this.sentKillSignals.delete(sessionId);
+    
+    // Mark session cancelled locally
+    this.cancelledSessions.add(sessionId);
+    this.broadcastLoadingState(sessionId, false, 'chatpage');
+    this.broadcastLoadingState(sessionId, false, 'sidebar');
+    this.stopAllStreamingForSession(sessionId);
+    this.clearAgentLog(sessionId);
+    
+    // Update last user message to sent so it can be edited
+    const messages = this.localCache.get(sessionId) || [];
+    const userMessages = messages.filter(msg => msg.sender === 'user');
+    if (userMessages.length > 0) {
+      const lastUserMessage = userMessages[userMessages.length - 1];
+      if (lastUserMessage.status === 'sending') {
+        lastUserMessage.status = 'sent';
+        const updatedMessages = [...messages];
+        const index = updatedMessages.findIndex(m => m.id === lastUserMessage.id);
+        if (index !== -1) {
+          updatedMessages[index] = lastUserMessage;
+          this.localCache.set(sessionId, updatedMessages);
+          this.notifyMessageUpdate(sessionId, updatedMessages);
+        }
+      }
+    }
   }
 
   /**
