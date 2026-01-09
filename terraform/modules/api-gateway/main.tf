@@ -35,7 +35,8 @@ resource "aws_api_gateway_deployment" "this" {
 
   depends_on = [
     aws_api_gateway_rest_api.this,
-    aws_api_gateway_resource.this,
+    aws_api_gateway_resource.root_level,
+    aws_api_gateway_resource.nested,
     aws_api_gateway_method.this,
     aws_api_gateway_integration.this,
     aws_api_gateway_method_response.this,
@@ -60,19 +61,48 @@ resource "aws_api_gateway_stage" "this" {
   tags = var.tags
 }
 
-# Resources - dynamically created based on var.resources
-resource "aws_api_gateway_resource" "this" {
-  for_each = var.resources
+# Root-level resources (no parent_path specified)
+resource "aws_api_gateway_resource" "root_level" {
+  for_each = {
+    for k, v in var.resources : k => v
+    if !can(v.parent_path) || v.parent_path == null
+  }
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  # Use parent resource if parent_path is specified, otherwise use root
-  parent_id = lookup(each.value, "parent_path", null) != null ? aws_api_gateway_resource.this[each.value.parent_path].id : aws_api_gateway_rest_api.this.root_resource_id
-  path_part = each.value.path_part
-
+  parent_id   = aws_api_gateway_rest_api.this.root_resource_id
+  path_part   = each.value.path_part
 
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Nested resources (with parent_path specified)
+resource "aws_api_gateway_resource" "nested" {
+  for_each = {
+    for k, v in var.resources : k => v
+    if can(v.parent_path) && v.parent_path != null
+  }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.root_level[each.value.parent_path].id
+  path_part   = each.value.path_part
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [
+    aws_api_gateway_resource.root_level
+  ]
+}
+
+# Merge both resource types for reference by other resources
+locals {
+  all_resources = merge(
+    aws_api_gateway_resource.root_level,
+    aws_api_gateway_resource.nested
+  )
 }
 
 # Methods - dynamically created based on var.methods
@@ -80,7 +110,7 @@ resource "aws_api_gateway_method" "this" {
   for_each = var.methods
 
   rest_api_id   = aws_api_gateway_rest_api.this.id
-  resource_id   = aws_api_gateway_resource.this[each.value.resource_key].id
+  resource_id   = local.all_resources[each.value.resource_key].id
   http_method   = each.value.http_method
   authorization = var.force_cognito_authorization ? "COGNITO_USER_POOLS" : each.value.authorization_type
   authorizer_id = var.force_cognito_authorization || each.value.authorization_type == "COGNITO_USER_POOLS" ? aws_api_gateway_authorizer.cognito.id : null
@@ -99,7 +129,7 @@ resource "aws_api_gateway_integration" "this" {
   for_each = var.methods
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.value.resource_key].id
+  resource_id = local.all_resources[each.value.resource_key].id
   http_method = aws_api_gateway_method.this[each.key].http_method
 
   type                    = each.value.integration_type
@@ -128,7 +158,7 @@ resource "aws_api_gateway_method_response" "this" {
   for_each = var.methods
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.value.resource_key].id
+  resource_id = local.all_resources[each.value.resource_key].id
   http_method = aws_api_gateway_method.this[each.key].http_method
   status_code = "200"
 
@@ -157,7 +187,7 @@ resource "aws_api_gateway_integration_response" "this" {
   for_each = var.methods
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.value.resource_key].id
+  resource_id = local.all_resources[each.value.resource_key].id
   http_method = aws_api_gateway_method.this[each.key].http_method
   status_code = aws_api_gateway_method_response.this[each.key].status_code
 
@@ -207,7 +237,7 @@ resource "aws_api_gateway_method" "options_methods" {
   for_each = var.resources
 
   rest_api_id   = aws_api_gateway_rest_api.this.id
-  resource_id   = aws_api_gateway_resource.this[each.key].id
+  resource_id   = local.all_resources[each.key].id
   http_method   = "OPTIONS"
   authorization = "NONE"
 
@@ -221,7 +251,7 @@ resource "aws_api_gateway_integration" "options_integrations" {
   for_each = var.resources
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.key].id
+  resource_id = local.all_resources[each.key].id
   http_method = aws_api_gateway_method.options_methods[each.key].http_method
 
   type                 = "MOCK"
@@ -245,7 +275,7 @@ resource "aws_api_gateway_method_response" "options_method_responses" {
   for_each = var.resources
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.key].id
+  resource_id = local.all_resources[each.key].id
   http_method = aws_api_gateway_method.options_methods[each.key].http_method
   status_code = "200"
 
@@ -274,7 +304,7 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
   for_each = var.resources
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.key].id
+  resource_id = local.all_resources[each.key].id
   http_method = aws_api_gateway_method.options_methods[each.key].http_method
   status_code = aws_api_gateway_method_response.options_method_responses[each.key].status_code
 
