@@ -308,6 +308,17 @@ class WebSocketHandler:
             session_id = message_data.get('sessionId')
             logger.info(f"Processing WebSocket message: type={message_data.get('type', 'chat')}, sessionId={session_id}")
             
+            # CRITICAL: Clear any stale kill flags from previous invocations
+            # Lambda reuses containers, so kill flags persist in module memory across invocations
+            # We must clear them early so new messages can be processed normally
+            if session_id:
+                try:
+                    from kill_signal_registry import clear_kill_flag
+                    clear_kill_flag(session_id)
+                    logger.info(f"🔄 Cleared kill flag for session {session_id} at message start")
+                except Exception as e:
+                    logger.debug(f"Could not clear kill flag: {str(e)}")
+            
             # Session ID is required for all message types except connection_establish
             if not session_id and message_data.get('type') != 'connection_establish':
                 logger.error(f"No sessionId provided in message data")
@@ -369,14 +380,6 @@ class WebSocketHandler:
                     'statusCode': 200,
                     'body': json_dumps_safe({'message': 'Connection established'})
                 }
-            
-            # Handle clear kill signal message
-            if message_type == 'clear_kill_signal':
-                return self._handle_clear_kill_signal(connection_id, user_id, session_id, message_data)
-            
-            # Handle kill signal message
-            if message_type == 'kill_signal':
-                return self._handle_kill_signal(connection_id, user_id, session_id, message_data)
             
             # Handle message editing
             if message_type == 'edit_message':
@@ -684,78 +687,8 @@ class WebSocketHandler:
         except Exception as e:
             logger.error(f"Error creating session: {str(e)}")
     
-    def _handle_kill_signal(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle kill signal message - sets kill flag in registry for immediate agent response"""
-        try:
-            reason = message_data.get('reason', 'user_cancellation')
-            logger.info(f"🔴 KILL SIGNAL: Processing kill signal for session {session_id}, reason: {reason}")
-            
-            if not session_id:
-                return {
-                    'statusCode': 400,
-                    'body': json_dumps_safe({'error': 'No session_id provided'})
-                }
-            
-            # Set kill flag in shared registry (for immediate agent response)
-            try:
-                from kill_signal_registry import set_kill_flag
-                set_kill_flag(session_id, reason)
-                logger.info(f"🔴 KILL SIGNAL: Set kill flag in registry for session {session_id}")
-            except Exception as reg_error:
-                logger.warning(f"Failed to set kill flag in registry: {str(reg_error)}")
-            
-            # Send acknowledgment to frontend
-            ack_message = {
-                'type': 'kill_signal_acknowledged',
-                'session_id': session_id,
-                'reason': reason,
-                'timestamp': datetime.now().isoformat(),
-                'message': 'Processing cancelled successfully'
-            }
-            self.send_to_client(connection_id, ack_message)
-            logger.info(f"🔴 KILL SIGNAL: Sent acknowledgment to frontend for session {session_id}")
-            
-            return {
-                'statusCode': 200,
-                'body': json_dumps_safe({'message': 'Kill signal processed successfully'})
-            }
-        except Exception as e:
-            logger.error(f"Error processing kill signal: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json_dumps_safe({'error': f'Failed to process kill signal: {str(e)}'})
-            }
-    
-    def _handle_clear_kill_signal(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle clear kill signal message - clears kill flag to allow new messages to process"""
-        try:
-            logger.info(f"🔄 CLEAR KILL: Processing clear kill signal for session {session_id}")
-            
-            if not session_id:
-                return {
-                    'statusCode': 400,
-                    'body': json_dumps_safe({'error': 'No session_id provided'})
-                }
-            
-            # Clear kill flag in shared registry
-            try:
-                from kill_signal_registry import clear_kill_flag
-                clear_kill_flag(session_id)
-                logger.info(f"🔄 CLEAR KILL: Cleared kill flag in registry for session {session_id}")
-            except Exception as reg_error:
-                logger.warning(f"Failed to clear kill flag in registry: {str(reg_error)}")
-            
-            return {
-                'statusCode': 200,
-                'body': json_dumps_safe({'message': 'Kill flag cleared successfully'})
-            }
-        except Exception as e:
-            logger.error(f"Error clearing kill signal: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json_dumps_safe({'error': f'Failed to clear kill signal: {str(e)}'})
-            }
-    
+
+
     def _handle_edit_message(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle message editing"""
         try:
@@ -770,14 +703,6 @@ class WebSocketHandler:
                 }
             
             logger.info(f"🔍 EDIT: Starting edit process for message {message_id}")
-            
-            # Set kill signal to stop ongoing processing
-            try:
-                from kill_signal_registry import set_kill_flag
-                set_kill_flag(session_id, 'message_edit')
-                logger.info(f"🔴 KILL SIGNAL: Set kill flag in registry for edit - session {session_id}")
-            except Exception as e:
-                logger.warning(f"Failed to set kill flag for edit: {str(e)}")
             
             # Get current session
             response = self.chat_sessions_table.get_item(

@@ -492,19 +492,9 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     is_streaming=True, is_complete=True
                                 )
                             
-                            # Also send explicit kill acknowledgment
-                            connection_ids = ws_handler.get_active_connections_for_user_session(user_id, session_id)
-                            for conn_id in connection_ids:
-                                kill_ack = {
-                                    'type': 'kill_signal_acknowledged',
-                                    'session_id': session_id,
-                                    'message': 'Processing cancelled successfully',
-                                    'timestamp': datetime.now().isoformat()
-                                }
-                                ws_handler.send_to_client(conn_id, kill_ack)
-                            logger.info(f"🔴 KILL SIGNAL: Sent kill acknowledgment to frontend for session {session_id}")
+                            logger.info(f"🔴 KILL SIGNAL: Agent stopped processing for session {session_id}")
                         except Exception as ws_error:
-                            logger.warning(f"Failed to send kill acknowledgment via WebSocket: {str(ws_error)}")
+                            logger.warning(f"Failed to send final response via WebSocket: {str(ws_error)}")
                     
                     raise Exception("Session has been terminated")
                 
