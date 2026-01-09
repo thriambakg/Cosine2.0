@@ -334,6 +334,7 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
   const [availableTiles, setAvailableTiles] = useState<any[]>([]);
   const [selectedTiles, setSelectedTiles] = useState<Set<string>>(new Set());
   const [importingTiles, setImportingTiles] = useState(false);
+  const [importSource, setImportSource] = useState<'file' | 'filesystem' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleTileClick = useCallback((tile: TileTypeDefinition) => {
@@ -411,6 +412,7 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
       // Select all tiles by default
       const allIds = new Set(tilesFromFile.map(t => t.id));
       setSelectedTiles(allIds);
+      setImportDialogOpen(true); // Open the dialog after loading tiles
     } catch (error: any) {
       console.error('Error parsing dashboard file:', error);
       setImportError(error.message || 'Failed to parse dashboard file. Please ensure it is a valid .cosine file.');
@@ -471,6 +473,70 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
     }
   }, [selectedTiles, availableTiles, onImportTile, onClose]);
 
+  const handleFilesystemTilesClick = useCallback(async () => {
+    setImportLoading(true);
+    setImportError(null);
+    setAvailableTiles([]);
+    setSelectedTiles(new Set());
+    setImportSource('filesystem');
+
+    try {
+      // Fetch tiles from filesystem (stored files)
+      const result = await apiRequest<{ success: boolean; tiles?: any[]; error?: string }>(
+        `/filesystem-tiles${user?.id ? `?userId=${user.id}` : ''}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            type: 'get_tiles'
+          }),
+          userId: user?.id,
+        }
+      );
+
+      if (!result.success) {
+        setImportError(result.error || 'Failed to fetch filesystem tiles.');
+        setImportLoading(false);
+        return;
+      }
+
+      const tilesFromFilesystem = result.tiles || [];
+
+      if (tilesFromFilesystem.length === 0) {
+        setImportError('No tiles found in your filesystem.');
+        setImportLoading(false);
+        return;
+      }
+
+      setAvailableTiles(tilesFromFilesystem);
+      // Select all tiles by default
+      const allIds = new Set(tilesFromFilesystem.map(t => t.id));
+      setSelectedTiles(allIds);
+      setImportDialogOpen(true);
+    } catch (error: any) {
+      console.error('Error fetching filesystem tiles:', error);
+      setImportError(error.message || 'Failed to fetch filesystem tiles.');
+    } finally {
+      setImportLoading(false);
+    }
+  }, [user?.id]);
+
+  const handleOpenImportDialog = useCallback(() => {
+    setImportSource('file');
+    setImportDialogOpen(true);
+    // Trigger file input click
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, []);
+
+  const handleCloseImportDialog = useCallback(() => {
+    setImportDialogOpen(false);
+    setAvailableTiles([]);
+    setSelectedTiles(new Set());
+    setImportError(null);
+    setImportSource(null);
+  }, []);
+
   return (
     <>
       <Dialog
@@ -500,7 +566,7 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
               <Button
                 size="small"
                 startIcon={<CloudUploadIcon />}
-                onClick={() => setImportDialogOpen(true)}
+                onClick={handleOpenImportDialog}
                 sx={{
                   color: '#3b82f6',
                   textTransform: 'none',
@@ -508,7 +574,7 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
                   '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.1)' }
                 }}
               >
-                Import from File
+                Import Tiles
               </Button>
             </Tooltip>
             <IconButton onClick={onClose} sx={{ color: '#9ca3af' }}>
@@ -647,8 +713,8 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
       {/* Import Tiles Dialog */}
       <Dialog
         open={importDialogOpen}
-        onClose={() => setImportDialogOpen(false)}
-        maxWidth="sm"
+        onClose={handleCloseImportDialog}
+        maxWidth="md"
         fullWidth
         PaperProps={{
           sx: {
@@ -665,48 +731,60 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
           gap: 1
         }}>
           <CloudUploadIcon sx={{ color: '#3b82f6' }} />
-          <Typography variant="h6">Import Tiles from File</Typography>
+          <Typography variant="h6">Import Tiles {importSource === 'filesystem' ? 'from Storage' : 'from File'}</Typography>
         </DialogTitle>
-        <DialogContent sx={{ p: 3, minHeight: '300px' }}>
+        <DialogContent sx={{ p: 3, minHeight: '400px' }}>
           {importError && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {importError}
             </Alert>
           )}
 
-          {availableTiles.length === 0 && !importLoading ? (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <FileUploadIcon sx={{ fontSize: '3rem', color: '#3b82f6', mb: 2 }} />
-              <Typography variant="body1" sx={{ color: '#ffffff', mb: 1 }}>
-                Select a .cosine file to import tiles
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
-                Choose a dashboard file that contains tiles you want to import to this dashboard.
-              </Typography>
+          {availableTiles.length === 0 && !importLoading && importSource !== 'filesystem' ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, py: 4 }}>
               <Button
                 variant="contained"
                 startIcon={<FileUploadIcon />}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleOpenImportDialog}
                 sx={{
                   backgroundColor: '#3b82f6',
                   color: '#ffffff',
                   textTransform: 'none',
+                  padding: '12px 20px',
+                  fontSize: '1rem',
                   '&:hover': { backgroundColor: '#2563eb' }
                 }}
               >
-                Select File
+                Import from File (.cosine)
+              </Button>
+              <Typography sx={{ color: '#9ca3af', textAlign: 'center' }}>or</Typography>
+              <Button
+                variant="outlined"
+                startIcon={<CloudUploadIcon />}
+                onClick={handleFilesystemTilesClick}
+                disabled={importLoading}
+                sx={{
+                  borderColor: '#374151',
+                  color: '#3b82f6',
+                  textTransform: 'none',
+                  padding: '12px 20px',
+                  fontSize: '1rem',
+                  '&:hover': { borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' }
+                }}
+              >
+                Browse Your Stored Tiles
               </Button>
             </Box>
           ) : importLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 6 }}>
               <CircularProgress sx={{ color: '#3b82f6' }} />
             </Box>
           ) : (
             <Box>
               <Typography variant="subtitle2" sx={{ color: '#ffffff', mb: 2 }}>
-                Available tiles ({selectedTiles.size} of {availableTiles.length} selected):
+                Select tiles to import ({selectedTiles.size} of {availableTiles.length} selected):
               </Typography>
-              <List sx={{ maxHeight: '400px', overflow: 'auto', backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: 1 }}>
+              <List sx={{ maxHeight: '500px', overflow: 'auto', backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: 1, border: '1px solid #374151' }}>
                 {availableTiles.map((tile) => (
                   <ListItem key={tile.id} disablePadding>
                     <ListItemButton
@@ -727,23 +805,25 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
                       <ListItemText
                         primary={tile.title}
                         secondary={tile.description}
-                        primaryTypographyProps={{ sx: { color: '#ffffff', fontSize: '0.95rem' } }}
+                        primaryTypographyProps={{ sx: { color: '#ffffff', fontSize: '0.95rem', fontWeight: 500 } }}
                         secondaryTypographyProps={{ sx: { color: '#9ca3af', fontSize: '0.8rem' } }}
                       />
                     </ListItemButton>
                   </ListItem>
                 ))}
               </List>
-              <Button
-                onClick={() => fileInputRef.current?.click()}
-                sx={{
-                  color: '#3b82f6',
-                  textTransform: 'none',
-                  mt: 2
-                }}
-              >
-                Choose Different File
-              </Button>
+              {importSource === 'file' && (
+                <Button
+                  onClick={handleOpenImportDialog}
+                  sx={{
+                    color: '#3b82f6',
+                    textTransform: 'none',
+                    mt: 2
+                  }}
+                >
+                  Choose Different File
+                </Button>
+              )}
             </Box>
           )}
 
@@ -757,30 +837,27 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onI
         </DialogContent>
         <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
           <Button
-            onClick={() => {
-              setImportDialogOpen(false);
-              setImportError(null);
-              setAvailableTiles([]);
-              setSelectedTiles(new Set());
-            }}
+            onClick={handleCloseImportDialog}
             sx={{ color: '#9ca3af' }}
           >
             Cancel
           </Button>
-          <Button
-            onClick={handleImportTiles}
-            disabled={selectedTiles.size === 0 || availableTiles.length === 0 || importingTiles || !onImportTile}
-            variant="contained"
-            sx={{
-              backgroundColor: '#3b82f6',
-              color: '#ffffff',
-              textTransform: 'none',
-              '&:hover': { backgroundColor: '#2563eb' },
-              '&:disabled': { backgroundColor: '#4b5563', color: '#9ca3af' }
-            }}
-          >
-            {importingTiles ? `Importing ${selectedTiles.size} Tile(s)...` : `Import Selected (${selectedTiles.size})`}
-          </Button>
+          {availableTiles.length > 0 && (
+            <Button
+              onClick={handleImportTiles}
+              disabled={selectedTiles.size === 0 || importingTiles || !onImportTile}
+              variant="contained"
+              sx={{
+                backgroundColor: '#3b82f6',
+                color: '#ffffff',
+                textTransform: 'none',
+                '&:hover': { backgroundColor: '#2563eb' },
+                '&:disabled': { backgroundColor: '#4b5563', color: '#9ca3af' }
+              }}
+            >
+              {importingTiles ? `Importing ${selectedTiles.size} Tile(s)...` : `Import Selected (${selectedTiles.size})`}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

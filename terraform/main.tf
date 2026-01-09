@@ -152,6 +152,12 @@ module "api_gateway" {
     dashboard_import = {
       path_part = "dashboard-import"
     }
+    dashboard_import_tiles = {
+      path_part = "dashboard-import-tiles"
+    }
+    filesystem_tiles = {
+      path_part = "filesystem-tiles"
+    }
     alerts = {
       path_part = "alerts"
     }
@@ -732,6 +738,16 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "dashboard-import"
     }
+    dashboard_import_tiles_post = {
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "dashboard-import-tiles"
+    }
+    filesystem_tiles_post = {
+      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "filesystem-tiles"
+    }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
       http_method   = "GET"
@@ -890,7 +906,7 @@ module "api_gateway" {
   tags                 = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "83" # Updated for billing payment GET method and logging
+  deployment_trigger = "84" # Updated for dashboard import tiles endpoints
 }
 
 

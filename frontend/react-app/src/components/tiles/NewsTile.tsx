@@ -419,6 +419,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
   // Restore pagination state on mount if needed
   useEffect(() => {
     if (paginationState && paginationState.totalResultsLoaded > (currentResults?.length || 0) && !isRestoringPagination && !isLoading) {
+      console.log('🔄 NewsTile: Mounting with pagination state - will restore paginated results', {
+        totalToLoad: paginationState.totalResultsLoaded,
+        currentLength: currentResults?.length || 0,
+      });
       restorePaginationState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -919,9 +923,21 @@ const NewsTile: React.FC<NewsTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
 
-  // Initial load: Fetch fresh results if none exist
+  // Initial load: Fetch fresh results if none exist (but skip if pagination restoration is needed)
   useEffect(() => {
     if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
+      // Check if pagination restoration is needed - if so, skip initial search
+      const needsPaginationRestore = paginationState && paginationState.totalResultsLoaded > 0 && 
+                                     (paginationState.lastEvaluatedKeys?.length || 0) > 0;
+      
+      if (needsPaginationRestore) {
+        console.log('🔄 NewsTile: Pagination restoration needed - marking initial search as done and restoring');
+        setHasPerformedInitialSearch(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        restorePaginationState();
+        return;
+      }
+      
       // Only auto-search if we have meaningful search params (not just defaults)
       const hasSearchCriteria = 
         (currentSearchParams.keywords && currentSearchParams.keywords.length > 0) ||
@@ -934,7 +950,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
         performSearch();
       }
     }
-  }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPerformedInitialSearch, currentResults.length, isLoading, isRestoringPagination, paginationState?.totalResultsLoaded];
 
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
@@ -1625,17 +1642,19 @@ const NewsTile: React.FC<NewsTileProps> = ({
               </Tooltip>
 
               <Tooltip title="Select columns to display">
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setColumnMenuAnchor(e.currentTarget);
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-                >
-                  <ViewColumnIcon fontSize="small" />
-                </IconButton>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setColumnMenuAnchor(e.currentTarget);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                  >
+                    <ViewColumnIcon fontSize="small" />
+                  </IconButton>
+                </span>
               </Tooltip>
 
               <Tooltip title={
@@ -1684,17 +1703,19 @@ const NewsTile: React.FC<NewsTileProps> = ({
               </Tooltip>
 
               <Tooltip title="Edit Search Criteria">
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSearchDialogOpen(true);
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
-                >
-                  <SearchIcon fontSize="small" />
-                </IconButton>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSearchDialogOpen(true);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    sx={{ color: '#9ca3af', '&:hover': { color: '#3b82f6' } }}
+                  >
+                    <SearchIcon fontSize="small" />
+                  </IconButton>
+                </span>
               </Tooltip>
             </>
           }
