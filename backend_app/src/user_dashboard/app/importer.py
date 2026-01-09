@@ -346,3 +346,45 @@ class DashboardImporter:
         
         return imported_tab
 
+    def validate_tile_data(self, dashboard_data: Dict[str, Any]) -> bool:
+        """
+        Validate that the data is a valid tile export
+        
+        Args:
+            dashboard_data: The decrypted data
+        
+        Returns:
+            True if valid tile data, False otherwise
+        """
+        try:
+            # Check for valid type
+            data_type = dashboard_data.get('type')
+            if data_type not in ['tile', 'dashboard']:
+                logger.error(f"Invalid data type: {data_type} (expected 'tile' or 'dashboard')")
+                return False
+            
+            # For tile type, check for tile field
+            if data_type == 'tile':
+                tile_data = dashboard_data.get('tile')
+                if not tile_data or not isinstance(tile_data, dict):
+                    logger.error("Missing or invalid 'tile' field in tile data")
+                    return False
+                
+                # Tile should have at least type and title
+                if 'type' not in tile_data:
+                    logger.error("Missing 'type' field in tile data")
+                    return False
+            
+            # For dashboard type, check for at least one tile in tab
+            elif data_type == 'dashboard':
+                tab_data = dashboard_data.get('tab', {})
+                tiles = tab_data.get('tiles', [])
+                if not tiles or not isinstance(tiles, list) or len(tiles) == 0:
+                    logger.error("No tiles found in dashboard data")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating tile data: {str(e)}")
+            return False

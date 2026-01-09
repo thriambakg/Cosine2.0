@@ -202,15 +202,15 @@ export const dashboardAPI = {
     }
   },
 
-  // Import a tile with full configuration (from file or duplicate)
-  importTile: async (tileData: any, tabId: string, userId: string): Promise<any> => {
+  // Import a tile from encrypted .cosine file
+  importTile: async (params: { fileContent: string; tabId?: string }): Promise<{ tile: any; message: string }> => {
     try {
-      return await apiRequest<any>(`/dashboard-import?userId=${userId}`, {
+      return await apiRequest<{ tile: any; message: string }>(`/tiles`, {
         method: 'POST',
         body: JSON.stringify({
           operation: 'import_tile',
-          tabId: tabId,
-          tileData: tileData
+          fileContent: params.fileContent,
+          tabId: params.tabId
         })
       });
     } catch (error) {

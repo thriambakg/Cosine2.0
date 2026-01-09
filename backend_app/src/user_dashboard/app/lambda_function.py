@@ -408,8 +408,11 @@ def handle_tiles_operations(user_id: str, http_method: str, path: str, event: Di
             
             logger.info(f"📋 Tiles POST operation: {body.get('operation', 'add_tile')}, body keys: {list(body.keys())}")
             
-            # Check if this is an import tiles request
-            if body.get('operation') == 'import_tiles':
+            # Check if this is an import tile request (single tile from .cosine file)
+            if body.get('operation') == 'import_tile':
+                return handle_import_tile(user_id, event)
+            # Check if this is an import tiles request (extract tiles from dashboard export)
+            elif body.get('operation') == 'import_tiles':
                 return handle_import_tiles(user_id, event)
             elif body.get('operation') == 'duplicate_tile':
                 return handle_duplicate_tile(user_id, event)
@@ -879,6 +882,167 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
     except Exception as e:
         logger.error(f"Error adding tile: {str(e)}")
         return create_response(500, {"error": "Failed to add tile"})
+
+def handle_import_tile(user_id: str, event: Dict) -> Dict:
+    """Import a tile from an encrypted .cosine file"""
+    try:
+        from importer import DashboardImporter
+        
+        body = json.loads(event.get('body', '{}'))
+        file_content = body.get('fileContent')  # Base64 encoded file content
+        tab_id = body.get('tabId')  # Optional: target tab ID
+        
+        if not file_content:
+            return create_response(400, {'error': 'fileContent is required'})
+        
+        # Decode base64 file content
+        try:
+            import base64
+            file_bytes = base64.b64decode(file_content)
+        except Exception as e:
+            logger.error(f"Error decoding file content: {str(e)}")
+            return create_response(400, {'error': f'Invalid file content encoding: {str(e)}'})
+        
+        # Use DashboardImporter to decrypt the file
+        importer = DashboardImporter()
+        result = importer.import_from_file(file_bytes, user_id)
+        
+        if not result.get('success'):
+            logger.error(f"Failed to decrypt tile file: {result.get('error')}")
+            return create_response(400, {
+                'success': False,
+                'error': result.get('error', 'Failed to decrypt tile file')
+            })
+        
+        dashboard_data = result.get('dashboard_data')
+        
+        # Validate this is a tile export (not a full dashboard)
+        data_type = dashboard_data.get('type')
+        if data_type not in ['tile', 'dashboard']:  # Accept both for backward compatibility
+            return create_response(400, {
+                'error': f'Invalid file type: expected "tile" or "dashboard", got "{data_type}"'
+            })
+        
+        # Extract tile data
+        tile_config = None
+        if data_type == 'tile':
+            # Direct tile export
+            tile_config = dashboard_data.get('tile')
+        else:
+            # Dashboard export - extract first tile from tab
+            tab_data = dashboard_data.get('tab', {})
+            tiles = tab_data.get('tiles', [])
+            if tiles and len(tiles) > 0:
+                tile_config = tiles[0]
+                logger.info(f"Extracting first tile from dashboard export: {tile_config.get('type', 'unknown')} - {tile_config.get('title', 'Untitled')}")
+            else:
+                return create_response(400, {'error': 'No tiles found in imported file'})
+        
+        if not tile_config:
+            return create_response(400, {'error': 'No tile data found in file'})
+        
+        # Get current dashboard
+        dashboard_config = get_user_dashboard(user_id)
+        if not dashboard_config:
+            return create_response(404, {"error": "User not found"})
+        
+        # Find the target tab
+        target_tab = None
+        if tab_id:
+            target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == tab_id), None)
+        else:
+            # Use active tab if no specific tab provided
+            active_tab_id = dashboard_config.get('activeTabId')
+            if active_tab_id:
+                target_tab = next((t for t in dashboard_config.get('tabs', []) if t['id'] == active_tab_id), None)
+            else:
+                # Use first tab if no active tab
+                tabs = dashboard_config.get('tabs', [])
+                target_tab = tabs[0] if tabs else None
+        
+        if not target_tab:
+            return create_response(400, {"error": "No tab found to add tile to"})
+        
+        # Create new tile from imported config
+        now = datetime.utcnow().isoformat()
+        tile_type = tile_config.get('type', 'crypto')
+        
+        # Get tile size for position calculation
+        tile_size = tile_config.get('gridSize', {'width': 4, 'height': 4})
+        tile_width = tile_size.get('width', 4) if isinstance(tile_size, dict) else 4
+        tile_height = tile_size.get('height', 4) if isinstance(tile_size, dict) else 4
+        
+        # Find next available position
+        existing_tiles = target_tab.get('tiles', [])
+        grid_position = find_next_available_position(existing_tiles, tile_width, tile_height)
+        
+        # Build new tile structure (similar to handle_add_tile but using imported config)
+        new_tile = {
+            'id': str(uuid.uuid4()),  # Generate new ID to avoid conflicts
+            'type': tile_type,
+            'title': tile_config.get('title', 'Imported Tile'),
+            'displayOptions': tile_config.get('displayOptions', {}),
+            'autoRefresh': tile_config.get('autoRefresh', False),
+            'isPinned': tile_config.get('isPinned', False),
+            'gridPosition': grid_position,
+            'gridSize': tile_size,
+            'tab_id': target_tab['id'],
+            'created_at': now,
+            'updated_at': now
+        }
+        
+        # Add type-specific fields from imported tile
+        if tile_type in ['crypto', 'stock']:
+            new_tile['symbol'] = tile_config.get('symbol')
+            new_tile['timeframe'] = tile_config.get('timeframe', '1d')
+        elif tile_type == 'folder':
+            new_tile['folderPath'] = tile_config.get('folderPath', '')
+            if tile_config.get('folderId') is not None:
+                new_tile['folderId'] = tile_config.get('folderId')
+        elif tile_type == 'portfolio':
+            # Preserve portfolio data but exclude runtime results
+            portfolio_data = tile_config.get('portfolioData', {'entries': [], 'timeframe': '1y'})
+            if isinstance(portfolio_data, dict):
+                # Remove results if present (runtime data)
+                portfolio_data = portfolio_data.copy()
+                if 'results' in portfolio_data:
+                    del portfolio_data['results']
+            new_tile['portfolioData'] = portfolio_data
+        elif tile_type in ['news', 'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures']:
+            # Search tiles - preserve search parameters and filters
+            if 'searchParams' in tile_config:
+                new_tile['searchParams'] = tile_config.get('searchParams')
+            if 'filterSettings' in tile_config:
+                new_tile['filterSettings'] = tile_config.get('filterSettings')
+            if 'filters' in tile_config:
+                new_tile['filters'] = tile_config.get('filters')
+            if 'paginationState' in tile_config:
+                new_tile['paginationState'] = tile_config.get('paginationState')
+        elif tile_type == 'stock_screener':
+            if 'criteria' in tile_config:
+                new_tile['criteria'] = tile_config.get('criteria')
+        
+        # Add tile to tab
+        if 'tiles' not in target_tab:
+            target_tab['tiles'] = []
+        
+        target_tab['tiles'].append(new_tile)
+        target_tab['updated_at'] = now
+        dashboard_config['last_updated'] = now
+        
+        # Save updated dashboard
+        save_user_dashboard(user_id, dashboard_config)
+        
+        logger.info(f"✅ Successfully imported tile: {new_tile['type']} - {new_tile['title']} (id: {new_tile['id']})")
+        
+        return create_response(200, {
+            'tile': new_tile,
+            'message': 'Tile imported successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error importing tile: {str(e)}", exc_info=True)
+        return create_response(500, {"error": f"Failed to import tile: {str(e)}"})
 
 def handle_update_tile(user_id: str, tile_id: str, event: Dict) -> Dict:
     """Update an existing tile"""

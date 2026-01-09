@@ -937,6 +937,69 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
+  const handleImportTile = async (tileData: any) => {
+    if (!activeTab || !user?.id) {
+      console.warn('No active tab or user ID found, cannot import tile');
+      return;
+    }
+
+    try {
+      console.log('Importing tile:', tileData);
+
+      // Generate a new tile ID
+      const newTileId = `tile-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+      // Create the new tile with imported configuration
+      const newTile = {
+        id: newTileId,
+        type: tileData.type,
+        config: {
+          ...tileData.config,
+          title: tileData.config?.title || `Imported ${tileData.type}`,
+        },
+        position: {
+          x: 0,
+          y: 0,
+          w: tileData.position?.w || 6,
+          h: tileData.position?.h || 4,
+        },
+      };
+
+      // Add to current tab's tiles
+      const updatedTiles = [...(activeTab.tiles || []), newTile];
+      const updatedTab = { ...activeTab, tiles: updatedTiles };
+      
+      // Update in allTabs
+      const updatedAllTabs = allTabs.map((tab: any) =>
+        tab.id === activeTab.id ? updatedTab : tab
+      );
+      
+      // Save to backend
+      const response = await dashboardAPI.saveTabs(
+        user.id,
+        updatedAllTabs,
+        activeDashboard?.id || 'default'
+      );
+
+      if (response.success) {
+        // Update local state
+        setAllTabs(updatedAllTabs);
+        setActiveTab(updatedTab);
+        
+        // Reload from database to ensure consistency
+        await reloadFromDatabase();
+        
+        console.log(`Tile imported successfully: ${newTileId}`);
+      } else {
+        console.error('Failed to save imported tile:', response.error);
+      }
+
+      setAddTileMenuOpen(false);
+    } catch (error) {
+      console.error('Failed to import tile:', error);
+    }
+  };
+
   // Navigation handlers for hierarchical tile selection - OLD SYSTEM (commented out)
   // These are kept for reference but not used with the new AddTileMenu component
   /*
@@ -2281,6 +2344,7 @@ const UnifiedDashboardPage: React.FC = () => {
           open={addTileMenuOpen}
           onClose={() => setAddTileMenuOpen(false)}
           onAddTile={handleAddTile}
+          onImportTile={handleImportTile}
           tileCategories={tileCategories}
         />
 

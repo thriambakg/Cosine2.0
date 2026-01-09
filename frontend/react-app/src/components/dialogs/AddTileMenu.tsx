@@ -21,13 +21,16 @@ import {
   ExpandMore as ExpandMoreIcon,
   Info as InfoIcon,
   Close as CloseIcon,
+  FileUpload as FileUploadIcon,
 } from '@mui/icons-material';
 import { TileCategory, TileTypeDefinition } from '../../types/dashboardTypes';
+import TileImportDialog from './TileImportDialog';
 
 interface AddTileMenuProps {
   open: boolean;
   onClose: () => void;
   onAddTile: (tileId: string) => void;
+  onImportTile?: (tileData: any) => void;
   tileCategories: TileCategory[];
 }
 
@@ -314,9 +317,10 @@ const TileInfoDialog: React.FC<TileInfoDialogProps> = ({ open, onClose, tile }) 
   );
 };
 
-const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, tileCategories }) => {
+const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, onImportTile, tileCategories }) => {
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
   const [infoTile, setInfoTile] = useState<TileTypeDefinition | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const handleTileClick = useCallback((tile: TileTypeDefinition) => {
     onAddTile(tile.id);
@@ -328,6 +332,19 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, til
     setInfoTile(tile);
     setInfoDialogOpen(true);
   }, []);
+
+  const handleImportClick = useCallback(() => {
+    setInfoDialogOpen(false);
+    setImportDialogOpen(true);
+  }, []);
+
+  const handleImportSuccess = useCallback((tileData: any) => {
+    if (onImportTile) {
+      onImportTile(tileData);
+    }
+    onClose();
+  }, [onImportTile, onClose]);
+
 
   return (
     <>
@@ -354,9 +371,29 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, til
         }}>
           <>
             <Typography variant="h6">Add New Tile</Typography>
-            <IconButton onClick={onClose} sx={{ color: '#9ca3af' }}>
-              <CloseIcon />
-            </IconButton>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button
+                startIcon={<FileUploadIcon />}
+                onClick={handleImportClick}
+                variant="outlined"
+                size="small"
+                sx={{
+                  color: '#3b82f6',
+                  borderColor: '#3b82f6',
+                  borderRadius: '0px',
+                  textTransform: 'none',
+                  '&:hover': {
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    borderColor: '#60a5fa',
+                  },
+                }}
+              >
+                Import
+              </Button>
+              <IconButton onClick={onClose} sx={{ color: '#9ca3af' }}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
           </>
         </DialogTitle>
         <DialogContent sx={{ p: 2, maxHeight: 'calc(90vh - 80px)', overflowY: 'auto' }}>
@@ -475,6 +512,12 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, til
                                   '&:hover': { color: '#3b82f6' }
                                 }}
                               >
+
+      <TileImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImportSuccess={handleImportSuccess}
+      />
                                 <InfoIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
@@ -494,6 +537,12 @@ const AddTileMenu: React.FC<AddTileMenuProps> = ({ open, onClose, onAddTile, til
         open={infoDialogOpen}
         onClose={() => setInfoDialogOpen(false)}
         tile={infoTile}
+      />
+
+      <TileImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImportSuccess={handleImportSuccess}
       />
     </>
   );
