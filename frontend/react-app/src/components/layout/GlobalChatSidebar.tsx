@@ -299,12 +299,21 @@ const SidebarMessageInputBar = memo(({
   onStop?: () => void;
 }) => {
   const [value, setValue] = useState('');
+  const [isSending, setIsSending] = useState(false); // Track local sending state to prevent double-clicks
+  
   const onSendClick = async () => {
-    if (!value.trim()) return;
+    if (!value.trim() || isSending) return; // Don't send if already sending
     const text = value;
     setValue('');
-    await onSend(text);
+    setIsSending(true); // Set local sending state immediately
+    try {
+      await onSend(text);
+    } finally {
+      // Clear sending state after a short delay to prevent accidental double-clicks
+      setTimeout(() => setIsSending(false), 500);
+    }
   };
+  
   const onKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -515,26 +524,33 @@ const SidebarMessageInputBar = memo(({
               size="small"
               onClick={(e) => {
                 e.stopPropagation();
+                e.preventDefault(); // Prevent any default behavior
+                
+                // Use isLoading (from parent) to determine if we should stop or send
+                // isLoading reflects the actual backend processing state
                 if (isLoading && onStop) {
+                  console.log('🛑 Sidebar input: Stop button clicked');
                   onStop();
-                } else {
+                } else if (!isSending) {
+                  // Only send if we're not already in the process of sending
+                  console.log('📤 Sidebar input: Send button clicked');
                   void onSendClick();
                 }
               }}
-              disabled={!isLoading && !value.trim()}
+              disabled={(!isLoading && !value.trim()) || isSending}
               sx={{
                 color: isLoading 
                   ? '#ef4444' 
-                  : (value.trim() ? '#22c55e' : '#6b7280'),
+                  : (value.trim() && !isSending ? '#22c55e' : '#6b7280'),
                 padding: '4px',
                 transition: 'all 0.2s ease',
                 '&:hover': { 
                   color: isLoading 
                     ? '#dc2626' 
-                    : (value.trim() ? '#16a34a' : '#6b7280'),
+                    : (value.trim() && !isSending ? '#16a34a' : '#6b7280'),
                   backgroundColor: isLoading 
                     ? 'rgba(239, 68, 68, 0.1)' 
-                    : (value.trim() ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
+                    : (value.trim() && !isSending ? 'rgba(34, 197, 94, 0.1)' : 'transparent'),
                 },
               }}
             >
@@ -2198,16 +2214,15 @@ const GlobalChatSidebar: React.FC = () => {
 
   // NOTE: Unused MessageInputBar component removed - using SidebarMessageInputBar instead defined at the top
 
-  // Cleanup effect for message cancellation
+  // Cleanup effect - local state only
   useEffect(() => {
     return () => {
-      // Cancel all pending messages when sidebar unmounts
-    if (activeSessionId) {
-        console.log('🧹 Sidebar: Cleaning up - cancelling all pending messages for session:', activeSessionId);
-        unifiedMessageHandler.cancelAllMessagesForSession(activeSessionId);
-      }
+      // NOTE: Do NOT send kill signals on unmount
+      // Kill signals should only be sent when user explicitly clicks stop button
+      // Unmount happens during navigation, sidebar clear, etc. and shouldn't cancel backend processing
+      console.log('🧹 Sidebar: Cleanup complete (local state only, no kill signal)');
     };
-  }, [activeSessionId]);
+  }, []); // Empty dependency array - only run on mount/unmount
 
   // Resize handlers - optimized for smooth preview movement
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -3318,15 +3333,46 @@ const GlobalChatSidebar: React.FC = () => {
                 let result;
                 if (uploadedFiles.length > 0) {
                   result = await sendUnifiedFileMessage(text, uploadedFiles as unknown as File[], selectedModel);
-                } else if (sessionContext.length > 0) {
-                  // If we have context items, always send as context message
-                  // This will create a session if one doesn't exist
-                  result = await sendUnifiedContextMessage(text, sessionContext, selectedModel, activeSessionId || undefined);
-                  previousContextRef.current = [...sessionContext];
-                } else if (activeSessionId) {
-                  result = await sendUnifiedFollowupMessage(text, selectedModel);
                 } else {
-                  result = await sendUnifiedMessage({ text, model: selectedModel, type: 'new_message' });
+                  // CRITICAL: Persist context to backend FIRST if we have an active session
+                  // This ensures context is saved before message is sent
+                  // For new sessions, the context will be persisted after session creation
+                  let contextWasPersisted = false;
+                  if (sessionContext.length > 0 && activeSessionId && user?.id) {
+                    console.log('⚠️ Sidebar: Persisting context to existing session before sending message');
+                    try {
+                      await sessionManagementAPI.updateSession(activeSessionId, user.id, {
+                        session_variables: {
+                          context_items: sessionContext,
+                          context_added_at: Date.now(),
+                        }
+                      });
+                      console.log('✅ Sidebar: Context persisted before message send');
+                      contextWasPersisted = true;
+                    } catch (error) {
+                      console.error('❌ Sidebar: Failed to persist context before message send:', error);
+                      // Continue with message send even if context persistence failed
+                      // The context data will be in sessionContext array sent with message
+                    }
+                  }
+                  
+                  // Unified message flow: Send message without context items in payload
+                  // Context items are already persisted to backend; agent will fetch from session variables
+                  if (sessionContext.length > 0 || activeSessionId) {
+                    // Send normal message - agent will fetch context from session variables
+                    result = await sendUnifiedContextMessage(
+                      text,  // Send message AS-IS, no modifications
+                      contextWasPersisted ? [] : sessionContext, // Empty array if persisted, items for fallback
+                      selectedModel,
+                      activeSessionId || undefined
+                    );
+                    if (sessionContext.length > 0) {
+                      previousContextRef.current = [...sessionContext];
+                    }
+                  } else {
+                    // No session and no context - create new session with new_message
+                    result = await sendUnifiedMessage({ text, model: selectedModel, type: 'new_message' });
+                  }
                 }
                 
                 if (result.success) {

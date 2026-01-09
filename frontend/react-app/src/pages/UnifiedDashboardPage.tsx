@@ -1747,11 +1747,12 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
 
-    // Filter out results, paginationState, and lastUpdated - these should only be in session storage, not database
-    // onUpdate is for session-only data (results, paginationState), onSettingsChange is for database persistence (config)
-    const { results, paginationState, lastUpdated, ...configData } = data;
+    // Filter out results and lastUpdated - only ephemeral session data
+    // Keep paginationState for database persistence (pagination keys needed for restoration)
+    const { results, lastUpdated, ...configData } = data;
+    const paginationState = data.paginationState;
     
-    // Store results and paginationState in sessionStorage only (not in tile state that gets saved to database)
+    // Store results and paginationState in sessionStorage only (not database)
     if (results !== undefined || paginationState !== undefined) {
       try {
         const sessionData: any = {};
@@ -1799,7 +1800,9 @@ const UnifiedDashboardPage: React.FC = () => {
       }
     }
 
-    // Only update tile state with non-result data (if any config data remains)
+    // Update tile state with configData (including paginationState for database persistence)
+    // paginationState is saved to database to preserve pagination across page reloads
+    // Results are NOT saved to avoid excessive storage - they're restored from API on page load
     if (Object.keys(configData).length > 0) {
       updateTabTiles(activeTabId, (currentTiles) => {
         const updatedTiles = currentTiles.map((tile: any) => 

@@ -223,6 +223,18 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
   
+  // Debug logging for received props
+  console.log('🏛️ GovtContractsSearchTile: Component mounted/updated', {
+    tileId: id,
+    receivedResults: results?.length || 0,
+    firstReceivedResult: results?.[0]?.award_id || 'N/A',
+    paginationState: paginationState ? {
+      totalResultsLoaded: paginationState.totalResultsLoaded,
+      keysCount: paginationState.lastEvaluatedKeys?.length || 0,
+      hasMore: paginationState.hasMore,
+    } : 'None',
+  });
+  
   const defaultDisplayOptions = {
     showRecipient: true,
     showAwardingAgency: true,
@@ -792,6 +804,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       totalResultsLoaded: paginationState.totalResultsLoaded,
       currentResults: results?.length || 0,
       keysToLoad: paginationState.lastEvaluatedKeys.length,
+      paginationKeys: paginationState.lastEvaluatedKeys,
+      firstCurrentResult: results?.[0]?.award_id || 'N/A',
+      lastCurrentResult: results?.[results.length - 1]?.award_id || 'N/A',
     });
 
     setIsRestoringPagination(true);
@@ -830,12 +845,24 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         
         if (initialResponse.success && initialResponse.results) {
           currentResults = [...initialResponse.results];
+          console.log('🔄 GovtContractsSearchTile: Loaded initial page during restoration', {
+            resultsCount: initialResponse.results.length,
+            firstResult: initialResponse.results[0]?.award_id || 'N/A',
+            lastResult: initialResponse.results[initialResponse.results.length - 1]?.award_id || 'N/A',
+            nextKey: initialResponse.last_evaluated_key,
+          });
         }
       }
 
       // Load each continuation page sequentially until we reach totalResultsLoaded
       while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0 && currentSearchParams) {
         const nextKey = keysToLoad[0];
+        console.log('🔄 GovtContractsSearchTile: Loading continuation page', {
+          currentResultsCount: currentResults.length,
+          targetTotal: paginationState.totalResultsLoaded,
+          remainingKeys: keysToLoad.length,
+          nextKey: nextKey,
+        });
         
         const filters: any = {
           ...currentSearchParams,
@@ -863,8 +890,16 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         const response = await govtContractsSearchAPI.search(searchRequest);
         
         if (response.success && response.results) {
+          const beforeCount = currentResults.length;
           currentResults = [...currentResults, ...response.results];
           keysToLoad = keysToLoad.slice(1);
+          console.log('🔄 GovtContractsSearchTile: Loaded continuation page', {
+            newResultsCount: response.results.length,
+            totalAfterLoad: currentResults.length,
+            firstNewResult: response.results[0]?.award_id || 'N/A',
+            lastNewResult: response.results[response.results.length - 1]?.award_id || 'N/A',
+            remainingKeys: keysToLoad.length,
+          });
         } else {
           // No more results or error, stop loading
           break;
@@ -878,6 +913,14 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
       setHasMore(paginationState.hasMore);
       setHasPerformedInitialSearch(true);
+      
+      console.log('✅ GovtContractsSearchTile: Pagination restoration complete', {
+        totalRestored: currentResults.length,
+        expectedTotal: paginationState.totalResultsLoaded,
+        firstResult: currentResults[0]?.award_id || 'N/A',
+        lastResult: currentResults[currentResults.length - 1]?.award_id || 'N/A',
+        keysRestored: paginationState.lastEvaluatedKeys.length,
+      });
       
       // Update tile with restored pagination state only (avoid storing raw results)
       onUpdate(id, {

@@ -159,21 +159,6 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     });
   }, [sendMessage]);
 
-  // Send followup message (existing session)
-  const sendFollowupMessage = useCallback(async (
-    text: string,
-    model: string = 'claude-sonnet-4'
-  ) => {
-    if (!sessionId) {
-      return { success: false, error: 'Session ID is required for followup messages' };
-    }
-    return sendMessage({
-      text,
-      model,
-      type: 'followup_message',
-      sessionId: sessionId // Explicitly pass sessionId for followup messages
-    });
-  }, [sendMessage, sessionId]);
 
   // Send edit message
   const sendEditMessage = useCallback(async (
@@ -282,7 +267,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     sendMessage,
     sendContextMessage,
     sendFileMessage,
-    sendFollowupMessage,
+    sendFileMessage,
     sendEditMessage,
     clearSession,
     deleteSession,

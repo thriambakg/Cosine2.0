@@ -39,8 +39,8 @@ export interface UnifiedMessageData {
   contextItems?: any[];
   context?: any;
   
-  // Message type
-  type: 'new_message' | 'context_message' | 'file_message' | 'followup_message' | 'edit_message';
+  // Message type (followup_message consolidated into context_message)
+  type: 'new_message' | 'context_message' | 'file_message' | 'edit_message';
 }
 
 export interface SessionCreationResult {
@@ -58,6 +58,7 @@ class UnifiedMessageHandlerService {
   private webSocketConnections: Map<string, WebSocket> = new Map(); // sessionId -> WebSocket connection
   private cancelledMessages: Set<string> = new Set(); // messageId -> cancelled messages
   private cancelledSessions: Set<string> = new Set(); // sessionId -> cancelled sessions (stops all processing)
+  private sentKillSignals: Set<string> = new Set(); // sessionId -> kill signals we sent (to distinguish from backend-initiated kills)
   private requestIdCounter: number = 0; // For generating unique request IDs
   private sessionUserIds: Map<string, string> = new Map(); // sessionId -> userId mapping
   private recentSendTimestamps: Map<string, number> = new Map(); // queueKey -> last send timestamp (prevents rapid duplicates)
@@ -110,6 +111,13 @@ class UnifiedMessageHandlerService {
         console.log(`🔄 UnifiedMessageHandler: Clearing cancelled status for session (${messageData.type}):`, messageData.sessionId);
         this.cancelledSessions.delete(messageData.sessionId);
       }
+    }
+    
+    // CRITICAL: Always send clear kill signal to backend for new messages
+    // The backend's kill flag persists across messages and may be stale from previous operations
+    // This ensures the backend is ready to process the new message without interference
+    if (messageData.sessionId && messageData.type !== 'edit_message') {
+      this.sendClearKillSignal(messageData.sessionId);
     }
     
     // Check if session was cancelled (after clearing for new messages)
@@ -197,6 +205,13 @@ class UnifiedMessageHandlerService {
   cancelAllMessagesForSession(sessionId: string): void {
     const requestId = `cancel_all_${++this.requestIdCounter}_${Date.now()}`;
     console.log(`🚫 UnifiedMessageHandler: Cancelling all messages for session [${requestId}]:`, sessionId);
+    // Log the stack to find where this is being called from
+    try {
+      const err = new Error('CANCEL STACK TRACE');
+      console.error('🚫 CANCEL CALLED FROM:', err.stack);
+    } catch (e) {
+      console.log('🚫 Could not capture stack trace');
+    }
     
     // Mark session as cancelled immediately (stops all frontend processing)
     this.cancelledSessions.add(sessionId);
@@ -234,6 +249,9 @@ class UnifiedMessageHandlerService {
     try {
       console.log(`🚫 UnifiedMessageHandler: Sending kill signal for session ${sessionId}, reason: ${reason}`);
       
+      // Track that we sent this kill signal
+      this.sentKillSignals.add(sessionId);
+      
       // Send kill signal via WebSocket if connection exists
       const ws = this.webSocketConnections.get(sessionId);
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -254,6 +272,33 @@ class UnifiedMessageHandlerService {
       }
     } catch (error) {
       console.error('❌ UnifiedMessageHandler: Error sending kill signal:', error);
+    }
+  }
+
+  /**
+   * Send clear kill signal to backend to reset the shared kill flag registry
+   * This is necessary because the backend's kill flag persists across messages
+   */
+  private sendClearKillSignal(sessionId: string): void {
+    try {
+      console.log(`🔄 UnifiedMessageHandler: Sending clear kill signal to backend for session ${sessionId}`);
+      
+      const ws = this.webSocketConnections.get(sessionId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const clearKillMessage = {
+          action: 'clear_kill_signal',
+          type: 'clear_kill_signal',
+          sessionId: sessionId,
+          timestamp: new Date().toISOString()
+        };
+        
+        ws.send(JSON.stringify(clearKillMessage));
+        console.log(`🔄 UnifiedMessageHandler: Sent clear kill signal via WebSocket for session ${sessionId}`);
+      } else {
+        console.log(`⚠️ UnifiedMessageHandler: WebSocket not available, cannot send clear kill signal for session ${sessionId}`);
+      }
+    } catch (error) {
+      console.error('❌ UnifiedMessageHandler: Error sending clear kill signal:', error);
     }
   }
 
@@ -364,20 +409,18 @@ class UnifiedMessageHandlerService {
           await this.processFileMessage(finalSessionId, messageData);
           break;
         
-        case 'followup_message':
-          // Add user message locally and start loading
-          this.addUserMessageToLocalCache(finalSessionId, messageData);
-          this.broadcastLoadingState(finalSessionId, true, messageData.source);
-          await this.processFollowupMessage(finalSessionId, messageData);
-          break;
-        
         case 'edit_message':
           // Edit flow: update existing user message in-place and truncate UI immediately
           this.applyLocalEditAndTruncate(finalSessionId, messageData);
           // Start loading while waiting for new AI response - broadcast to BOTH interfaces for universal updates
           this.broadcastLoadingState(finalSessionId, true, 'chatpage');
           this.broadcastLoadingState(finalSessionId, true, 'sidebar');
-          await this.processEditMessage(finalSessionId, messageData);
+          // Send edit via WebSocket (reuse context message process - both just send via WS)
+          if (!this.hasWebSocketConnection(finalSessionId)) {
+            await this.ensureWebSocketConnection(finalSessionId, messageData.userId);
+          }
+          await this.sendWebSocketMessage(finalSessionId, messageData);
+          console.log('✏️ UnifiedMessageHandler: Edit message sent for session:', finalSessionId);
           break;
       }
 
@@ -546,24 +589,7 @@ class UnifiedMessageHandlerService {
     
     // Send message via WebSocket
     await this.sendWebSocketMessage(sessionId, messageData);
-    console.log('✅ UnifiedMessageHandler: Followup message sent for session:', sessionId);
-  }
-
-  /**
-   * Process edit message
-   */
-  private async processEditMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
-    console.log('✏️ UnifiedMessageHandler: Processing edit message for session:', sessionId);
-    
-    // Connection already established in handleMessageProcessing for new connections
-    // For existing connections, ensure it's still valid
-    if (!this.hasWebSocketConnection(sessionId)) {
-      await this.ensureWebSocketConnection(sessionId, messageData.userId);
-    }
-    
-    // Send message via WebSocket
-    await this.sendWebSocketMessage(sessionId, messageData);
-    console.log('✅ UnifiedMessageHandler: Edit message sent for session:', sessionId);
+    console.log('✅ UnifiedMessageHandler: Message sent for session:', sessionId);
   }
 
   /**
@@ -1112,8 +1138,21 @@ class UnifiedMessageHandlerService {
    * Stops loading animation and allows user to edit the message they just sent
    */
   private handleKillSignalAcknowledgment(sessionId: string, data: any): void {
-    console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason);
+    const wasExpected = this.sentKillSignals.has(sessionId);
+    console.log('✅ UnifiedMessageHandler: Kill signal acknowledged for session:', sessionId, 'reason:', data.reason, 'expected:', wasExpected);
+    
+    if (!wasExpected) {
+      console.warn('⚠️ UNEXPECTED: Backend sent kill signal that we did not initiate! Reason:', data.reason);
+      console.warn('⚠️ This may indicate a backend error or WebSocket connection issue');
+      // Don't mark session as cancelled if we didn't send the kill signal
+      // The backend shouldn't be sending kill signals on its own
+      return;
+    }
+    
     console.log('🛑 Processing Cancelled: Processing cancelled successfully');
+    
+    // Clear the tracking since we've acknowledged it
+    this.sentKillSignals.delete(sessionId);
     
     // Mark session as cancelled (if not already)
     this.cancelledSessions.add(sessionId);

@@ -168,11 +168,6 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
     import threading
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
     
-    # Check if session is already killed
-    if session_context and session_context.get('killed_at'):
-        logger.warning(f"Session {session_id} already killed before processing")
-        raise Exception("Session has been terminated")
-    
     # Get kill flag from shared registry (for real-time WebSocket kill signals)
     try:
         from kill_signal_registry import get_kill_flag, is_killed
@@ -185,24 +180,16 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         is_killed = lambda sid: False
     
     def check_kill_signal():
-        """Periodically check for kill signal from both registry and DynamoDB"""
-        session_manager = get_session_manager()
-        check_interval = 1.0  # Check every 1 second for faster response
-        max_checks = 900  # Maximum 900 checks (15 minutes total)
+        """Monitor kill signal from shared registry (real-time WebSocket signals)"""
+        check_interval = 0.5  # Check every 500ms for faster response
+        max_checks = 1800  # Maximum 1800 checks (15 minutes total)
         check_count = 0
         
         while not kill_flag.is_set() and check_count < max_checks:
             try:
-                # First check shared registry (fast, real-time WebSocket signals)
+                # Check shared registry for kill signal (fast, real-time)
                 if is_killed(session_id):
                     logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in registry for session {session_id}")
-                    kill_flag.set()
-                    break
-                
-                # Also check DynamoDB (fallback for persistence)
-                fresh_context = session_manager.get_session_context(session_id, user_id, include_conversation_history=False)
-                if fresh_context and fresh_context.get('killed_at'):
-                    logger.warning(f"🔴 KILL SIGNAL: Kill signal detected in DynamoDB for session {session_id}: {fresh_context.get('kill_reason', 'unknown')}")
                     kill_flag.set()
                     break
             except Exception as e:
@@ -1122,20 +1109,7 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
                         }
                     }
             
-            # Check for kill signal before processing
-            if session_context.get('killed_at'):
-                logger.warning(f"Session {session_id} has been killed: {session_context.get('kill_reason', 'unknown')}")
-                return {
-                    'statusCode': 410,  # Gone status code
-                    'body': {
-                        'error': 'Session terminated',
-                        'message': f'Session {session_id} has been terminated',
-                        'session_id': session_id,
-                        'user_id': user_id,
-                        'killed_at': session_context.get('killed_at'),
-                        'kill_reason': session_context.get('kill_reason', 'unknown')
-                    }
-                }
+            # Kill signals are now only in-memory events, checked during processing
         else:
             # Only create a new session if no session_id was provided
             if not session_id:
@@ -1225,20 +1199,7 @@ Context Items Available: {len(context_items)} items
         try:
             logger.debug("Calling session-aware agent...")
             
-            # Check for kill signal before processing
-            if session_context and session_context.get('killed_at'):
-                logger.warning(f"Session {session_id} has been killed before agent processing")
-                return {
-                    'statusCode': 410,
-                    'body': {
-                        'error': 'Session terminated',
-                        'message': f'Session {session_id} has been terminated',
-                        'session_id': session_id,
-                        'user_id': user_id,
-                        'killed_at': session_context.get('killed_at'),
-                        'kill_reason': session_context.get('kill_reason', 'unknown')
-                    }
-                }
+            # Kill signals are now only in-memory events, checked during processing
             
             # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
             ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"

@@ -239,12 +239,18 @@ const TypingText = ({
 // Hoisted input bar to preserve local state across parent re-renders
 const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, onModelClick, modelLabel, isLoading, onStop }: { disabled: boolean; placeholder: string; onSend: (text: string) => void; onFileClick: () => void; onModelClick: (e: React.MouseEvent<HTMLElement>) => void; modelLabel: string; isLoading?: boolean; onStop?: () => void }) => {
   const [value, setValue] = useState('');
+  const [isSending, setIsSending] = useState(false); // Track local sending state to prevent double-clicks
+  
   const onSendClick = () => {
-    if (value.trim()) {
+    if (value.trim() && !isSending) {
+      setIsSending(true); // Set local sending state immediately
       onSend(value);
       setValue('');
+      // Clear sending state after a short delay to prevent accidental double-clicks
+      setTimeout(() => setIsSending(false), 500);
     }
   };
+  
   const onKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -447,17 +453,24 @@ const ChatMessageInputBar = memo(({ disabled, placeholder, onSend, onFileClick, 
             size="small"
             onClick={(e) => {
               e.stopPropagation();
+              e.preventDefault(); // Prevent any default behavior
+              
+              // Use isLoading (from parent) to determine if we should stop or send
+              // isLoading reflects the actual backend processing state
               if (isLoading && onStop) {
+                console.log('🛑 ChatPage input: Stop button clicked');
                 onStop();
-              } else {
+              } else if (!isSending) {
+                // Only send if we're not already in the process of sending
+                console.log('📤 ChatPage input: Send button clicked');
                 onSendClick();
               }
             }}
-            disabled={!isLoading && (disabled || !value.trim())}
+            disabled={!isLoading && (disabled || !value.trim() || isSending)}
             sx={{
               color: isLoading 
                 ? '#ef4444' 
-                : (value.trim() ? '#22c55e' : '#6b7280'),
+                : (value.trim() && !isSending ? '#22c55e' : '#6b7280'),
               padding: '4px',
               transition: 'all 0.2s ease',
               '&:hover': { 
@@ -984,7 +997,6 @@ export default function ChatPage() {
     sendMessage: sendUnifiedMessage,
     sendContextMessage: sendUnifiedContextMessage,
     sendFileMessage: sendUnifiedFileMessage,
-    sendFollowupMessage: sendUnifiedFollowupMessage,
     sendEditMessage: sendUnifiedEditMessage
   } = useUnifiedMessaging({
     sessionId: currentSession?.session_id || null,
@@ -1172,7 +1184,8 @@ export default function ChatPage() {
       } else if (nextMessage.type === 'context' && nextMessage.context) {
         result = await sendUnifiedContextMessage(nextMessage.text, nextMessage.context, nextMessage.model);
       } else if (nextMessage.type === 'followup' && currentSession?.session_id) {
-        result = await sendUnifiedFollowupMessage(nextMessage.text, nextMessage.model);
+        // Send followup as context_message with empty context for consistency
+        result = await sendUnifiedContextMessage(nextMessage.text, [], nextMessage.model);
       } else {
         result = await sendUnifiedMessage({ text: nextMessage.text, model: nextMessage.model, type: 'new_message' });
       }
@@ -1216,7 +1229,7 @@ export default function ChatPage() {
     } finally {
       isProcessingQueueRef.current = false;
     }
-  }, [messageQueue, currentSession?.session_id, getCurrentSessionLoading, isUnifiedProcessing, isStreamingActive, typingMessages, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedFollowupMessage, sendUnifiedMessage, loadSession, loadSessionFromDatabase]);
+  }, [messageQueue, currentSession?.session_id, getCurrentSessionLoading, isUnifiedProcessing, isStreamingActive, typingMessages, sendUnifiedFileMessage, sendUnifiedContextMessage, sendUnifiedMessage, loadSession, loadSessionFromDatabase]);
 
   // Subscribe to loading state updates from unified messaging system
   useEffect(() => {
@@ -1630,11 +1643,10 @@ export default function ChatPage() {
       });
       loadingTimeoutRefs.current = {};
       
-      // Cancel all pending messages when component unmounts (page refresh)
-      if (currentSessionRef.current) {
-        console.log('🧹 ChatPage: Cleaning up - cancelling all pending messages for session:', currentSessionRef.current);
-        unifiedMessageHandler.cancelAllMessagesForSession(currentSessionRef.current);
-      }
+      // NOTE: Do NOT send kill signals on unmount
+      // Kill signals should only be sent when user explicitly clicks stop button
+      // Unmount happens during navigation, sidebar clear, etc. and shouldn't cancel backend processing
+      console.log('🧹 ChatPage: Cleanup complete (local state only, no kill signal)');
     };
   }, []); // Empty dependency array - only run on mount/unmount
 
@@ -2176,56 +2188,58 @@ export default function ChatPage() {
         // The handler expects files with name, size, type properties which UploadedFile has
         result = await sendUnifiedFileMessage(text, uploadedFiles as unknown as File[], selectedModel);
       } else if (sessionContext.length > 0 && hasContextChanged()) {
-        // Context has changed - send context data for initial message, agent will fetch from database for follow-ups
-        console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - sending context message with tile data`);
+        // Context has changed - persist to backend first, then send message without context in payload
+        console.log(`📋 ChatPage: Context changed (${sessionContext.length} items) - persisting to backend before sending message`);
         
-        // CRITICAL: Sanitize context items to ensure data field is always an object, not a string
-        const sanitizedContext = sessionContext.map(item => {
-          let dataField = item.data;
-          
-          // If data is a string, parse it back to an object
-          if (typeof dataField === 'string') {
-            try {
-              dataField = JSON.parse(dataField);
-              console.warn(`⚠️ ChatPage: Context item ${item.id} had data as string, parsed it back to object`);
-            } catch (e) {
-              console.error(`❌ ChatPage: Failed to parse data field for item ${item.id}:`, e);
-              dataField = {};
-            }
+        // CRITICAL: Persist context to backend FIRST before sending message
+        // This ensures context is saved before message reaches agent
+        if (currentSession?.session_id && user?.id) {
+          try {
+            // Sanitize context items before persisting
+            const sanitizedContext = sessionContext.map(item => {
+              let dataField = item.data;
+              
+              // If data is a string, parse it back to an object
+              if (typeof dataField === 'string') {
+                try {
+                  dataField = JSON.parse(dataField);
+                } catch (e) {
+                  dataField = {};
+                }
+              }
+              
+              // Ensure data is an object
+              if (!dataField || typeof dataField !== 'object' || Array.isArray(dataField)) {
+                dataField = {};
+              }
+              
+              return {
+                ...item,
+                data: dataField
+              };
+            });
+            
+            await sessionManagementAPI.updateSession(currentSession.session_id, user.id, {
+              session_variables: {
+                context_items: sanitizedContext,
+                context_added_at: Date.now(),
+              }
+            });
+            console.log('✅ ChatPage: Context persisted to backend before message send');
+          } catch (error) {
+            console.error('❌ ChatPage: Failed to persist context before message send:', error);
+            // Continue with message send even if persistence failed
           }
-          
-          // Ensure data is an object (not null, undefined, or array)
-          if (!dataField || typeof dataField !== 'object' || Array.isArray(dataField)) {
-            console.warn(`⚠️ ChatPage: Context item ${item.id} has invalid data field (type: ${typeof dataField}), using empty object`);
-            dataField = {};
-          }
-          
-          return {
-            ...item,
-            data: dataField // Ensure data is always an object
-          };
-        });
+        }
         
-        // Log sanitized context items before sending
-        console.log('🔍 ChatPage: Sanitized context items before sending:', sanitizedContext.map(item => ({
-          id: item.id,
-          type: item.type,
-          title: item.title,
-          has_data: !!item.data,
-          data_type: typeof item.data,
-          data_keys: item.data ? Object.keys(item.data) : [],
-          data_s3_key: item.data?.s3_key,
-          full_data: item.data
-        })));
-        
-        // Sending context message with sanitized context items
-        result = await sendUnifiedContextMessage(text, sanitizedContext, selectedModel);
+        // Send message WITHOUT context items - agent will fetch from session variables
+        result = await sendUnifiedContextMessage(text, [], selectedModel);
         // Update previous context after sending
         previousContextRef.current = [...sessionContext];
       } else if (currentSession?.session_id) {
-        // Followup message (existing session)
-        console.log('🔄 ChatPage: Sending followup message to existing session');
-        result = await sendUnifiedFollowupMessage(text, selectedModel);
+        // Followup message (existing session) - use context_message path for consistency
+        console.log('🔄 ChatPage: Sending message to existing session');
+        result = await sendUnifiedContextMessage(text, [], selectedModel);
       } else {
         // New message (no session)
         console.log('🆕 ChatPage: Sending new message (will create session)');

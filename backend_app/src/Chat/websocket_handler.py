@@ -370,6 +370,10 @@ class WebSocketHandler:
                     'body': json_dumps_safe({'message': 'Connection established'})
                 }
             
+            # Handle clear kill signal message
+            if message_type == 'clear_kill_signal':
+                return self._handle_clear_kill_signal(connection_id, user_id, session_id, message_data)
+            
             # Handle kill signal message
             if message_type == 'kill_signal':
                 return self._handle_kill_signal(connection_id, user_id, session_id, message_data)
@@ -700,22 +704,6 @@ class WebSocketHandler:
             except Exception as reg_error:
                 logger.warning(f"Failed to set kill flag in registry: {str(reg_error)}")
             
-            # Also set kill flag in DynamoDB (for persistence and fallback)
-            try:
-                timestamp_ms = int(datetime.now().timestamp() * 1000)
-                self.chat_sessions_table.update_item(
-                    Key={'user_id': user_id, 'session_id': session_id},
-                    UpdateExpression='SET killed_at = :killed_at, kill_reason = :kill_reason',
-                    ExpressionAttributeValues={
-                        ':killed_at': timestamp_ms,
-                        ':kill_reason': reason
-                    },
-                    ConditionExpression='attribute_exists(user_id) AND attribute_exists(session_id)'
-                )
-                logger.info(f"🔴 KILL SIGNAL: Set kill flag in DynamoDB for session {session_id}")
-            except Exception as db_error:
-                logger.warning(f"Failed to set kill flag in DynamoDB: {str(db_error)}")
-            
             # Send acknowledgment to frontend
             ack_message = {
                 'type': 'kill_signal_acknowledged',
@@ -738,6 +726,36 @@ class WebSocketHandler:
                 'body': json_dumps_safe({'error': f'Failed to process kill signal: {str(e)}'})
             }
     
+    def _handle_clear_kill_signal(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle clear kill signal message - clears kill flag to allow new messages to process"""
+        try:
+            logger.info(f"🔄 CLEAR KILL: Processing clear kill signal for session {session_id}")
+            
+            if not session_id:
+                return {
+                    'statusCode': 400,
+                    'body': json_dumps_safe({'error': 'No session_id provided'})
+                }
+            
+            # Clear kill flag in shared registry
+            try:
+                from kill_signal_registry import clear_kill_flag
+                clear_kill_flag(session_id)
+                logger.info(f"🔄 CLEAR KILL: Cleared kill flag in registry for session {session_id}")
+            except Exception as reg_error:
+                logger.warning(f"Failed to clear kill flag in registry: {str(reg_error)}")
+            
+            return {
+                'statusCode': 200,
+                'body': json_dumps_safe({'message': 'Kill flag cleared successfully'})
+            }
+        except Exception as e:
+            logger.error(f"Error clearing kill signal: {str(e)}")
+            return {
+                'statusCode': 500,
+                'body': json_dumps_safe({'error': f'Failed to clear kill signal: {str(e)}'})
+            }
+    
     def _handle_edit_message(self, connection_id: str, user_id: str, session_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle message editing"""
         try:
@@ -754,15 +772,12 @@ class WebSocketHandler:
             logger.info(f"🔍 EDIT: Starting edit process for message {message_id}")
             
             # Set kill signal to stop ongoing processing
-            timestamp_ms = int(datetime.now().timestamp() * 1000)
             try:
-                self.chat_sessions_table.update_item(
-                    Key={'user_id': user_id, 'session_id': session_id},
-                    UpdateExpression='SET killed_at = :killed_at',
-                    ExpressionAttributeValues={':killed_at': timestamp_ms}
-                )
-            except Exception:
-                pass
+                from kill_signal_registry import set_kill_flag
+                set_kill_flag(session_id, 'message_edit')
+                logger.info(f"🔴 KILL SIGNAL: Set kill flag in registry for edit - session {session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to set kill flag for edit: {str(e)}")
             
             # Get current session
             response = self.chat_sessions_table.get_item(
@@ -821,7 +836,7 @@ class WebSocketHandler:
             timestamp = int(datetime.now().timestamp())
             self.chat_sessions_table.update_item(
                 Key={'user_id': user_id, 'session_id': session_id},
-                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :updated, last_edit_at = :edit_at, last_edited_message_id = :edited_id REMOVE killed_at',
+                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :updated, last_edit_at = :edit_at, last_edited_message_id = :edited_id',
                 ExpressionAttributeValues={
                     ':messages': truncated_messages,
                     ':count': len(truncated_messages),
