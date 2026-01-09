@@ -437,17 +437,31 @@ def handle_tiles_operations(user_id: str, http_method: str, path: str, event: Di
             logger.error(f"❌ Error parsing request body in handle_tiles_operations: {str(e)}")
             return create_response(400, {"error": f"Error parsing request: {str(e)}"})
     elif http_method == 'PUT':
-        # Extract tile ID from path (e.g., /tiles/tile123 -> tile123)
-        tile_id = path.split('/')[-1]
-        if not tile_id or tile_id == 'tiles':
-            return create_response(400, {"error": "Tile ID required in path"})
-        return handle_update_tile(user_id, tile_id, event)
+        # Extract tile ID from body or path (body takes precedence)
+        try:
+            body = json.loads(event.get('body', '{}')) if isinstance(event.get('body'), str) else event.get('body', {})
+            tile_id = body.get('tileId')
+            if not tile_id:
+                # Fallback: try to extract from path
+                tile_id = path.split('/')[-1]
+                if tile_id == 'tiles' or not tile_id:
+                    return create_response(400, {"error": "Tile ID required in body or path"})
+            return handle_update_tile(user_id, tile_id, event)
+        except json.JSONDecodeError:
+            return create_response(400, {"error": "Invalid JSON in request body"})
     elif http_method == 'DELETE':
-        # Extract tile ID from path (e.g., /tiles/tile123 -> tile123)
-        tile_id = path.split('/')[-1]
-        if not tile_id or tile_id == 'tiles':
-            return create_response(400, {"error": "Tile ID required in path"})
-        return handle_remove_tile(user_id, tile_id)
+        # Extract tile ID from body or path (body takes precedence)
+        try:
+            body = json.loads(event.get('body', '{}')) if isinstance(event.get('body'), str) else event.get('body', {})
+            tile_id = body.get('tileId')
+            if not tile_id:
+                # Fallback: try to extract from path
+                tile_id = path.split('/')[-1]
+                if tile_id == 'tiles' or not tile_id:
+                    return create_response(400, {"error": "Tile ID required in body or path"})
+            return handle_remove_tile(user_id, tile_id)
+        except json.JSONDecodeError:
+            return create_response(400, {"error": "Invalid JSON in request body"})
     else:
         return create_response(405, {"error": "Method not allowed for tiles endpoint"})
 

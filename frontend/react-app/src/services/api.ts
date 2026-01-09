@@ -793,8 +793,9 @@ export const dashboardAPI = {
   },
 
   removeTile: async (tileId: string): Promise<{ message: string }> => {
-    return apiRequest<{ message: string }>(`/dashboard-tiles/${tileId}`, {
+    return apiRequest<{ message: string }>('/dashboard-tiles', {
       method: 'DELETE',
+      body: JSON.stringify({ tileId }),
     });
   },
 
