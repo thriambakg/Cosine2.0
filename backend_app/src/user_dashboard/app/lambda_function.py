@@ -987,10 +987,10 @@ def handle_import_tile(user_id: str, event: Dict) -> Dict:
         now = datetime.utcnow().isoformat()
         tile_type = tile_config.get('type', 'crypto')
         
-        # Get tile size for position calculation
+        # Get tile size for position calculation (convert to int to handle float values)
         tile_size = tile_config.get('gridSize', {'width': 4, 'height': 4})
-        tile_width = tile_size.get('width', 4) if isinstance(tile_size, dict) else 4
-        tile_height = tile_size.get('height', 4) if isinstance(tile_size, dict) else 4
+        tile_width = int(tile_size.get('width', 4)) if isinstance(tile_size, dict) else 4
+        tile_height = int(tile_size.get('height', 4)) if isinstance(tile_size, dict) else 4
         
         # Find next available position
         existing_tiles = target_tab.get('tiles', [])
@@ -1029,7 +1029,7 @@ def handle_import_tile(user_id: str, event: Dict) -> Dict:
                     del portfolio_data['results']
             new_tile['portfolioData'] = portfolio_data
         elif tile_type in ['news', 'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures']:
-            # Search tiles - preserve search parameters and filters
+            # Search tiles - preserve search parameters, filters, pagination, AND results
             if 'searchParams' in tile_config:
                 new_tile['searchParams'] = tile_config.get('searchParams')
             if 'filterSettings' in tile_config:
@@ -1038,6 +1038,9 @@ def handle_import_tile(user_id: str, event: Dict) -> Dict:
                 new_tile['filters'] = tile_config.get('filters')
             if 'paginationState' in tile_config:
                 new_tile['paginationState'] = tile_config.get('paginationState')
+            # Preserve results to show exact same data (not fresh query results)
+            if 'results' in tile_config:
+                new_tile['results'] = tile_config.get('results')
         elif tile_type == 'stock_screener':
             if 'criteria' in tile_config:
                 new_tile['criteria'] = tile_config.get('criteria')
@@ -1443,13 +1446,16 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
         original_title = duplicated_tile.get('title', 'Untitled')
         duplicated_tile['title'] = f"{original_title} (Copy)"
         
-        # Remove runtime-specific data (results, etc.)
+        # Remove temporary runtime-specific data (UI state, not configuration)
+        # NOTE: We now PRESERVE 'results' to maintain exact search results alongside paginationState
+        # This ensures duplicated tiles show the same data, not fresh queries that might differ
         if 'articles' in duplicated_tile:
             del duplicated_tile['articles']
         if 'trades' in duplicated_tile:
             del duplicated_tile['trades']
-        if 'results' in duplicated_tile:
-            del duplicated_tile['results']
+        # Keep 'results' for search tiles (govt_contracts, congress_bills, etc.)
+        # if 'results' in duplicated_tile:
+        #     del duplicated_tile['results']
         if 'allResults' in duplicated_tile:
             del duplicated_tile['allResults']
         if 'filteredResults' in duplicated_tile:
@@ -1462,8 +1468,11 @@ def handle_duplicate_tile(user_id: str, event: Dict) -> Dict:
                 del portfolio_data['results']
             duplicated_tile['portfolioData'] = portfolio_data
         
-        # IMPORTANT: Preserve paginationState for all tiles that have pagination
-        # This allows news tiles, govt contracts tiles, etc. to restore pagination
+        # IMPORTANT: Explicitly preserve paginationState for all tiles that have pagination
+        # This allows news tiles, govt contracts tiles, etc. to restore pagination (including "load more +X" state)
+        # paginationState is already preserved from source_tile.copy() above, this is just documentation
+        # If searchParams exist, ensure they're also preserved for search tiles
+        # Both paginationState and searchParams are configuration, not runtime data
         
         # Use provided position or calculate next available position
         provided_position = body.get('gridPosition')
@@ -2048,18 +2057,18 @@ def find_next_available_position(existing_tiles: List[Dict], tile_width: int, ti
         pos = tile.get('gridPosition', tile.get('position', {}))
         size = tile.get('gridSize', tile.get('size', {}))
         
-        # Get position coordinates
+        # Get position coordinates (convert to int to handle float values)
         if isinstance(pos, dict):
-            tile_x = pos.get('x', 0)
-            tile_y = pos.get('y', 0)
+            tile_x = int(pos.get('x', 0))
+            tile_y = int(pos.get('y', 0))
         else:
             tile_x = 0
             tile_y = 0
         
-        # Get size dimensions
+        # Get size dimensions (convert to int to handle float values)
         if isinstance(size, dict):
-            tile_w = size.get('width', 4)
-            tile_h = size.get('height', 4)
+            tile_w = int(size.get('width', 4))
+            tile_h = int(size.get('height', 4))
         else:
             tile_w = 4
             tile_h = 4

@@ -796,7 +796,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         };
         
         // For search tiles, ensure searchParams are always included (even if empty)
-        // This ensures the tile can be restored with its search configuration
+        // This ensures the tile can be restored with its search configuration AND exact results
         if (['lda_disclosures', 'congress_bills', 'news', 'sec_search', 'govt_contracts', 'politician_trades'].includes(tile.type)) {
           if (tile.searchParams !== undefined) {
             fullTileData.searchParams = tile.searchParams;
@@ -806,6 +806,11 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           }
           if (tile.paginationState !== undefined) {
             fullTileData.paginationState = tile.paginationState;
+          }
+          // IMPORTANT: Save results data to preserve exact search results (not just pagination keys)
+          // This ensures imported/duplicated tiles show the same data, even if underlying DB changed
+          if (tile.results !== undefined) {
+            fullTileData.results = tile.results;
           }
         }
         const title = tile.symbol 

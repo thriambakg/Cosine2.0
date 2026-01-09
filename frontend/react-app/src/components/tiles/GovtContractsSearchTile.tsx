@@ -977,9 +977,15 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // Preview mode: Always run fresh query when opened in preview
+  // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
+      if (paginationState && paginationState.totalResultsLoaded > 0) {
+        console.log('🔄 GovtContractsSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
+        return;
+      }
+      
       const hasSearchCriteria = 
         (currentSearchParams.awarding_agency_name && currentSearchParams.awarding_agency_name.length > 0) ||
         (currentSearchParams.funding_agency_name && currentSearchParams.funding_agency_name.length > 0) ||
@@ -993,7 +999,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         currentSearchParams.date_to;  // Legacy
       
       if (hasSearchCriteria) {
-        console.log('🔄 GovtContractsSearchTile: Preview mode - running fresh query');
+        console.log('🔄 GovtContractsSearchTile: Preview mode - running fresh query (no pagination state)');
         setHasPerformedInitialSearch(false); // Reset to allow fresh search
         performSearch();
       }

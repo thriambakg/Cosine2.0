@@ -880,9 +880,15 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     }
   }, [allResults, selectedFilters, filterResults]);
 
-  // Preview mode: Always run fresh query when opened in preview
+  // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
+      if (paginationState && paginationState.totalResultsLoaded > 0) {
+        console.log('🔄 SECSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
+        return;
+      }
+      
       // Only auto-search if we have meaningful search params (not just defaults)
       // Check for actual values, not just empty arrays or default dates
       const hasSearchCriteria = 
@@ -896,7 +902,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         (!Array.isArray(currentSearchParams.located) && currentSearchParams.located && currentSearchParams.located.trim() !== '');
       
       if (hasSearchCriteria) {
-        console.log('🔄 SECSearchTile: Preview mode - running fresh query');
+        console.log('🔄 SECSearchTile: Preview mode - running fresh query (no pagination state)');
         setHasPerformedInitialSearch(false); // Reset to allow fresh search
         performSearch();
       }

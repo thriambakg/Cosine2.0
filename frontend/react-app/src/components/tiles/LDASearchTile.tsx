@@ -991,9 +991,15 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     }
   }, [paginationState, allResults.length, isRestoringPagination]);
 
-  // Preview mode: Always run fresh query when opened in preview
+  // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
+      if (paginationState && paginationState.totalResultsLoaded > 0) {
+        console.log('🔄 LDASearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
+        return;
+      }
+      
       const hasSearchCriteria = 
         (currentSearchParams.general_text_search && currentSearchParams.general_text_search.length > 0) ||
         (currentSearchParams.general_text_search_fields && (
@@ -1016,7 +1022,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         currentSearchParams.amount_max !== undefined;
       
       if (hasSearchCriteria) {
-        console.log('🔄 LDASearchTile: Preview mode - running fresh query');
+        console.log('🔄 LDASearchTile: Preview mode - running fresh query (no pagination state)');
         setHasPerformedInitialSearch(false); // Reset to allow fresh search
         performSearch();
       }

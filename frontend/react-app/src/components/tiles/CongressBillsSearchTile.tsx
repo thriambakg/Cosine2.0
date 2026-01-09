@@ -880,9 +880,15 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // Preview mode: Always run fresh query when opened in preview
+  // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
+      if (paginationState && paginationState.totalResultsLoaded > 0) {
+        console.log('🔄 CongressBillsSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
+        return;
+      }
+      
       const hasSearchCriteria = 
         (currentSearchParams.bill_title && currentSearchParams.bill_title.length > 0) ||
         (currentSearchParams.bill_type && currentSearchParams.bill_type.length > 0) ||
@@ -898,7 +904,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
         currentSearchParams.bill_number !== undefined;
       
       if (hasSearchCriteria) {
-        console.log('🔄 CongressBillsSearchTile: Preview mode - running fresh query');
+        console.log('🔄 CongressBillsSearchTile: Preview mode - running fresh query (no pagination state)');
         setHasPerformedInitialSearch(false); // Reset to allow fresh search
         performSearch();
       }

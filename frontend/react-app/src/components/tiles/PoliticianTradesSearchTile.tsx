@@ -732,9 +732,15 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     loadSecuritySuggestions();
   }, [loadPoliticianSuggestions, loadSecuritySuggestions]);
 
-  // Preview mode: Always run fresh query when opened in preview
+  // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
+      // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
+      if (paginationState && paginationState.totalResultsLoaded > 0) {
+        console.log('🔄 PoliticianTradesSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
+        return;
+      }
+      
       const hasSearchCriteria = 
         (currentSearchParams.politicianName && currentSearchParams.politicianName.length > 0) ||
         (currentSearchParams.security && currentSearchParams.security.length > 0) ||
@@ -743,7 +749,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         (currentSearchParams.transactionType && currentSearchParams.transactionType.length > 0);
       
       if (hasSearchCriteria) {
-        console.log('🔄 PoliticianTradesSearchTile: Preview mode - running fresh query');
+        console.log('🔄 PoliticianTradesSearchTile: Preview mode - running fresh query (no pagination state)');
         setHasPerformedInitialSearch(false); // Reset to allow fresh search
         performSearch();
       }
