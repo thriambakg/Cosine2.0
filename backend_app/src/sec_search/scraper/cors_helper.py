@@ -4,6 +4,7 @@ Centralized CORS handling for all Lambda functions
 Restricts access to investcosine* and localhost:3000*
 """
 
+
 import re
 
 # Allowed origin patterns (regex patterns)
