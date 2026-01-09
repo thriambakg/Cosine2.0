@@ -170,9 +170,11 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
     
     # Get kill flag from shared registry (for real-time WebSocket kill signals)
     try:
-        from kill_signal_registry import get_kill_flag, is_killed
+        from kill_signal_registry import get_kill_flag, is_killed, clear_kill_flag
+        # Clear any stale kill flags from previous invocations
+        clear_kill_flag(session_id)
         kill_flag = get_kill_flag(session_id)
-        logger.info(f"Using shared kill flag registry for session {session_id}")
+        logger.info(f"Using shared kill flag registry for session {session_id} (cleared stale flags)")
     except ImportError:
         # Fallback: create local kill flag if registry not available
         logger.warning("Kill signal registry not available, using local kill flag")
