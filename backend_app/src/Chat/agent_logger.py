@@ -145,16 +145,6 @@ class AgentLogger(logging.Handler):
         if not self.websocket_enabled or not self.ws_handler:
             return
         
-        # CHECK KILL FLAG BEFORE SENDING LOG
-        # If session was killed, don't send any more logs
-        try:
-            from kill_signal_registry import is_killed
-            if self.session_id and is_killed(self.session_id):
-                # Session is killed, suppress all logging
-                return
-        except ImportError:
-            pass  # Registry not available, continue normally
-        
         try:
             # Construct log message in format expected by frontend
             log_message = {

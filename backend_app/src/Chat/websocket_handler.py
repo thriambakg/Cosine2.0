@@ -319,6 +319,19 @@ class WebSocketHandler:
                 except Exception as e:
                     logger.debug(f"Could not clear kill flag: {str(e)}")
             
+            # KILL SIGNAL: If this is a regular message and kill flag is set, terminate immediately
+            if session_id and message_type not in ('kill_signal', 'clear_kill_signal', 'connection_establish'):
+                try:
+                    from kill_signal_registry import is_killed
+                    if is_killed(session_id):
+                        logger.warning(f"🔴 KILL SIGNAL: Kill flag active for session {session_id}, terminating invocation")
+                        return {
+                            'statusCode': 200,
+                            'body': json_dumps_safe({'message': 'Session terminated'})
+                        }
+                except ImportError:
+                    pass  # Registry not available, continue normally
+            
             # Session ID is required for all message types except connection_establish
             if not session_id and message_type != 'connection_establish':
                 logger.error(f"No sessionId provided in message data")
