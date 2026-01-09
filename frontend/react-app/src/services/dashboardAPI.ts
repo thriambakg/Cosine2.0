@@ -205,7 +205,7 @@ export const dashboardAPI = {
   // Import a tile from encrypted .cosine file
   importTile: async (params: { fileContent: string; tabId?: string }): Promise<{ tile: any; message: string }> => {
     try {
-      return await apiRequest<{ tile: any; message: string }>(`/tiles`, {
+      return await apiRequest<{ tile: any; message: string }>(`/dashboard-tiles`, {
         method: 'POST',
         body: JSON.stringify({
           operation: 'import_tile',

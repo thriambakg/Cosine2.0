@@ -358,23 +358,35 @@ def lambda_handler(event, context):
 def extract_user_id(event: Dict) -> Optional[str]:
     """
     Extract user ID from the request
-    TODO: Implement proper authentication/authorization
+    Priority order:
+    1. Cognito JWT from API Gateway authorizer (requestContext.authorizer.claims.sub)
+    2. Query parameters (for backwards compatibility)
+    3. Path parameters (for backwards compatibility)
+    4. X-User-ID header (for testing only)
     """
-    # Check query parameters first (for GET requests)
+    # PRIMARY: Extract from Cognito JWT claims (API Gateway authorizer)
+    request_context = event.get('requestContext', {})
+    authorizer = request_context.get('authorizer', {})
+    claims = authorizer.get('claims', {})
+    user_id = claims.get('sub')  # Cognito user ID from JWT
+    if user_id:
+        return user_id
+    
+    # FALLBACK: Check query parameters (for backwards compatibility)
     query_params = event.get('queryStringParameters', {})
     if query_params:
         user_id = query_params.get('userId')
         if user_id:
             return user_id
     
-    # Check path parameters
+    # FALLBACK: Check path parameters (for backwards compatibility)
     path_params = event.get('pathParameters', {})
     if path_params:
         user_id = path_params.get('userId')
         if user_id:
             return user_id
     
-    # Fallback to header (for testing)
+    # FALLBACK: Check header (for testing only)
     headers = event.get('headers', {})
     user_id = headers.get('X-User-ID')
     
