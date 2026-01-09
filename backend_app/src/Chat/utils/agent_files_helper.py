@@ -290,7 +290,7 @@ class AgentFilesHelper:
         session_variables: Dict[str, Any]
     ) -> None:
         """
-        Send session update notification to WebSocket processor.
+        Send session update notification via WebSocket directly (same as file uploads).
         
         Args:
             user_id: User ID
@@ -298,27 +298,11 @@ class AgentFilesHelper:
             session_variables: Updated session variables
         """
         try:
-            websocket_processor_name = get_chat_agent_function_name()
-            if not websocket_processor_name:
-                logger.warning("WEBSOCKET_PROCESSOR_FUNCTION_NAME not configured, skipping WebSocket notification")
-                return
-            
-            # Create WebSocket payload for session update
-            websocket_payload = {
-                'type': 'session_update',
-                'user_id': user_id,
-                'session_id': session_id,
-                'session_variables': session_variables
-            }
-            
-            # Invoke WebSocket processor Lambda
-            response = lambda_client.invoke(
-                FunctionName=websocket_processor_name,
-                InvocationType='Event',  # Async invocation
-                Payload=json.dumps(websocket_payload, cls=DecimalEncoder)
-            )
-            
-            logger.info(f"Sent session update to WebSocket processor for session {session_id}")
+            # Use WebSocketHandler to send session update directly (like file uploads do)
+            from websocket_handler import WebSocketHandler
+            ws_handler = WebSocketHandler()
+            ws_handler._send_session_update_with_variables(user_id, session_id, session_variables)
+            logger.info(f"✅ Sent agent files session update to WebSocket for session {session_id}")
             
         except Exception as e:
             logger.error(f"Error sending session update to WebSocket: {str(e)}", exc_info=True)
