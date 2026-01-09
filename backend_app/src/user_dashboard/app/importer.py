@@ -357,33 +357,46 @@ class DashboardImporter:
             True if valid tile data, False otherwise
         """
         try:
-            # Check for valid type
-            data_type = dashboard_data.get('type')
-            if data_type not in ['tile', 'dashboard']:
-                logger.error(f"Invalid data type: {data_type} (expected 'tile' or 'dashboard')")
+            # Check for valid structure
+            if not isinstance(dashboard_data, dict):
+                logger.error("Data is not a dictionary")
                 return False
             
-            # For tile type, check for tile field
-            if data_type == 'tile':
+            # For single tile export (new format), check for tile field
+            if 'tile' in dashboard_data:
                 tile_data = dashboard_data.get('tile')
                 if not tile_data or not isinstance(tile_data, dict):
                     logger.error("Missing or invalid 'tile' field in tile data")
                     return False
                 
-                # Tile should have at least type and title
+                # Tile should have at least type
                 if 'type' not in tile_data:
                     logger.error("Missing 'type' field in tile data")
                     return False
+                
+                logger.info(f"✅ Valid tile export: {tile_data.get('type')} - {tile_data.get('title', 'Untitled')}")
+                return True
             
-            # For dashboard type, check for at least one tile in tab
-            elif data_type == 'dashboard':
+            # For dashboard export (legacy format), check for tab with tiles
+            if 'tab' in dashboard_data:
                 tab_data = dashboard_data.get('tab', {})
                 tiles = tab_data.get('tiles', [])
                 if not tiles or not isinstance(tiles, list) or len(tiles) == 0:
                     logger.error("No tiles found in dashboard data")
                     return False
+                
+                logger.info(f"✅ Valid dashboard export with {len(tiles)} tile(s)")
+                return True
             
-            return True
+            # Legacy format: tile fields directly in dashboard_data (old govt_contracts exports)
+            # If it has type but no 'tile' or 'tab', it's a direct tile export
+            data_type = dashboard_data.get('type')
+            if data_type and data_type != 'dashboard':
+                logger.info(f"✅ Valid legacy tile export (direct format): {data_type}")
+                return True
+            
+            logger.error("Data is neither a tile nor a dashboard export")
+            return False
             
         except Exception as e:
             logger.error(f"Error validating tile data: {str(e)}")

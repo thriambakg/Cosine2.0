@@ -928,27 +928,35 @@ def handle_import_tile(user_id: str, event: Dict) -> Dict:
         
         dashboard_data = result.get('dashboard_data')
         
-        # Validate this is a tile export (not a full dashboard)
-        data_type = dashboard_data.get('type')
-        if data_type not in ['tile', 'dashboard']:  # Accept both for backward compatibility
+        # Validate this is a tile export using tile-specific validation
+        if not importer.validate_tile_data(dashboard_data):
             return create_response(400, {
-                'error': f'Invalid file type: expected "tile" or "dashboard", got "{data_type}"'
+                'error': 'Invalid tile data structure'
             })
         
-        # Extract tile data
+        # Extract tile data from various formats
         tile_config = None
-        if data_type == 'tile':
-            # Direct tile export
+        
+        # Format 1: New tile export format with 'tile' field
+        if 'tile' in dashboard_data:
             tile_config = dashboard_data.get('tile')
-        else:
-            # Dashboard export - extract first tile from tab
+            logger.info(f"📦 Importing tile from new format: {tile_config.get('type', 'unknown')} - {tile_config.get('title', 'Untitled')}")
+        
+        # Format 2: Dashboard export with tiles in tab
+        elif 'tab' in dashboard_data:
             tab_data = dashboard_data.get('tab', {})
             tiles = tab_data.get('tiles', [])
             if tiles and len(tiles) > 0:
                 tile_config = tiles[0]
-                logger.info(f"Extracting first tile from dashboard export: {tile_config.get('type', 'unknown')} - {tile_config.get('title', 'Untitled')}")
+                logger.info(f"📦 Extracting first tile from dashboard export: {tile_config.get('type', 'unknown')} - {tile_config.get('title', 'Untitled')}")
             else:
                 return create_response(400, {'error': 'No tiles found in imported file'})
+        
+        # Format 3: Legacy direct tile export (old format, e.g., govt_contracts)
+        # If it has 'type' but no 'tile' or 'tab', the whole object is the tile
+        elif 'type' in dashboard_data and dashboard_data.get('type') != 'dashboard':
+            tile_config = dashboard_data
+            logger.info(f"📦 Importing tile from legacy direct format: {tile_config.get('type', 'unknown')} - {tile_config.get('title', 'Untitled')}")
         
         if not tile_config:
             return create_response(400, {'error': 'No tile data found in file'})
