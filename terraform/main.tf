@@ -894,6 +894,7 @@ module "api_gateway" {
 }
 
 
+
 # IAM Policy for Lambda functions to access Secrets Manager
 resource "aws_iam_policy" "lambda_secrets_policy" {
   name        = "${var.project_name}-lambda-secrets-policy-${var.environment}"
