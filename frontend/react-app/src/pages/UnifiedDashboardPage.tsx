@@ -944,56 +944,20 @@ const UnifiedDashboardPage: React.FC = () => {
     }
 
     try {
-      console.log('Importing tile:', tileData);
+      console.log('Importing tile with backend decryption:', tileData);
 
-      // Generate a new tile ID
-      const newTileId = `tile-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-      // Create the new tile with imported configuration
-      const newTile = {
-        id: newTileId,
-        type: tileData.type,
-        config: {
-          ...tileData.config,
-          title: tileData.config?.title || `Imported ${tileData.type}`,
-        },
-        position: {
-          x: 0,
-          y: 0,
-          w: tileData.position?.w || 6,
-          h: tileData.position?.h || 4,
-        },
-      };
-
-      // Add to current tab's tiles
-      const updatedTiles = [...(activeTab.tiles || []), newTile];
-      const updatedTab = { ...activeTab, tiles: updatedTiles };
+      // The backend now handles the full import process including:
+      // - Decryption of .cosine file
+      // - Validation of tile structure
+      // - Creating new tile with fresh UUID
+      // - Auto-positioning on grid
+      // - Saving to database
       
-      // Update in allTabs
-      const updatedAllTabs = allTabs.map((tab: any) =>
-        tab.id === activeTab.id ? updatedTab : tab
-      );
+      // The tileData here is the imported tile returned from backend
+      // Just reload from database to get the updated state
+      await reloadFromDatabase();
       
-      // Save to backend
-      const response = await dashboardAPI.saveTabs(
-        user.id,
-        updatedAllTabs,
-        activeDashboard?.id || 'default'
-      );
-
-      if (response.success) {
-        // Update local state
-        setAllTabs(updatedAllTabs);
-        setActiveTab(updatedTab);
-        
-        // Reload from database to ensure consistency
-        await reloadFromDatabase();
-        
-        console.log(`Tile imported successfully: ${newTileId}`);
-      } else {
-        console.error('Failed to save imported tile:', response.error);
-      }
-
+      console.log('✅ Tile imported successfully');
       setAddTileMenuOpen(false);
     } catch (error) {
       console.error('Failed to import tile:', error);
