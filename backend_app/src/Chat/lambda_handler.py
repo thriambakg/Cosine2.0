@@ -177,10 +177,17 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         kill_flag_registry_available = True
         clear_kill_flag_func = clear_kill_flag
         is_killed_func = is_killed
-        # Clear any stale kill flags from previous invocations before starting new processing
-        clear_kill_flag(session_id)
+        # CRITICAL: Check if kill signal is already set BEFORE clearing (kill signal might have arrived before processing started)
+        if is_killed(session_id):
+            logger.warning(f"🔴 KILL SIGNAL: Kill flag already set for session {session_id} before processing started")
+            # Clear the flag and raise immediately
+            clear_kill_flag(session_id)
+            raise Exception("Session has been terminated before processing started")
+        
+        # Only clear kill flag if processing is starting (no kill signal detected)
+        clear_kill_flag(session_id)  # Clear any stale flags
         kill_flag = get_kill_flag(session_id)
-        logger.info(f"Using shared kill flag registry for session {session_id} (cleared stale flags)")
+        logger.info(f"Using shared kill flag registry for session {session_id} (checked and cleared stale flags)")
     except ImportError:
         # Fallback: create local kill flag if registry not available
         logger.warning("Kill signal registry not available, using local kill flag")
@@ -189,24 +196,24 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         clear_kill_flag_func = None
     
     def check_kill_signal():
-        """Monitor kill signal from shared registry (real-time WebSocket signals)"""
+        """Monitor kill signal from DynamoDB (shared across all Lambda instances)"""
         if not kill_flag_registry_available or not is_killed_func:
             # No registry available, skip monitoring
             return
         
-        check_interval = 0.5  # Check every 500ms for faster response
-        max_checks = 1800  # Maximum 1800 checks (15 minutes total)
+        check_interval = 0.3  # Check every 300ms for faster kill signal detection (reduced from 500ms)
+        max_checks = 3600  # Maximum 3600 checks (18 minutes total at 300ms intervals)
         check_count = 0
         
         while not kill_flag.is_set() and check_count < max_checks:
             try:
-                # Check shared registry for kill signal (fast, real-time)
+                # Check DynamoDB for kill signal (shared across Lambda instances)
                 if is_killed_func(session_id):
-                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in registry for session {session_id}")
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in DynamoDB for session {session_id}")
                     kill_flag.set()
                     break
             except Exception as e:
-                logger.error(f"Error checking kill signal: {str(e)}")
+                logger.error(f"Error checking kill signal in DynamoDB: {str(e)}")
             
             check_count += 1
             if check_count < max_checks:
@@ -250,7 +257,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                 async def process_async_stream():
                                     nonlocal full_response, last_sent_length
                                     async for chunk in stream_result:
-                                        if kill_flag.is_set():
+                                        # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                        if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during async streaming, stopping")
+                                            kill_flag.set()  # Ensure local flag is set
                                             break
                                         if chunk:
                                             try:
@@ -294,7 +304,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                 # Regular sync generator
                                 try:
                                     for chunk in stream_result:
-                                        if kill_flag.is_set():
+                                        # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                        if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during sync streaming, stopping")
+                                            kill_flag.set()  # Ensure local flag is set
                                             break
                                         if chunk:
                                             try:
@@ -350,7 +363,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     async def process_async_stream():
                                         nonlocal full_response, last_sent_length
                                         async for chunk in stream_result:
-                                            if kill_flag.is_set():
+                                            # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                            if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model async streaming, stopping")
+                                                kill_flag.set()  # Ensure local flag is set
                                                 break
                                             if chunk:
                                                 try:
@@ -396,7 +412,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     # Regular sync generator
                                     try:
                                         for chunk in stream_result:
-                                            if kill_flag.is_set():
+                                            # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                            if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model sync streaming, stopping")
+                                                kill_flag.set()  # Ensure local flag is set
                                                 break
                                             if chunk:
                                                 try:
