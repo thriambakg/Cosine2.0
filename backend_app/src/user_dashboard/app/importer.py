@@ -131,12 +131,8 @@ class DashboardImporter:
                             'error': 'Failed to decrypt dashboard file. The file may be corrupted or encrypted with an unsupported key.'
                         }
             
-            # Validate dashboard data structure
-            if not self.validate_dashboard_data(dashboard_data):
-                return {
-                    'success': False,
-                    'error': 'Invalid dashboard data structure'
-                }
+            # Don't validate structure here - let the caller decide what validation to use
+            # (tile imports need tile validation, dashboard imports need dashboard validation)
             
             return {
                 'success': True,
