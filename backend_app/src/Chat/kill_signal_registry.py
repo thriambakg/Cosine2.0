@@ -45,12 +45,14 @@ def get_kill_flag(session_id: str) -> threading.Event:
     # Return a threading.Event that will be set based on DynamoDB state
     return threading.Event()
 
-def set_kill_flag(session_id: str, reason: str = 'user_cancellation'):
+def set_kill_flag(session_id: str, user_id: str, reason: str = 'user_cancellation'):
     """
     Set kill flag for a session in DynamoDB (persistent across Lambda instances)
+    Uses dedicated 'kill' column instead of session_variables
     
     Args:
         session_id: Session ID
+        user_id: User ID (required for composite key)
         reason: Reason for kill signal
     """
     try:
@@ -59,46 +61,72 @@ def set_kill_flag(session_id: str, reason: str = 'user_cancellation'):
             logger.error("Cannot set kill flag: sessions table not available")
             return
         
-        # Store kill flag in session_variables with a timestamp
+        if not user_id:
+            logger.error("Cannot set kill flag: user_id is required for composite key")
+            return
+        
+        # Store kill flag in dedicated 'kill' column
         current_time = int(time.time() * 1000)  # Milliseconds
         try:
             # Try to update the session if it exists
-            # If session doesn't exist, that's okay - the kill flag will be checked when processing starts
-            response = table.get_item(Key={'session_id': session_id})
+            # Use composite key: user_id (partition key) and session_id (sort key)
+            response = table.get_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                }
+            )
             if 'Item' in response:
-                # Session exists, update it with kill flag
+                # Session exists, update it with kill flag in dedicated column
                 table.update_item(
-                    Key={'session_id': session_id},
-                    UpdateExpression='SET session_variables.kill_signal = :kill_flag, session_variables.kill_signal_reason = :reason, session_variables.kill_signal_timestamp = :timestamp',
+                    Key={
+                        'user_id': user_id,
+                        'session_id': session_id
+                    },
+                    UpdateExpression='SET #kill = :kill_flag',
+                    ExpressionAttributeNames={
+                        '#kill': 'kill'  # 'kill' is a reserved word, so use ExpressionAttributeNames
+                    },
                     ExpressionAttributeValues={
-                        ':kill_flag': True,
-                        ':reason': reason,
-                        ':timestamp': current_time
+                        ':kill_flag': True
                     },
                     ReturnValues='NONE'
                 )
-                logger.info(f"🔴 KILL SIGNAL: Set kill flag in DynamoDB for session {session_id}, reason: {reason}")
+                logger.info(f"🔴 KILL SIGNAL: Set kill flag in DynamoDB for session {session_id} (user: {user_id}), reason: {reason}")
             else:
-                # Session doesn't exist yet - log a warning
-                # The processing Lambda will check DynamoDB when it starts, so if kill signal arrives
-                # after processing starts, the check_kill_signal thread will detect it
-                logger.warning(f"⚠️ KILL SIGNAL: Session {session_id} doesn't exist yet. Kill signal will be checked when processing starts or during periodic checks")
+                # Session doesn't exist yet - try to create a minimal entry with kill flag
+                # This allows kill signals to work even before session is fully created
+                try:
+                    table.put_item(
+                        Item={
+                            'user_id': user_id,
+                            'session_id': session_id,
+                            'kill': True,
+                            'created_at': current_time,
+                            'last_updated': current_time
+                        }
+                    )
+                    logger.info(f"🔴 KILL SIGNAL: Created session entry with kill flag for session {session_id} (user: {user_id}), reason: {reason}")
+                except Exception as put_error:
+                    logger.warning(f"⚠️ KILL SIGNAL: Session {session_id} doesn't exist and couldn't create minimal entry. Kill signal will be checked when processing starts. Error: {str(put_error)}")
         except Exception as e:
             logger.error(f"❌ Failed to set kill flag in DynamoDB: {str(e)}")
         
-        # Update local cache immediately
+        # Update local cache immediately (use session_id as key)
         with _cache_lock:
             _local_cache[session_id] = (True, time.time())
     
     except Exception as e:
         logger.error(f"❌ Error setting kill flag in DynamoDB: {str(e)}")
 
-def clear_kill_flag(session_id: str):
+def clear_kill_flag(session_id: str, user_id: str = None):
     """
     Clear kill flag for a session in DynamoDB
+    Uses dedicated 'kill' column
     
     Args:
         session_id: Session ID
+        user_id: User ID (required for composite key, optional for backward compatibility)
     """
     try:
         table = _get_sessions_table()
@@ -106,17 +134,27 @@ def clear_kill_flag(session_id: str):
             logger.error("Cannot clear kill flag: sessions table not available")
             return
         
-        # Remove kill flag from session_variables
+        if not user_id:
+            logger.warning(f"Cannot clear kill flag: user_id is required for composite key. Session: {session_id}")
+            return
+        
+        # Remove kill flag from dedicated 'kill' column
         try:
             table.update_item(
-                Key={'session_id': session_id},
-                UpdateExpression='REMOVE session_variables.kill_signal, session_variables.kill_signal_reason, session_variables.kill_signal_timestamp',
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                UpdateExpression='REMOVE #kill',
+                ExpressionAttributeNames={
+                    '#kill': 'kill'  # 'kill' is a reserved word
+                },
                 ReturnValues='NONE'
             )
-            logger.debug(f"Cleared kill flag in DynamoDB for session {session_id}")
+            logger.debug(f"Cleared kill flag in DynamoDB for session {session_id} (user: {user_id})")
         except table.meta.client.exceptions.ResourceNotFoundException:
             # Session doesn't exist, nothing to clear
-            logger.debug(f"Session {session_id} doesn't exist, nothing to clear")
+            logger.debug(f"Session {session_id} (user: {user_id}) doesn't exist, nothing to clear")
         except Exception as e:
             logger.error(f"❌ Failed to clear kill flag in DynamoDB: {str(e)}")
         
@@ -127,12 +165,14 @@ def clear_kill_flag(session_id: str):
     except Exception as e:
         logger.error(f"❌ Error clearing kill flag in DynamoDB: {str(e)}")
 
-def is_killed(session_id: str) -> bool:
+def is_killed(session_id: str, user_id: str = None) -> bool:
     """
     Check if a session has been killed by checking DynamoDB (with local cache for performance)
+    Uses dedicated 'kill' column and composite key (user_id, session_id)
     
     Args:
         session_id: Session ID
+        user_id: User ID (required for composite key, optional for backward compatibility)
         
     Returns:
         True if kill flag is set, False otherwise
@@ -148,6 +188,11 @@ def is_killed(session_id: str) -> bool:
             del _local_cache[session_id]
     
     # Check DynamoDB (slower but accurate)
+    # If user_id is not provided, we can't check DynamoDB (composite key required)
+    if not user_id:
+        logger.warning(f"Cannot check kill flag: user_id is required for composite key. Session: {session_id}")
+        return False
+    
     try:
         table = _get_sessions_table()
         if not table:
@@ -155,14 +200,21 @@ def is_killed(session_id: str) -> bool:
             return False
         
         try:
+            # Use composite key: user_id (partition key) and session_id (sort key)
             response = table.get_item(
-                Key={'session_id': session_id},
-                ProjectionExpression='session_variables.kill_signal'
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                },
+                ProjectionExpression='#kill',
+                ExpressionAttributeNames={
+                    '#kill': 'kill'  # 'kill' is a reserved word
+                }
             )
             
             if 'Item' in response:
-                session_vars = response['Item'].get('session_variables', {})
-                is_killed_value = session_vars.get('kill_signal', False)
+                # Check dedicated 'kill' column
+                is_killed_value = response['Item'].get('kill', False)
                 
                 # Update local cache
                 with _cache_lock:
@@ -181,13 +233,14 @@ def is_killed(session_id: str) -> bool:
         logger.error(f"❌ Error checking kill flag: {str(e)}")
         return False
 
-def remove_kill_flag(session_id: str):
+def remove_kill_flag(session_id: str, user_id: str = None):
     """
     Remove kill flag from registry (cleanup - same as clear_kill_flag)
     
     Args:
         session_id: Session ID
+        user_id: User ID (required for composite key, optional for backward compatibility)
     """
-    clear_kill_flag(session_id)
+    clear_kill_flag(session_id, user_id)
 
 

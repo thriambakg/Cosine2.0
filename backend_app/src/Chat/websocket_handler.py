@@ -327,14 +327,16 @@ class WebSocketHandler:
                 logger.warning(f"🔴 KILL SIGNAL: Received kill signal for session {session_id}, reason: {reason}")
                 
                 # CRITICAL: Set kill flag in shared registry so ongoing agent processing can detect it
-                if session_id and KILL_SIGNAL_REGISTRY_AVAILABLE:
+                # Use DynamoDB with composite key (user_id, session_id) and dedicated 'kill' column
+                if session_id and user_id and KILL_SIGNAL_REGISTRY_AVAILABLE:
                     try:
-                        set_kill_flag(session_id, reason)
-                        logger.info(f"✅ KILL SIGNAL: Set kill flag in registry for session {session_id}")
+                        from kill_signal_registry import set_kill_flag
+                        set_kill_flag(session_id, user_id, reason)
+                        logger.info(f"✅ KILL SIGNAL: Set kill flag in DynamoDB for session {session_id} (user: {user_id})")
                     except Exception as e:
-                        logger.error(f"❌ Failed to set kill flag in registry: {str(e)}")
+                        logger.error(f"❌ Failed to set kill flag in DynamoDB: {str(e)}")
                 elif session_id:
-                    logger.warning(f"⚠️ KILL SIGNAL: Kill signal registry not available, kill flag not set for session {session_id}")
+                    logger.warning(f"⚠️ KILL SIGNAL: Missing session_id or user_id, or kill signal registry not available. Session: {session_id}, User: {user_id}")
                 
                 return {
                     'statusCode': 200,

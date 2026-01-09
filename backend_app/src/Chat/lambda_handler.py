@@ -175,19 +175,19 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
     try:
         from kill_signal_registry import get_kill_flag, is_killed, clear_kill_flag
         kill_flag_registry_available = True
-        clear_kill_flag_func = clear_kill_flag
-        is_killed_func = is_killed
+        clear_kill_flag_func = lambda sid: clear_kill_flag(sid, user_id)  # Wrap to include user_id
+        is_killed_func = lambda sid: is_killed(sid, user_id)  # Wrap to include user_id
         # CRITICAL: Check if kill signal is already set BEFORE clearing (kill signal might have arrived before processing started)
-        if is_killed(session_id):
-            logger.warning(f"🔴 KILL SIGNAL: Kill flag already set for session {session_id} before processing started")
+        if is_killed(session_id, user_id):
+            logger.warning(f"🔴 KILL SIGNAL: Kill flag already set for session {session_id} (user: {user_id}) before processing started")
             # Clear the flag and raise immediately
-            clear_kill_flag(session_id)
+            clear_kill_flag(session_id, user_id)
             raise Exception("Session has been terminated before processing started")
         
         # Only clear kill flag if processing is starting (no kill signal detected)
-        clear_kill_flag(session_id)  # Clear any stale flags
+        clear_kill_flag(session_id, user_id)  # Clear any stale flags
         kill_flag = get_kill_flag(session_id)
-        logger.info(f"Using shared kill flag registry for session {session_id} (checked and cleared stale flags)")
+        logger.info(f"Using shared kill flag registry for session {session_id} (user: {user_id}) (checked and cleared stale flags)")
     except ImportError:
         # Fallback: create local kill flag if registry not available
         logger.warning("Kill signal registry not available, using local kill flag")
@@ -196,20 +196,25 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
         clear_kill_flag_func = None
     
     def check_kill_signal():
-        """Monitor kill signal from DynamoDB (shared across all Lambda instances)"""
+        """Monitor kill signal from DynamoDB continuously throughout processing (thinking, tool calling, streaming, etc.)"""
         if not kill_flag_registry_available or not is_killed_func:
             # No registry available, skip monitoring
             return
         
-        check_interval = 0.3  # Check every 300ms for faster kill signal detection (reduced from 500ms)
-        max_checks = 3600  # Maximum 3600 checks (18 minutes total at 300ms intervals)
+        check_interval = 0.2  # Check every 200ms for fast kill signal detection (critical for stopping during thinking/tool calling)
+        max_checks = 5400  # Maximum 5400 checks (18 minutes total at 200ms intervals)
         check_count = 0
         
         while not kill_flag.is_set() and check_count < max_checks:
             try:
-                # Check DynamoDB for kill signal (shared across Lambda instances)
+                # CRITICAL: Check DynamoDB frequently throughout ALL phases of processing
+                # This ensures kill signals are detected during:
+                # - Agent thinking/planning
+                # - Tool execution
+                # - Streaming response generation
+                # - Any other processing phase
                 if is_killed_func(session_id):
-                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in DynamoDB for session {session_id}")
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in DynamoDB for session {session_id} (user: {user_id})")
                     kill_flag.set()
                     break
             except Exception as e:
@@ -258,6 +263,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     nonlocal full_response, last_sent_length
                                     async for chunk in stream_result:
                                         # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                        # Also check DynamoDB directly for fastest detection
                                         if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
                                             logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during async streaming, stopping")
                                             kill_flag.set()  # Ensure local flag is set
@@ -305,6 +311,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                 try:
                                     for chunk in stream_result:
                                         # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                        # Also check DynamoDB directly for fastest detection
                                         if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
                                             logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during sync streaming, stopping")
                                             kill_flag.set()  # Ensure local flag is set
@@ -364,6 +371,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                         nonlocal full_response, last_sent_length
                                         async for chunk in stream_result:
                                             # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                            # Also check DynamoDB directly for fastest detection
                                             if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
                                                 logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model async streaming, stopping")
                                                 kill_flag.set()  # Ensure local flag is set
@@ -413,6 +421,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     try:
                                         for chunk in stream_result:
                                             # CRITICAL: Check kill flag frequently during streaming (every chunk)
+                                            # Also check DynamoDB directly for fastest detection
                                             if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
                                                 logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model sync streaming, stopping")
                                                 kill_flag.set()  # Ensure local flag is set
@@ -517,10 +526,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                     # CRITICAL: Clear kill flag in registry after detection so followup messages aren't killed
                     if kill_flag_registry_available and clear_kill_flag_func:
                         try:
-                            clear_kill_flag_func(session_id)
-                            logger.info(f"✅ KILL SIGNAL: Cleared kill flag in registry for session {session_id}")
+                            clear_kill_flag_func(session_id)  # Already wrapped with user_id
+                            logger.info(f"✅ KILL SIGNAL: Cleared kill flag in DynamoDB for session {session_id} (user: {user_id})")
                         except Exception as e:
-                            logger.error(f"❌ Failed to clear kill flag in registry: {str(e)}")
+                            logger.error(f"❌ Failed to clear kill flag in DynamoDB: {str(e)}")
                     
                     # Send kill acknowledgment via WebSocket to frontend
                     if ws_handler:
@@ -556,10 +565,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             # This ensures the flag is cleared even if a kill signal was set during processing but not detected
             if kill_flag_registry_available and clear_kill_flag_func:
                 try:
-                    clear_kill_flag_func(session_id)
-                    logger.debug(f"Cleared kill flag in registry after successful processing for session {session_id}")
+                    clear_kill_flag_func(session_id)  # Already wrapped with user_id
+                    logger.debug(f"Cleared kill flag in DynamoDB after successful processing for session {session_id} (user: {user_id})")
                 except Exception as e:
-                    logger.error(f"Failed to clear kill flag in registry after completion: {str(e)}")
+                    logger.error(f"Failed to clear kill flag in DynamoDB after completion: {str(e)}")
             
             # Send final completion signal if streaming was used
             if ai_message_id and ws_handler and accumulated_streaming_content.get('value'):
@@ -581,10 +590,10 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             # Kill flag already cleared in the kill signal handler above, but ensure it's cleared here too
             if kill_flag_registry_available and clear_kill_flag_func:
                 try:
-                    clear_kill_flag_func(session_id)
-                    logger.debug(f"Cleared kill flag in registry after termination exception for session {session_id}")
+                    clear_kill_flag_func(session_id)  # Already wrapped with user_id
+                    logger.debug(f"Cleared kill flag in DynamoDB after termination exception for session {session_id} (user: {user_id})")
                 except Exception as clear_error:
-                    logger.error(f"Failed to clear kill flag in registry after termination: {str(clear_error)}")
+                    logger.error(f"Failed to clear kill flag in DynamoDB after termination: {str(clear_error)}")
             raise e
         elif "Read timed out" in error_str or "TimeoutError" in error_str:
             logger.error(f"Network timeout during agent processing for session {session_id}")
@@ -596,14 +605,14 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             logger.error(f"Error in kill-monitored processing: {str(e)}")
             raise e
     finally:
-        # CRITICAL: Always clear kill flag in registry in finally block to ensure it's cleared regardless of how processing ends
+        # CRITICAL: Always clear kill flag in DynamoDB in finally block to ensure it's cleared regardless of how processing ends
         # This is a safety net to ensure the flag is cleared even if processing ends abnormally
         if kill_flag_registry_available and clear_kill_flag_func:
             try:
-                clear_kill_flag_func(session_id)
-                logger.debug(f"Cleared kill flag in registry in finally block for session {session_id}")
+                clear_kill_flag_func(session_id)  # Already wrapped with user_id
+                logger.debug(f"Cleared kill flag in DynamoDB in finally block for session {session_id} (user: {user_id})")
             except Exception as e:
-                logger.error(f"Failed to clear kill flag in registry in finally block: {str(e)}")
+                logger.error(f"Failed to clear kill flag in DynamoDB in finally block: {str(e)}")
         
         # Signal the monitor thread to stop
         kill_flag.set()
