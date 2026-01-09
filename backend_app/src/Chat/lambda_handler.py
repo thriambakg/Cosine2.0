@@ -1191,6 +1191,16 @@ Context Items Available: {len(context_items)} items
             
             # Kill signals are now only in-memory events, checked during processing
             
+            # CHECK KILL FLAG BEFORE STARTING AGENT
+            # Prevents starting agent if kill signal arrived between message queueing and processing
+            try:
+                from kill_signal_registry import is_killed
+                if is_killed(session_id):
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected before agent start for session {session_id}")
+                    raise Exception("Session has been terminated")
+            except ImportError:
+                pass  # Registry not available, continue normally
+            
             # Generate UNIQUE message ID for AI response (don't reuse user's message_id!)
             ai_message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
             
