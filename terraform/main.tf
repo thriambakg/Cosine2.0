@@ -146,18 +146,11 @@ module "api_gateway" {
     dashboard_tiles = {
       path_part = "dashboard-tiles"
     }
-    dashboard_tiles_id = {
-      path_part   = "{id}"
-      parent_path = "dashboard_tiles"
-    }
     dashboard_share = {
       path_part = "dashboard-share"
     }
     dashboard_import = {
       path_part = "dashboard-import"
-    }
-    filesystem_tiles = {
-      path_part = "filesystem-tiles"
     }
     alerts = {
       path_part = "alerts"
@@ -722,7 +715,7 @@ module "api_gateway" {
     tiles_delete = {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
-      resource_path = "dashboard_tiles_id"
+      resource_path = "dashboard-tiles"
     }
     tiles_put = {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
@@ -738,11 +731,6 @@ module "api_gateway" {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "POST"
       resource_path = "dashboard-import"
-    }
-    filesystem_tiles_post = {
-      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
-      http_method   = "POST"
-      resource_path = "filesystem-tiles"
     }
     alerts_get = {
       function_arn  = module.stock_alerts_lambda.wrapper_function_arn != null ? module.stock_alerts_lambda.wrapper_function_arn : module.stock_alerts_lambda.function_arn
@@ -902,7 +890,7 @@ module "api_gateway" {
   tags                 = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "84" # Updated for dashboard import tiles endpoints
+  deployment_trigger = "83" # Updated for billing payment GET method and logging
 }
 
 
