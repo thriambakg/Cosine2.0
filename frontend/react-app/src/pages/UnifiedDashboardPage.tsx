@@ -937,33 +937,6 @@ const UnifiedDashboardPage: React.FC = () => {
     }
   };
 
-  const handleImportTile = async (tileData: any) => {
-    if (!activeTab || !user?.id) {
-      console.warn('No active tab or user ID found, cannot import tile');
-      throw new Error('No active tab or user');
-    }
-
-    try {
-      // Import the tile with its full configuration (preserves pagination state, search params, etc.)
-      const response = await dashboardAPI.importTile(
-        tileData,
-        activeTab.id,
-        user.id
-      );
-
-      if (response.success) {
-        // Reload data from database after tile is imported
-        await reloadFromDatabase();
-        setAddTileMenuOpen(false);
-      } else {
-        throw new Error(response.error || 'Failed to import tile');
-      }
-    } catch (error: any) {
-      console.error(`Failed to import tile:`, error);
-      throw error;
-    }
-  };
-
   // Navigation handlers for hierarchical tile selection - OLD SYSTEM (commented out)
   // These are kept for reference but not used with the new AddTileMenu component
   /*
@@ -1583,19 +1556,18 @@ const UnifiedDashboardPage: React.FC = () => {
       return;
     }
 
+    // Optimistically update local state first for immediate UI feedback
+    const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
+    updateTabTiles(activeTab.id, updatedTiles);
+
     try {
-      // Immediately delete from backend to prevent tile from reappearing
+      // Then try to delete from backend
       await dashboardAPI.removeTile(id);
       console.log('✅ Tile deleted from backend:', id);
-      
-      // Then update local state
-      const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
-      updateTabTiles(activeTab.id, updatedTiles);
     } catch (error) {
-      console.error('❌ Failed to delete tile from backend:', error);
-      // Still update local state even if backend call fails
-      const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
-      updateTabTiles(activeTab.id, updatedTiles);
+      console.warn('⚠️ Tile removed from UI but backend deletion failed. The tile may reappear on refresh:', error);
+      // Note: We don't revert the local state since the user expects the tile to be gone
+      // and showing it again would be confusing. The tile will reappear on refresh if the backend deletion truly failed.
     }
   }, [activeTab, updateTabTiles, user?.id]);
 
@@ -2309,7 +2281,6 @@ const UnifiedDashboardPage: React.FC = () => {
           open={addTileMenuOpen}
           onClose={() => setAddTileMenuOpen(false)}
           onAddTile={handleAddTile}
-          onImportTile={handleImportTile}
           tileCategories={tileCategories}
         />
 

@@ -630,9 +630,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           },
         });
         
-        // Update parent component - include pagination state in session state
+        // Update parent component with pagination metadata only (avoid persisting full results)
         onUpdate(id, {
-          results: response.results,
           paginationState: {
             totalResultsLoaded: response.results.length,
             lastEvaluatedKeys: response.last_evaluated_key ? [response.last_evaluated_key] : [],
@@ -741,7 +740,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         });
         
         onUpdate(id, {
-          results: updatedResults,
           paginationState: {
             totalResultsLoaded: updatedResults.length,
             lastEvaluatedKeys: updatedKeys,
@@ -881,9 +879,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       setHasMore(paginationState.hasMore);
       setHasPerformedInitialSearch(true);
       
-      // Update tile with restored results - include pagination state
+      // Update tile with restored pagination state only (avoid storing raw results)
       onUpdate(id, {
-        results: currentResults,
         paginationState: {
           totalResultsLoaded: currentResults.length,
           lastEvaluatedKeys: paginationState.lastEvaluatedKeys,

@@ -81,8 +81,7 @@ interface NewsTileProps {
     sources?: string[];
     categories?: string[];
     countries?: string[];
-  };
-  articles?: NewsArticle[];
+  };  
   displayOptions?: {
     showTitle: boolean;
     showDescription: boolean;
@@ -130,7 +129,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     lastEvaluatedKeys: [],
     hasMore: false,
   },
-  articles = [],
   displayOptions = {
     showTitle: true,
     showDescription: false,
@@ -149,6 +147,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   customIcon,
 }) => {
   
+  
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   const [displayDialogOpen, setDisplayDialogOpen] = useState(false);
@@ -162,33 +161,34 @@ const NewsTile: React.FC<NewsTileProps> = ({
   
   // Filter state for client-side filtering - restore from props if available
   const [allResults, setAllResults] = useState<NewsArticle[]>(() => {
-    // Initialize from articles prop if available
-    if (articles && articles.length > 0) {
-      return articles.map((article, index) => ({
-        ...article,
-        id: article.id || `article_${index}_${Date.now()}`,
-      }));
-    }
+    // Don't initialize from props - let pagination restore handle this
     return [];
   });
   const [filteredResults, setFilteredResults] = useState<NewsArticle[]>(() => {
-    // Initialize from articles prop if available
-    if (articles && articles.length > 0) {
-      return articles.map((article, index) => ({
-        ...article,
-        id: article.id || `article_${index}_${Date.now()}`,
-      }));
-    }
+    // Don't initialize from props - let pagination restore handle this
     return [];
   });
   const [selectedFilters, setSelectedFilters] = useState<{
     sources: string[];
     categories: string[];
     countries: string[];
-  }>({
-    sources: initialFilterSettings?.sources || [],
-    categories: initialFilterSettings?.categories || [],
-    countries: initialFilterSettings?.countries || [],
+  }>(() => {
+    // For new tiles, start with empty filters to show all search results
+    // Only restore filters if we have existing pagination state (indicating restored tile)
+    const hasExistingData = initialPaginationState?.totalResultsLoaded && initialPaginationState.totalResultsLoaded > 0;
+    if (hasExistingData && initialFilterSettings) {
+      return {
+        sources: initialFilterSettings.sources || [],
+        categories: initialFilterSettings.categories || [],
+        countries: initialFilterSettings.countries || [],
+      };
+    }
+    // Default to empty filters for new tiles
+    return {
+      sources: [],
+      categories: [],
+      countries: [],
+    };
   });
 
   const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
@@ -204,7 +204,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   }>({
     ...searchParams,
   });
-  const [currentResults, setCurrentResults] = useState<NewsArticle[]>(articles);
+  const [currentResults, setCurrentResults] = useState<NewsArticle[]>([]);
   
   // Ensure defaults are set for display options first (before useCallback)
   const defaultDisplayOptions = {
@@ -255,6 +255,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
   });
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   
+  const [hasMore, setHasMore] = useState<boolean>(() => {
+    // First try to get from paginationState prop
+    if (initialPaginationState?.hasMore !== undefined) {
+      return initialPaginationState.hasMore;
+    }
+    // Fallback to localStorage for backward compatibility
+    try {
+      const saved = localStorage.getItem(`newsTile_hasMore_${id}`);
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+  
   // Restore pagination state by reloading results from saved pagination keys
   const restorePaginationState = useCallback(async () => {
     if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
@@ -265,12 +279,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
       // Already have all results, no need to restore
       return;
     }
-
-    console.log('🔄 NewsTile: Restoring pagination state', {
-      totalResultsLoaded: paginationState.totalResultsLoaded,
-      currentResults: currentResults?.length || 0,
-      keysToLoad: paginationState.lastEvaluatedKeys.length,
-    });
 
     setIsRestoringPagination(true);
     setIsLoading(true);
@@ -341,9 +349,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
       setHasMore(paginationState.hasMore);
       setHasPerformedInitialSearch(true);
 
-      // Update tile with restored results - include pagination state
+      // Update tile with restored pagination state only (avoid persisting raw articles)
       onUpdate(id, {
-        articles: restoredResults,
         paginationState: {
           totalResultsLoaded: restoredResults.length,
           lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
@@ -352,10 +359,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
         lastUpdated: Date.now(),
       });
 
-      console.log('✅ NewsTile: Pagination state restored', {
-        restoredCount: restoredResults.length,
-        targetCount: paginationState.totalResultsLoaded,
-      });
     } catch (err) {
       console.error('❌ NewsTile: Error restoring pagination state', err);
       setError('Failed to restore previous results. Please refresh.');
@@ -364,19 +367,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
       setIsLoading(false);
     }
   }, [paginationState, currentResults, currentSearchParams, id, onUpdate]);
-  const [hasMore, setHasMore] = useState<boolean>(() => {
-    // First try to get from paginationState prop
-    if (initialPaginationState?.hasMore !== undefined) {
-      return initialPaginationState.hasMore;
-    }
-    // Fallback to localStorage for backward compatibility
-    try {
-      const saved = localStorage.getItem(`newsTile_hasMore_${id}`);
-      return saved === 'true';
-    } catch {
-      return false;
-    }
-  });
   
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState<{
@@ -416,17 +406,34 @@ const NewsTile: React.FC<NewsTileProps> = ({
     onSettingsChange(id, { searchParams: currentSearchParams });
   }, [currentSearchParams, id, onSettingsChange]);
 
+  // Sync hasMore with paginationState when it changes (e.g., after import)
+  // But don't override fresh search results for newly created tiles
+  useEffect(() => {
+    if (paginationState?.hasMore !== undefined && hasMore !== paginationState.hasMore) {
+      // Only sync if this tile has existing pagination data (not a fresh search)
+      const hasExistingPaginationData = paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0;
+      
+      if (hasExistingPaginationData) {
+
+        setHasMore(paginationState.hasMore);
+      } else {
+
+      }
+    }
+  }, [paginationState?.hasMore, hasMore, paginationState?.totalResultsLoaded]);
+
   // Restore pagination state on mount if needed
   useEffect(() => {
     if (paginationState && paginationState.totalResultsLoaded > (currentResults?.length || 0) && !isRestoringPagination && !isLoading) {
-      console.log('🔄 NewsTile: Mounting with pagination state - will restore paginated results', {
-        totalToLoad: paginationState.totalResultsLoaded,
-        currentLength: currentResults?.length || 0,
-      });
       restorePaginationState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
+
+  // Track size and position changes
+  useEffect(() => {
+    // Size and position tracking for internal state management
+  }, [id, size, isDragging, isResizing]);
 
   // Column width state for dynamic sizing
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -440,9 +447,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
   });
   const tileRef = useRef<HTMLDivElement>(null);
   
-  // Ref to track pending onUpdate calls (to avoid calling during render)
+  // Ref to track pending onUpdate calls (to avoid calling during render) without persisting bulky article payloads
   const pendingUpdateRef = useRef<{ 
-    articles: NewsArticle[];
     paginationState?: {
       totalResultsLoaded: number;
       lastEvaluatedKeys: any[];
@@ -483,6 +489,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
     },
   });
 
+  // Track pin state changes
+  useEffect(() => {
+    // Pin state tracking for internal state management
+  }, [id, isPinned, pinnedState, autoRefresh]);
+
   // Auto refresh functionality
   const autoRefreshRef = useRef<NodeJS.Timeout>();
   
@@ -492,7 +503,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const performSearch = useCallback(async () => {
     if (!currentSearchParams) return;
     
-    console.log('📰 NewsTile: Starting search with params:', currentSearchParams);
+
     setIsLoading(true);
     setError(null);
     setLastEvaluatedKey(null);
@@ -511,24 +522,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
         limit: localDisplayOptions.maxResults || 200,
       };
       
-      console.log('📤 NewsTile: Sending search request with keywords:', currentSearchParams.keywords);
-      
-      console.log('📤 NewsTile: Sending search request:', searchRequest);
+
       
       const response = await newsSearchAPI.searchNews(searchRequest);
       
       if (response.articles) {
-        console.log('📰 NewsTile: Retrieved', response.articles.length, 'articles');
-        
-        // Debug: Check first article's image_url
-        if (response.articles.length > 0) {
-          console.log('📰 NewsTile: First article data:', {
-            title: response.articles[0].title,
-            image_url: response.articles[0].image_url,
-            hasImageUrl: !!response.articles[0].image_url,
-            allKeys: Object.keys(response.articles[0]),
-          });
-        }
         
         // Ensure each article has an id for table rendering
         const processedResults = response.articles.map((article, index) => ({
@@ -538,6 +536,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
         
         // Store all results for filtering
         const newLastEvaluatedKey = response.last_evaluated_key || null;
+
+        
         setAllResults(processedResults);
         setFilteredResults(processedResults);
         setCurrentResults(processedResults);
@@ -559,13 +559,14 @@ const NewsTile: React.FC<NewsTileProps> = ({
           },
         });
         
-        // Update parent component - persist results in session only (not database)
-        // Set flag to prevent articles prop sync from overriding our fresh results
-        articlesUpdateRef.current = true;
-        onUpdate(id, {
-          articles: processedResults,
-          lastUpdated: Date.now(),
-        });
+        // Store pagination state for useEffect to call onUpdate (avoid calling during render)
+        pendingUpdateRef.current = {
+          paginationState: {
+            totalResultsLoaded: processedResults.length,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: response.has_more || false,
+          },
+        };
       } else {
         console.error('📰 NewsTile: Search failed - no articles returned');
         setError('Search failed - no articles returned');
@@ -624,13 +625,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
         lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
       };
       
-      console.log('📥 NewsTile: Load More Request with keywords:', currentSearchParams.keywords);
-      
-      console.log('📥 NewsTile: Load More Request:', {
-        searchParams: currentSearchParams,
-        lastEvaluatedKey,
-      });
-      
       const response = await newsSearchAPI.searchNews(searchRequest);
       
       if (response.articles && response.articles.length > 0) {
@@ -645,6 +639,24 @@ const NewsTile: React.FC<NewsTileProps> = ({
         
         // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
         let updatedKeys: any[] = [];
+        let updatedResultsLength = 0;
+        
+        setAllResults(prev => {
+          const updated = [...prev, ...processedResults];
+          updatedResultsLength = updated.length;
+          // Store pagination state for useEffect to call onUpdate (avoid calling during render)
+          pendingUpdateRef.current = {
+            paginationState: {
+              totalResultsLoaded: updated.length,
+              lastEvaluatedKeys: newLastEvaluatedKey 
+                ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100)
+                : lastEvaluatedKeys,
+              hasMore: response.has_more || false,
+            },
+          };
+          return updated;
+        });
+        
         setLastEvaluatedKeys(prev => {
           updatedKeys = newLastEvaluatedKey 
             ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
@@ -653,28 +665,13 @@ const NewsTile: React.FC<NewsTileProps> = ({
           // Persist pagination state
           onSettingsChange(id, {
             paginationState: {
-              totalResultsLoaded: allResults.length + processedResults.length,
+              totalResultsLoaded: updatedResultsLength,
               lastEvaluatedKeys: updatedKeys,
               hasMore: response.has_more || false,
             },
           });
           
           return updatedKeys;
-        });
-        
-        setAllResults(prev => {
-          const updated = [...prev, ...processedResults];
-          // Store for useEffect to call onUpdate (avoid calling during render)
-          // Include pagination state in the pending update
-          pendingUpdateRef.current = { 
-            articles: updated,
-            paginationState: {
-              totalResultsLoaded: updated.length,
-              lastEvaluatedKeys: updatedKeys,
-              hasMore: response.has_more || false,
-            }
-          };
-          return updated;
         });
         setFilteredResults(prev => [...prev, ...processedResults]);
         setCurrentResults(prev => [...prev, ...processedResults]);
@@ -708,7 +705,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, lastEvaluatedKeys, onSettingsChange]);
 
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -755,51 +752,6 @@ const NewsTile: React.FC<NewsTileProps> = ({
     };
   }, [calculateResultsPerPage, isPageSizeManuallySet]);
 
-  // Sync props to state when they change (for state persistence)
-  // Only sync articles - filtering will be handled by applyFilters useEffect
-  // Use ref to prevent syncing when we just updated articles ourselves
-  const articlesUpdateRef = useRef<boolean>(false);
-  useEffect(() => {
-    // Skip sync if we just updated articles ourselves (to avoid overriding fresh search results)
-    if (articlesUpdateRef.current) {
-      articlesUpdateRef.current = false;
-      return;
-    }
-    
-    // Only update if articles prop actually changed
-    if (articles) {
-      if (articles.length > 0) {
-        // Restore articles from props (persisted state)
-        const processedArticles = articles.map((article, index) => ({
-          ...article,
-          id: article.id || `article_${index}_${Date.now()}`,
-        }));
-        // Only update allResults - applyFilters will handle filtering
-        setAllResults(prev => {
-          // Check if articles actually changed to avoid unnecessary updates
-          // Compare by length and IDs to avoid infinite loops
-          if (prev.length === processedArticles.length) {
-            const prevIds = new Set(prev.map(a => a.id));
-            const newIds = new Set(processedArticles.map(a => a.id));
-            if (prevIds.size === newIds.size && 
-                Array.from(prevIds).every(id => newIds.has(id))) {
-              return prev; // No change
-            }
-          }
-          return processedArticles;
-        });
-        setHasPerformedInitialSearch(true);
-      } else if (articles.length === 0) {
-        // Only clear if we don't have any current results (to avoid clearing fresh search results)
-        setAllResults(prev => {
-          if (prev.length === 0) return prev; // Already empty
-          // Don't clear if we have results - might be a stale prop update
-          return prev.length > 0 ? prev : [];
-        });
-      }
-    }
-  }, [articles]);
-
   // Restore pagination state from prop when it changes (e.g., on mount or when navigating back)
   useEffect(() => {
     if (paginationState) {
@@ -809,24 +761,26 @@ const NewsTile: React.FC<NewsTileProps> = ({
         // Set lastEvaluatedKey to the most recent key
         setLastEvaluatedKey(paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1]);
       }
-      // Restore hasMore
+      // Restore hasMore - but only if we don't have fresh search results
       if (paginationState.hasMore !== undefined) {
-        setHasMore(paginationState.hasMore);
+        const hasFreshResults = allResults.length > 0 && hasPerformedInitialSearch;
+        const shouldSkipSync = hasFreshResults && paginationState.totalResultsLoaded === 0;
+        
+        if (!shouldSkipSync) {
+          setHasMore(paginationState.hasMore);
+        }
       }
     }
-  }, [paginationState]);
+  }, [paginationState, allResults.length, hasPerformedInitialSearch]);
 
   // Handle pending onUpdate calls (to avoid calling during render)
   useEffect(() => {
     if (pendingUpdateRef.current) {
-      const { articles, paginationState: pendingPaginationState } = pendingUpdateRef.current;
+      const { paginationState: pendingPaginationState } = pendingUpdateRef.current;
       pendingUpdateRef.current = null;
-      // Set flag to prevent articles prop sync from overriding our fresh results
-      articlesUpdateRef.current = true;
       onUpdate(id, {
-        articles,
         paginationState: pendingPaginationState || {
-          totalResultsLoaded: articles.length,
+          totalResultsLoaded: allResults.length,
           lastEvaluatedKeys: lastEvaluatedKeys,
           hasMore: hasMore,
         },
@@ -915,7 +869,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
         (currentSearchParams.countries && currentSearchParams.countries.length > 0);
       
       if (hasSearchCriteria) {
-        console.log('🔄 NewsTile: Preview mode - running fresh query');
+
         setHasPerformedInitialSearch(false); // Reset to allow fresh search
         performSearch();
       }
@@ -931,7 +885,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                                      (paginationState.lastEvaluatedKeys?.length || 0) > 0;
       
       if (needsPaginationRestore) {
-        console.log('🔄 NewsTile: Pagination restoration needed - marking initial search as done and restoring');
+
         setHasPerformedInitialSearch(true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
         restorePaginationState();
@@ -945,13 +899,27 @@ const NewsTile: React.FC<NewsTileProps> = ({
         (currentSearchParams.categories && currentSearchParams.categories.length > 0) ||
         (currentSearchParams.countries && currentSearchParams.countries.length > 0);
       
+      console.log('🔄 NewsTile: Initial Load Check', {
+        hasPerformedInitialSearch,
+        currentResultsLength: currentResults.length,
+        isLoading,
+        isRestoringPagination,
+        needsPaginationRestore,
+        hasSearchCriteria,
+        searchParams: currentSearchParams
+      });
+      
       if (hasSearchCriteria) {
         console.log('🔄 NewsTile: Initial load - performing search with existing params');
         performSearch();
+      } else {
+        console.log('🔄 NewsTile: No search criteria found, skipping initial search');
       }
+    } else if (hasPerformedInitialSearch || currentResults.length > 0) {
+      console.log('🔄 NewsTile: Skipping initial search - already performed or has results');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPerformedInitialSearch, currentResults.length, isLoading, isRestoringPagination, paginationState?.totalResultsLoaded];
+  }, [hasPerformedInitialSearch, isLoading, isRestoringPagination, paginationState?.totalResultsLoaded]);
 
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
@@ -1011,7 +979,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       
       if (response.success) {
         const result = response.result as any;
-        console.log(`✅ Saved ${result?.succeeded || selectedArticleObjects.length} of ${selectedArticleObjects.length} article(s) to filesystem`);
+
         if (result?.errors && result.errors.length > 0) {
           console.warn(`⚠️ ${result.errors.length} article(s) failed to save:`, result.errors);
         }
@@ -1099,8 +1067,26 @@ const NewsTile: React.FC<NewsTileProps> = ({
 
   // Apply filters when selectedFilters change
   useEffect(() => {
+    console.log('🔍 NewsTile: Applying filters', {
+      selectedFilters,
+      allResultsLength: allResults.length,
+      beforeFilter: filteredResults.length
+    });
     applyFilters();
   }, [applyFilters]);
+  
+  // Log when key state changes that affect load more visibility
+  useEffect(() => {
+    console.log('📊 NewsTile: Key State Changed', {
+      allResultsLength: allResults.length,
+      filteredResultsLength: filteredResults.length,
+      hasMore,
+      isLoading,
+      isLoadingMore,
+      canShowLoadMore: hasMore && (allResults.length > 0 || (paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0)) && 
+        filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+    });
+  }, [allResults.length, filteredResults.length, hasMore, isLoading, isLoadingMore, paginationState?.totalResultsLoaded]);
 
   // Sync visible columns with display options when display options change
   useEffect(() => {
@@ -1539,34 +1525,48 @@ const NewsTile: React.FC<NewsTileProps> = ({
           })()}
           
           <Chip
-            label={
-              isLoadingMore 
+            label={(() => {
+              // Debug load more conditions
+              const hasMore = paginationState?.hasMore || false;
+              
+              const canLoadMore = hasMore && (allResults.length > 0 || (paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0)) && 
+                filteredResults.length === allResults.length;
+              
+
+              
+              return isLoadingMore 
                 ? 'Loading...' 
-                : hasMore && allResults.length > 0 && filteredResults.length === allResults.length
-                  ? `Load More (${allResults.length} loaded)`
+                : canLoadMore
+                  ? `Load More (${allResults.length || paginationState?.totalResultsLoaded || 0} loaded)`
                   : allResults.length > 0 && currentResults.length !== allResults.length 
                     ? `${currentResults.length} of ${allResults.length} results`
-                    : `${currentResults.length} results`
+                    : `${currentResults.length} results`;
+            })()
             }
             size="small"
             onClick={
-              hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+              hasMore && (allResults.length > 0 || (paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0)) && 
+              filteredResults.length === allResults.length && !isLoadingMore && !isLoading
                 ? handleLoadMore
                 : undefined
             }
-            disabled={isLoadingMore || isLoading || !hasMore || filteredResults.length !== allResults.length}
+            disabled={isLoadingMore || isLoading || !hasMore || 
+              (allResults.length > 0 && filteredResults.length !== allResults.length)}
             sx={{
-              backgroundColor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+              backgroundColor: hasMore && (allResults.length > 0 || (paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0)) && 
+                filteredResults.length === allResults.length && !isLoadingMore && !isLoading
                 ? 'rgba(59, 130, 246, 0.3)'
                 : 'rgba(59, 130, 246, 0.2)',
               color: '#3b82f6',
               border: '1px solid #3b82f6',
               fontSize: '0.75rem',
               height: '20px',
-              cursor: hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+              cursor: hasMore && (allResults.length > 0 || (paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0)) && 
+                filteredResults.length === allResults.length && !isLoadingMore && !isLoading
                 ? 'pointer'
                 : 'default',
-              '&:hover': hasMore && allResults.length > 0 && filteredResults.length === allResults.length && !isLoadingMore && !isLoading
+              '&:hover': hasMore && (allResults.length > 0 || (paginationState?.totalResultsLoaded && paginationState.totalResultsLoaded > 0)) && 
+                filteredResults.length === allResults.length && !isLoadingMore && !isLoading
                 ? {
                     backgroundColor: 'rgba(59, 130, 246, 0.4)',
                     transform: 'scale(1.05)',
@@ -1929,7 +1929,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
                                 }}
                                 onLoad={() => {
                                   if (article.id === currentPageResults[0]?.id) {
-                                    console.log('📰 NewsTile: Image loaded successfully:', article.image_url);
+
                                   }
                                 }}
                                 sx={{

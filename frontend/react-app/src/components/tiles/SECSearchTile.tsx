@@ -570,9 +570,8 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
           setAllResults(allResultsData);
           // currentResults will be set by filter useEffect
           
-            // Update tile data - persist results in session only (not database)
+            // Update tile data - session metadata only (not raw results)
             onUpdate(id, {
-              results: allResultsData, // Session persistence - full results for duration of login only
               lastUpdated: new Date().toISOString(),
             });
             
@@ -656,9 +655,8 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             setAllResults(results);
             // currentResults will be set by filter useEffect
             
-            // Update tile data - persist results in session only (not database)
+            // Update tile data - session metadata only (not raw results)
             onUpdate(id, {
-              results: results, // Session persistence - full results for duration of login only
               lastUpdated: new Date().toISOString(),
             });
             

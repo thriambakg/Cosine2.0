@@ -146,14 +146,15 @@ module "api_gateway" {
     dashboard_tiles = {
       path_part = "dashboard-tiles"
     }
+    dashboard_tiles_id = {
+      path_part   = "{id}"
+      parent_path = "dashboard_tiles"
+    }
     dashboard_share = {
       path_part = "dashboard-share"
     }
     dashboard_import = {
       path_part = "dashboard-import"
-    }
-    dashboard_import_tiles = {
-      path_part = "dashboard-import-tiles"
     }
     filesystem_tiles = {
       path_part = "filesystem-tiles"
@@ -721,7 +722,7 @@ module "api_gateway" {
     tiles_delete = {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "DELETE"
-      resource_path = "dashboard-tiles"
+      resource_path = "dashboard_tiles_id"
     }
     tiles_put = {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
@@ -737,11 +738,6 @@ module "api_gateway" {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
       http_method   = "POST"
       resource_path = "dashboard-import"
-    }
-    dashboard_import_tiles_post = {
-      function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn
-      http_method   = "POST"
-      resource_path = "dashboard-import-tiles"
     }
     filesystem_tiles_post = {
       function_arn  = module.user_dashboard_lambda.wrapper_function_arn != null ? module.user_dashboard_lambda.wrapper_function_arn : module.user_dashboard_lambda.function_arn

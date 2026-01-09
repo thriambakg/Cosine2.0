@@ -958,7 +958,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const stockScreenerProps = {
       ...commonProps,
       criteria: tile.criteria,
-      results: tile.results,
       paginationState: sessionPaginationStateScreener,
       displayOptions: (tile.displayOptions as any) || {
         showIndustry: true,
@@ -985,7 +984,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       searchParams: tile.searchParams, // Include searchParams like PoliticianTradesSearchTile
       filterSettings: tile.filterSettings,
-      articles: tile.articles,
       paginationState: sessionPaginationStateNews,
       displayOptions: (tile.displayOptions as any) || {
         showTitle: true,
@@ -1030,7 +1028,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const politicianTradesProps = {
       ...commonProps,
       searchParams: tile.searchParams,
-      results: tile.trades,
       paginationState: sessionPaginationStateTrades,
       displayOptions: (tile.displayOptions as any) || {
         showPolitician: true,
@@ -1066,7 +1063,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         showResultsTable: true,
         maxResults: 50,
         compactView: false,
-        results: tile.results, // Pass session results from tile data
         ...((tile.displayOptions as any) || {}),
       },
       autoRefresh: tile.autoRefresh,
@@ -1094,7 +1090,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
-      results: tile.results as any,
       paginationState: sessionPaginationState,
       displayOptions: {
         showRecipient: true,
@@ -1136,7 +1131,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
-      results: tile.results as any,
       paginationState: sessionPaginationStateBills,
       displayOptions: {
         showBillTitle: true,
@@ -1181,7 +1175,6 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
       filterSettings: tile.filterSettings,
-      results: tile.results as any,
       paginationState: sessionPaginationStateLDA,
       displayOptions: {
         showFilingType: true,
