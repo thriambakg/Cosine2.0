@@ -67,35 +67,55 @@ def set_kill_flag(session_id: str, user_id: str, reason: str = 'user_cancellatio
         
         # Store kill flag in dedicated 'kill' column
         current_time = int(time.time() * 1000)  # Milliseconds
+        from botocore.exceptions import ClientError
+        
         try:
-            # Try to update the session if it exists
-            # Use composite key: user_id (partition key) and session_id (sort key)
+            # First, check if the session exists
             response = table.get_item(
                 Key={
                     'user_id': user_id,
                     'session_id': session_id
                 }
             )
+            
             if 'Item' in response:
                 # Session exists, update it with kill flag in dedicated column
+                # Use update_item with SET - DynamoDB will add the attribute if it doesn't exist
                 table.update_item(
                     Key={
                         'user_id': user_id,
                         'session_id': session_id
                     },
-                    UpdateExpression='SET #kill = :kill_flag',
+                    UpdateExpression='SET #kill = :kill_flag, last_updated = :timestamp',
                     ExpressionAttributeNames={
                         '#kill': 'kill'  # 'kill' is a reserved word, so use ExpressionAttributeNames
                     },
                     ExpressionAttributeValues={
-                        ':kill_flag': True
+                        ':kill_flag': True,
+                        ':timestamp': current_time
                     },
                     ReturnValues='NONE'
                 )
                 logger.info(f"🔴 KILL SIGNAL: Set kill flag in DynamoDB for session {session_id} (user: {user_id}), reason: {reason}")
+                
+                # Verify the kill flag was actually set by reading it back
+                try:
+                    verify_response = table.get_item(
+                        Key={
+                            'user_id': user_id,
+                            'session_id': session_id
+                        }
+                    )
+                    if 'Item' in verify_response and verify_response['Item'].get('kill') == True:
+                        logger.info(f"✅ KILL SIGNAL: Verified kill flag is set in DynamoDB for session {session_id} (user: {user_id})")
+                    else:
+                        logger.warning(f"⚠️ KILL SIGNAL: Kill flag may not have been set correctly for session {session_id} (user: {user_id}). Item exists but kill attribute missing or False.")
+                except Exception as verify_error:
+                    logger.warning(f"⚠️ KILL SIGNAL: Could not verify kill flag was set: {str(verify_error)}")
             else:
                 # Session doesn't exist yet - try to create a minimal entry with kill flag
                 # This allows kill signals to work even before session is fully created
+                logger.info(f"⚠️ KILL SIGNAL: Session {session_id} doesn't exist, creating minimal entry with kill flag")
                 try:
                     table.put_item(
                         Item={
@@ -103,12 +123,18 @@ def set_kill_flag(session_id: str, user_id: str, reason: str = 'user_cancellatio
                             'session_id': session_id,
                             'kill': True,
                             'created_at': current_time,
-                            'last_updated': current_time
+                            'last_updated': current_time,
+                            'message_count': 0,
+                            'messages': []
                         }
                     )
                     logger.info(f"🔴 KILL SIGNAL: Created session entry with kill flag for session {session_id} (user: {user_id}), reason: {reason}")
                 except Exception as put_error:
                     logger.warning(f"⚠️ KILL SIGNAL: Session {session_id} doesn't exist and couldn't create minimal entry. Kill signal will be checked when processing starts. Error: {str(put_error)}")
+                    
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+            logger.error(f"❌ Failed to set kill flag in DynamoDB: {str(e)}, Error Code: {error_code}")
         except Exception as e:
             logger.error(f"❌ Failed to set kill flag in DynamoDB: {str(e)}")
         
@@ -201,26 +227,33 @@ def is_killed(session_id: str, user_id: str = None) -> bool:
         
         try:
             # Use composite key: user_id (partition key) and session_id (sort key)
+            # Don't use ProjectionExpression - get full item to check if kill attribute exists
+            # ProjectionExpression can cause issues if the attribute doesn't exist yet
             response = table.get_item(
                 Key={
                     'user_id': user_id,
                     'session_id': session_id
-                },
-                ProjectionExpression='#kill',
-                ExpressionAttributeNames={
-                    '#kill': 'kill'  # 'kill' is a reserved word
                 }
             )
             
             if 'Item' in response:
                 # Check dedicated 'kill' column
-                is_killed_value = response['Item'].get('kill', False)
+                # DynamoDB returns boolean as Decimal, so handle that case
+                kill_value = response['Item'].get('kill', False)
+                
+                # Convert Decimal to bool if needed (DynamoDB stores numbers as Decimal)
+                if isinstance(kill_value, bool):
+                    is_killed_value = kill_value
+                elif hasattr(kill_value, '__bool__'):
+                    is_killed_value = bool(kill_value)
+                else:
+                    is_killed_value = False
                 
                 # Update local cache
                 with _cache_lock:
                     _local_cache[session_id] = (is_killed_value, time.time())
                 
-                return bool(is_killed_value)
+                return is_killed_value
             
             # Session doesn't exist, no kill flag
             return False
