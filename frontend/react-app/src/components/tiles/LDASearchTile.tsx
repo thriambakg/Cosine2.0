@@ -107,7 +107,8 @@ interface LDASearchTileProps {
     compactView: boolean;
   };
   paginationState?: {
-    totalResultsLoaded: number;
+    totalResultsLoaded?: number;
+    pageCount?: number;
     lastEvaluatedKeys: any[];
     hasMore: boolean;
   };
@@ -240,8 +241,13 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   const [generalSearchItems, setGeneralSearchItems] = useState<LDAAutocompleteItem[]>(() => initializeGeneralSearchItems(searchParams));
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
+  const [pageCount, setPageCount] = useState<number>(1); // Track current page (1 initial + up to 3 more)
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
+  
+  // Pagination limits: 4 pages total (1 initial + 3 load more) = 100 results max (25 per page)
+  const MAX_PAGES = 4;
+  const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
   
   const defaultDisplayOptions = {
     showFilingType: true,
@@ -489,7 +495,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: 100, // Tile: limit to 100 results
+        limit: 25, // Tile: limit to 25 results per batch
       };
       
       const response = await ldaSearchAPI.search(searchRequest);
@@ -505,14 +511,19 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         setFilteredResults(response.results);
         setCurrentResults(response.results);
         setHasPerformedInitialSearch(true);
-        // Only set hasMore if we have a valid last_evaluated_key for pagination
-        // If backend says has_more but provides no key, we can't actually load more
-        const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
-        setHasMore((response.has_more || false) && hasValidPaginationKey);
-        setLastEvaluatedKey(newLastEvaluatedKey);
         
-        // Store pagination state (only first page key for initial search)
-        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
+        // Limit pagination to 4 pages total (1 initial + 3 more)
+        // Only set hasMore if we have a valid last_evaluated_key and haven't reached page limit
+        const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
+        const canLoadMore = (response.has_more || false) && hasValidPaginationKey;
+        const hasReachedPageLimit = false; // Initial page, we haven't loaded any additional pages yet
+        
+        setHasMore(canLoadMore && !hasReachedPageLimit);
+        setLastEvaluatedKey(newLastEvaluatedKey);
+        setPageCount(1); // Initial page
+        
+        // Store pagination state - limit to MAX_PAGINATION_KEYS
+        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey].slice(0, MAX_PAGINATION_KEYS) : [];
         setLastEvaluatedKeys(newLastEvaluatedKeys);
         
         console.log('📋 LDASearchTile: Pagination state set', {
@@ -521,24 +532,26 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           lastEvaluatedKeys: newLastEvaluatedKeys,
         });
         
-        // Persist pagination state
-        // Only persist hasMore if we have a valid pagination key
-        const hasValidPaginationKeyForState = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
+        // Persist pagination state (max 4 pages)
+        const pageCountForState = 1; // Initial page
+        const persistentHasMore = canLoadMore && !hasReachedPageLimit;
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
+            pageCount: pageCountForState,
             totalResultsLoaded: response.results.length,
             lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: (response.has_more || false) && hasValidPaginationKeyForState,
+            hasMore: persistentHasMore,
           },
         });
         
         // Update parent component - only save pagination state, not results
         onUpdate(id, {
           paginationState: {
+            pageCount: pageCountForState,
             totalResultsLoaded: response.results.length,
             lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: persistentHasMore,
           },
           lastUpdated: Date.now(),
         });
@@ -582,6 +595,13 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   
   // Load more results
   const handleLoadMore = useCallback(async () => {
+    // Check if we've reached the page limit (4 pages total)
+    if (pageCount >= MAX_PAGES) {
+      console.warn('📋 LDASearchTile: Load more blocked - reached maximum page limit', { pageCount, MAX_PAGES });
+      setHasMore(false);
+      return;
+    }
+    
     // Use lastEvaluatedKey if available, otherwise use the last key from lastEvaluatedKeys array
     // Handle case where lastEvaluatedKey might be false (boolean) - convert to null
     const validLastEvaluatedKey = (lastEvaluatedKey && typeof lastEvaluatedKey === 'object') ? lastEvaluatedKey : null;
@@ -667,7 +687,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       const searchRequest = {
         filters,
         last_evaluated_key: keyToUse,
-        limit: 100, // Tile: limit to 100 results
+        limit: 25, // Tile: limit to 25 results per batch
       };
       
       const response = await ldaSearchAPI.search(searchRequest);
@@ -681,15 +701,23 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         setAllResults(updatedResults);
         setFilteredResults(updatedResults);
         setCurrentResults(updatedResults);
-        // Only set hasMore if we have a valid last_evaluated_key for pagination
+        
+        // Update page count
+        const newPageCount = pageCount + 1;
+        setPageCount(newPageCount);
+        
+        // Only set hasMore if we have a valid last_evaluated_key and haven't reached page limit
         // If backend says has_more but provides no key, we can't actually load more
         const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
-        setHasMore((response.has_more || false) && hasValidPaginationKey);
+        const canLoadMore = (response.has_more || false) && hasValidPaginationKey;
+        const hasReachedPageLimit = newPageCount >= MAX_PAGES;
+        
+        setHasMore(canLoadMore && !hasReachedPageLimit);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
-        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        // Update lastEvaluatedKeys array - limit to MAX_PAGINATION_KEYS (3 keys for pages 2, 3, 4)
         const updatedKeys = newLastEvaluatedKey 
-          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(0, MAX_PAGINATION_KEYS)
           : lastEvaluatedKeys;
         setLastEvaluatedKeys(updatedKeys);
         
@@ -699,20 +727,23 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           lastEvaluatedKeysLength: updatedKeys.length,
         });
         
-        // Persist pagination state
+        // Persist pagination state (max 4 pages)
+        const persistentHasMore = canLoadMore && !hasReachedPageLimit;
         onSettingsChange(id, {
           paginationState: {
+            pageCount: newPageCount,
             totalResultsLoaded: updatedResults.length,
             lastEvaluatedKeys: updatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: persistentHasMore,
           },
         });
         
         onUpdate(id, {
           paginationState: {
+            pageCount: newPageCount,
             totalResultsLoaded: updatedResults.length,
             lastEvaluatedKeys: updatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: persistentHasMore,
           },
           lastUpdated: Date.now(),
         });
@@ -744,7 +775,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange, generalSearchItems]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange, generalSearchItems, pageCount, MAX_PAGES]);
 
   // Restore pagination state on mount
   // Results are NOT saved - fetch fresh using searchParams and pagination keys
@@ -769,7 +800,39 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
     try {
       let currentResults: LDAFiling[] = [];
-      let keysToLoad = paginationState.lastEvaluatedKeys ? [...paginationState.lastEvaluatedKeys] : [];
+      // Limit keys to MAX_PAGINATION_KEYS and filter to ensure we don't exceed page limit
+      let keysToLoad = paginationState.lastEvaluatedKeys 
+        ? [...paginationState.lastEvaluatedKeys].slice(0, MAX_PAGINATION_KEYS)
+        : [];
+      
+      // Restore pageCount from paginationState
+      // If pageCount is not present (old state), calculate it from totalResultsLoaded (assuming 25 per page)
+      let restoredPageCount: number;
+      if (paginationState.pageCount !== undefined) {
+        restoredPageCount = paginationState.pageCount;
+      } else if (paginationState.totalResultsLoaded !== undefined && paginationState.totalResultsLoaded > 0) {
+        // Legacy state: calculate pageCount from totalResultsLoaded (assuming 25 results per page)
+        restoredPageCount = Math.ceil(paginationState.totalResultsLoaded / 25);
+        console.log('🔄 LDASearchTile: Calculated pageCount from legacy totalResultsLoaded', {
+          totalResultsLoaded: paginationState.totalResultsLoaded,
+          calculatedPageCount: restoredPageCount,
+        });
+      } else {
+        restoredPageCount = 1; // Default to 1 page if no info available
+      }
+      
+      // Limit to MAX_PAGES to prevent restoring more than allowed
+      restoredPageCount = Math.min(restoredPageCount, MAX_PAGES);
+      setPageCount(restoredPageCount);
+      
+      // If pageCount is already at or exceeds MAX_PAGES, don't restore pagination
+      if (restoredPageCount >= MAX_PAGES) {
+        console.warn('📋 LDASearchTile: Page limit reached, not restoring pagination', { restoredPageCount, MAX_PAGES });
+        setHasMore(false);
+        setIsRestoringPagination(false);
+        setIsLoading(false);
+        return;
+      }
       
       // First, fetch the initial page (no last_evaluated_key)
       const filters: LDASearchFilters = { ...currentSearchParams };
@@ -825,10 +888,10 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         }
       });
       
-      // Fetch initial page
+      // Fetch initial page with tile batch size (25)
       const initialSearchRequest = {
         filters,
-        limit: localDisplayOptions.maxResults || 50,
+        limit: 25, // Tile: use 25 per batch for restoration
         last_evaluated_key: false,
       };
       
@@ -838,13 +901,16 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         currentResults = [...initialResponse.results];
       }
 
-      // Load additional pages using pagination keys until we reach totalResultsLoaded
-      while (currentResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
+      // Load additional pages using pagination keys (limit to saved pageCount or MAX_PAGES)
+      // Only load as many pages as were actually loaded before (based on pageCount from paginationState)
+      const maxPagesToRestore = Math.min(restoredPageCount, MAX_PAGES);
+      let currentPageCount = 1; // Start at 1 (initial page already loaded)
+      while (keysToLoad.length > 0 && currentPageCount < maxPagesToRestore) {
         const nextKey = keysToLoad[0];
         
         const searchRequest = {
           filters,
-          limit: localDisplayOptions.maxResults || 50,
+          limit: 25, // Tile: use 25 per batch for restoration
           last_evaluated_key: nextKey,
         };
         
@@ -853,6 +919,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         if (response.success && response.results) {
           currentResults = [...currentResults, ...response.results];
           keysToLoad = keysToLoad.slice(1);
+          currentPageCount++;
         } else {
           // No more results or error, stop loading
           break;
@@ -863,13 +930,25 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       setAllResults(currentResults);
       setFilteredResults(currentResults);
       setCurrentResults(currentResults);
-      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
+      
+      // Limit restored keys to MAX_PAGINATION_KEYS
+      const restoredKeys = paginationState.lastEvaluatedKeys 
+        ? [...paginationState.lastEvaluatedKeys].slice(0, MAX_PAGINATION_KEYS)
+        : [];
+      setLastEvaluatedKeys(restoredKeys);
+      
       // Set lastEvaluatedKey to the last key if there are keys and hasMore is true
-      const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
-        ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
+      const lastKey = restoredKeys.length > 0 
+        ? restoredKeys[restoredKeys.length - 1] 
         : null;
-      setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
-      setHasMore(paginationState.hasMore);
+      setLastEvaluatedKey(lastKey);
+      
+      // Only set hasMore to true if we have a valid pagination key and haven't reached page limit
+      // If hasMore is true but no key exists, we can't actually load more
+      const hasValidPaginationKey = lastKey !== null && lastKey !== undefined;
+      const hasReachedPageLimit = currentPageCount >= MAX_PAGES;
+      const restoredHasMore = (paginationState.hasMore || false) && hasValidPaginationKey && !hasReachedPageLimit;
+      setHasMore(restoredHasMore);
       setHasPerformedInitialSearch(true);
       
       // Update tile with restored results - include pagination state
@@ -877,7 +956,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         paginationState: {
           totalResultsLoaded: currentResults.length,
           lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
-          hasMore: paginationState.hasMore,
+          hasMore: restoredHasMore,
         },
         lastUpdated: Date.now(),
       });
@@ -898,7 +977,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   // Restore pagination state on mount if needed
   // Results are NOT saved - fetch fresh using searchParams and pagination keys
   useEffect(() => {
-    if (paginationState && paginationState.totalResultsLoaded > 0 && allResults.length === 0 && !isRestoringPagination && !isLoading && currentSearchParams) {
+    if (paginationState && paginationState.pageCount !== undefined && paginationState.pageCount > 0 && paginationState.pageCount <= MAX_PAGES && allResults.length === 0 && !isRestoringPagination && !isLoading && currentSearchParams) {
       restorePaginationState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -976,36 +1055,62 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   // Restore pagination state from props on mount (session persistence)
   // Results are NOT saved - we'll fetch them fresh using searchParams
   useEffect(() => {
-    if (paginationState && allResults.length === 0 && !isRestoringPagination) {
+    if (paginationState && paginationState.pageCount !== undefined && paginationState.pageCount > 0 && paginationState.pageCount <= MAX_PAGES && allResults.length === 0 && !isRestoringPagination) {
       console.log('🔄 LDASearchTile: Restoring pagination state from session');
-      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys || []);
-      const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
-        ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
+      const restoredPageCount = paginationState.pageCount;
+      setPageCount(restoredPageCount);
+      
+      // Limit restored keys to MAX_PAGINATION_KEYS
+      const restoredKeys = paginationState.lastEvaluatedKeys 
+        ? [...paginationState.lastEvaluatedKeys].slice(0, MAX_PAGINATION_KEYS)
+        : [];
+      setLastEvaluatedKeys(restoredKeys);
+      
+      const lastKey = restoredKeys.length > 0 
+        ? restoredKeys[restoredKeys.length - 1] 
         : null;
-      setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
-      setHasMore(paginationState.hasMore || false);
+      setLastEvaluatedKey(lastKey);
+      
+      // Only set hasMore to true if we have a valid pagination key and haven't reached page limit
+      // If hasMore is true but no key exists, we can't actually load more
+      const hasValidPaginationKey = lastKey !== null && lastKey !== undefined;
+      const hasReachedPageLimit = restoredPageCount >= MAX_PAGES;
+      setHasMore((paginationState.hasMore || false) && hasValidPaginationKey && !hasReachedPageLimit);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
   // Sync pagination state when props change (e.g., after restore from backend)
   useEffect(() => {
-    if (paginationState && allResults.length === 0 && !isRestoringPagination) {
+    if (paginationState && paginationState.pageCount !== undefined && paginationState.pageCount > 0 && paginationState.pageCount <= MAX_PAGES && allResults.length === 0 && !isRestoringPagination) {
       console.log('🔄 LDASearchTile: Restoring pagination state from tile data');
-      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys || []);
-      const lastKey = paginationState.lastEvaluatedKeys && paginationState.lastEvaluatedKeys.length > 0 
-        ? paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] 
+      const restoredPageCount = paginationState.pageCount;
+      setPageCount(restoredPageCount);
+      
+      // Limit restored keys to MAX_PAGINATION_KEYS
+      const restoredKeys = paginationState.lastEvaluatedKeys 
+        ? [...paginationState.lastEvaluatedKeys].slice(0, MAX_PAGINATION_KEYS)
+        : [];
+      setLastEvaluatedKeys(restoredKeys);
+      
+      const lastKey = restoredKeys.length > 0 
+        ? restoredKeys[restoredKeys.length - 1] 
         : null;
-      setLastEvaluatedKey(paginationState.hasMore ? lastKey : null);
-      setHasMore(paginationState.hasMore || false);
+      setLastEvaluatedKey(lastKey);
+      
+      // Only set hasMore to true if we have a valid pagination key and haven't reached page limit
+      // If hasMore is true but no key exists, we can't actually load more
+      const hasValidPaginationKey = lastKey !== null && lastKey !== undefined;
+      const hasReachedPageLimit = restoredPageCount >= MAX_PAGES;
+      setHasMore((paginationState.hasMore || false) && hasValidPaginationKey && !hasReachedPageLimit);
     }
-  }, [paginationState, allResults.length, isRestoringPagination]);
+  }, [paginationState, allResults.length, isRestoringPagination, MAX_PAGES]);
 
   // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
       // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
-      if (paginationState && paginationState.totalResultsLoaded > 0) {
+      if (paginationState && paginationState.totalResultsLoaded !== undefined && paginationState.totalResultsLoaded > 0) {
         console.log('🔄 LDASearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
         return;
       }
@@ -1101,12 +1206,26 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     handleContextMenuClose();
   };
 
-  const handleFileBrowserSelect = async (folderPath: string) => {
+  const isSavingToFilesRef = useRef(false);
+  
+  const handleFileBrowserSelect = useCallback(async (folderPath: string) => {
     if (!user || selectedFilings.size === 0) return;
     
+    // Prevent multiple simultaneous saves
+    if (isSavingToFilesRef.current) {
+      console.warn('📋 LDASearchTile: Save operation already in progress, ignoring duplicate call');
+      return;
+    }
+    
+    isSavingToFilesRef.current = true;
+    
     try {
+      // Clear selection immediately to prevent re-triggering
+      const filingsToSave = new Set(selectedFilings);
+      setSelectedFilings(new Set());
+      
       const selectedFilingObjects = currentResults.filter(filing => 
-        selectedFilings.has(filing.id || filing.filing_uuid || filing.PK || '')
+        filingsToSave.has(filing.id || filing.filing_uuid || filing.PK || '')
       );
 
       // Save all filings to the filesystem with FULL data using bulk operation
@@ -1138,11 +1257,12 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       } else {
         throw new Error(response.error || 'Failed to save filings');
       }
-      setSelectedFilings(new Set());
     } catch (error) {
       console.error('Error saving filings to filesystem:', error);
+    } finally {
+      isSavingToFilesRef.current = false;
     }
-  };
+  }, [user, selectedFilings, currentResults]);
 
   const handleAddToContext = () => {
     const selectedFilingObjects = currentResults.filter(filing => 

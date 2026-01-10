@@ -685,6 +685,16 @@ const FolderTile: React.FC<FolderTileProps> = ({
   };
 
   const handleDragOver = (e: React.DragEvent, targetItem: FileSystemItem) => {
+    // Check if this is an external drag (from another tile)
+    const types = e.dataTransfer.types;
+    const isExternalDrag = !draggedItem && (types.includes('text/plain') || types.includes('application/json'));
+    
+    // For external drags, allow event to bubble up to List component
+    if (isExternalDrag) {
+      return; // Don't prevent default or stop propagation, let it bubble to List
+    }
+    
+    // For internal drags, handle as before
     e.preventDefault();
     e.stopPropagation();
     if (draggedItem && draggedItem.id !== targetItem.id) {
@@ -697,6 +707,16 @@ const FolderTile: React.FC<FolderTileProps> = ({
   };
 
   const handleDrop = async (e: React.DragEvent, targetItem: FileSystemItem) => {
+    // Check if this is an external drag (from another tile)
+    const types = e.dataTransfer.types;
+    const isExternalDrag = !draggedItem && (types.includes('text/plain') || types.includes('application/json'));
+    
+    // For external drags, allow event to bubble up to List component
+    if (isExternalDrag) {
+      return; // Don't prevent default or stop propagation, let it bubble to List
+    }
+    
+    // For internal drags, handle as before
     e.preventDefault();
     e.stopPropagation();
     
@@ -962,6 +982,196 @@ const FolderTile: React.FC<FolderTileProps> = ({
     loadFolderContents(currentFolderPath);
   };
 
+  // Drag and drop handlers for accepting items from other tiles
+  const [isDragOverTile, setIsDragOverTile] = useState(false);
+
+  // Global drag end handler to reset state when drag ends outside the drop zone
+  useEffect(() => {
+    const handleGlobalDragEnd = () => {
+      setIsDragOverTile(false);
+    };
+    
+    document.addEventListener('dragend', handleGlobalDragEnd);
+    return () => {
+      document.removeEventListener('dragend', handleGlobalDragEnd);
+    };
+  }, []);
+
+  const handleTileDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Check if this is a drag from another tile by checking available data types
+    // External tiles use text/plain or application/json, internal moves use filesystem_items
+    const types = e.dataTransfer.types;
+    // Only show drag over visual for external tiles (not internal filesystem moves)
+    // External tiles will have text/plain or application/json with structured data
+    // Internal moves will be handled by the item-level drop handlers
+    if (types.includes('text/plain') || types.includes('application/json')) {
+      // Check if it's not a filesystem_items type (which is handled by item-level handlers)
+      // We'll allow the drop and check the actual data in handleTileDrop
+      setIsDragOverTile(true);
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+
+  const handleTileDragLeave = useCallback((e: React.DragEvent) => {
+    // Only clear drag over if we're leaving the tile area (not entering a child)
+    const relatedTarget = e.relatedTarget as Node;
+    if (!e.currentTarget.contains(relatedTarget)) {
+      setIsDragOverTile(false);
+    }
+  }, []);
+
+  const handleTileDragEnd = useCallback(() => {
+    // Always reset drag over state when drag ends
+    setIsDragOverTile(false);
+  }, []);
+
+  const handleTileDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOverTile(false);
+    
+    if (!user) return;
+
+    try {
+      // Try to get data from text/plain first (standard format for tiles)
+      let data;
+      try {
+        const textData = e.dataTransfer.getData('text/plain');
+        if (textData) {
+          data = JSON.parse(textData);
+        } else {
+          // Fallback to application/json
+          const jsonData = e.dataTransfer.getData('application/json');
+          if (jsonData) {
+            data = JSON.parse(jsonData);
+          } else {
+            return; // No valid drag data
+          }
+        }
+      } catch {
+        return; // Failed to parse drag data
+      }
+
+      // Ignore filesystem_items (handled by internal drop handlers)
+      if (data && data.type === 'filesystem_items') {
+        return; // Let internal handlers handle this
+      }
+
+      // Handle different tile types
+      let items: Array<{ 
+        context_data: any; 
+        title: string; 
+        item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'politician_trade' | 'govt_contract' | 'news_article' | 'stock_result' 
+      }> = [];
+
+      if (data && data.type === 'lda_filings' && data.filings && Array.isArray(data.filings)) {
+        items = data.filings.map((filing: any) => {
+          const filingId = filing.id || filing.filing_uuid || `filing_${Date.now()}`;
+          const title = filing.registrant_name 
+            ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+            : `LDA Filing ${filingId}`;
+          return {
+            context_data: filing,
+            title: title,
+            item_type: 'lda_disclosure' as const,
+          };
+        });
+      } else if (data.type === 'govt_contracts' && data.awards && Array.isArray(data.awards)) {
+        items = data.awards.map((award: any) => {
+          const title = award.recipient_name 
+            ? `Government Contract - ${award.recipient_name}${award.awarding_agency_name ? ` / ${award.awarding_agency_name}` : ''}`
+            : `Government Contract ${award.award_id || ''}`;
+          return {
+            context_data: award,
+            title: title,
+            item_type: 'govt_contract' as const,
+          };
+        });
+      } else if (data.type === 'sec_filings' && data.filings && Array.isArray(data.filings)) {
+        items = data.filings.map((filing: any) => {
+          const title = filing.filingEntity 
+            ? `SEC Filing - ${filing.filingEntity}${filing.form ? ` (${filing.form})` : ''}`
+            : `SEC Filing ${filing.accession || ''}`;
+          return {
+            context_data: filing,
+            title: title,
+            item_type: 'sec_filing' as const,
+          };
+        });
+      } else if (data.type === 'congress_bills' && data.bills && Array.isArray(data.bills)) {
+        items = data.bills.map((bill: any) => {
+          const title = `${bill.bill_type || 'Bill'} ${bill.bill_number || ''} - ${bill.bill_title || 'Untitled Bill'}`.trim();
+          return {
+            context_data: bill,
+            title: title,
+            item_type: 'congress_bill' as const,
+          };
+        });
+      } else if (data.type === 'politician_trades' && data.trades && Array.isArray(data.trades)) {
+        items = data.trades.map((trade: any) => {
+          const title = `${trade.politicianName || 'Unknown'} - ${trade.securitySymbol || trade.securityName || 'Trade'}`;
+          return {
+            context_data: trade,
+            title: title,
+            item_type: 'politician_trade' as const,
+          };
+        });
+      } else if (data.type === 'news_articles' && data.articles && Array.isArray(data.articles)) {
+        items = data.articles.map((article: any) => {
+          const title = article.title || 'News Article';
+          return {
+            context_data: article,
+            title: title,
+            item_type: 'news_article' as const,
+          };
+        });
+      } else if (data.type === 'stocks' && data.stocks && Array.isArray(data.stocks)) {
+        items = data.stocks.map((stock: any) => {
+          const title = `${stock.symbol || 'Stock'} - ${stock.name || stock.symbol || 'Unknown'}`;
+          return {
+            context_data: stock,
+            title: title,
+            item_type: 'stock_result' as const,
+          };
+        });
+      }
+
+      if (items.length === 0) {
+        // No valid items to add
+        return;
+      }
+
+      // Use bulk operation to add items to current folder
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: currentFolderPath,
+        items: items,
+      });
+
+      if (response.success) {
+        const result = response.result as any;
+        console.log(`✅ FolderTile [${id}]: Saved ${result?.succeeded || items.length} of ${items.length} item(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} item(s) failed to save:`, result.errors);
+        }
+        
+        // Refresh folder contents to show the new items
+        await loadFolderContents(currentFolderPath);
+      } else {
+        console.error('❌ FolderTile: Failed to save items:', response.error);
+        setError(response.error || 'Failed to save items');
+      }
+    } catch (error: any) {
+      console.error('❌ FolderTile: Error handling drop:', error);
+      setError(error.message || 'Error saving items');
+    } finally {
+      // Always reset drag over state after drop completes (success or error)
+      setIsDragOverTile(false);
+    }
+  }, [user, currentFolderPath, id, loadFolderContents]);
+
   const tileColor = customColor || '#fbbf24';
   const displayTitle = customTitle || 'Folder';
 
@@ -1081,6 +1291,10 @@ const FolderTile: React.FC<FolderTileProps> = ({
 
       {/* Content Area */}
       <Box
+        onDragOver={handleTileDragOver}
+        onDragLeave={handleTileDragLeave}
+        onDrop={handleTileDrop}
+        onDragEnd={handleTileDragEnd}
         sx={{
           flex: 1,
           overflow: 'auto',
@@ -1088,6 +1302,11 @@ const FolderTile: React.FC<FolderTileProps> = ({
           display: 'flex',
           flexDirection: 'column',
           gap: 1,
+          position: 'relative',
+          border: isDragOverTile ? `2px dashed ${tileColor}` : '2px solid transparent',
+          borderRadius: isDragOverTile ? '4px' : '0px',
+          backgroundColor: isDragOverTile ? `${tileColor}10` : 'transparent',
+          transition: 'all 0.2s ease',
           '&::-webkit-scrollbar': {
             width: '6px',
             height: '6px',
@@ -1107,6 +1326,40 @@ const FolderTile: React.FC<FolderTileProps> = ({
           },
         }}
       >
+        {/* Drag over indicator */}
+        {isDragOverTile && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: `${tileColor}20`,
+              zIndex: 10,
+              pointerEvents: 'none',
+            }}
+          >
+            <Typography
+              variant="h6"
+              sx={{
+                color: tileColor,
+                fontWeight: 600,
+                textAlign: 'center',
+                px: 3,
+                py: 2,
+                border: `2px dashed ${tileColor}`,
+                borderRadius: '4px',
+                backgroundColor: 'rgba(15, 23, 42, 0.9)',
+              }}
+            >
+              Drop items here to add to folder
+            </Typography>
+          </Box>
+        )}
         {/* Action Bar with Select All on left, Actions on right - Always visible */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1, borderBottom: '1px solid #374151' }}>
           {/* Select All on left */}
@@ -1215,6 +1468,10 @@ const FolderTile: React.FC<FolderTileProps> = ({
           </Box>
         ) : (
           <List 
+            onDragOver={handleTileDragOver}
+            onDragLeave={handleTileDragLeave}
+            onDrop={handleTileDrop}
+            onDragEnd={handleTileDragEnd}
             onContextMenu={(e) => {
               // Only show context menu on empty area if no items are selected
               if (selectedItems.size === 0 && !selectedItem) {

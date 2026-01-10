@@ -2041,7 +2041,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     />
                     {visibleColumns.includes('recipient') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                        {award.recipient_name || 'N/A'}
+                        {award.recipient_name || (award.recipient_name_normalized ? award.recipient_name_normalized.toUpperCase() : 'N/A')}
                       </TableCell>
                     )}
                     {visibleColumns.includes('awarding_agency') && (

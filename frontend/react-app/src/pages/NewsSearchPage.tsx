@@ -57,6 +57,13 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
         borderRadius: '0px',
         backdropFilter: 'blur(10px)',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        '&:hover': {
+          background: 'rgba(15, 23, 42, 0.95)',
+          border: '2px solid #374151',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+          transform: 'none',
+          zIndex: 'auto',
+        },
         ...safeSx
       }}
       {...props}

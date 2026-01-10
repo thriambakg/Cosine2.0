@@ -587,6 +587,21 @@ const GlobalChatSidebar: React.FC = () => {
   const [sessionContext, setSessionContext] = useState<ContextItem[]>([]);
   const previousContextRef = useRef<ContextItem[]>([]);
   
+  // Drag and drop state for visual feedback
+  const [isDragOverSidebar, setIsDragOverSidebar] = useState(false);
+  
+  // Global drag end handler to reset state when drag ends outside the drop zone
+  useEffect(() => {
+    const handleGlobalDragEnd = () => {
+      setIsDragOverSidebar(false);
+    };
+    
+    document.addEventListener('dragend', handleGlobalDragEnd);
+    return () => {
+      document.removeEventListener('dragend', handleGlobalDragEnd);
+    };
+  }, []);
+  
   // Update previous context when session changes (but not on every sessionContext change)
   // This effect should ONLY run when activeSessionId changes, not when sessionContext.length changes
   useEffect(() => {
@@ -2383,24 +2398,28 @@ const GlobalChatSidebar: React.FC = () => {
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Add visual feedback
-        const target = e.currentTarget as HTMLElement;
-        target.style.backgroundColor = 'rgba(59, 130, 246, 0.05)';
+        // Check if this is a drag from a tile (has type field)
+        const types = e.dataTransfer.types;
+        if (types.includes('text/plain') || types.includes('application/json')) {
+          setIsDragOverSidebar(true);
+          e.dataTransfer.dropEffect = 'copy';
+        }
       }}
       onDragLeave={(e) => {
         // Only remove highlight if leaving the entire sidebar
         const target = e.currentTarget as HTMLElement;
         const relatedTarget = e.relatedTarget as HTMLElement;
         if (!target.contains(relatedTarget)) {
-          target.style.backgroundColor = 'rgba(15, 23, 42, 0.98)';
+          setIsDragOverSidebar(false);
         }
+      }}
+      onDragEnd={() => {
+        // Always reset drag over state when drag ends
+        setIsDragOverSidebar(false);
       }}
       onDrop={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Remove visual feedback
-        const target = e.currentTarget as HTMLElement;
-        target.style.backgroundColor = 'rgba(15, 23, 42, 0.98)';
         
         try {
           // Try to get data from application/json first (for filesystem items and other structured data)
@@ -2562,6 +2581,9 @@ const GlobalChatSidebar: React.FC = () => {
           }
         } catch (err) {
           console.error('Error handling drop:', err);
+        } finally {
+          // Always reset drag over state after drop completes (success or error)
+          setIsDragOverSidebar(false);
         }
       }}
       sx={{
@@ -2571,12 +2593,14 @@ const GlobalChatSidebar: React.FC = () => {
         bottom: 0,
         width: sidebarWidth,
         backgroundColor: 'rgba(15, 23, 42, 0.98)',
-        borderLeft: '2px solid #374151',
+        borderLeft: isDragOverSidebar ? '3px solid #3b82f6' : '2px solid #374151',
         backdropFilter: 'blur(10px)',
         zIndex: 1200,
         display: 'flex',
         flexDirection: 'column',
-        boxShadow: '-4px 0 16px rgba(0, 0, 0, 0.3)',
+        boxShadow: isDragOverSidebar 
+          ? '-4px 0 16px rgba(59, 130, 246, 0.4)' 
+          : '-4px 0 16px rgba(0, 0, 0, 0.3)',
         animation: isDualScreenMode ? 'none' : 'slideInFromRight 0.3s ease-out',
         '@keyframes slideInFromRight': {
           from: { transform: 'translateX(100%)' },
@@ -2584,8 +2608,49 @@ const GlobalChatSidebar: React.FC = () => {
         },
         // Transform based on visibility - dual screen mode is managed automatically
         transform: isVisible ? 'translateX(0)' : 'translateX(100%)',
+        transition: isDragOverSidebar ? 'all 0.2s ease' : 'border 0.2s ease',
       }}
     >
+      {/* Drag over indicator */}
+      {isDragOverSidebar && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            zIndex: 1300,
+            pointerEvents: 'none',
+          }}
+        >
+          <Box
+            sx={{
+              px: 3,
+              py: 2,
+              border: '2px dashed #3b82f6',
+              borderRadius: '4px',
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            <Typography
+              variant="h6"
+              sx={{
+                color: '#3b82f6',
+                fontWeight: 600,
+                textAlign: 'center',
+              }}
+            >
+              Drop items here to add to context
+            </Typography>
+          </Box>
+        </Box>
+      )}
       {/* Resize Handle - visible when sidebar is visible */}
       {isVisible && (
         <Box

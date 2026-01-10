@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -152,10 +152,24 @@ const FileBrowserDialog: React.FC<FileBrowserDialogProps> = ({
     }
   };
 
+  const isSelectingRef = useRef(false);
+  
   const handleSelect = () => {
+    // Prevent multiple simultaneous selections
+    if (isSelectingRef.current) {
+      console.warn('📁 FileBrowserDialog: Select operation already in progress, ignoring duplicate call');
+      return;
+    }
+    
+    isSelectingRef.current = true;
     const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
     onSelect(folderPath);
     onClose();
+    
+    // Reset after a short delay to allow the operation to complete
+    setTimeout(() => {
+      isSelectingRef.current = false;
+    }, 1000);
   };
 
   return (
