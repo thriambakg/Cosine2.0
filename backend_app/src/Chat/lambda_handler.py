@@ -306,9 +306,17 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                 
                                 try:
                                     full_response = loop.run_until_complete(process_async_stream())
+                                except Exception as async_stream_error:
+                                    # Re-raise kill signal exceptions immediately
+                                    if "Session has been terminated" in str(async_stream_error):
+                                        raise
+                                    # For other errors, log and re-raise
+                                    logger.error(f"Error in async stream processing: {str(async_stream_error)}")
+                                    raise
                                 finally:
                                     loop.close()
                                 
+                                # Only return if we successfully completed streaming (no exception raised)
                                 return full_response
                             else:
                                 # Regular sync generator
@@ -377,7 +385,7 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                 if inspect.isasyncgen(stream_result):
                                     async def process_async_stream():
                                         nonlocal full_response, last_sent_length
-                                            async for chunk in stream_result:
+                                        async for chunk in stream_result:
                                             # CRITICAL: Check kill flag frequently during streaming (every chunk)
                                             # Also check DynamoDB directly for fastest detection
                                             if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
@@ -422,10 +430,18 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                     
                                     try:
                                         full_response = loop.run_until_complete(process_async_stream())
+                                    except Exception as async_stream_error:
+                                        # Re-raise kill signal exceptions immediately
+                                        if "Session has been terminated" in str(async_stream_error):
+                                            raise
+                                        # For other errors, log and re-raise
+                                        logger.error(f"Error in async stream processing: {str(async_stream_error)}")
+                                        raise
                                     finally:
                                         loop.close()
                                     
                                     # Create agent response object from streamed content
+                                    # Only return if we successfully completed streaming (no exception raised)
                                     from strands.types import AgentResult, Message
                                     return AgentResult(message=Message(content=full_response))
                                 else:
@@ -1364,6 +1380,37 @@ Context Items Available: {len(context_items)} items
                 logger.warning(f"Failed to flush agent logs: {str(flush_error)}")
             
             logger.debug(f"Agent response received: {type(agent_response)}")
+            
+            # CRITICAL: Check kill flag immediately after agent processing completes
+            # Even if agent() completed, we should stop before processing/sending response
+            try:
+                from kill_signal_registry import is_killed
+                if is_killed(session_id, user_id):
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected after agent processing completed, aborting before processing response")
+                    # Clear accumulated content - don't send or save anything if killed
+                    accumulated_streaming_content['value'] = ''
+                    streaming_used['value'] = False
+                    # Clear kill flag since we're aborting
+                    try:
+                        from kill_signal_registry import clear_kill_flag
+                        clear_kill_flag(session_id, user_id)
+                    except Exception as clear_error:
+                        logger.error(f"❌ Failed to clear kill flag: {str(clear_error)}")
+                    # Return error response instead of continuing
+                    return {
+                        'statusCode': 200,  # Return 200 so WebSocket doesn't error, but mark as terminated
+                        'body': {
+                            'error': 'Session terminated',
+                            'message': 'Request was cancelled',
+                            'session_id': session_id,
+                            'user_id': user_id,
+                            'terminated': True
+                        }
+                    }
+            except Exception as kill_check_error:
+                logger.error(f"Error checking kill flag after agent processing: {str(kill_check_error)}")
+                # Continue if we can't check (better to send response than lose it)
+            
         except Exception as e:
             error_str = str(e)
             # Handle kill signal termination
@@ -1372,6 +1419,12 @@ Context Items Available: {len(context_items)} items
                 # Clear accumulated content - don't send or save anything if killed
                 accumulated_streaming_content['value'] = ''
                 streaming_used['value'] = False
+                # Clear kill flag since we're aborting
+                try:
+                    from kill_signal_registry import clear_kill_flag
+                    clear_kill_flag(session_id, user_id)
+                except Exception as clear_error:
+                    logger.error(f"❌ Failed to clear kill flag: {str(clear_error)}")
                 # Return error response instead of continuing
                 return {
                     'statusCode': 200,  # Return 200 so WebSocket doesn't error, but mark as terminated
