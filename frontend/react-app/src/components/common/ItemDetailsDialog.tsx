@@ -2466,11 +2466,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         console.log('📥 Fetching child award:', childAward.award_id);
                         
                         // Make API call to lambda with just the award_id
-                        const awardResponse = await govtContractsSearchAPI.getAward({
-                          award_id: childAward.award_id,
-                        });
-                        
-                        if (awardResponse.success && awardResponse.result) {
+                          const awardResponse = await govtContractsSearchAPI.getAward({
+                            award_id: childAward.award_id,
+                          });
+                          
+                          if (awardResponse.success && awardResponse.result) {
                           const childAwardData = awardResponse.result;
                           console.log('✅ Child award fetched, opening new dialog:', childAwardData.award_id);
                           
@@ -2488,12 +2488,12 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                               parentAward: itemData, // Pass current award as parent
                             }
                           );
-                        } else {
+                          } else {
                           console.warn('⚠️ Child award not found in database:', childAward.award_id);
                           // Child award doesn't exist - could show a message or skip
                           // For now, we'll just log it
-                        }
-                      } catch (error) {
+                          }
+                        } catch (error) {
                         console.error('❌ Error fetching child award:', error);
                       }
                     }}

@@ -153,7 +153,7 @@ const FileBrowserDialog: React.FC<FileBrowserDialogProps> = ({
   };
 
   const isSelectingRef = useRef(false);
-  
+
   const handleSelect = () => {
     // Prevent multiple simultaneous selections
     if (isSelectingRef.current) {
