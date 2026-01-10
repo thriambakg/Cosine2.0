@@ -2159,8 +2159,8 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     else:
         # For queries with KEYS_ONLY GSIs, we need to fetch more items than the limit
         # because we'll filter in Python after BatchGetItem (some items may not match filters)
-        # Use a multiplier to fetch more items (e.g., fetch 5x the limit to account for filtering)
-        query_limit = max(limit * 5, 100)  # Fetch at least 5x the limit, minimum 100 items
+        # Use a smaller multiplier (2x) to reduce fetch time - frontend can paginate if needed
+        query_limit = max(limit * 2, 100)  # Fetch 2x the limit, minimum 100 items (reduced from 5x for performance)
         params = {
             'Limit': query_limit
         }
