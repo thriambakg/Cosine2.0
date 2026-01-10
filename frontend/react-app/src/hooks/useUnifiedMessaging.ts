@@ -160,6 +160,20 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
   }, [sendMessage]);
 
 
+  // Send followup message (context message with existing session)
+  const sendFollowupMessage = useCallback(async (
+    text: string,
+    model: string = 'claude-sonnet-4'
+  ) => {
+    if (!userId) {
+      console.warn('⚠️ User ID is required for followup message');
+      return { success: false, error: 'User ID is required' };
+    }
+
+    // Followup messages use context_message type but with existing session
+    return sendContextMessage(text, [], model, sessionId || undefined);
+  }, [userId, sessionId, sendContextMessage]);
+
   // Send edit message
   const sendEditMessage = useCallback(async (
     text: string,
@@ -267,7 +281,7 @@ export const useUnifiedMessaging = (options: UseUnifiedMessagingOptions) => {
     sendMessage,
     sendContextMessage,
     sendFileMessage,
-    sendFileMessage,
+    sendFollowupMessage,
     sendEditMessage,
     clearSession,
     deleteSession,

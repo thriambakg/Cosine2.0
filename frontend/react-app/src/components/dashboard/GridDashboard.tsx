@@ -3,7 +3,7 @@ import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mu
 import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { filesystemAPI } from '@/services/api';
+import { filesystemAPI, GovtContractAward, CongressBill } from '@/services/api';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -1160,7 +1160,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
       paginationState: sessionPaginationState,
-      results: sessionResults,
+      results: sessionResults as GovtContractAward[] | undefined,
       displayOptions: {
         showRecipient: true,
         showAwardingAgency: true,
@@ -1206,7 +1206,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
       paginationState: sessionPaginationStateBills,
-      results: sessionResultsBills,
+      results: sessionResultsBills as CongressBill[] | undefined,
       displayOptions: {
         showBillTitle: true,
         showBillType: true,

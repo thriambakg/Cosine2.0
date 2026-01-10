@@ -107,7 +107,8 @@ interface GovtContractsSearchTileProps {
     compactView: boolean;
   };
   paginationState?: {
-    totalResultsLoaded: number;
+    totalResultsLoaded?: number;
+    pageCount?: number;
     lastEvaluatedKeys: any[];
     hasMore: boolean;
   };
@@ -223,18 +224,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
   
-  // Debug logging for received props
-  console.log('🏛️ GovtContractsSearchTile: Component mounted/updated', {
-    tileId: id,
-    receivedResults: results?.length || 0,
-    firstReceivedResult: results?.[0]?.award_id || 'N/A',
-    paginationState: paginationState ? {
-      totalResultsLoaded: paginationState.totalResultsLoaded,
-      keysCount: paginationState.lastEvaluatedKeys?.length || 0,
-      hasMore: paginationState.hasMore,
-    } : 'None',
-  });
-  
   const defaultDisplayOptions = {
     showRecipient: true,
     showAwardingAgency: true,
@@ -266,6 +255,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     'recipient',
     'awarding_agency',
     'funding_agency',
+    'recipient_location',
     'amount',
     'period_start_date',
     'period_end_date',
@@ -612,7 +602,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: 125,
+        limit: 25,
       };
       
       const response = await govtContractsSearchAPI.search(searchRequest);
@@ -625,29 +615,39 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         setFilteredResults(response.results);
         setCurrentResults(response.results);
         setHasPerformedInitialSearch(true);
-        setHasMore(response.has_more || false);
+        
+        // Limit pagination to 4 pages total (1 initial + 3 more)
+        const MAX_PAGES = 4;
+        const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+        
+        // Only allow hasMore if we haven't reached the page limit
+        const canLoadMore = response.has_more && newLastEvaluatedKey !== null;
+        const hasReachedPageLimit = false; // Initial page, we haven't loaded any additional pages yet
+        
+        setHasMore(canLoadMore && !hasReachedPageLimit);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
-        // Store pagination state - simplified: just track page keys, not exact counts
-        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
+        // Store pagination state - limit to MAX_PAGINATION_KEYS
+        const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey].slice(0, MAX_PAGINATION_KEYS) : [];
         setLastEvaluatedKeys(newLastEvaluatedKeys);
         
-        // Persist searchParams and simplified pagination state (page-based, not result-count-based)
+        // Persist searchParams and pagination state (max 4 pages)
+        const pageCount = 1; // Initial page
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
-            pageCount: 1, // Simple page count
+            pageCount: pageCount,
             lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: canLoadMore && !hasReachedPageLimit,
           },
         });
         
-        // Update parent component with simplified pagination metadata
+        // Update parent component with pagination metadata
         onUpdate(id, {
           paginationState: {
-            pageCount: 1,
-            lastEvaluatedKeys: response.last_evaluated_key ? [response.last_evaluated_key] : [],
-            hasMore: response.has_more || false,
+            pageCount: pageCount,
+            lastEvaluatedKeys: newLastEvaluatedKeys,
+            hasMore: canLoadMore && !hasReachedPageLimit,
           },
           lastUpdated: Date.now(),
         });
@@ -689,9 +689,21 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange]);
   
-  // Load more results
+  // Load more results - limited to 4 pages total
   const handleLoadMore = useCallback(async () => {
-    if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams) return;
+    const MAX_PAGES = 4;
+    const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+    
+    // Check if we've reached the page limit
+    const currentPageCount = lastEvaluatedKeys.length + 1; // +1 for initial page
+    const hasReachedPageLimit = currentPageCount >= MAX_PAGES;
+    
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams || hasReachedPageLimit) {
+      if (hasReachedPageLimit) {
+        console.log('🏛️ GovtContractsSearchTile: Reached maximum page limit (4 pages)');
+      }
+      return;
+    }
     
     setIsLoadingMore(true);
     setError(null);
@@ -721,7 +733,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: 125,
+        limit: 25,
         last_evaluated_key: lastEvaluatedKey,
       };
       
@@ -730,42 +742,51 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       if (response.success && response.results) {
         const updatedResults = [...allResults, ...response.results];
         const newLastEvaluatedKey = response.last_evaluated_key || null;
+        const newPageCount = currentPageCount + 1; // Increment page count
+        
+        // Check if we've reached the page limit after loading this page
+        const willReachPageLimit = newPageCount >= MAX_PAGES;
+        
         setAllResults(updatedResults);
         setFilteredResults(updatedResults);
         setCurrentResults(updatedResults);
-        setHasMore(response.has_more || false);
+        
+        // Only allow hasMore if backend says there's more AND we haven't reached the page limit
+        setHasMore(response.has_more && !willReachPageLimit && newLastEvaluatedKey !== null);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
-        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        // Update lastEvaluatedKeys array - limit to MAX_PAGINATION_KEYS (3 keys)
         const updatedKeys = newLastEvaluatedKey 
-          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(0, MAX_PAGINATION_KEYS) // Keep only first 3 keys
           : lastEvaluatedKeys;
         setLastEvaluatedKeys(updatedKeys);
         
-        // Persist simplified pagination state (page count, not exact result count)
-        const pageCount = updatedKeys.length + 1; // +1 for initial page
+        // Persist pagination state (max 4 pages)
         onSettingsChange(id, {
           paginationState: {
-            pageCount: pageCount,
+            pageCount: newPageCount,
             lastEvaluatedKeys: updatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: response.has_more && !willReachPageLimit && newLastEvaluatedKey !== null,
           },
         });
         
         onUpdate(id, {
           paginationState: {
-            pageCount: pageCount,
+            pageCount: newPageCount,
             lastEvaluatedKeys: updatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: response.has_more && !willReachPageLimit && newLastEvaluatedKey !== null,
           },
           lastUpdated: Date.now(),
         });
+        
+        if (willReachPageLimit) {
+          console.log('🏛️ GovtContractsSearchTile: Reached maximum page limit (4 pages) after loading');
+        }
       } else {
         console.error('🏛️ GovtContractsSearchTile: Load more failed');
         setError('Load more failed');
         setHasMore(false);
         // Update pagination state to reflect no more results
-        const currentPageCount = lastEvaluatedKeys.length + 1; // +1 for initial page
         onSettingsChange(id, {
           paginationState: {
             pageCount: currentPageCount,
@@ -779,7 +800,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       setError(err.message || 'An error occurred while loading more results');
       setHasMore(false);
       // Preserve current pagination state on error
-      const currentPageCount = lastEvaluatedKeys.length + 1; // +1 for initial page
       onSettingsChange(id, {
         paginationState: {
           pageCount: currentPageCount,
@@ -792,8 +812,11 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
 
-  // Restore pagination state on mount - simplified: just restore pages, not exact counts
+  // Restore pagination state on mount - limited to 4 pages
   const restorePaginationState = useCallback(async () => {
+    const MAX_PAGES = 4;
+    const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+    
     if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
       return;
     }
@@ -803,9 +826,15 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       return;
     }
 
-    console.log('🔄 GovtContractsSearchTile: Restoring pagination state (page-based)', {
-      pageCount: paginationState.pageCount || 0,
-      keysToLoad: paginationState.lastEvaluatedKeys.length,
+    // Limit to MAX_PAGES
+    const savedPageCount = paginationState.pageCount || 0;
+    const pageCountToRestore = Math.min(savedPageCount, MAX_PAGES);
+    const keysToRestore = paginationState.lastEvaluatedKeys.slice(0, MAX_PAGINATION_KEYS);
+
+    console.log('🔄 GovtContractsSearchTile: Restoring pagination state (page-based, max 4 pages)', {
+      savedPageCount: savedPageCount,
+      pageCountToRestore: pageCountToRestore,
+      keysToRestore: keysToRestore.length,
     });
 
     setIsRestoringPagination(true);
@@ -814,9 +843,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
     try {
       let currentResults: any[] = [];
+      let currentPageCount = 0;
       
       // Load the initial page first
-      if (currentSearchParams) {
+      if (currentSearchParams && pageCountToRestore > 0) {
         const filters: any = { ...currentSearchParams };
         
         // Remove legacy date fields (date_from, date_to) - use date_year instead
@@ -835,20 +865,20 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         // Load the initial page (no pagination key)
         const initialSearchRequest = {
           filters,
-          limit: 125,
+          limit: 25,
         };
         
         const initialResponse = await govtContractsSearchAPI.search(initialSearchRequest);
         
         if (initialResponse.success && initialResponse.results) {
           currentResults = [...initialResponse.results];
+          currentPageCount = 1;
         }
       }
 
-      // Load continuation pages up to the saved page count (simplified: just load all saved pages)
-      const keysToLoad = [...paginationState.lastEvaluatedKeys];
-      for (const nextKey of keysToLoad) {
-        if (!currentSearchParams) break;
+      // Load continuation pages up to the saved page count (max 4 pages)
+      for (const nextKey of keysToRestore) {
+        if (!currentSearchParams || currentPageCount >= MAX_PAGES) break;
         
         const filters: any = { ...currentSearchParams };
         
@@ -867,7 +897,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         
         const searchRequest = {
           filters,
-          limit: 125,
+          limit: 25,
           last_evaluated_key: nextKey,
         };
         
@@ -875,31 +905,40 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         
         if (response.success && response.results && response.results.length > 0) {
           currentResults = [...currentResults, ...response.results];
+          currentPageCount += 1;
         } else {
           // No more results, stop loading
           break;
         }
       }
       
+      // Determine hasMore based on restored state and page limit
+      const hasReachedPageLimit = currentPageCount >= MAX_PAGES;
+      const lastKey = keysToRestore[keysToRestore.length - 1] || null;
+      const restoredHasMore = paginationState.hasMore && !hasReachedPageLimit && lastKey !== null;
+      
       // Update state with restored results
       setAllResults(currentResults);
       setFilteredResults(currentResults);
       setCurrentResults(currentResults);
-      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
-      setHasMore(paginationState.hasMore);
+      setLastEvaluatedKeys(keysToRestore);
+      setLastEvaluatedKey(lastKey);
+      setHasMore(restoredHasMore);
       setHasPerformedInitialSearch(true);
       
       console.log('✅ GovtContractsSearchTile: Pagination restoration complete', {
-        pagesRestored: paginationState.pageCount || 0,
+        pagesRestored: currentPageCount,
+        maxPages: MAX_PAGES,
         resultsCount: currentResults.length,
+        hasMore: restoredHasMore,
       });
       
       // Update tile with restored pagination state
       onUpdate(id, {
         paginationState: {
-          pageCount: paginationState.pageCount || 0,
-          lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
-          hasMore: paginationState.hasMore,
+          pageCount: currentPageCount,
+          lastEvaluatedKeys: keysToRestore,
+          hasMore: restoredHasMore,
         },
         lastUpdated: Date.now(),
       });
@@ -912,9 +951,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [paginationState, results, currentSearchParams, id, onUpdate]);
 
-  // Restore pagination state on mount if needed
+  // Restore pagination state on mount if needed (max 4 pages)
   useEffect(() => {
-    if (paginationState && paginationState.totalResultsLoaded > (results?.length || 0) && !isRestoringPagination && !isLoading) {
+    if (paginationState && paginationState.pageCount !== undefined && paginationState.pageCount > 0 && paginationState.pageCount <= 4 && !isRestoringPagination && !isLoading) {
       restorePaginationState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -991,7 +1030,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
       // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
-      if (paginationState && paginationState.totalResultsLoaded > 0) {
+      if (paginationState && paginationState.totalResultsLoaded !== undefined && paginationState.totalResultsLoaded > 0) {
         console.log('🔄 GovtContractsSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
         return;
       }
@@ -1133,6 +1172,62 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const handleRefresh = () => {
     performSearch();
   };
+
+  // Handle award enrichment - update the award in tile results
+  const handleAwardEnrichment = useCallback((enrichedAward: GovtContractAward) => {
+    console.log('🔄 GovtContractsSearchTile: Award enriched, updating results', {
+      award_id: enrichedAward.award_id,
+      transactions_count: enrichedAward.transactions?.length || 0,
+      subawards_count: enrichedAward.subawards?.length || 0,
+      transaction_count_field: enrichedAward.transaction_count,
+      subaward_count_field: enrichedAward.subaward_count,
+    });
+    
+    // Update the award in allResults, filteredResults, and currentResults
+    const updateAwardInArray = (arr: GovtContractAward[]) => {
+      return arr.map(award => {
+        if (award.award_id === enrichedAward.award_id) {
+          // Merge enriched data with existing award data
+          // This ensures we preserve all fields and update transactions/subawards
+          const updatedAward = {
+            ...award,
+            ...enrichedAward,
+            // Explicitly update transactions and subawards arrays
+            transactions: enrichedAward.transactions || award.transactions || [],
+            subawards: enrichedAward.subawards || award.subawards || [],
+            transaction_count: enrichedAward.transaction_count ?? award.transaction_count,
+            subaward_count: enrichedAward.subaward_count ?? award.subaward_count,
+          };
+          console.log('🔄 GovtContractsSearchTile: Updating award in array', {
+            award_id: updatedAward.award_id,
+            old_transactions: award.transactions?.length || 0,
+            new_transactions: updatedAward.transactions?.length || 0,
+            old_subawards: award.subawards?.length || 0,
+            new_subawards: updatedAward.subawards?.length || 0,
+          });
+          return updatedAward;
+        }
+        return award;
+      });
+    };
+    
+    setAllResults(prev => {
+      const updated = updateAwardInArray(prev);
+      console.log('✅ GovtContractsSearchTile: Updated allResults', {
+        total_awards: updated.length,
+        updated_award_index: updated.findIndex(a => a.award_id === enrichedAward.award_id),
+      });
+      return updated;
+    });
+    setFilteredResults(prev => updateAwardInArray(prev));
+    setCurrentResults(prev => updateAwardInArray(prev));
+    
+    console.log('✅ GovtContractsSearchTile: Award updated in tile results', {
+      award_id: enrichedAward.award_id,
+      transactions_count: enrichedAward.transactions?.length || 0,
+      subawards_count: enrichedAward.subawards?.length || 0,
+    });
+  }, []);
 
 
   // Client-side filtering function
@@ -1879,6 +1974,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                   {visibleColumns.includes('funding_agency') && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Funding Agency</TableCell>
                   )}
+                  {visibleColumns.includes('recipient_location') && (
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Recipient Location</TableCell>
+                  )}
                   {visibleColumns.includes('amount') && (
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Amount</TableCell>
                   )}
@@ -1916,6 +2014,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                           { 
                             user_id: user.id,
                             parentAward: null,
+                            onEnrich: handleAwardEnrichment,
                           }
                         );
                       }
@@ -1953,6 +2052,18 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     {visibleColumns.includes('funding_agency') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                         {award.funding_agency_name || 'N/A'}
+                      </TableCell>
+                    )}
+                    {visibleColumns.includes('recipient_location') && (
+                      <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
+                        {(() => {
+                          const state = award.recipient_location_state || award.recipient_state_name;
+                          const zip = award.recipient_zip_code;
+                          if (zip) {
+                            return state ? `${state}, ${zip}` : zip;
+                          }
+                          return state || 'N/A';
+                        })()}
                       </TableCell>
                     )}
                     {visibleColumns.includes('amount') && (
@@ -2050,7 +2161,24 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             <Typography variant="h6">Search Government Contracts</Typography>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ 
+          p: 3,
+          maxHeight: '70vh',
+          overflowY: 'auto',
+          '&::-webkit-scrollbar': {
+            width: '6px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+            borderRadius: '3px',
+          },
+          '&::-webkit-scrollbar-thumb:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+          },
+        }}>
           <Box display="flex" flexDirection="column" gap={3} mt={2}>
             {/* Awarding Agency */}
             <MultiSelectField<{ code?: string; name?: string; id?: string; text?: string; [key: string]: any }>
@@ -2390,7 +2518,24 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             />
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ 
+          p: 3,
+          maxHeight: '70vh',
+          overflowY: 'auto',
+          '&::-webkit-scrollbar': {
+            width: '6px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'rgba(55, 65, 81, 0.3)',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+            borderRadius: '3px',
+          },
+          '&::-webkit-scrollbar-thumb:hover': {
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+          },
+        }}>
           <Typography variant="body2" sx={{ color: '#9ca3af', mb: 3 }}>
             Refine search results by: Click headings to show top filters. Document counts shown in <span style={{ color: '#3b82f6' }}>#</span>
           </Typography>
@@ -3134,6 +3279,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             recipient: 'Recipient',
             awarding_agency: 'Awarding Agency',
             funding_agency: 'Funding Agency',
+            recipient_location: 'Recipient Location',
             amount: 'Amount',
             period_start_date: 'Period Start Date',
             period_end_date: 'Period End Date',

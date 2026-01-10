@@ -168,6 +168,7 @@ const GovtContractsSearchPage: React.FC = () => {
     'recipient',
     'awarding_agency',
     'funding_agency',
+    'recipient_location',
     'amount',
     'period_start_date',
     'period_end_date',
@@ -689,7 +690,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       const response = await govtContractsSearchAPI.search({
         filters,
-        limit: 125,
+        limit: 25,
       });
 
       if (response.success) {
@@ -754,7 +755,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       const response = await govtContractsSearchAPI.search({
         filters,
-        limit: 125,
+        limit: 25,
         last_evaluated_key: lastEvaluatedKey,
       });
 
@@ -1714,6 +1715,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         recipient: 'Recipient',
                         awarding_agency: 'Awarding Agency',
                         funding_agency: 'Funding Agency',
+                        recipient_location: 'Recipient Location',
                         amount: 'Amount',
                         period_start_date: 'Period Start Date',
                         period_end_date: 'Period End Date',
@@ -1834,6 +1836,13 @@ const GovtContractsSearchPage: React.FC = () => {
                                   fontSize: '0.875rem',
                                 }}>Funding Agency</TableCell>
                               )}
+                              {visibleColumns.includes('recipient_location') && (
+                                <TableCell sx={{ 
+                                  color: '#9ca3af', 
+                                  fontWeight: 600, 
+                                  fontSize: '0.875rem',
+                                }}>Recipient Location</TableCell>
+                              )}
                               {visibleColumns.includes('amount') && (
                                 <TableCell sx={{ 
                                   color: '#9ca3af', 
@@ -1935,6 +1944,22 @@ const GovtContractsSearchPage: React.FC = () => {
                                     padding: '12px',
                                   }}>
                                     {award.funding_agency_name || 'N/A'}
+                                  </TableCell>
+                                )}
+                                {visibleColumns.includes('recipient_location') && (
+                                  <TableCell sx={{ 
+                                    color: '#ffffff', 
+                                    fontSize: '0.875rem',
+                                    padding: '12px',
+                                  }}>
+                                    {(() => {
+                                      const state = award.recipient_location_state || award.recipient_state_name;
+                                      const zip = award.recipient_zip_code;
+                                      if (zip) {
+                                        return state ? `${state}, ${zip}` : zip;
+                                      }
+                                      return state || 'N/A';
+                                    })()}
                                   </TableCell>
                                 )}
                                 {visibleColumns.includes('amount') && (

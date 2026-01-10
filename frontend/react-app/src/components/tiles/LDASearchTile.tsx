@@ -489,6 +489,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
 
       const searchRequest = {
         filters,
+        limit: 100, // Tile: limit to 100 results
       };
       
       const response = await ldaSearchAPI.search(searchRequest);
@@ -504,7 +505,10 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         setFilteredResults(response.results);
         setCurrentResults(response.results);
         setHasPerformedInitialSearch(true);
-        setHasMore(response.has_more || false);
+        // Only set hasMore if we have a valid last_evaluated_key for pagination
+        // If backend says has_more but provides no key, we can't actually load more
+        const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
+        setHasMore((response.has_more || false) && hasValidPaginationKey);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
         // Store pagination state (only first page key for initial search)
@@ -518,12 +522,14 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         });
         
         // Persist pagination state
+        // Only persist hasMore if we have a valid pagination key
+        const hasValidPaginationKeyForState = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
             totalResultsLoaded: response.results.length,
             lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: (response.has_more || false) && hasValidPaginationKeyForState,
           },
         });
         
@@ -661,6 +667,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
       const searchRequest = {
         filters,
         last_evaluated_key: keyToUse,
+        limit: 100, // Tile: limit to 100 results
       };
       
       const response = await ldaSearchAPI.search(searchRequest);
@@ -674,7 +681,10 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
         setAllResults(updatedResults);
         setFilteredResults(updatedResults);
         setCurrentResults(updatedResults);
-        setHasMore(response.has_more || false);
+        // Only set hasMore if we have a valid last_evaluated_key for pagination
+        // If backend says has_more but provides no key, we can't actually load more
+        const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
+        setHasMore((response.has_more || false) && hasValidPaginationKey);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
         // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)

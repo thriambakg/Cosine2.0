@@ -5,7 +5,6 @@
  */
 
 import { sessionManagementAPI } from './api';
-import { API_CONFIG } from '../config/api';
 
 export interface SharedMessage {
   id: string;
@@ -240,8 +239,11 @@ class UnifiedMessageHandlerService {
 
   /**
    * Get current user ID from active sessions
+   * @private Reserved for future use
    */
-  private getCurrentUserId(): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // @ts-ignore - Reserved for future use
+  private _getCurrentUserId(): string | null {
     // Try to get user ID from any active session
     for (const [, userId] of this.sessionUserIds.entries()) {
       if (userId) {
@@ -252,7 +254,8 @@ class UnifiedMessageHandlerService {
   }
 
   /**
-   * Send kill signal via WebSocket (preferred) or API fallback
+   * Send kill signal via WebSocket (only if connection is active)
+   * Skip if no active connection - session deletion already handles cleanup
    */
   private async sendKillSignal(sessionId: string, reason: string): Promise<void> {
     try {
@@ -272,15 +275,9 @@ class UnifiedMessageHandlerService {
         return;
       }
       
-      // Fallback: send via REST (optional, but kill is async anyway)
-      const userId = this.getCurrentUserId();
-      if (userId) {
-        fetch(`${API_CONFIG.BASE_URL}/sessions?user_id=${userId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'kill_session', session_id: sessionId, reason })
-        }).catch(e => console.error('Kill signal API fallback failed:', e));
-      }
+      // No active WebSocket connection - skip kill signal
+      // Session deletion via REST API will handle cleanup
+      console.log(`⚠️ UnifiedMessageHandler: No active WebSocket connection for session ${sessionId}, skipping kill signal (session deletion already in progress)`);
     } catch (error) {
       console.error('❌ UnifiedMessageHandler: Error sending kill signal:', error);
     }
@@ -514,8 +511,11 @@ class UnifiedMessageHandlerService {
 
   /**
    * Process followup message (existing session with new context)
+   * @private Reserved for future use when followup messages need special handling
    */
-  private async processFollowupMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // @ts-ignore - Reserved for future use
+  private async _processFollowupMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     console.log('🔄 UnifiedMessageHandler: Processing followup message for session:', sessionId);
     
     // Connection already established in handleMessageProcessing for new connections

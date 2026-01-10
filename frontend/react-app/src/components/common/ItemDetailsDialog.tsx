@@ -31,6 +31,7 @@ import TutorialHelpIcon from './TutorialHelpIcon';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
+import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import FileBrowserDialog from './FileBrowserDialog';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
@@ -116,7 +117,22 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [downloadLoading, setDownloadLoading] = useState<boolean>(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState<boolean>(false);
   
+  // State to track item data - updated when enrichment completes
+  const [itemData, setItemData] = useState<any>(() => {
+    // Initialize from props - handle nested data structure
+    return data?.data && typeof data.data === 'object' ? data.data : data;
+  });
+  
   const { user } = useAuth();
+  
+  // Dialog manager helpers for opening new dialogs (e.g., parent contract)
+  const { openItemDetails } = useDialogManagerHelpers();
+  
+  // Update itemData when data prop changes (e.g., when dialog is opened with new data)
+  useEffect(() => {
+    const newItemData = data?.data && typeof data.data === 'object' ? data.data : data;
+    setItemData(newItemData);
+  }, [data]);
   
   // Dialog manager for minimize functionality (only use if not already managed)
   const safeDialogManager = useSafeDialogManager();
@@ -247,8 +263,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
   // Handle enrichment for Government Contracts
   const handleEnrichAward = useCallback(async () => {
-    // Get award_id from data or nested data.data
-    const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
+    // Get award_id from itemData state
     const awardId = itemData?.award_id;
     
     if (!awardId || enrichmentLoading || !user_id) return;
@@ -269,16 +284,36 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           );
           
           // Wait a moment for DynamoDB to be consistent, then fetch the updated award
+          // Use a longer delay for large updates (more transactions/subawards)
+          const delay = (response.transactions_count || 0) > 1000 || (response.subawards_count || 0) > 1000 ? 5000 : 2000;
+          console.log(`⏳ Waiting ${delay}ms for DynamoDB consistency before fetching updated award...`);
+          
           setTimeout(async () => {
             try {
+              console.log('📥 Fetching updated award after enrichment...', awardId);
               const awardResponse = await govtContractsSearchAPI.getAward({
                 award_id: awardId,
               });
               
               if (awardResponse.success && awardResponse.result) {
-                // Call onEnrich callback with updated data
+                const updatedAward = awardResponse.result;
+                console.log('✅ Fetched updated award', {
+                  award_id: updatedAward.award_id,
+                  transactions_count: updatedAward.transactions?.length || 0,
+                  subawards_count: updatedAward.subawards?.length || 0,
+                  transaction_count_field: updatedAward.transaction_count,
+                  subaward_count_field: updatedAward.subaward_count,
+                  has_oversize_s3_key: !!updatedAward.oversize_s3_key,
+                });
+                
+                // Update local state with enriched award data
+                console.log('🔄 Updating ItemDetailsDialog state with enriched award');
+                setItemData(updatedAward);
+                
+                // Call onEnrich callback with updated data (to update tile)
                 if (onEnrich) {
-                  onEnrich(awardResponse.result);
+                  console.log('📤 Calling onEnrich callback with updated award data');
+                  onEnrich(updatedAward);
                 }
                 
                 setEnrichmentSuccess(
@@ -289,14 +324,16 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 setTimeout(() => {
                   setEnrichmentSuccess(null);
                 }, 5000);
+              } else {
+                console.warn('⚠️ Award fetch returned unsuccessful response', awardResponse);
               }
             } catch (error) {
-              console.error('Error fetching updated award:', error);
+              console.error('❌ Error fetching updated award:', error);
               setEnrichmentError('Failed to fetch updated award data');
             } finally {
               setEnrichmentLoading(false);
             }
-          }, 2000);
+          }, delay);
         } else {
           setEnrichmentSuccess('Award data is already up to date.');
           setTimeout(() => {
@@ -317,8 +354,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
   // Handle adding item to context (sidebar)
   const handleAddToContext = useCallback(() => {
-    const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
-    
     if (!itemData) return;
     
     try {
@@ -370,7 +405,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const handleFileBrowserSelect = useCallback(async (folderPath: string) => {
     if (!user) return;
     
-    const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
     if (!itemData) return;
     
     try {
@@ -507,11 +541,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       }
     }
 
-    // Handle both nested data structure and flat structure
-    let itemData = data;
-    if (data?.data && typeof data.data === 'object') {
-      itemData = data.data;
-    }
+    // Use itemData state (already handles nested/flat structure)
 
     // Politician Trade
     if (itemType === 'politician_trade' || itemData?.tradeId || itemData?.politicianName || itemData?.transactionType) {
@@ -1534,8 +1564,70 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 </Box>
               </Box>
               
-              {/* Right Column: CFDA & Dates */}
+              {/* Right Column: Parent Contract & CFDA & Dates */}
               <Box>
+                {/* Parent IDV Information for Child Awards - Top Right */}
+                {itemData?.is_idv_child && itemData?.parent_idv_id && (
+                  <Box sx={{ mb: 3, textAlign: 'right' }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                      Parent Contract
+                    </Typography>
+                    <Box
+                      component="span"
+                      sx={{
+                        display: 'inline-block',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          opacity: 0.8,
+                        },
+                      }}
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        if (!itemData?.parent_idv_id || !user_id) return;
+                        
+                        try {
+                          console.log('📥 Fetching parent contract:', itemData.parent_idv_id);
+                          
+                          // Make API call to lambda with just the award_id
+                          const awardResponse = await govtContractsSearchAPI.getAward({
+                            award_id: itemData.parent_idv_id,
+                          });
+                          
+                          if (awardResponse.success && awardResponse.result) {
+                            const parentAward = awardResponse.result;
+                            console.log('✅ Parent contract fetched, opening new dialog:', parentAward.award_id);
+                            
+                            // Open new dialog with parent award data
+                            const parentTitle = parentAward.recipient_name 
+                              ? `Government Contract - ${parentAward.recipient_name}${parentAward.awarding_agency_name ? ` / ${parentAward.awarding_agency_name}` : ''}`
+                              : `Government Contract ${parentAward.award_id || ''}`;
+                            
+                            openItemDetails(
+                              'govt_contract',
+                              parentAward,
+                              parentTitle,
+                              {
+                                user_id: user_id,
+                                parentAward: null, // Don't pass parent since this IS the parent
+                              }
+                            );
+                          } else {
+                            console.error('Failed to fetch parent contract:', awardResponse);
+                          }
+                        } catch (error) {
+                          console.error('❌ Error fetching parent contract:', error);
+                        }
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ color: '#3b82f6', fontWeight: 600, fontFamily: 'monospace' }}>
+                        {itemData.parent_idv_id}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+                
                 {itemData?.cfda_number && (
                   <Box sx={{ mb: 3 }}>
                     <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
@@ -2364,39 +2456,45 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         borderColor: '#3b82f6',
                       },
                     }}
-                    onClick={async () => {
-                      if (onNavigateToChild && childAward?.award_id) {
-                        // Try to fetch child award
-                        try {
-                          const awardResponse = await govtContractsSearchAPI.getAward({
-                            award_id: childAward.award_id,
-                          });
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      
+                      if (!childAward?.award_id || !user_id) return;
+                      
+                      try {
+                        console.log('📥 Fetching child award:', childAward.award_id);
+                        
+                        // Make API call to lambda with just the award_id
+                        const awardResponse = await govtContractsSearchAPI.getAward({
+                          award_id: childAward.award_id,
+                        });
+                        
+                        if (awardResponse.success && awardResponse.result) {
+                          const childAwardData = awardResponse.result;
+                          console.log('✅ Child award fetched, opening new dialog:', childAwardData.award_id);
                           
-                          if (awardResponse.success && awardResponse.result) {
-                            onNavigateToChild(awardResponse.result);
-                          } else {
-                            // If not found, create minimal award from child details
-                            const minimalAward = {
-                              ...childAward,
-                              transactions: [],
-                              subawards: [],
-                              transaction_count: childAward.transaction_count || 0,
-                              subaward_count: childAward.subaward_count || 0,
-                            };
-                            onNavigateToChild(minimalAward);
-                          }
-                        } catch (error) {
-                          console.error('Error fetching child award:', error);
-                          // Still navigate with minimal data
-                          const minimalAward = {
-                            ...childAward,
-                            transactions: [],
-                            subawards: [],
-                            transaction_count: childAward.transaction_count || 0,
-                            subaward_count: childAward.subaward_count || 0,
-                          };
-                          onNavigateToChild(minimalAward);
+                          // Open new dialog with child award data
+                          const childTitle = childAwardData.recipient_name 
+                            ? `Government Contract - ${childAwardData.recipient_name}${childAwardData.awarding_agency_name ? ` / ${childAwardData.awarding_agency_name}` : ''}`
+                            : `Government Contract ${childAwardData.award_id || ''}`;
+                          
+                          openItemDetails(
+                            'govt_contract',
+                            childAwardData,
+                            childTitle,
+                            {
+                              user_id: user_id,
+                              parentAward: itemData, // Pass current award as parent
+                            }
+                          );
+                        } else {
+                          console.warn('⚠️ Child award not found in database:', childAward.award_id);
+                          // Child award doesn't exist - could show a message or skip
+                          // For now, we'll just log it
                         }
+                      } catch (error) {
+                        console.error('❌ Error fetching child award:', error);
                       }
                     }}
                   >
@@ -3269,45 +3367,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 )}
               </Box>
               <Box sx={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                {/* Parent IDV Information for Child Awards */}
-                {itemDataForHeader?.is_idv_child && itemDataForHeader?.parent_idv_id && (
-                  <Box sx={{ textAlign: 'right' }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5, fontSize: '11px' }}>
-                      This is a child award
-                    </Typography>
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1,
-                        cursor: 'pointer',
-                        '&:hover': {
-                          opacity: 0.8,
-                        },
-                      }}
-                      onClick={async () => {
-                        if (onNavigateToParent && itemDataForHeader?.parent_idv_id) {
-                          try {
-                            const awardResponse = await govtContractsSearchAPI.getAward({
-                              award_id: itemDataForHeader.parent_idv_id,
-                            });
-                            
-                            if (awardResponse.success && awardResponse.result) {
-                              onNavigateToParent(awardResponse.result);
-                            }
-                          } catch (error) {
-                            console.error('Error fetching parent IDV:', error);
-                          }
-                        }
-                      }}
-                    >
-                      <Typography variant="body2" sx={{ color: '#3b82f6', fontWeight: 600, fontFamily: 'monospace' }}>
-                        Parent: {itemDataForHeader.parent_idv_id}
-                      </Typography>
-                    </Box>
-                  </Box>
-                )}
-                
+                {/* Parent contract moved to main content area */}
               </Box>
             </Box>
           </Box>
@@ -3680,7 +3740,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           >
         {/* Title content will be rendered per item type */}
         {itemType === 'govt_contract' && (() => {
-          const itemData = data?.data && typeof data.data === 'object' ? data.data : data;
           return (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <Box sx={{ flex: 1 }}>
@@ -3773,46 +3832,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 )}
               </Box>
               <Box sx={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                {/* Parent IDV Information for Child Awards */}
-                {itemData?.is_idv_child && itemData?.parent_idv_id && (
-                <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5, fontSize: '11px' }}>
-                    This is a child award
-                  </Typography>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      cursor: 'pointer',
-                      '&:hover': {
-                        opacity: 0.8,
-                      },
-                    }}
-                    onClick={async () => {
-                      if (onNavigateToParent && itemData?.parent_idv_id) {
-                        // Try to fetch parent award
-                        try {
-                          const awardResponse = await govtContractsSearchAPI.getAward({
-                            award_id: itemData.parent_idv_id,
-                          });
-                          
-                          if (awardResponse.success && awardResponse.result) {
-                            onNavigateToParent(awardResponse.result);
-                          }
-                        } catch (error) {
-                          console.error('Error fetching parent IDV:', error);
-                        }
-                      }
-                    }}
-                  >
-                    <Typography variant="body2" sx={{ color: '#3b82f6', fontWeight: 600, fontFamily: 'monospace' }}>
-                      Parent: {itemData.parent_idv_id}
-                    </Typography>
-                  </Box>
-                </Box>
-              )}
-              
+                {/* Parent contract moved to main content area */}
             </Box>
           </Box>
           );

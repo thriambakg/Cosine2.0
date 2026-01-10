@@ -156,6 +156,11 @@ interface SECSearchTileProps {
     compactView?: boolean;
     results?: SECSearchResult[];
   };
+  paginationState?: {
+    totalResultsLoaded?: number;
+    lastEvaluatedKeys?: any[];
+    hasMore?: boolean;
+  };
   autoRefresh?: boolean;
   isPinned?: boolean;
   customTitle?: string;
@@ -197,6 +202,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     maxResults: 50,
     compactView: false,
   },
+  paginationState,
   autoRefresh = false,
   isPinned = false,
   customTitle,
@@ -884,7 +890,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
       // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
-      if (paginationState && paginationState.totalResultsLoaded > 0) {
+      if (paginationState && paginationState.totalResultsLoaded !== undefined && paginationState.totalResultsLoaded > 0) {
         console.log('🔄 SECSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
         return;
       }

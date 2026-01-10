@@ -8,6 +8,9 @@ import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
+// Track if we're already redirecting to prevent multiple redirects
+let isRedirectingToLogin = false;
+
 // Debug logging on import
 console.log('🚀 API Service initialized with:', {
   baseUrl: API_BASE_URL,
@@ -34,15 +37,89 @@ export const apiRequest = async <T>(
     let authHeader: Record<string, string> = {};
     try {
       const session = await fetchAuthSession();
-      const idToken = session.tokens?.idToken?.toString();
-      const accessToken = session.tokens?.accessToken?.toString();
-      const bearer = idToken || accessToken;
-      if (bearer) {
-        authHeader = { Authorization: `Bearer ${bearer}` };
+      const idToken = session.tokens?.idToken;
+      const accessToken = session.tokens?.accessToken;
+      
+      // Check if tokens are expired
+      if (idToken || accessToken) {
+        // Get the token that exists (prefer idToken)
+        const token = idToken || accessToken;
+        
+        // Check if token has expiration (JWT tokens have exp claim)
+        try {
+          // Try to access token expiration
+          // JWT tokens have a payload with an 'exp' claim (expiration timestamp in seconds)
+          let tokenExpired = false;
+          
+          // Check if token has a payload property with exp
+          if (token && typeof token === 'object' && 'payload' in token) {
+            const payload = (token as any).payload;
+            if (payload && typeof payload.exp === 'number') {
+              const expirationTime = payload.exp;
+              const currentTime = Math.floor(Date.now() / 1000);
+              
+              // If token is expired or expiring within 5 seconds, treat as expired
+              if (expirationTime <= currentTime + 5) {
+                tokenExpired = true;
+              }
+            }
+          }
+          
+          if (tokenExpired && !isRedirectingToLogin) {
+            console.warn('🔒 Cognito token expired or expiring soon - redirecting to login');
+            
+            // Set flag to prevent multiple redirects
+            isRedirectingToLogin = true;
+            
+            // Dispatch auth expired event
+            if (typeof window !== 'undefined') {
+              const authExpiredEvent = new CustomEvent('auth-expired', {
+                detail: {
+                  status: 401,
+                  endpoint,
+                  message: 'Your session has expired. Please log in again.'
+                }
+              });
+              window.dispatchEvent(authExpiredEvent);
+              
+              // Redirect to login after cleanup
+              setTimeout(() => {
+                try {
+                  localStorage.removeItem('user');
+                  sessionStorage.clear();
+                } catch (e) {
+                  console.warn('Failed to clear storage:', e);
+                }
+                window.location.href = '/';
+              }, 500);
+            }
+            
+            // Throw error to stop the request
+            throw new Error('Token expired');
+          }
+        } catch (tokenCheckError: any) {
+          if (tokenCheckError.message === 'Token expired') {
+            throw tokenCheckError;
+          }
+          // If we can't check expiration, continue with the token
+          console.warn('Could not verify token expiration:', tokenCheckError);
+        }
+        
+        const bearer = token ? token.toString() : '';
+        if (bearer) {
+          authHeader = { Authorization: `Bearer ${bearer}` };
+        }
       } else {
         console.warn('🔒 No Cognito tokens found; proceeding without Authorization header');
       }
-    } catch (authErr) {
+    } catch (authErr: any) {
+      // Check if this is a token expiration error
+      if (authErr.message === 'Token expired') {
+        // Already handled above, just re-throw
+        throw authErr;
+      }
+      
+      // For other auth errors, log and continue (might be unauthenticated request)
       console.warn('🔒 Failed to fetch Cognito session; proceeding unauthenticated:', authErr);
     }
 
@@ -87,15 +164,52 @@ export const apiRequest = async <T>(
     
     // Log additional debugging info
     if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const statusText = error.response?.statusText;
+      
       console.error(`🔍 Network Error Details:`, {
         url,
         baseUrl: API_BASE_URL,
         endpoint,
         error: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
+        status: status,
+        statusText: statusText,
         data: error.response?.data
       });
+      
+      // Handle authentication errors (401, 403) - token expired or unauthorized
+      if ((status === 401 || status === 403) && !isRedirectingToLogin) {
+        console.warn('🔒 Authentication error detected (401/403) - session expired, redirecting to login');
+        
+        // Set flag to prevent multiple redirects
+        isRedirectingToLogin = true;
+        
+        // Dispatch event to notify auth context to clear session
+        if (typeof window !== 'undefined') {
+          const authExpiredEvent = new CustomEvent('auth-expired', {
+            detail: {
+              status,
+              endpoint,
+              message: 'Your session has expired. Please log in again.'
+            }
+          });
+          window.dispatchEvent(authExpiredEvent);
+          
+          // Redirect to login page after a short delay to allow cleanup
+          setTimeout(() => {
+            // Clear any cached auth data
+            try {
+              localStorage.removeItem('user');
+              sessionStorage.clear();
+            } catch (e) {
+              console.warn('Failed to clear storage:', e);
+            }
+            
+            // Redirect to login
+            window.location.href = '/';
+          }, 500);
+        }
+      }
       
       // Log API configuration for debugging
       logApiConfig();

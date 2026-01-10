@@ -1053,7 +1053,7 @@ def query_gsi_for_filing_ids(
     return filing_ids, last_eval_key
 
 
-def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] = None, limit: Optional[int] = None) -> Dict[str, Any]:
     """
     Search filings in DynamoDB using filters with multi-GSI intersection approach
     
@@ -1801,9 +1801,9 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
-        # For multi-query intersection, limit to 125 items per batch (DEFAULT_BATCH_SIZE)
+        # For multi-query intersection, limit based on request or default to 125 items per batch
         # Use union offset pagination consistently to avoid switching between pagination methods
-        DEFAULT_BATCH_SIZE = 125  # Default batch size (matches contracts lambda)
+        DEFAULT_BATCH_SIZE = limit if limit is not None else 125  # Default batch size (matches contracts lambda)
         all_matching_items = []
         next_offset = None  # Initialize next_offset
         
@@ -1878,7 +1878,11 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
         index_name = f"{len(query_configs)}_queries"
         
         # Convert Decimal to float for JSON serialization
-        results = [convert_decimal_to_float(item) for item in items]
+        # Apply limit if provided (respect limit from event payload)
+        DEFAULT_BATCH_SIZE = limit if limit is not None else 125
+        max_results = min(len(items), DEFAULT_BATCH_SIZE)
+        results = [convert_decimal_to_float(item) for item in items[:max_results]]
+        logger.info(f"Returning {len(results)} results (limit from event payload was {limit}, items fetched: {len(items)}, max_results={max_results})")
         
         # Check if we have a search index or parameter-filing mapping query with pagination support
         # If so, use its pagination key for "load more" functionality
@@ -2069,7 +2073,9 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
             date_to = filters.get('date_to')
             
             # Query search index to get entity PKs (with pagination support)
-            batch_size = 125  # Default batch size (matches contracts lambda)
+            # Use limit from event payload, or default to 125
+            batch_size = limit if limit is not None else 125
+            logger.info(f"Multi-query intersection (search-index): Using batch_size={batch_size} (limit from event: {limit})")
             entity_pks, search_index_key = query_search_index(
                 search_type=config['search_type'],
                 search_values=config['search_values'],
@@ -2194,7 +2200,11 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
                         logger.info(f"Item {idx+1} filtered out: filing_id={item.get('filing_id', 'N/A')}, client_name={item.get('client_name', 'N/A')}, amount_reported={item.get('amount_reported', 0)}")
             
             logger.info(f"After Python filtering: {len(filtered_items)} items passed filters out of {len(items)} total")
-            results = [convert_decimal_to_float(item) for item in filtered_items]
+            # Apply limit if provided (respect limit from event payload)
+            DEFAULT_BATCH_SIZE = limit if limit is not None else 125
+            max_results = min(len(filtered_items), DEFAULT_BATCH_SIZE)
+            results = [convert_decimal_to_float(item) for item in filtered_items[:max_results]]
+            logger.info(f"Returning {len(results)} results (limit from event payload was {limit}, filtered {len(filtered_items)} total, max_results={max_results})")
             
             # Prepare pagination token for "load more" functionality
             # Store the search index key so we can continue pagination
@@ -2236,7 +2246,9 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
             # Query parameter-filing mappings to get filing IDs (with pagination support)
             # Use a reasonable batch size for pagination - fetch enough to account for filtering
             # but not too many to avoid long wait times
-            batch_size = 125  # Default batch size (matches contracts lambda)
+            # Use limit from event payload, or default to 125
+            batch_size = limit if limit is not None else 125
+            logger.info(f"Multi-query intersection (parameter-filing): Using batch_size={batch_size} (limit from event: {limit})")
             filing_ids, param_mapping_key = query_parameter_filing_mappings(
                 parameter_type=config['parameter_type'],
                 parameter_values=config['parameter_values'],
@@ -2317,7 +2329,11 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
                 if apply_python_filter(item, remaining_filters):
                     filtered_items.append(item)
             
-            results = [convert_decimal_to_float(item) for item in filtered_items]
+            # Apply limit if provided (respect limit from event payload)
+            DEFAULT_BATCH_SIZE = limit if limit is not None else 125
+            max_results = min(len(filtered_items), DEFAULT_BATCH_SIZE)
+            results = [convert_decimal_to_float(item) for item in filtered_items[:max_results]]
+            logger.info(f"Returning {len(results)} results (limit from event payload was {limit}, filtered {len(filtered_items)} total, max_results={max_results})")
             
             # Prepare pagination token for "load more" functionality
             # Store the parameter-filing mapping key so we can continue pagination
@@ -2421,7 +2437,9 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
         max_consecutive_empty_rounds = 5  # Stop if 5 consecutive rounds return 0 matching items
         consecutive_empty_rounds = 0
         pagination_round = 0
-        batch_size = 125  # Default batch size (matches contracts lambda)
+        # Use limit from event payload, or default to 125
+        batch_size = limit if limit is not None else 125
+        logger.info(f"Single GSI query: Using batch_size={batch_size} (limit from event: {limit})")
         
         # For amount queries, allow trying multiple buckets until we have enough results
         if is_amount_query:
@@ -2794,12 +2812,43 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
         current_year = datetime.now().year
         years_to_query = [current_year, current_year - 1]
         
+        # Handle custom default_gsi_query pagination key if present
+        default_gsi_last_eval_key = None
+        if last_evaluated_key and isinstance(last_evaluated_key, dict) and last_evaluated_key.get('query_type') == 'default_gsi_query':
+            # Extract the DynamoDB last_eval_key from the custom pagination key
+            default_gsi_last_eval_key = last_evaluated_key.get('last_eval_key')
+            # Use the years_queried from the pagination key if available, otherwise use defaults
+            pagination_years = last_evaluated_key.get('years_queried')
+            if pagination_years:
+                years_to_query = pagination_years
+                logger.info(f"Using years from pagination key: {years_to_query}")
+            if default_gsi_last_eval_key:
+                logger.info(f"Using last_eval_key from default_gsi_query pagination key for year {years_to_query[0]}")
+        elif last_evaluated_key and not isinstance(last_evaluated_key, dict):
+            # Legacy: if last_evaluated_key is a direct DynamoDB key (not wrapped in custom format)
+            default_gsi_last_eval_key = last_evaluated_key
+            logger.info("Using last_evaluated_key as direct DynamoDB key")
+        
         all_filing_ids = []
         all_last_eval_keys = {}
         
-        # Query each year's GSI to get filing IDs (limit to 125 to prevent large responses)
-        DEFAULT_BATCH_SIZE = 125  # Default batch size (matches contracts lambda)
-        total_ids_needed = DEFAULT_BATCH_SIZE
+        # Query each year's GSI to get filing IDs (limit based on request or default to 125)
+        # Use provided limit from event payload, or default to 125 for response size control
+        # For tile (limit=100), use that. For page (limit=None), use default 125 per batch
+        # Ensure limit is an integer if provided (API might send it as string)
+        if limit is not None:
+            try:
+                DEFAULT_BATCH_SIZE = int(limit)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid limit value in default_gsi_query: {limit}, using 125")
+                DEFAULT_BATCH_SIZE = 125
+        else:
+            DEFAULT_BATCH_SIZE = 125
+        logger.info(f"default_gsi_query: Using DEFAULT_BATCH_SIZE={DEFAULT_BATCH_SIZE} (limit parameter: {limit})")
+        # Fetch enough IDs to account for filtering, but cap appropriately
+        # When limit=100, fetch up to 200 IDs (2x) to ensure we get 100 after filtering
+        # When limit=None, fetch up to 250 IDs to get 125 after filtering
+        total_ids_needed = min(DEFAULT_BATCH_SIZE * 2, 250)
         
         for year in years_to_query:
             if len(all_filing_ids) >= total_ids_needed:
@@ -2808,12 +2857,15 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
             # Calculate how many more IDs we need
             remaining_needed = total_ids_needed - len(all_filing_ids)
             
+            # Use the last_eval_key only for the first year (most recent)
+            exclusive_start = default_gsi_last_eval_key if year == years_to_query[0] and default_gsi_last_eval_key else None
+            
             filing_ids, last_eval_key = query_gsi_for_filing_ids(
                 index_name='YearPostedDateIndex',
                 hash_key_name='filing_year',
                 hash_key_value=year,
                 limit=remaining_needed,  # Only fetch what we need
-                exclusive_start_key=last_evaluated_key if year == years_to_query[0] else None,
+                exclusive_start_key=exclusive_start,
                 get_all=False
             )
             all_filing_ids.extend(filing_ids)
@@ -2822,11 +2874,13 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
         
         logger.info(f"Found {len(all_filing_ids)} filing IDs from recent years (limited to {DEFAULT_BATCH_SIZE} for response size)")
         
-        # Fetch full items using batch get (only fetch what we need)
+        # Fetch full items using batch get
+        # Fetch enough IDs to potentially get DEFAULT_BATCH_SIZE results after filtering
         items = []
         if all_filing_ids:
-            # Limit to DEFAULT_BATCH_SIZE to prevent large responses
-            ids_to_fetch = all_filing_ids[:DEFAULT_BATCH_SIZE]
+            # Fetch IDs we collected (up to total_ids_needed) to account for filtering
+            # We need more IDs than DEFAULT_BATCH_SIZE because some might not match filters
+            ids_to_fetch = all_filing_ids[:min(total_ids_needed, len(all_filing_ids))]
             # DynamoDB BatchGetItem limit is 100 items per request
             batch_get_size = 100
             dynamodb_client = boto3.client('dynamodb')
@@ -2853,36 +2907,72 @@ def search_filings(filters: Dict[str, Any], last_evaluated_key: Optional[Dict] =
         filtered_items = [item for item in items if apply_python_filter(item, filters)]
         logger.info(f"After filtering: {len(filtered_items)} items match filters (out of {len(items)} fetched)")
         
-        # Return up to DEFAULT_BATCH_SIZE items to prevent response size issues
-        results = [convert_decimal_to_float(item) for item in filtered_items[:DEFAULT_BATCH_SIZE]]
+        # Return exactly up to DEFAULT_BATCH_SIZE items (respect limit from event payload)
+        # This ensures tile gets exactly 100 results when limit=100, page gets 125 when limit=None
+        # Explicitly slice to ensure we never exceed the limit
+        max_results = min(len(filtered_items), DEFAULT_BATCH_SIZE)
+        results = [convert_decimal_to_float(item) for item in filtered_items[:max_results]]
+        logger.info(f"Returning {len(results)} results (limit from event payload was {DEFAULT_BATCH_SIZE}, filtered {len(filtered_items)} total matching, max_results={max_results})")
         
         # Use the last evaluated key from the most recent year queried
-        # has_more is True if: (1) we have a pagination key, OR (2) we fetched the full batch
+        # has_more is True only if we have a valid pagination key to continue
         serializable_last_key = None
         has_more = False
         
         # Check if we have more results available
+        # First, check if we have any last_eval_keys from the GSI queries (most reliable)
         if all_last_eval_keys:
-            # We have a pagination key, so there are more items in the GSI
-            try:
-                # Use the last evaluated key from the first year (most recent)
-                serializable_last_key = convert_decimal_to_float(all_last_eval_keys.get(years_to_query[0]))
-                has_more = True
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key: {e}")
-        elif len(all_filing_ids) >= DEFAULT_BATCH_SIZE:
+            # Find the first year that has a pagination key (start with most recent year)
+            for year in years_to_query:
+                year_key = all_last_eval_keys.get(year)
+                if year_key:
+                    try:
+                        # Use the last evaluated key from this year
+                        serializable_last_key = convert_decimal_to_float(year_key)
+                        # Only set has_more if we successfully created a pagination key
+                        has_more = serializable_last_key is not None
+                        if has_more:
+                            logger.info(f"Using pagination key from year {year}")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Error converting last_evaluated_key for year {year}: {e}")
+                        continue
+        
+        # If we don't have a GSI pagination key but fetched a full batch, create a custom pagination key
+        if not has_more and len(all_filing_ids) >= DEFAULT_BATCH_SIZE and all_filing_ids:
             # We fetched the full batch, so there might be more items
-            # Create a pagination key to continue from where we left off
-            has_more = True
-            # Store the last fetched ID and year info for continuation
-            if all_filing_ids:
-                serializable_last_key = {
-                    'query_type': 'default_gsi_query',
-                    'last_fetched_id': all_filing_ids[-1],
-                    'years_queried': years_to_query,
-                    'total_ids_fetched': len(all_filing_ids),
-                    'last_eval_key': convert_decimal_to_float(all_last_eval_keys.get(years_to_query[0])) if all_last_eval_keys else None
-                }
+            # Create a pagination key based on the last fetched ID and year info
+            # Try to find any year with a last_eval_key to include in the pagination key
+            last_eval_key_for_pagination = None
+            if all_last_eval_keys:
+                # Find the first year that has a last_eval_key
+                for year in years_to_query:
+                    year_key = all_last_eval_keys.get(year)
+                    if year_key:
+                        try:
+                            last_eval_key_for_pagination = convert_decimal_to_float(year_key)
+                            break
+                        except Exception as e:
+                            logger.warning(f"Error converting last_eval_key for pagination key: {e}")
+                            continue
+            
+            # Create custom pagination key with year info and last fetched ID
+            serializable_last_key = {
+                'query_type': 'default_gsi_query',
+                'last_fetched_id': all_filing_ids[-1],
+                'years_queried': years_to_query,
+                'total_ids_fetched': len(all_filing_ids),
+                'last_eval_key': last_eval_key_for_pagination
+            }
+            # Only set has_more if we successfully created a pagination key
+            has_more = serializable_last_key is not None
+            if has_more:
+                logger.info(f"Created custom pagination key for default_gsi_query with last_fetched_id: {all_filing_ids[-1]}")
+        
+        # Final validation: Never return has_more=True without a valid pagination key
+        if has_more and serializable_last_key is None:
+            logger.warning("Data inconsistency detected: has_more=True but serializable_last_key is None. Setting has_more=False.")
+            has_more = False
         
         return {
             'success': True,
@@ -2965,15 +3055,25 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             request_body = event.get('body', {})
         
-        # Extract filters
+        # Extract filters, limit, and pagination key
         filters = request_body.get('filters', {})
         last_evaluated_key = request_body.get('last_evaluated_key')
+        limit = request_body.get('limit')  # Optional limit (None means unlimited)
+        # Convert limit to int if provided (API might send it as string)
+        if limit is not None:
+            try:
+                limit = int(limit)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid limit value: {limit}, using None (unlimited)")
+                limit = None
         
         # Log filters for debugging
-        logger.info(f"Search request - filters: {json.dumps(filters)}, last_evaluated_key: {last_evaluated_key is not None}")
+        logger.info(f"Search request - filters: {json.dumps(filters)}, last_evaluated_key: {last_evaluated_key is not None}, limit: {limit}")
         
-        # Perform search - return all results (no limit)
-        result = search_filings(filters, last_evaluated_key)
+        # Perform search with optional limit
+        # If limit is None, return all results (unlimited)
+        # If limit is provided (e.g., 100 for tile), limit results to that number
+        result = search_filings(filters, last_evaluated_key, limit)
         logger.info(f"Search complete - found {result.get('count', 0)} results, has_more: {result.get('has_more', False)}")
         
         # If this is from SQS, publish completion notification

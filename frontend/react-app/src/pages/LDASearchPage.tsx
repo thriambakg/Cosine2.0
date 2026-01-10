@@ -693,7 +693,10 @@ const LDASearchPage: React.FC = () => {
         setAllSearchResults(response.results);
         setCurrentResults(response.results);
         setTotalFound(response.count || response.results.length);
-        setHasMore(response.has_more || false);
+        // Only set hasMore if we have a valid last_evaluated_key for pagination
+        // If backend says has_more but provides no key, we can't actually load more
+        const hasValidPaginationKey = response.last_evaluated_key !== null && response.last_evaluated_key !== undefined;
+        setHasMore((response.has_more || false) && hasValidPaginationKey);
         setLastEvaluatedKey(response.last_evaluated_key || null);
       } else {
         setSearchError('No results found');
@@ -796,7 +799,9 @@ const LDASearchPage: React.FC = () => {
         const newResults = [...allSearchResults, ...uniqueNewResults];
         setAllSearchResults(newResults);
         setCurrentResults(newResults);
-        setHasMore(response.has_more || false);
+        // Only set hasMore if we have a valid last_evaluated_key for pagination
+        const hasValidPaginationKey = response.last_evaluated_key !== null && response.last_evaluated_key !== undefined;
+        setHasMore((response.has_more || false) && hasValidPaginationKey);
         setLastEvaluatedKey(response.last_evaluated_key || null);
         setTotalFound(response.count ? allSearchResults.length + response.count : newResults.length);
       } else {

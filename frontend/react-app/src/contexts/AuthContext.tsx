@@ -149,6 +149,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
+  // Listen for auth expiration events from API calls (401/403 errors)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleAuthExpired = async () => {
+      console.warn('🔒 Auth expiration detected - clearing session and redirecting to login');
+      
+      try {
+        // Clear user state
+        setUser(null);
+        setAuthError('Your session has expired. Please log in again.');
+        
+        // Sign out from Cognito
+        try {
+          await signOut();
+        } catch (signOutError) {
+          console.warn('Failed to sign out from Cognito:', signOutError);
+        }
+        
+        // Clear any cached data
+        try {
+          localStorage.removeItem('user');
+          sessionStorage.clear();
+        } catch (clearError) {
+          console.warn('Failed to clear storage:', clearError);
+        }
+      } catch (error) {
+        console.error('Error handling auth expiration:', error);
+      }
+    };
+    
+    window.addEventListener('auth-expired', handleAuthExpired);
+    
+    return () => {
+      window.removeEventListener('auth-expired', handleAuthExpired);
+    };
+  }, []);
+
   // After authentication, ensure a default dashboard exists for the user
   useEffect(() => {
     const ensureDefaultDashboard = async () => {
@@ -271,6 +309,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cognitoUser = await getCurrentUser();
 
       if (cognitoUser) {
+        // Verify session is still valid by checking token expiration
+        try {
+          const { fetchAuthSession } = await import('aws-amplify/auth');
+          const session = await fetchAuthSession();
+          const idToken = session.tokens?.idToken;
+          const accessToken = session.tokens?.accessToken;
+          
+          // Check if tokens are expired
+          if (idToken || accessToken) {
+            const token = idToken || accessToken;
+            
+            // Check if token has expiration
+            if (token && token.payload && 'exp' in token.payload) {
+              const expirationTime = token.payload.exp as number;
+              const currentTime = Math.floor(Date.now() / 1000);
+              
+              // If token is expired, clear session and redirect to login
+              if (expirationTime <= currentTime) {
+                console.warn('🔒 Session expired during initialization - clearing and redirecting to login');
+                setUser(null);
+                setAuthError('Your session has expired. Please log in again.');
+                
+                // Sign out from Cognito
+                try {
+                  await signOut();
+                } catch (signOutError) {
+                  console.warn('Failed to sign out from Cognito:', signOutError);
+                }
+                
+                // Clear storage and redirect
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.removeItem('user');
+                    sessionStorage.clear();
+                  } catch (clearError) {
+                    console.warn('Failed to clear storage:', clearError);
+                  }
+                  
+                  // Redirect to login after a short delay
+                  setTimeout(() => {
+                    window.location.href = '/';
+                  }, 500);
+                }
+                
+                return;
+              }
+            }
+          }
+        } catch (sessionError) {
+          console.warn('Failed to verify session expiration:', sessionError);
+          // Continue with user initialization if session check fails
+        }
+        
         const userData = await convertCognitoUser(cognitoUser);
         setUser(userData);
 
@@ -286,7 +377,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // User is not authenticated, which is fine
       setUser(null);
       if (error?.name === 'UserUnAuthenticatedException') {
-        setAuthError('You are not signed in. Please log in to access your account.');
+        setAuthError(null); // Don't show error if user is just not signed in
       } else {
         setAuthError(error?.message || 'Authentication error.');
       }
