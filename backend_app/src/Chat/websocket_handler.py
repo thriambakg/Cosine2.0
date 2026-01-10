@@ -226,6 +226,18 @@ class WebSocketHandler:
             is_complete: If True, marks this as the final chunk (only used when is_streaming=True)
         """
         try:
+            # CRITICAL: Check kill flag before sending any chunks or response
+            # This prevents sending chunks after kill signal has been detected
+            try:
+                from kill_signal_registry import is_killed
+                if is_killed(session_id, user_id):
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected in send_chat_response, aborting send for session {session_id}")
+                    # Don't send anything if kill flag is set
+                    return
+            except Exception as kill_check_error:
+                logger.error(f"Error checking kill flag before sending response: {str(kill_check_error)}")
+                # Continue with send if we can't check (better to send than to lose response)
+            
             # Get active connections
             connection_ids = self.get_active_connections_for_user_session(user_id, session_id)
             

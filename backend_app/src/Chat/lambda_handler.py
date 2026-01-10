@@ -265,9 +265,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                         # CRITICAL: Check kill flag frequently during streaming (every chunk)
                                         # Also check DynamoDB directly for fastest detection
                                         if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
-                                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during async streaming, stopping")
+                                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during async streaming, stopping immediately")
                                             kill_flag.set()  # Ensure local flag is set
-                                            break
+                                            # CRITICAL: Clear accumulated content so partial response won't be sent/saved
+                                            accumulated_streaming_content['value'] = ''
+                                            streaming_used['value'] = False
+                                            # Don't return full_response - raise exception to stop processing
+                                            raise Exception("Session has been terminated")
                                         if chunk:
                                             try:
                                                 chunk_text = str(chunk)
@@ -313,9 +317,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                         # CRITICAL: Check kill flag frequently during streaming (every chunk)
                                         # Also check DynamoDB directly for fastest detection
                                         if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
-                                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during sync streaming, stopping")
+                                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during sync streaming, stopping immediately")
                                             kill_flag.set()  # Ensure local flag is set
-                                            break
+                                            # CRITICAL: Clear accumulated content so partial response won't be sent/saved
+                                            accumulated_streaming_content['value'] = ''
+                                            streaming_used['value'] = False
+                                            # Don't return full_response - raise exception to stop processing
+                                            raise Exception("Session has been terminated")
                                         if chunk:
                                             try:
                                                 chunk_text = str(chunk)
@@ -369,13 +377,17 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                 if inspect.isasyncgen(stream_result):
                                     async def process_async_stream():
                                         nonlocal full_response, last_sent_length
-                                        async for chunk in stream_result:
+                                            async for chunk in stream_result:
                                             # CRITICAL: Check kill flag frequently during streaming (every chunk)
                                             # Also check DynamoDB directly for fastest detection
                                             if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
-                                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model async streaming, stopping")
+                                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model async streaming, stopping immediately")
                                                 kill_flag.set()  # Ensure local flag is set
-                                                break
+                                                # CRITICAL: Clear accumulated content so partial response won't be sent/saved
+                                                accumulated_streaming_content['value'] = ''
+                                                streaming_used['value'] = False
+                                                # Don't return full_response - raise exception to stop processing
+                                                raise Exception("Session has been terminated")
                                             if chunk:
                                                 try:
                                                     chunk_text = str(chunk)
@@ -423,9 +435,13 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                             # CRITICAL: Check kill flag frequently during streaming (every chunk)
                                             # Also check DynamoDB directly for fastest detection
                                             if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
-                                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model sync streaming, stopping")
+                                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during model sync streaming, stopping immediately")
                                                 kill_flag.set()  # Ensure local flag is set
-                                                break
+                                                # CRITICAL: Clear accumulated content so partial response won't be sent/saved
+                                                accumulated_streaming_content['value'] = ''
+                                                streaming_used['value'] = False
+                                                # Don't return full_response - raise exception to stop processing
+                                                raise Exception("Session has been terminated")
                                             if chunk:
                                                 try:
                                                     chunk_text = str(chunk)
@@ -466,6 +482,18 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                         # Final fallback: Use regular invocation and chunk the response
                         # This simulates streaming by sending response in small chunks
                         response = agent(enhanced_message)
+                        
+                        # CRITICAL: Check kill flag IMMEDIATELY after agent returns (before processing response)
+                        # The agent may have completed tool execution, but we should stop before generating final response
+                        # Also clear accumulated content immediately if kill flag is set
+                        if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected immediately after agent execution, stopping before processing response")
+                            kill_flag.set()  # Ensure local flag is set
+                            # CRITICAL: Clear accumulated content so it won't be sent or saved
+                            accumulated_streaming_content['value'] = ''
+                            streaming_used['value'] = False
+                            raise Exception("Session has been terminated")
+                        
                         response_str = ""
                         if hasattr(response, 'message') and hasattr(response.message, 'content'):
                             if isinstance(response.message.content, list):
@@ -475,11 +503,28 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                         else:
                             response_str = str(response)
                         
+                        # CRITICAL: Check kill flag again AFTER extracting response_str (before chunking)
+                        # Kill signal might have been set during response extraction
+                        if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected after extracting response_str, stopping before chunking")
+                            kill_flag.set()
+                            accumulated_streaming_content['value'] = ''
+                            streaming_used['value'] = False
+                            raise Exception("Session has been terminated")
+                        
                         # Send response in small chunks to simulate streaming
+                        # CRITICAL: Check kill flag before AND during chunking
                         chunk_size = 20  # Send 20 characters at a time for smoother appearance
                         for i in range(0, len(response_str), chunk_size):
-                            if kill_flag.is_set():
-                                break
+                            # Check kill flag before processing each chunk
+                            if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected during response chunking at position {i}/{len(response_str)}, stopping")
+                                kill_flag.set()  # Ensure local flag is set
+                                # CRITICAL: Clear accumulated content so partial response won't be sent/saved
+                                accumulated_streaming_content['value'] = ''
+                                streaming_used['value'] = False
+                                raise Exception("Session has been terminated")
+                            
                             chunk = response_str[i:i+chunk_size]
                             accumulated_streaming_content['value'] += chunk
                             
@@ -557,9 +602,41 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
             
             # Get the result
             if future.cancelled():
+                logger.warning(f"🔴 KILL SIGNAL: Future was cancelled for session {session_id}")
+                raise Exception("Session has been terminated")
+            
+            # CRITICAL: Check kill flag again after future completes (in case kill signal arrived during execution)
+            # This handles the case where agent() call completed but kill signal was set during execution
+            if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected after agent execution completed, stopping before returning result")
+                kill_flag.set()  # Ensure local flag is set
+                # CRITICAL: Clear accumulated content so it won't be sent or saved
+                accumulated_streaming_content['value'] = ''
+                streaming_used['value'] = False
+                # Clear the flag since we're aborting
+                if kill_flag_registry_available and clear_kill_flag_func:
+                    try:
+                        clear_kill_flag_func(session_id)
+                    except Exception as e:
+                        logger.error(f"❌ Failed to clear kill flag: {str(e)}")
                 raise Exception("Session has been terminated")
             
             result = future.result()
+            
+            # CRITICAL: Check kill flag AGAIN after getting result (double-check)
+            # The agent may have returned a result, but kill signal might have been set during result processing
+            if kill_flag.is_set() or (kill_flag_registry_available and is_killed_func and is_killed_func(session_id)):
+                logger.warning(f"🔴 KILL SIGNAL: Kill flag detected after getting result, discarding result")
+                kill_flag.set()
+                # CRITICAL: Clear accumulated content so it won't be sent or saved
+                accumulated_streaming_content['value'] = ''
+                streaming_used['value'] = False
+                if kill_flag_registry_available and clear_kill_flag_func:
+                    try:
+                        clear_kill_flag_func(session_id)
+                    except Exception as e:
+                        logger.error(f"❌ Failed to clear kill flag: {str(e)}")
+                raise Exception("Session has been terminated")
             
             # CRITICAL: Clear kill flag in registry after successful completion
             # This ensures the flag is cleared even if a kill signal was set during processing but not detected
@@ -1289,8 +1366,25 @@ Context Items Available: {len(context_items)} items
             logger.debug(f"Agent response received: {type(agent_response)}")
         except Exception as e:
             error_str = str(e)
+            # Handle kill signal termination
+            if "Session has been terminated" in error_str:
+                logger.warning(f"🔴 KILL SIGNAL: Agent processing was terminated for session {session_id}")
+                # Clear accumulated content - don't send or save anything if killed
+                accumulated_streaming_content['value'] = ''
+                streaming_used['value'] = False
+                # Return error response instead of continuing
+                return {
+                    'statusCode': 200,  # Return 200 so WebSocket doesn't error, but mark as terminated
+                    'body': {
+                        'error': 'Session terminated',
+                        'message': 'Request was cancelled',
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'terminated': True
+                    }
+                }
             # Handle max_tokens limit error gracefully
-            if "max_tokens" in error_str.lower() or "unrecoverable state" in error_str.lower() or "MaxTokensReached" in str(type(e).__name__):
+            elif "max_tokens" in error_str.lower() or "unrecoverable state" in error_str.lower() or "MaxTokensReached" in str(type(e).__name__):
                 logger.warning(f"Agent reached max_tokens limit: {error_str}")
                 # Create a mock agent response with error message
                 from strands.types import AgentResult, Message
@@ -1380,6 +1474,31 @@ Context Items Available: {len(context_items)} items
         # Update response_content with final content
         response_content = final_content
         
+        # CRITICAL: Check kill flag before sending/saving response
+        # Even though kill signal might have been detected, accumulated content might still exist
+        # We need to check one more time before persisting anything
+        try:
+            from kill_signal_registry import is_killed
+            if is_killed(session_id, user_id):
+                logger.warning(f"🔴 KILL SIGNAL: Kill flag still set before sending/saving response, aborting")
+                # Clear accumulated content - don't send or save anything
+                accumulated_streaming_content['value'] = ''
+                streaming_used['value'] = False
+                # Return early without sending or saving
+                return {
+                    'statusCode': 200,
+                    'body': {
+                        'error': 'Session terminated',
+                        'message': 'Request was cancelled',
+                        'session_id': session_id,
+                        'user_id': user_id,
+                        'terminated': True
+                    }
+                }
+        except Exception as kill_check_error:
+            logger.error(f"Error checking kill flag before sending response: {str(kill_check_error)}")
+            # Continue with response if we can't check (better to send than to lose response)
+        
         # WebSocket processor now handles all user message saving
         # Chat agent only processes and generates responses - no message saving needed
         is_edit = event_body.get('is_edit', False)
@@ -1391,7 +1510,7 @@ Context Items Available: {len(context_items)} items
             ws_handler = WebSocketHandler()
             
             # Only send complete response if streaming wasn't used
-            # If streaming was used, chunks were already sent incrementally
+            # If streaming was used, chunks were already sent incrementally (but might have been killed mid-stream)
             if not streaming_used.get('value', False):
                 ws_handler.send_chat_response(user_id, session_id, response_content, ai_message_id)
             else:
@@ -1400,6 +1519,7 @@ Context Items Available: {len(context_items)} items
             logger.info(f"✅ Sent chat response directly to WebSocket (session: {session_id}, user: {user_id})")
             
             # Always save AI response to DynamoDB (whether streaming was used or not)
+            # BUT only if kill flag is NOT set (check again before saving)
             # Use accumulated streaming content if available and not empty, otherwise use response_content
             if streaming_used.get('value', False) and accumulated_streaming_content.get('value') and accumulated_streaming_content['value'].strip():
                 content_to_save = accumulated_streaming_content['value']
@@ -1408,13 +1528,37 @@ Context Items Available: {len(context_items)} items
                 content_to_save = response_content
                 logger.info(f"💾 Using response_content for DynamoDB save: {len(content_to_save)} chars")
             
-            # Only save if we have content
+            # CRITICAL: Check kill flag AGAIN before saving to DynamoDB
+            # Don't save response if kill signal was set (even if we already sent chunks via WebSocket)
+            try:
+                from kill_signal_registry import is_killed
+                if is_killed(session_id, user_id):
+                    logger.warning(f"🔴 KILL SIGNAL: Kill flag detected before saving to DynamoDB, skipping save")
+                    # Clear accumulated content reference so it won't be saved
+                    content_to_save = ''
+                    accumulated_streaming_content['value'] = ''
+            except Exception as kill_check_error:
+                logger.error(f"Error checking kill flag before saving: {str(kill_check_error)}")
+                # Continue with save if we can't check (better to save than to lose response)
+            
+            # Only save if we have content AND kill flag is not set
             if content_to_save and content_to_save.strip():
                 try:
                     import boto3
                     from decimal import Decimal
                     dynamodb = boto3.resource('dynamodb')
                     chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
+                    
+                    # Double-check kill flag one more time right before saving
+                    try:
+                        from kill_signal_registry import is_killed
+                        if is_killed(session_id, user_id):
+                            logger.warning(f"🔴 KILL SIGNAL: Kill flag detected right before DynamoDB save, aborting save")
+                            raise Exception("Kill signal detected, aborting save")
+                    except Exception as kill_check_error:
+                        if "Kill signal detected" in str(kill_check_error):
+                            raise  # Re-raise our intentional exception
+                        logger.error(f"Error checking kill flag: {str(kill_check_error)}")
                     
                     # Get current messages
                     session_response = chat_sessions_table.get_item(
@@ -1465,8 +1609,11 @@ Context Items Available: {len(context_items)} items
                                 )
                                 logger.info(f"✅ Saved AI response to DynamoDB: {ai_message_id} (streaming: {streaming_used.get('value', False)}, length: {len(content_to_save)})")
                 except Exception as db_error:
-                    logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
-                    # Continue - response was sent via WebSocket
+                    if "Kill signal detected" in str(db_error):
+                        logger.warning(f"🔴 KILL SIGNAL: DynamoDB save aborted due to kill signal")
+                    else:
+                        logger.warning(f"Failed to save AI response to DynamoDB: {str(db_error)}")
+                    # Continue - response was sent via WebSocket (but might have been killed)
             else:
                 logger.warning(f"⚠️ No content to save for AI message {ai_message_id}, skipping DynamoDB save (streaming_used: {streaming_used.get('value', False)}, accumulated_length: {len(accumulated_streaming_content.get('value', ''))}, response_length: {len(response_content)})")
             
