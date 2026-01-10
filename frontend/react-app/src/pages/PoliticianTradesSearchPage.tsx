@@ -38,6 +38,7 @@ import {
   Launch as LaunchIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 import { politicianTradesSearchAPI, PoliticianTradesSearchParams, PoliticianTrade } from '../services/api';
 import { politicianSuggestionsService } from '../services/politicianSuggestions';
@@ -128,6 +129,7 @@ interface ExpandedFiltersState {
   transactionType: boolean;
   stateDistrict: boolean;
   amountRange: boolean;
+  file: boolean;
 }
 
 const PoliticianTradesSearchPage: React.FC = () => {
@@ -233,6 +235,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     transaction_type_filters?: Array<{ transactionType: string; count: number }>;
     state_district_filters?: Array<{ stateDistrict: string; count: number }>;
     amount_range_filters?: Array<{ amount_range: string; count: number }>;
+    file_filters?: Array<{ file: string; count: number }>;
   }>(savedState?.availableFilters || {});
   
   const [expandedFilters, setExpandedFilters] = useState<ExpandedFiltersState>(
@@ -244,6 +247,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
       transactionType: false,
       stateDistrict: false,
       amountRange: false,
+      file: false,
     }
   );
   
@@ -255,6 +259,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     transactionTypes: string[];
     stateDistricts: string[];
     amountRanges: string[];
+    files: string[];
   }>({
     politicians: savedState?.selectedFilters?.politicians || [],
     parties: savedState?.selectedFilters?.parties || [],
@@ -263,6 +268,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     transactionTypes: savedState?.selectedFilters?.transactionTypes || [],
     stateDistricts: savedState?.selectedFilters?.stateDistricts || [],
     amountRanges: savedState?.selectedFilters?.amountRanges || [],
+    files: savedState?.selectedFilters?.files || [],
   });
   
   const [isFiltered, setIsFiltered] = useState<boolean>(savedState?.isFiltered || false);
@@ -370,6 +376,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     const transactionTypeMap = new Map<string, number>();
     const stateDistrictMap = new Map<string, number>();
     const amountRangeMap = new Map<string, number>();
+    const fileMap = new Map<string, number>();
     
     results.forEach(trade => {
       if (trade.politicianName) {
@@ -396,6 +403,12 @@ const PoliticianTradesSearchPage: React.FC = () => {
       // Categorize by amount range
       const amountCategory = getAmountRangeCategory(trade);
       amountRangeMap.set(amountCategory, (amountRangeMap.get(amountCategory) || 0) + 1);
+      
+      // Extract PDF filename from formS3Key (e.g., "trades/2024-01-15/senate/20030444.pdf" -> "20030444.pdf")
+      if (trade.formS3Key) {
+        const filename = trade.formS3Key.split('/').pop() || trade.formS3Key;
+        fileMap.set(filename, (fileMap.get(filename) || 0) + 1);
+      }
     });
     
     return {
@@ -419,6 +432,9 @@ const PoliticianTradesSearchPage: React.FC = () => {
         .sort((a, b) => b.count - a.count),
       amount_range_filters: Array.from(amountRangeMap.entries())
         .map(([amount_range, count]) => ({ amount_range, count }))
+        .sort((a, b) => b.count - a.count),
+      file_filters: Array.from(fileMap.entries())
+        .map(([file, count]) => ({ file, count }))
         .sort((a, b) => b.count - a.count),
     };
   };
@@ -1053,7 +1069,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
          selectedFilters.securities.length === 0 &&
          selectedFilters.transactionTypes.length === 0 &&
          selectedFilters.stateDistricts.length === 0 &&
-         selectedFilters.amountRanges.length === 0)) {
+         selectedFilters.amountRanges.length === 0 &&
+         selectedFilters.files.length === 0)) {
       return allSearchResults;
     }
     
@@ -1089,6 +1106,13 @@ const PoliticianTradesSearchPage: React.FC = () => {
       if (selectedFilters.amountRanges.length > 0) {
         const tradeAmountRange = getAmountRangeCategory(trade);
         if (!selectedFilters.amountRanges.includes(tradeAmountRange)) {
+          return false;
+        }
+      }
+      if (selectedFilters.files.length > 0) {
+        // Extract PDF filename from formS3Key for comparison
+        const tradeFilename = trade.formS3Key ? (trade.formS3Key.split('/').pop() || trade.formS3Key) : null;
+        if (!tradeFilename || !selectedFilters.files.includes(tradeFilename)) {
           return false;
         }
       }
@@ -1173,7 +1197,30 @@ const PoliticianTradesSearchPage: React.FC = () => {
               Verify House Clerk
             </Button>
           </Box>
-            </Box>
+        </Box>
+
+        {/* Disclaimer Banner */}
+        <Alert
+          severity="warning"
+          icon={<WarningIcon sx={{ color: '#fbbf24' }} />}
+          sx={{
+            mb: 3,
+            backgroundColor: 'rgba(251, 191, 36, 0.1)',
+            border: '1px solid rgba(251, 191, 36, 0.3)',
+            color: '#fbbf24',
+            '& .MuiAlert-icon': {
+              color: '#fbbf24',
+            },
+            '& .MuiAlert-message': {
+              color: '#fbbf24',
+              width: '100%',
+            },
+          }}
+        >
+          <Typography variant="body2" sx={{ color: '#fbbf24', fontWeight: 500 }}>
+            ⚠️ Search results are webscraped. For exact filings, view the files filter with the yellow triangle below.
+          </Typography>
+        </Alert>
 
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
@@ -1840,6 +1887,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                   transactionTypes: [],
                   stateDistricts: [],
                   amountRanges: [],
+                  files: [],
                 });
                 setAllSearchResults([]);
                 setTotalFound(0);
@@ -2564,7 +2612,8 @@ const PoliticianTradesSearchPage: React.FC = () => {
                 selectedFilters.securities.length > 0 ||
                 selectedFilters.transactionTypes.length > 0 ||
                 selectedFilters.stateDistricts.length > 0 ||
-                selectedFilters.amountRanges.length > 0) && (
+                selectedFilters.amountRanges.length > 0 ||
+                selectedFilters.files.length > 0) && (
                 <Box sx={{ 
                   mb: 2, 
                   p: 2, 
@@ -2737,6 +2786,29 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         }}
                       />
                     ))}
+                    {selectedFilters.files.map((file, idx) => (
+                      <Chip
+                        key={`file-${idx}`}
+                        label={file}
+                        onDelete={() => {
+                          setSelectedFilters(prev => ({
+                            ...prev,
+                            files: prev.files.filter((_, i) => i !== idx),
+                          }));
+                          setIsFiltered(true);
+                        }}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                          color: '#93c5fd',
+                          border: '1px solid #3b82f6',
+                          '& .MuiChip-deleteIcon': {
+                            color: '#93c5fd',
+                            '&:hover': { color: '#ffffff' },
+                          },
+                        }}
+                      />
+                    ))}
                   </Box>
                   <Button
                     size="small"
@@ -2749,6 +2821,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
                         transactionTypes: [],
                         stateDistricts: [],
                         amountRanges: [],
+                        files: [],
                       });
                       setIsFiltered(false);
                     }}
@@ -3525,6 +3598,121 @@ const PoliticianTradesSearchPage: React.FC = () => {
                               {filter.amount_range}
                             </Typography>
                             <Chip 
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                height: 20,
+                                fontSize: '0.7rem',
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(107, 114, 128, 0.3)',
+                                color: isSelected ? '#93c5fd' : '#9ca3af',
+                                border: isSelected 
+                                  ? '1px solid #3b82f6' 
+                                  : '1px solid #6b7280',
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Collapse>
+                </Box>
+              )}
+
+              {/* Files Filter */}
+              {availableFilters.file_filters && availableFilters.file_filters.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Box
+                    onClick={() => setExpandedFilters(prev => ({ ...prev, file: !prev.file }))}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      cursor: 'pointer',
+                      p: 1.5,
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.5)',
+                      },
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <WarningIcon sx={{ color: '#fbbf24', fontSize: '1.2rem' }} />
+                      <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
+                        Files
+                      </Typography>
+                    </Box>
+                    {expandedFilters.file ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                  </Box>
+                  <Collapse in={expandedFilters.file}>
+                    <Box sx={{ 
+                      mt: 1, 
+                      maxHeight: 300, 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}>
+                      {availableFilters.file_filters.map((filter, idx) => {
+                        const isSelected = selectedFilters.files.includes(filter.file);
+                        return (
+                          <Box
+                            key={idx}
+                            onClick={() => {
+                              setSelectedFilters(prev => {
+                                const exists = prev.files.includes(filter.file);
+                                if (exists) {
+                                  return {
+                                    ...prev,
+                                    files: prev.files.filter(f => f !== filter.file),
+                                  };
+                                } else {
+                                  return {
+                                    ...prev,
+                                    files: [...prev.files, filter.file],
+                                  };
+                                }
+                              });
+                              setIsFiltered(true);
+                            }}
+                            sx={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              p: 1,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                              border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                              '&:hover': {
+                                backgroundColor: isSelected 
+                                  ? 'rgba(59, 130, 246, 0.3)' 
+                                  : 'rgba(59, 130, 246, 0.1)',
+                              },
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ 
+                              color: isSelected ? '#93c5fd' : '#ffffff', 
+                              fontSize: '0.875rem', 
+                              flex: 1,
+                              fontWeight: isSelected ? 600 : 400,
+                              fontFamily: 'monospace',
+                            }}>
+                              {filter.file}
+                            </Typography>
+                            <Chip
                               label={filter.count}
                               size="small"
                               sx={{

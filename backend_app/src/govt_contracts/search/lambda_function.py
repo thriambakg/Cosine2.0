@@ -407,7 +407,7 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         for value in values:
             if value and str(value).strip():
                 queries.append({
-                    'index_name': 'AwardTypeFiscalYearIndex',
+                'index_name': 'AwardTypeFiscalYearIndex',
                     'hash_key_name': 'award_type',
                     'hash_key_value': str(value).strip(),
                     'range_key_name': 'fiscal_year',
@@ -556,9 +556,9 @@ def search_awards_union(
         return {
             'success': True,
             'results': [],
-            'count': 0,
-            'has_more': False,
-            'last_evaluated_key': None,
+                    'count': 0,
+                    'has_more': False,
+                    'last_evaluated_key': None,
             'method': 'union',
             'index_used': 'none'
         }
@@ -627,8 +627,6 @@ def search_awards_union(
         
         if all_award_ids is None:
             all_award_ids = set()
-    else:
-        all_award_ids = set()
     
     # Step 3: If we have intersection queries (obligation ranges), intersect with field results
     # Note: Multiple fiscal year queries for obligation ranges should be UNIONed (match in ANY fiscal year)
@@ -808,6 +806,26 @@ def search_awards_union(
     }
 
 
+def get_award_by_id(award_id: str) -> Optional[Dict[str, Any]]:
+    """Get a single award by ID directly from DynamoDB"""
+    try:
+        if not award_id:
+            return None
+        
+        response = awards_table.get_item(Key={'award_id': award_id})
+        item = response.get('Item')
+        
+        if item:
+            # Enrich with S3 data if needed
+            enriched = enrich_award_with_details(item)
+            return enriched
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching award {award_id}: {str(e)}", exc_info=True)
+        return None
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for union-based award search"""
     try:
@@ -829,11 +847,42 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             body = event.get('body', {})
         
-        # Extract search parameters
+        # Check if this is a direct award_id lookup (getAward request)
+        award_id = body.get('award_id')
+        if award_id:
+            logger.info(f"Direct award lookup requested for award_id: {award_id}")
+            award = get_award_by_id(award_id)
+            
+            if award:
+                # Convert to response format matching search results
+                result = convert_decimal_to_float(award)
+                return {
+                    'statusCode': 200,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({
+                        'success': True,
+                        'result': result,
+                        'count': 1
+                    }, default=str)
+                }
+            else:
+                # Award not found
+                return {
+                    'statusCode': 200,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({
+                        'success': True,
+                        'result': None,
+                        'count': 0,
+                        'error': f'Award {award_id} not found'
+                    }, default=str)
+                }
+        
+        # Extract search parameters (regular search)
         filters = body.get('filters', {})
         limit = body.get('limit', 100)
         last_evaluated_key = body.get('last_evaluated_key')
-        
+            
         # Perform union search
         result = search_awards_union(filters=filters, limit=limit, last_evaluated_key=last_evaluated_key)
         

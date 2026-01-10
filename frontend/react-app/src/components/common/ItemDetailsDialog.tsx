@@ -28,7 +28,7 @@ import {
   Minimize as MinimizeIcon,
 } from '@mui/icons-material';
 import TutorialHelpIcon from './TutorialHelpIcon';
-import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI } from '@/services/api';
+import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI, fileReturnAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -469,41 +469,45 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       return;
     }
 
+    if (!s3Key) {
+      console.error('❌ Download failed: Missing s3_key');
+      alert('Failed to download file: Missing file path.');
+      return;
+    }
+
     try {
-      console.log('📥 Downloading file:', filename);
+      console.log('📥 Downloading file:', filename, 'from s3_key:', s3Key, 'bucket:', bucket);
       
-      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-      const response = await fetch(`${apiUrl}/file-download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user_id,
-          session_id: '', // Optional for SEC filings
-          bucket: bucket,
-          s3_key: s3Key,
-          filename: filename
-        })
+      // Use the API service wrapper for better error handling
+      const response = await fileReturnAPI.downloadFile({
+        user_id: user_id,
+        session_id: '', // Optional for politician trades, SEC filings, etc.
+        bucket: bucket,
+        s3_key: s3Key,
+        filename: filename
       });
       
-      if (!response.ok) {
-        throw new Error(`Download request failed: ${response.status}`);
+      if (!response.success || !response.data?.download_url) {
+        throw new Error(response.error || 'Download request failed');
       }
       
-      const { download_url } = await response.json();
+      const { download_url } = response.data;
       
       // Create download link and trigger download
       const link = document.createElement('a');
       link.href = download_url;
       link.download = filename;
       link.target = '_blank';
+      link.rel = 'noopener noreferrer';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
       console.log('✅ File download started');
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Download failed:', error);
-      alert('Failed to download file. Please try again.');
+      const errorMessage = error?.message || 'Failed to download file. Please try again.';
+      alert(`Failed to download file: ${errorMessage}`);
     }
   }, [user_id]);
 
