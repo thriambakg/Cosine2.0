@@ -2860,20 +2860,23 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     
     # Convert last_evaluated_key to JSON-serializable format
     # DynamoDB LastEvaluatedKey may contain Decimal types and other DynamoDB-specific types
-    # NOTE: We'll create our own pagination key from the last returned item, so we don't need
-    # to use DynamoDB's LastEvaluatedKey. DynamoDB's key points to after the last item we
-    # QUERIED, not after the last item we RETURNED, which would cause items to be skipped.
+    # CRITICAL: For KEYS_ONLY GSI queries with post-filtering, we MUST use DynamoDB's LastEvaluatedKey
+    # because it points to after the last item we QUERIED from the GSI. If we create a key from the
+    # last RETURNED item, we'll skip items that were queried but not returned (due to filtering).
+    # 
+    # Example: Query GSI with Limit=100, get 100 items, filter to 25 items, return 25 items.
+    # If we use the 25th item's key, next page starts from position 25 in GSI, skipping items 26-100.
+    # We should use DynamoDB's LastEvaluatedKey which points to after item 100.
     dynamodb_last_key = None
     if last_eval_key:
         try:
             dynamodb_last_key = convert_decimal_to_float(last_eval_key)
             logger.info(f"DynamoDB provided LastEvaluatedKey (pointing to after last QUERIED item): {json.dumps(dynamodb_last_key, default=str)}")
-            logger.info(f"Will create custom pagination key from last RETURNED item instead to avoid skipping items")
         except Exception as e:
             logger.warning(f"Error converting last_evaluated_key to serializable format: {e}")
             dynamodb_last_key = None
     
-    # We'll set serializable_last_key to our custom key below
+    # We'll set serializable_last_key below - prefer DynamoDB's key if available
     serializable_last_key = None
     
     # Simplified pagination logic: Always allow pagination to continue if we have items to return.
@@ -2888,23 +2891,27 @@ def search_awards(filters: Dict[str, Any], limit: int = 100, last_evaluated_key:
     # Otherwise, always set has_more to True if we have items, allowing the frontend to continue.
     has_more_results = len(items) > 0  # If we have items, allow frontend to continue paginating
     
-    # Always create a pagination key from the last RETURNED item if we have items to return.
-    # CRITICAL: We MUST create our own pagination key from the last returned item, even if
-    # DynamoDB gave us a LastEvaluatedKey. DynamoDB's LastEvaluatedKey points to after the
-    # last item we QUERIED (e.g., the 125th item), not after the last item we RETURNED (e.g., the 25th item).
-    # Using DynamoDB's key would cause us to skip items between the last returned item and
-    # the last queried item.
+    # CRITICAL: For KEYS_ONLY GSI queries with post-filtering, we MUST use DynamoDB's LastEvaluatedKey
+    # when available, because it points to after the last item we QUERIED from the GSI. This ensures
+    # we don't skip items that were queried but filtered out.
     #
-    # We use the last item we're RETURNING (not the last item we processed) to create the key,
-    # ensuring we continue from exactly where we left off. We must use the GSI item that corresponds
-    # to the last returned item to get the correct GSI key structure (fiscal_year, etc.).
-    should_create_pagination_key = (
+    # Only create a pagination key from the last returned item if:
+    # 1. We have items to return, AND
+    # 2. We DON'T have DynamoDB's LastEvaluatedKey (meaning we've exhausted the GSI for this query)
+    #
+    # If we have DynamoDB's LastEvaluatedKey, use it directly to continue from where we left off in the GSI.
+    should_create_custom_pagination_key = (
         len(items) > 0 and  # Only create key if we have items to return
         method == 'query' and 
-        index_name
-        # Always create our own key, even if DynamoDB gave us one
+        index_name and
+        dynamodb_last_key is None  # Only create custom key if DynamoDB didn't provide one
     )
-    if should_create_pagination_key:
+    
+    # If we have DynamoDB's LastEvaluatedKey, use it directly (most common case for KEYS_ONLY GSI)
+    if dynamodb_last_key and len(items) > 0 and method == 'query' and index_name:
+        serializable_last_key = dynamodb_last_key
+        logger.info(f"Using DynamoDB's LastEvaluatedKey for pagination (ensures no items are skipped): {json.dumps(serializable_last_key, default=str)}")
+    elif should_create_custom_pagination_key:
         # CRITICAL: Always use the last RETURNED item's GSI item for the pagination key.
         # This ensures we continue from exactly where we left off, not from a later position.
         # The last returned item is the item at position (limit - 1), which is the last item
