@@ -3520,7 +3520,7 @@ export default function ChatPage() {
                 // Use direct download approach (same as dashboard)
                 const link = document.createElement('a');
                 link.href = response.downloadUrl;
-                link.download = `${currentSession.title || 'chat-session'}.cosine`;
+                link.download = `${currentSession.title || 'chat-session'}.cs`;
                 link.style.display = 'none';
                 document.body.appendChild(link);
                 link.click();
@@ -3543,7 +3543,7 @@ export default function ChatPage() {
           <ListItemIcon>
             <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
           </ListItemIcon>
-          <ListItemText>Download as .cosine</ListItemText>
+          <ListItemText>Download as .cs</ListItemText>
         </MenuItem>
       </Menu>
 

@@ -51,7 +51,7 @@ export const chatPageSteps: Step[] = [
     content: (
       <div>
         <h3 style={{ marginTop: 0, color: '#ffffff' }}>Import Chat</h3>
-        <p>Click here to load shared conversations from others. Import .cosine files to continue conversations or reference past discussions.</p>
+        <p>Click here to load shared conversations from others. Import .cs files to continue conversations or reference past discussions.</p>
       </div>
     ),
     placement: 'right',
@@ -65,7 +65,7 @@ export const chatPageSteps: Step[] = [
         <p>Click this button to share your current conversation with others:</p>
         <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
           <li><strong>Share Link:</strong> Generate a shareable link to this conversation</li>
-          <li><strong>Download:</strong> Export as .cosine file</li>
+          <li><strong>Download:</strong> Export as .cs file</li>
           <li>Files and context are included in exports</li>
         </ul>
       </div>

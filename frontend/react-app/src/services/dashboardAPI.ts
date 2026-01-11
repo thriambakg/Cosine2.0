@@ -202,7 +202,7 @@ export const dashboardAPI = {
     }
   },
 
-  // Import a tile from encrypted .cosine file
+  // Import a tile from encrypted .cs file
   importTile: async (params: { fileContent: string; tabId?: string }): Promise<{ tile: any; message: string }> => {
     try {
       return await apiRequest<{ tile: any; message: string }>(`/dashboard-tiles`, {

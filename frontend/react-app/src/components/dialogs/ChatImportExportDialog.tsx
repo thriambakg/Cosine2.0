@@ -92,7 +92,7 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
           created_at: folder.created_at || Date.now(),
         }));
         const items = (response.result.items || [])
-          .filter((item: any) => item.s3_key && item.s3_key.endsWith('.cosine'))
+          .filter((item: any) => item.s3_key && item.s3_key.endsWith('.cs'))
           .map((item: any) => ({
             id: item.id,
             name: item.name,
@@ -337,8 +337,8 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      if (!file.name.endsWith('.cosine')) {
-        setError('Please select a valid .cosine chat session file');
+      if (!file.name.endsWith('.cs')) {
+        setError('Please select a valid .cs chat session file');
         return;
       }
       setImportFile(file);
@@ -466,7 +466,7 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileSelect}
-                  accept=".cosine"
+                  accept=".cs"
                   style={{ display: 'none' }}
                 />
                 <Button
@@ -491,7 +491,7 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
                     },
                   }}
                 >
-                  {importFile ? importFile.name : 'Select .cosine File'}
+                  {importFile ? importFile.name : 'Select .cs File'}
                 </Button>
                 <Button
                   fullWidth
@@ -643,7 +643,7 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
                     </Box>
                   ) : currentFolderItems.length === 0 ? (
                     <Box sx={{ p: 3, textAlign: 'center', color: '#6b7280' }}>
-                      <Typography variant="body2">No .cosine files found in this folder</Typography>
+                      <Typography variant="body2">No .cs files found in this folder</Typography>
                     </Box>
                   ) : (
                     <List sx={{ p: 0 }}>
@@ -682,7 +682,7 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
                                 <Typography sx={{ color: '#ffffff', fontWeight: 500 }}>{item.name}</Typography>
                                 {item.type !== 'folder' && (
                                   <Chip
-                                    label=".cosine"
+                                    label=".cs"
                                     size="small"
                                     sx={{
                                       height: 20,

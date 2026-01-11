@@ -1,6 +1,6 @@
 """
 Decryption Helper
-Utility for decrypting .cosine encrypted context items from the filesystem.
+Utility for decrypting .cs encrypted context items from the filesystem.
 Follows the same pattern as the file_return lambda function.
 """
 
@@ -24,7 +24,7 @@ ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-i
 def derive_platform_key() -> bytes:
     """
     Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
-    This allows .cosine files to be shared across all users in the platform
+    This allows .cs files to be shared across all users in the platform
     
     Returns:
         bytes: The derived platform-wide encryption key (base64-encoded)
@@ -151,12 +151,12 @@ def decrypt_context_data(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
 
 def decrypt_cosine_file(user_id: str, encrypted_data: bytes) -> Dict[str, Any]:
     """
-    Convenience wrapper for decrypting .cosine files.
+    Convenience wrapper for decrypting .cs files.
     This is the main function to use when decrypting files from S3.
     
     Args:
         user_id: The user ID that owns the encrypted file
-        encrypted_data: The encrypted bytes from the .cosine file
+        encrypted_data: The encrypted bytes from the .cs file
         
     Returns:
         Dict[str, Any]: The decrypted context data

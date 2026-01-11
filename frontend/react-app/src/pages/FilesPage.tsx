@@ -664,23 +664,23 @@ const FilesPage: React.FC = () => {
         metadata: item.metadata
       });
       
-      // Check if this is a .cosine file (by name, type, or metadata)
+      // Check if this is a .cs file (by name, type, or metadata)
       // Also check metadata.original_filename if it exists (for uploaded files)
       const isCosineFile = item.type === 'context_item' || 
-                          item.name?.toLowerCase().endsWith('.cosine') ||
+                          item.name?.toLowerCase().endsWith('.cs') ||
                           item.metadata?.type === 'context_item' ||
                           (item.metadata && typeof item.metadata === 'object' && 'original_filename' in item.metadata && 
-                           String(item.metadata.original_filename || '').toLowerCase().endsWith('.cosine'));
+                           String(item.metadata.original_filename || '').toLowerCase().endsWith('.cs'));
       
       console.log(`🔍 isCosineFile check:`, {
         type_check: item.type === 'context_item',
-        name_check: item.name?.toLowerCase().endsWith('.cosine'),
+        name_check: item.name?.toLowerCase().endsWith('.cs'),
         metadata_type_check: item.metadata?.type === 'context_item',
         isCosineFile,
         final_s3_key_before_construction: s3_key
       });
       
-      // If s3_key is missing from manifest, construct it for .cosine files
+      // If s3_key is missing from manifest, construct it for .cs files
       if (!s3_key && user && isCosineFile) {
         // Determine folder path - check parentId and current folder
         let folderPath = '';
@@ -691,12 +691,12 @@ const FilesPage: React.FC = () => {
           folderPath = currentFolderId;
         }
         
-        // Construct s3_key for .cosine files
+        // Construct s3_key for .cs files
         const folderPathPart = folderPath ? `${folderPath}/` : '';
-        s3_key = `users/${user.id}/filesys/${folderPathPart}${item.id}.cosine`;
+        s3_key = `users/${user.id}/filesys/${folderPathPart}${item.id}.cs`;
         console.warn(`⚠️ s3_key missing from manifest for item ${item.id} (${item.name}), constructed: ${s3_key}`);
       } else if (!s3_key && !isCosineFile) {
-        // For non-.cosine files, we need the s3_key from the manifest
+        // For non-.cs files, we need the s3_key from the manifest
         console.error(`❌ s3_key missing from ${item.type} item ${item.id} (${item.name}) - cannot add to context`);
         alert(`Cannot add "${item.name}" to context: file location information is missing. Please refresh the page and try again.`);
         setContextMenuAnchor(null);
@@ -712,9 +712,9 @@ const FilesPage: React.FC = () => {
       }
       
       // CRITICAL: Ensure s3_key is ALWAYS set before creating context item
-      // Last resort: construct s3_key with empty folder path (root folder) for .cosine files
+      // Last resort: construct s3_key with empty folder path (root folder) for .cs files
       if (!s3_key && user && isCosineFile) {
-        s3_key = `users/${user.id}/filesys/${item.id}.cosine`;
+        s3_key = `users/${user.id}/filesys/${item.id}.cs`;
         console.error(`❌ CRITICAL: s3_key was still missing after all attempts, using last-resort construction: ${s3_key}`);
       }
       
@@ -806,7 +806,7 @@ const FilesPage: React.FC = () => {
         console.error(`❌ CRITICAL: Context item created without s3_key:`, contextItem);
         // Try to fix it if we have the item info
         if (user && item.id) {
-          const fallbackS3Key = `users/${user.id}/filesys/${item.id}.cosine`;
+          const fallbackS3Key = `users/${user.id}/filesys/${item.id}.cs`;
           contextItem.data.s3_key = fallbackS3Key;
           console.warn(`⚠️ Fixed missing s3_key with fallback: ${fallbackS3Key}`);
         } else {

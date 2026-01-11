@@ -167,9 +167,9 @@ const NewTabDialog: React.FC<NewTabDialogProps> = ({
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Validate file type (should be .cosine file)
-      if (!file.name.endsWith('.cosine')) {
-        setImportError('Please select a valid .cosine dashboard file');
+      // Validate file type (should be .cs file)
+      if (!file.name.endsWith('.cs')) {
+        setImportError('Please select a valid .cs dashboard file');
         return;
       }
       setImportFile(file);
@@ -311,17 +311,17 @@ const NewTabDialog: React.FC<NewTabDialogProps> = ({
     }
   };
 
-  // Check if a file is a dashboard file (.cosine extension)
+  // Check if a file is a dashboard file (.cs extension)
   const isDashboardFile = (item: { name: string; type: string; s3_key?: string }): boolean => {
-    // Check if it has .cosine extension
-    if (item.name?.toLowerCase().endsWith('.cosine')) {
+    // Check if it has .cs extension
+    if (item.name?.toLowerCase().endsWith('.cs')) {
       return true;
     }
-    // Check if s3_key ends with .cosine
-    if (item.s3_key?.toLowerCase().endsWith('.cosine')) {
+    // Check if s3_key ends with .cs
+    if (item.s3_key?.toLowerCase().endsWith('.cs')) {
       return true;
     }
-    // Check if it's a context_item type (these are saved as .cosine files)
+    // Check if it's a context_item type (these are saved as .cs files)
     if (item.type === 'context_item') {
       return true;
     }
@@ -656,16 +656,16 @@ const NewTabDialog: React.FC<NewTabDialogProps> = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".cosine"
+                  accept=".cs"
                   onChange={handleFileSelect}
                   style={{ display: 'none' }}
                 />
                 <CloudUploadIcon sx={{ fontSize: 48, color: '#6b7280', mb: 1 }} />
                 <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                  {importFile ? importFile.name : 'Click to select a .cosine file'}
+                  {importFile ? importFile.name : 'Click to select a .cs file'}
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#6b7280' }}>
-                  Supported format: .cosine
+                  Supported format: .cs
                 </Typography>
               </Box>
             </Box>
@@ -706,7 +706,7 @@ const NewTabDialog: React.FC<NewTabDialogProps> = ({
                   {selectedFilesystemFile ? selectedFilesystemFile.name : 'Click to browse your files'}
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#6b7280' }}>
-                  Select a .cosine file from your filesystem
+                  Select a .cs file from your filesystem
                 </Typography>
               </Box>
             </Box>

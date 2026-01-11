@@ -1,6 +1,6 @@
 """
 Dashboard Importer
-Helper class for importing dashboard configurations from .cosine files or share links
+Helper class for importing dashboard configurations from .cs files or share links
 Handles decryption and writing to the dashboard configuration table
 """
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Environment variables
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
-CONTEXT_ITEM_EXTENSION = '.cosine'
+CONTEXT_ITEM_EXTENSION = '.cs'
 
 # Initialize S3 client
 s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3v4'))
@@ -29,7 +29,7 @@ s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3
 
 class DashboardImporter:
     """
-    Imports dashboard configurations from encrypted .cosine files or share links
+    Imports dashboard configurations from encrypted .cs files or share links
     Decrypts the data and writes it to the user's dashboard configuration table
     """
     
@@ -85,7 +85,7 @@ class DashboardImporter:
         Import dashboard from file content
         
         Args:
-            file_content: The encrypted .cosine file content
+            file_content: The encrypted .cs file content
             importing_user_id: User ID of the user importing the dashboard
             original_user_id: Optional original user ID (if known, for decryption)
         
