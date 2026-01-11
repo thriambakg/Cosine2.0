@@ -261,11 +261,21 @@ class GovtContractsSearcher:
 @tool
 def search_govt_contracts(
     filters: str,
-    limit: int = 100,
+    limit: int = 5,
     last_evaluated_key: str = None
 ) -> str:
     """
     Search for government contracts/awards in DynamoDB using various filters.
+    
+    **IMPORTANT: Use autocomplete before searching:**
+    For recipient_name searches, consider using autocomplete if the user provides a generic name.
+    The search tool uses substring matching, but autocomplete can help find exact company names.
+    
+    **Pagination:**
+    - Default limit is 5 results to conserve compute
+    - For "most recent" queries, returns 5 most recent results
+    - For "more" queries, use last_evaluated_key from previous response to fetch next 5
+    - For specific items, if within first 5 results, return as-is
     
     Args:
         filters: JSON string containing filter fields. Supported filters:
@@ -285,7 +295,7 @@ def search_govt_contracts(
             - date_to: End date in YYYY-MM-DD format
             - min_obligation: Minimum obligation amount (decimal)
             - max_obligation: Maximum obligation amount (decimal)
-        limit: Maximum number of results to return (default: 100, max: 1000)
+        limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)
         last_evaluated_key: JSON string of pagination token from previous request (optional)
     
     Returns:
@@ -294,7 +304,7 @@ def search_govt_contracts(
     Example:
         search_govt_contracts(
             '{"awarding_agency_name": "Department of Defense", "fiscal_year": 2023}',
-            limit=50
+            limit=5
         )
     """
     try:
@@ -318,7 +328,7 @@ def search_govt_contracts(
         if limit > 1000:
             limit = 1000
         if limit < 1:
-            limit = 100
+            limit = 5
         
         # Perform search
         result = GovtContractsSearcher.search_awards_with_s3_passthrough(

@@ -222,10 +222,16 @@ def handle_autocomplete_request(field_types: List[str], query: str, limit: int =
     all_results = []
     
     # Get more matches than needed to allow for pagination
-    # For constants files with empty query, we want all results, so use a very high limit
+    # For constants files (countries/foreign), empty query should return first items (default 10)
+    # For other field types with empty query, we want all results
+    is_constants_field = any(ft in ['country', 'foreign'] for ft in field_types)
     if not query or not query.strip():
-        # Empty query means "get all" - use a very high limit to get everything
-        search_limit = max(limit, 10000)  # Use the requested limit or 10000, whichever is higher
+        if is_constants_field:
+            # For constants fields, limit to requested limit (default 10) for empty query
+            search_limit = limit
+        else:
+            # Empty query means "get all" - use a very high limit to get everything
+            search_limit = max(limit, 10000)  # Use the requested limit or 10000, whichever is higher
     else:
         # For search queries, get more than needed for pagination
         search_limit = max(limit * 10, 100)  # At least 100 per field type

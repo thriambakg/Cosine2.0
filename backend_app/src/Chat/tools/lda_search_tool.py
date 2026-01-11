@@ -507,21 +507,29 @@ def store_results_in_s3(results: Dict[str, Any], user_id: str, session_id: str) 
 @tool
 def lda_search(
     filters: str,
-    limit: int = 100
+    limit: int = 5,
+    last_evaluated_key: str = None
 ) -> str:
     """
     Search for LDA (Lobbying Disclosure Act) filings and contributions.
     
-    This tool searches the LDA database for lobbying disclosures. Before using this tool,
-    you should first use lda_autocomplete to find the exact names of registrants, clients,
-    lobbyists, or PACs, especially if the user provides a generic name like "Apple".
+    **IMPORTANT: Use autocomplete before searching:**
+    Before using this tool, you should first use lda_autocomplete to find the exact names of registrants, clients,
+    lobbyists, or PACs, especially if the user provides a generic name like "Apple" or "Microsoft".
     
-    When a user asks for lobbying history of a generic name:
-    1. First use lda_autocomplete to find all matches across different types
-    2. If multiple types have matches (e.g., "Apple" as both client and registrant),
-       ask the user to clarify which type they want, or search all if they want comprehensive results
-    3. If a name appears in multiple categories (e.g., "Apple" client vs "Suzie Apple" lobbyist),
-       ask the user which specific one they're interested in
+    **Workflow for generic names:**
+    1. User asks for contracts/filings on "X company"
+    2. First use lda_autocomplete("X company") to find all matches (limit: 10)
+    3. If multiple types have matches (e.g., "Apple" as both client and registrant),
+       ask the user to clarify which type they want, OR if matches are very similar, run searches for all matches
+    4. User selects or agent proceeds with autocompleted value(s)
+    5. Use lda_search with the exact autocompleted name(s)
+    
+    **Pagination:**
+    - Default limit is 5 results to conserve compute
+    - For "most recent" queries, returns 5 most recent results
+    - For "more" queries, use last_evaluated_key from previous response to fetch next 5
+    - For specific items, if within first 5 results, return as-is
     
     Args:
         filters: JSON string containing filter fields. Supported filters:
@@ -536,7 +544,8 @@ def lda_search(
             - date_to: End date in YYYY-MM-DD format
             - filing_year: Filing year (integer, e.g., 2023)
             - item_type: Item type - "FILING" or "CONTRIBUTION" (default: both)
-        limit: Maximum number of results to return (default: 100, max: 1000)
+        limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)
+        last_evaluated_key: JSON string of pagination token from previous request (optional)
         
     Note: Multiple filters use AND logic (intersection) - results must match ALL specified filters.
     
@@ -563,14 +572,22 @@ def lda_search(
         else:
             filters_dict = filters
         
+        # Parse last_evaluated_key if provided
+        last_key = None
+        if last_evaluated_key:
+            if isinstance(last_evaluated_key, str):
+                last_key = json.loads(last_evaluated_key)
+            else:
+                last_key = last_evaluated_key
+        
         # Validate limit
         if limit > 1000:
             limit = 1000
         if limit < 1:
-            limit = 100
+            limit = 5
         
         # Perform search
-        result = search_filings_simplified(filters_dict, limit=limit)
+        result = search_filings_simplified(filters_dict, limit=limit, last_evaluated_key=last_key)
         
         if not result.get('success'):
             return json.dumps(result, default=str)

@@ -476,6 +476,35 @@ function MultiSelectField<T = string>({
         onOpen={() => {
           console.log('🔵 MultiSelectField: onOpen called');
           setIsDropdownOpen(true);
+          // Trigger empty query search when dropdown opens (if onSearch is available)
+          // This will show default results (e.g., first 10 countries) when clicking the field
+          if (onSearch && (!inputValue || inputValue.length === 0)) {
+            lastSearchQueryRef.current = '';
+            setCurrentQuery('');
+            setIsLoadingMore(true);
+            
+            (async () => {
+              try {
+                const searchResults = onSearch('', 0);
+                let response: any;
+                if (searchResults instanceof Promise) {
+                  response = await searchResults;
+                } else {
+                  response = searchResults;
+                }
+                
+                const { results, hasMore: moreAvailable } = extractResults(response);
+                setDynamicSuggestions(results);
+                setHasMore(moreAvailable);
+              } catch (error) {
+                console.error('Default search error on open:', error);
+                setDynamicSuggestions([]);
+                setHasMore(false);
+              } finally {
+                setIsLoadingMore(false);
+              }
+            })();
+          }
         }}
         onClose={(_, reason) => {
           console.log('🔴 MultiSelectField: onClose called', { reason, isDropdownOpen, label });

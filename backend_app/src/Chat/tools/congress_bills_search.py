@@ -877,11 +877,23 @@ class CongressBillsSearcher:
 @tool
 def search_congress_bills(
     filters: str,
-    limit: int = 10,
+    limit: int = 5,
     last_evaluated_key: str = None
 ) -> str:
     """
     Search for congressional bills in DynamoDB using various filters.
+    
+    **IMPORTANT: Use autocomplete before searching:**
+    For sponsor_name and policy_area searches, use search_autocomplete to find exact values.
+    - For sponsor_name: Use search_autocomplete(query, "congress_legislator", limit=10)
+    - For policy_area: Use search_autocomplete(query, "policy_area", limit=10)
+    If multiple matches, ask user to clarify OR if very similar, run searches for all matches.
+    
+    **Pagination:**
+    - Default limit is 5 results to conserve compute
+    - For "most recent" queries, returns 5 most recent results
+    - For "more" queries, use last_evaluated_key from previous response to fetch next 5
+    - For specific items, if within first 5 results, return as-is
     
     Args:
         filters: JSON string containing filter fields. Supported filters:
@@ -898,8 +910,7 @@ def search_congress_bills(
             - introduced_date_to: End date in YYYY-MM-DD format
             - latest_action_date_from: Start date in YYYY-MM-DD format
             - latest_action_date_to: End date in YYYY-MM-DD format
-        limit: Maximum number of results to return (default: 10 for agent use, max: 1000). 
-               Use small limits (10-20) initially to check if results match user intent, then paginate if needed.
+        limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)
         last_evaluated_key: JSON string of pagination token from previous request (optional)
     
     Returns:
@@ -944,7 +955,7 @@ def search_congress_bills(
         if limit > 1000:
             limit = 1000
         if limit < 1:
-            limit = 10  # Default to 10 for agent use (matches frontend page size)
+            limit = 5  # Default to 5 for compute efficiency
         
         # Perform search
         result = CongressBillsSearcher.search_bills_with_s3_passthrough(

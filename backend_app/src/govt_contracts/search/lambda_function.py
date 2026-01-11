@@ -427,17 +427,17 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     if has_obligation_range and not using_obligation_index:
         # No ObligationIndex GSIs used - need separate FiscalYearObligationIndex queries
         # Build range condition for obligation
-        range_condition = None
-        range_value = None
+                range_condition = None
+                range_value = None
         
         if min_obligation is not None and max_obligation is not None:
-            range_condition = 'between'
+                    range_condition = 'between'
             range_value = (Decimal(str(min_obligation)), Decimal(str(max_obligation)))
         elif min_obligation is not None:
-            range_condition = 'gte'
+                    range_condition = 'gte'
             range_value = Decimal(str(min_obligation))
         elif max_obligation is not None:
-            range_condition = 'lte'
+                    range_condition = 'lte'
             range_value = Decimal(str(max_obligation))
         
         # If fiscal_year is provided, query those specific years
@@ -453,7 +453,7 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'filter_type': 'obligation_range',
                     'is_intersection': True  # Mark this as intersection query
                 })
-        else:
+            else:
             # If fiscal_year is NOT provided, check if we have other field filters
             has_other_filters = any([
                 filters.get('awarding_agency_code'),
@@ -467,11 +467,11 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             if has_other_filters:
                 # When combining with other filters, query 3 most recent fiscal years
                 # The intersection will naturally limit results, so we don't need all years
-                current_year = datetime.now().year
+    current_year = datetime.now().year
                 fiscal_years_to_query = list(range(current_year, current_year - 3, -1))  # Only 3 most recent years
                 logger.info(f"Obligation range filter without fiscal_year (with other filters): querying {len(fiscal_years_to_query)} fiscal years ({fiscal_years_to_query[-1]}-{fiscal_years_to_query[0]}) for performance")
                 
-                for fiscal_year in fiscal_years_to_query:
+    for fiscal_year in fiscal_years_to_query:
                     queries.append({
                         'index_name': 'FiscalYearObligationIndex',
                         'hash_key_name': 'fiscal_year',
@@ -619,7 +619,7 @@ def search_awards_union(
                 # First field: use its results as starting point
                 all_award_ids = field_ids.copy()
                 logger.info(f"Starting with field '{filter_type}': {len(all_award_ids)} award_ids")
-            else:
+        else:
                 # Subsequent fields: INTERSECT with existing results
                 before_count = len(all_award_ids)
                 all_award_ids &= field_ids  # INTERSECT: keep only IDs in both sets
@@ -647,7 +647,7 @@ def search_awards_union(
             # The intersection with field results will naturally limit final results
             obligation_max_items = 10000
             logger.info(f"Obligation range queries combined with other filters: limiting to {obligation_max_items} items per fiscal year for performance")
-        else:
+            else:
             # Obligation-only search: can query more items
             obligation_max_items = 50000
         
@@ -694,13 +694,13 @@ def search_awards_union(
                     # Stop if we have enough items or if this year returned fewer than max_items (year exhausted)
                     if len(field_obligation_ids) >= items_needed:
                         logger.info(f"    Have enough items ({len(field_obligation_ids)} >= {items_needed}), stopping year queries")
-                        break
+                    break
                     if len(gsi_items) < 50000:
                         # This year is exhausted (returned fewer than max), but continue to next year
                         # in case we still need more items
                         if len(field_obligation_ids) >= items_needed:
-                            break
-            else:
+                break
+    else:
                 # Normal processing: execute all queries (fiscal years specified or combined with other filters)
                 logger.info(f"UNION obligation queries for field '{filter_type}': {len(query_configs)} queries")
                 
@@ -821,7 +821,7 @@ def get_award_by_id(award_id: str) -> Optional[Dict[str, Any]]:
             return enriched
         
         return None
-    except Exception as e:
+            except Exception as e:
         logger.error(f"Error fetching award {award_id}: {str(e)}", exc_info=True)
         return None
 
@@ -867,8 +867,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }
             else:
                 # Award not found
-                return {
-                    'statusCode': 200,
+            return {
+                'statusCode': 200,
                     'headers': build_cors_headers(origin),
                     'body': json.dumps({
                         'success': True,

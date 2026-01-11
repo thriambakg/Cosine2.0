@@ -261,9 +261,10 @@ class ContextAwareAgent:
 - get_session_files_tool(session_id, user_id, file_type) - Get specific files when needed
 - get_current_datetime(format) - Get current date/time (use "date" for YYYY-MM-DD format)
 - calculate_date_range(months_ago, days_ago, start_offset_days, end_offset_days) - Calculate date ranges (e.g., months_ago=2 for "past 2 months")
-- search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB
-- search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
-- search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
+- lda_search(filters, limit=5, last_evaluated_key) - Search LDA filings (use lda_autocomplete first for names)
+- search_congress_bills(filters, limit=5, last_evaluated_key) - Search congressional bills (use search_autocomplete first)
+- search_govt_contracts(filters, limit=5, last_evaluated_key) - Search government contracts/awards
+- search_politician_trades(filters, page=1, page_size=5, last_evaluated_key) - Search politician stock trades
 
 📊 CHART GENERATION RULES:
 - When comparing multiple stocks, ALWAYS call generate_chart_tool ONCE with the COMPLETE result from get_multiple_financial_data
@@ -338,9 +339,34 @@ When get_chat_history_tool returns data:
 - Example: For "past 2 months", call calculate_date_range(months_ago=2) to get exact dates, then use start_date in filters
 
 🔍 SEARCH TOOLS (Government & Political Data):
-- search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills
+**AUTOCOMPLETE WORKFLOW (REQUIRED):**
+Before using search tools with generic names, ALWAYS use autocomplete first:
+1. User asks for contracts/filings on "X company" or generic name
+2. Use appropriate autocomplete tool (lda_autocomplete or search_autocomplete) with limit=10
+3. If multiple matches/types found:
+   - If matches are very similar, proceed with all matches
+   - If matches differ significantly, ask user to clarify which one
+4. Use exact autocompleted value(s) in search tool filters
+
+**PAGINATION & LIMITS:**
+- All search tools default to limit=5 (or page_size=5) to conserve compute
+- "Most recent" queries: Return 5 most recent results
+- "More" queries: Use last_evaluated_key from previous response to fetch next 5
+- Specific items: If within first 5 results, return as-is; otherwise fetch more with pagination
+
+- lda_search(filters, limit=5, last_evaluated_key) - Search LDA filings
+  * ALWAYS use lda_autocomplete(query, limit=10) first for registrant_name, client_name, lobbyist_name, pac_name, foreign_entity_name
+  * Filters: registrant_name, client_name, lobbyist_name, pac_name, general_issue_code, government_entity, 
+    foreign_entity_name, date_from/to, filing_year, item_type
+  * Default limit: 5 (max: 1000)
+  * Use last_evaluated_key for pagination (fetch next 5)
+  
+- search_congress_bills(filters, limit=5, last_evaluated_key) - Search congressional bills
+  * Use search_autocomplete(query, "congress_legislator", limit=10) for sponsor_name
+  * Use search_autocomplete(query, "policy_area", limit=10) for policy_area
   * Filters: sponsor_name, bill_title, bill_type, sponsor_party, sponsor_state, policy_area, bipartisan, 
     bill_number, congress, introduced_date_from/to, latest_action_date_from/to
+  * Default limit: 5 (max: 1000)
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key
   * Each bill result includes a `bill_text_html_s3_key` field (e.g., "billtext/119-HR-5789.html")
@@ -349,18 +375,20 @@ When get_chat_history_tool returns data:
   * Example: If search returns bill with bill_text_html_s3_key="billtext/119-HR-5789.html", 
     call read_s3_file_tool("billtext/119-HR-5789.html") to get the full bill text
   
-- search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards
+- search_govt_contracts(filters, limit=5, last_evaluated_key) - Search government contracts/awards
   * Filters: awarding_agency_name/code, funding_agency_name/code, recipient_name, recipient_location_state/country,
     award_type, naics_code, psc_code, cfda_number, fiscal_year, date_from/to, min/max_obligation
+  * Default limit: 5 (max: 1000)
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key
   
-- search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades
+- search_politician_trades(filters, page=1, page_size=5, last_evaluated_key) - Search politician stock trades
   * Filters: politicianName, position, party, security/securitySymbol/securityName, transactionType,
     amountRange, stateDistrict, dateFrom/to, filingDateFrom/to, requiresManualReview, isUnparsed, matchConfidence
+  * Default page_size: 5 (max: 100)
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key
-  * Supports pagination with page/page_size (max page_size: 100)
+  * Supports pagination with page/page_size or last_evaluated_key
 
 📦 S3 PASSTHROUGH FOR LARGE RESULTS:
 - All search tools automatically store large results (>50KB or >50 items) in S3

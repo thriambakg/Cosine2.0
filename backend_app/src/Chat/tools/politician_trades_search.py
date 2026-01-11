@@ -274,11 +274,17 @@ class PoliticianTradesSearcher:
 def search_politician_trades(
     filters: str,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = 5,
     last_evaluated_key: str = None
 ) -> str:
     """
     Search for politician stock trades in DynamoDB using various filters.
+    
+    **Pagination:**
+    - Default page_size is 5 results to conserve compute
+    - For "most recent" queries, returns 5 most recent results (page=1, page_size=5)
+    - For "more" queries, increment page number or use last_evaluated_key from previous response
+    - For specific items, if within first 5 results, return as-is
     
     Args:
         filters: JSON string containing filter fields. Supported filters:
@@ -299,7 +305,7 @@ def search_politician_trades(
             - isUnparsed: Boolean
             - matchConfidence: Minimum match confidence (decimal)
         page: Page number (default: 1)
-        page_size: Number of results per page (default: 50, max: 100)
+        page_size: Number of results per page (default: 5 for compute efficiency, max: 100)
         last_evaluated_key: JSON string of pagination token from previous request (optional)
     
     Returns:
@@ -309,7 +315,7 @@ def search_politician_trades(
         search_politician_trades(
             '{"politicianName": "Nancy Pelosi", "dateFrom": "2023-01-01"}',
             page=1,
-            page_size=50
+            page_size=5
         )
     """
     try:
@@ -333,7 +339,7 @@ def search_politician_trades(
         if page_size > 100:
             page_size = 100
         if page_size < 1:
-            page_size = 50
+            page_size = 5  # Default to 5 for compute efficiency
         
         # Validate page
         if page < 1:

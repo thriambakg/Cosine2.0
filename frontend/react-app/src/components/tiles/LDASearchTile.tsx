@@ -2395,9 +2395,9 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                   onSearch={async (query: string, offset?: number) => {
                     try {
                       const response = await ldaAutocompleteAPI.search({
-                        query,
+                        query: query || '', // Allow empty query for default results
                         field_types: ['foreign'],
-                        limit: 20,
+                        limit: query ? 20 : 10, // Default to 10 for empty query
                         offset: offset || 0,
                       });
                       return {

@@ -1196,6 +1196,147 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
               )}
             </Box>
           )}
+
+          {/* All Lobbyist Names */}
+          {data?.all_lobbyist_names && Array.isArray(data.all_lobbyist_names) && data.all_lobbyist_names.length > 0 && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Lobbyists
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {data.all_lobbyist_names.map((name: string, index: number) => (
+                  <Chip
+                    key={index}
+                    label={name}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                      color: '#93c5fd',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.25)',
+                      },
+                    }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Lobbying Activities */}
+          {data?.lobbying_activities && Array.isArray(data.lobbying_activities) && data.lobbying_activities.length > 0 && (
+            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                Lobbying Activities
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {data.lobbying_activities.map((activity: any, index: number) => (
+                  <Box
+                    key={index}
+                    sx={{
+                      p: 2,
+                      backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                      borderRadius: '4px',
+                      border: '1px solid #1e293b',
+                    }}
+                  >
+                    {/* Description */}
+                    {activity.description && (
+                      <Typography variant="body2" sx={{ color: '#e2e8f0', mb: 2 }}>
+                        {activity.description}
+                      </Typography>
+                    )}
+
+                    {/* General Issue Code */}
+                    {(activity.general_issue_code || activity.general_issue_code_display) && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mb: 0.5 }}>
+                          General Issue Code
+                        </Typography>
+                        <Chip
+                          label={activity.general_issue_code_display || activity.general_issue_code}
+                          size="small"
+                          sx={{
+                            backgroundColor: 'rgba(139, 92, 246, 0.15)',
+                            color: '#c4b5fd',
+                            border: '1px solid rgba(139, 92, 246, 0.3)',
+                          }}
+                        />
+                        {activity.general_issue_code && activity.general_issue_code_display && activity.general_issue_code !== activity.general_issue_code_display && (
+                          <Typography variant="caption" sx={{ color: '#6b7280', ml: 1 }}>
+                            ({activity.general_issue_code})
+                          </Typography>
+                        )}
+                      </Box>
+                    )}
+
+                    {/* Government Entities */}
+                    {activity.government_entities && Array.isArray(activity.government_entities) && activity.government_entities.length > 0 && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mb: 1 }}>
+                          Government Entities
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {activity.government_entities.map((entity: any, entityIndex: number) => (
+                            <Chip
+                              key={entityIndex}
+                              label={entity.name || entity}
+                              size="small"
+                              sx={{
+                                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                color: '#6ee7b7',
+                                border: '1px solid rgba(16, 185, 129, 0.3)',
+                              }}
+                            />
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+
+                    {/* Lobbyists for this activity */}
+                    {activity.lobbyists && Array.isArray(activity.lobbyists) && activity.lobbyists.length > 0 && (
+                      <Box>
+                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mb: 1 }}>
+                          Lobbyists ({activity.lobbyists.length})
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {activity.lobbyists.map((lobbyist: any, lobbyistIndex: number) => {
+                            const lobbyistName = lobbyist.lobbyist
+                              ? `${lobbyist.lobbyist.first_name || ''} ${lobbyist.lobbyist.middle_name || ''} ${lobbyist.lobbyist.last_name || ''} ${lobbyist.lobbyist.suffix_display || ''}`.trim() || lobbyist.lobbyist.nickname || 'Unknown'
+                              : lobbyist.name || 'Unknown';
+                            return (
+                              <Chip
+                                key={lobbyistIndex}
+                                label={lobbyistName}
+                                size="small"
+                                sx={{
+                                  backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                  color: '#93c5fd',
+                                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                                }}
+                              />
+                            );
+                          })}
+                        </Box>
+                      </Box>
+                    )}
+
+                    {/* Foreign Entity Issues */}
+                    {activity.foreign_entity_issues && (
+                      <Box sx={{ mt: 2 }}>
+                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mb: 0.5 }}>
+                          Foreign Entity Issues
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', fontStyle: 'italic' }}>
+                          {activity.foreign_entity_issues}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
         </Box>
       );
     }
