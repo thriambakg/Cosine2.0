@@ -1,6 +1,6 @@
 """
 Chat Session Importer
-Helper class for importing chat sessions from .cs files or share links
+Helper class for importing chat sessions from .cosine files or share links
 Handles decryption, S3 object upload, and DynamoDB insertion
 """
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
 CHAT_SESSIONS_TABLE_NAME = os.environ.get('CHAT_SESSIONS_TABLE_NAME', 'cosine-chat-sessions-production')
-CONTEXT_ITEM_EXTENSION = '.cs'
+CONTEXT_ITEM_EXTENSION = '.cosine'
 
 # Initialize AWS clients
 s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3v4'))
@@ -36,7 +36,7 @@ dynamodb = boto3.resource('dynamodb')
 
 class ChatSessionImporter:
     """
-    Imports chat sessions from encrypted .cs files or share links
+    Imports chat sessions from encrypted .cosine files or share links
     Decrypts the data, uploads S3 objects, and writes to DynamoDB
     """
     
@@ -159,7 +159,7 @@ class ChatSessionImporter:
                     # Handle filesystem items - re-encrypt and store in filesystem location
                     try:
                         # Extract folder path and filename from old S3 key
-                        # Format: users/{old_user_id}/filesys/{folder_path}/{item_id}.cs
+                        # Format: users/{old_user_id}/filesys/{folder_path}/{item_id}.cosine
                         parts = old_s3_key.split('/filesys/')
                         if len(parts) == 2:
                             folder_path_and_file = parts[1]
@@ -350,7 +350,7 @@ class ChatSessionImporter:
         Import session from file content
         
         Args:
-            file_content: The encrypted .cs file content
+            file_content: The encrypted .cosine file content
             importing_user_id: User ID of the user importing the session
         
         Returns:

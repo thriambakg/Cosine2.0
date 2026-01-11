@@ -36,13 +36,13 @@ S3_BASE_URL = os.environ.get('S3_BASE_URL', 'https://cosine-chat-files-productio
 MANIFEST_FILE = '.manifest.json'
 
 # Context item encryption constants
-CONTEXT_ITEM_EXTENSION = '.cs'
+CONTEXT_ITEM_EXTENSION = '.cosine'
 CONTEXT_ITEM_MIME_TYPE = 'application/octet-stream'
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')  # Should be set via environment variable
 
 def derive_platform_key() -> bytes:
     """Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
-    This allows .cs files to be shared across all users in the platform"""
+    This allows .cosine files to be shared across all users in the platform"""
     salt = hashlib.sha256(f"{ENCRYPTION_SECRET}platform-wide".encode()).digest()[:16]
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -69,7 +69,7 @@ def encrypt_context_data(user_id: str, data: Dict[str, Any]) -> bytes:
     """Encrypt context data using Fernet with platform-wide key (shareable across all users)"""
     try:
         logger.debug(f"🔐 Starting encryption with platform-wide key")
-        # Use platform-wide key for shareable .cs files
+        # Use platform-wide key for shareable .cosine files
         key = derive_platform_key()
         logger.debug(f"🔐 Derived platform encryption key (length: {len(key)})")
         fernet = Fernet(key)
@@ -222,7 +222,7 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         s3_key = f"users/{user_id}/filesys/{folder_path}/{file_id}{file_extension}" if folder_path else f"users/{user_id}/filesys/{file_id}{file_extension}"
         
         # All user-uploaded files are stored as-is (no encryption/decryption)
-        # This includes .cs files - they are stored exactly as uploaded
+        # This includes .cosine files - they are stored exactly as uploaded
         # Only context items created from the website (via add_context_item) are encrypted
         
         # Determine content type based on file extension
@@ -230,7 +230,7 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         if file_extension.lower() == '.json':
             content_type = 'application/json'
         elif file_extension.lower() == CONTEXT_ITEM_EXTENSION:
-            # .cs files uploaded by users are stored as-is
+            # .cosine files uploaded by users are stored as-is
             content_type = CONTEXT_ITEM_MIME_TYPE
         elif file_extension.lower() in ['.png', '.jpg', '.jpeg', '.gif']:
             content_type = f'image/{file_extension[1:].lower()}'
@@ -281,18 +281,18 @@ def add_file_upload(user_id: str, folder_path: str, file_content: bytes, filenam
         raise
 
 def add_context_item(user_id: str, folder_path: str, context_data: Dict[str, Any], title: str, item_type: str = 'context_item') -> Dict[str, Any]:
-    """Add a context item (full JSON object) to the filesystem - encrypted and saved as .cs file"""
+    """Add a context item (full JSON object) to the filesystem - encrypted and saved as .cosine file"""
     try:
         logger.info(f"🔐 Adding context item: user_id={user_id}, item_type={item_type}, title={title}")
         
         # Get folder manifest
         manifest = get_folder_manifest(user_id, folder_path)
         
-        # Generate item ID and S3 key (using .cs extension for encrypted context items)
+        # Generate item ID and S3 key (using .cosine extension for encrypted context items)
         item_id = str(uuid.uuid4())
         s3_key = f"users/{user_id}/filesys/{folder_path}/{item_id}{CONTEXT_ITEM_EXTENSION}" if folder_path else f"users/{user_id}/filesys/{item_id}{CONTEXT_ITEM_EXTENSION}"
         
-        logger.info(f"🔐 Generated S3 key with .cs extension: {s3_key}")
+        logger.info(f"🔐 Generated S3 key with .cosine extension: {s3_key}")
         
         # Encrypt and store context data
         logger.info(f"🔐 Encrypting context data for user {user_id}...")
@@ -910,7 +910,7 @@ def copy_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
                 response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
                 content_bytes = response['Body'].read()
                 
-                # For .cs files, decrypt the content
+                # For .cosine files, decrypt the content
                 if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
                     item['content'] = decrypt_context_data(user_id, content_bytes)
                 else:
@@ -946,7 +946,7 @@ def copy_folder(user_id: str, folder_path: str) -> Dict[str, Any]:
                     response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
                     content_bytes = response['Body'].read()
                     
-                    # For .cs files, decrypt the content
+                    # For .cosine files, decrypt the content
                     if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
                         items_data[item_id] = {
                             **item,
@@ -1040,7 +1040,7 @@ def paste_item(user_id: str, dest_folder_path: str, clipboard_data: Dict[str, An
             # Upload content to S3
             if item_data.get('content') is not None:
                 if item_data.get('s3_key', '').endswith(CONTEXT_ITEM_EXTENSION) or file_extension == CONTEXT_ITEM_EXTENSION:
-                    # Encrypt and save .cs file
+                    # Encrypt and save .cosine file
                     encrypted_data = encrypt_context_data(user_id, item_data['content'])
                     s3_client.put_object(
                         Bucket=CHAT_FILES_BUCKET_NAME,
@@ -1167,7 +1167,7 @@ def list_folder(user_id: str, folder_path: str = '') -> Dict[str, Any]:
 def update_item(user_id: str, folder_path: str, item_id: str, content_data: Dict[str, Any]) -> Dict[str, Any]:
     """Update an item's content in S3
     
-    For encrypted .cs files: decrypts old file, updates with new data, re-encrypts and saves.
+    For encrypted .cosine files: decrypts old file, updates with new data, re-encrypts and saves.
     For regular files: updates content directly.
     """
     try:
@@ -1184,12 +1184,12 @@ def update_item(user_id: str, folder_path: str, item_id: str, content_data: Dict
         
         logger.info(f"🔄 Updating item {item_id}, s3_key: {s3_key}")
         
-        # Check if this is a .cs encrypted context item file
+        # Check if this is a .cosine encrypted context item file
         is_cosine_file = s3_key.endswith(CONTEXT_ITEM_EXTENSION)
         
         if is_cosine_file:
-            # For encrypted .cs files: encrypt the new content and save
-            logger.info(f"🔐 Updating encrypted .cs file: {s3_key}")
+            # For encrypted .cosine files: encrypt the new content and save
+            logger.info(f"🔐 Updating encrypted .cosine file: {s3_key}")
             logger.info(f"🔐 Encrypting updated content for user {user_id}...")
             encrypted_data = encrypt_context_data(user_id, content_data)
             logger.info(f"🔐 Encryption successful, encrypted data size: {len(encrypted_data)} bytes")
@@ -1238,8 +1238,8 @@ def get_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
                     response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=item['s3_key'])
                     content_bytes = response['Body'].read()
                     
-                    # Check if this is a .cs encrypted context item file
-                    # Only .cs files are encrypted - all other files are stored as-is
+                    # Check if this is a .cosine encrypted context item file
+                    # Only .cosine files are encrypted - all other files are stored as-is
                     if item['s3_key'].endswith(CONTEXT_ITEM_EXTENSION):
                         # Decrypt the encrypted context item for preview
                         item['content'] = decrypt_context_data(user_id, content_bytes)

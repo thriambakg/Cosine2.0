@@ -3345,7 +3345,7 @@ const GlobalChatSidebar: React.FC = () => {
             ref={fileInputRef}
             onChange={(e) => handleFileUpload(e.target.files!)}
             multiple
-            accept=".cs,image/*,application/pdf,text/*,application/json,application/xml,application/msword,application/vnd.openxmlformats-officedocument.*,application/vnd.ms-excel.*,application/vnd.ms-powerpoint.*,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/octet-stream"
+            accept=".cosine,image/*,application/pdf,text/*,application/json,application/xml,application/msword,application/vnd.openxmlformats-officedocument.*,application/vnd.ms-excel.*,application/vnd.ms-powerpoint.*,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/octet-stream"
             style={{ display: 'none' }}
           />
           <SidebarMessageInputBar

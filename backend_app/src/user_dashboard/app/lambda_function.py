@@ -420,7 +420,7 @@ def handle_tiles_operations(user_id: str, http_method: str, path: str, event: Di
             
             logger.info(f"📋 Tiles POST operation: {body.get('operation', 'add_tile')}, body keys: {list(body.keys())}")
             
-            # Check if this is an import tile request (single tile from .cs file)
+            # Check if this is an import tile request (single tile from .cosine file)
             if body.get('operation') == 'import_tile':
                 return handle_import_tile(user_id, event)
             # Check if this is an import tiles request (extract tiles from dashboard export)
@@ -910,7 +910,7 @@ def handle_add_tile(user_id: str, event: Dict) -> Dict:
         return create_response(500, {"error": "Failed to add tile"})
 
 def handle_import_tile(user_id: str, event: Dict) -> Dict:
-    """Import a tile from an encrypted .cs file"""
+    """Import a tile from an encrypted .cosine file"""
     try:
         from importer import DashboardImporter
         
@@ -1164,7 +1164,7 @@ def handle_remove_tile(user_id: str, tile_id: str) -> Dict:
         return create_response(500, {"error": "Failed to remove tile"})
 
 def handle_extract_tiles_from_file(user_id: str, http_method: str, event: Dict) -> Dict:
-    """Extract tiles from an encrypted .cs file for preview/selection before import"""
+    """Extract tiles from an encrypted .cosine file for preview/selection before import"""
     try:
         if http_method != 'POST':
             return create_response(400, {'error': 'Only POST requests are supported'})

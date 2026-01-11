@@ -99,20 +99,20 @@ class S3FileReader:
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()  # This is bytes, not string
             
-            # Handle .cs encrypted files (context items from filesystem)
+            # Handle .cosine encrypted files (context items from filesystem)
             # Check this FIRST before other file type logic
             s3_key_lower = s3_key.lower()
             file_type_lower = file_type.lower() if file_type else ''
             
-            # Check if this is a .cs file by extension or explicit file_type
-            is_cosine_file = s3_key_lower.endswith('.cs') or file_type_lower == 'cs'
+            # Check if this is a .cosine file by extension or explicit file_type
+            is_cosine_file = s3_key_lower.endswith('.cosine') or file_type_lower == 'cosine'
             
             # Also check if content looks like Fernet-encrypted data (starts with gAAAAAB)
             content_preview = content[:20] if len(content) >= 20 else content
             looks_encrypted = isinstance(content_preview, bytes) and content_preview.startswith(b'gAAAAAB')
             
             if is_cosine_file or (looks_encrypted and '/filesys/' in s3_key):
-                logger.info(f"🔐 Detected .cs file or encrypted content, attempting decryption")
+                logger.info(f"🔐 Detected .cosine file or encrypted content, attempting decryption")
                 logger.info(f"🔐 s3_key: {s3_key}, file_type: {file_type}, is_cosine_file: {is_cosine_file}, looks_encrypted: {looks_encrypted}")
                 try:
                     # Import decryption helper (following pattern used by other tools)
@@ -155,7 +155,7 @@ class S3FileReader:
                             logger.error(f"❌ S3 key parts: {s3_key_parts}")
                             logger.error(f"❌ Environment USER_ID: {os.environ.get('USER_ID')}")
                             logger.error(f"❌ Environment CURRENT_USER_ID: {os.environ.get('CURRENT_USER_ID')}")
-                            return f"Error: Cannot decrypt .cs file - user_id not found in S3 key or environment. S3 key: {s3_key}"
+                            return f"Error: Cannot decrypt .cosine file - user_id not found in S3 key or environment. S3 key: {s3_key}"
                     
                     # Ensure content is bytes (not string)
                     if isinstance(content, str):
@@ -163,27 +163,27 @@ class S3FileReader:
                         content = content.encode('utf-8')
                     
                     # Attempt decryption
-                    logger.info(f"🔐 Attempting to decrypt .cs file (size: {len(content)} bytes, type: {type(content).__name__}) for user {user_id}")
+                    logger.info(f"🔐 Attempting to decrypt .cosine file (size: {len(content)} bytes, type: {type(content).__name__}) for user {user_id}")
                     logger.info(f"🔐 Content preview (first 50 bytes): {content[:50] if len(content) >= 50 else content}")
                     try:
                         decrypted_data = decrypt_cosine_file(user_id, content)
-                        logger.info(f"✅ Successfully decrypted .cs file, returning JSON data")
+                        logger.info(f"✅ Successfully decrypted .cosine file, returning JSON data")
                         logger.info(f"✅ Decrypted data keys: {list(decrypted_data.keys()) if isinstance(decrypted_data, dict) else 'N/A'}")
                         return json.dumps(decrypted_data, indent=2, default=str)
                     except ValueError as ve:
                         logger.error(f"❌ Decryption failed with ValueError: {str(ve)}")
-                        return f"Error decrypting .cs file: {str(ve)}"
+                        return f"Error decrypting .cosine file: {str(ve)}"
                     except Exception as decrypt_err:
                         logger.error(f"❌ Decryption failed with exception: {str(decrypt_err)}")
                         import traceback
                         logger.error(f"❌ Decryption traceback: {traceback.format_exc()}")
-                        return f"Error decrypting .cs file: {str(decrypt_err)}"
+                        return f"Error decrypting .cosine file: {str(decrypt_err)}"
                         
                 except Exception as e:
-                    logger.error(f"❌ Unexpected error in .cs decryption block: {str(e)}")
+                    logger.error(f"❌ Unexpected error in .cosine decryption block: {str(e)}")
                     import traceback
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
-                    return f"Error decrypting .cs file: {str(e)}"
+                    return f"Error decrypting .cosine file: {str(e)}"
             
             # Decode based on content type
             content_type = response.get('ContentType', '')

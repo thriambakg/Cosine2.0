@@ -188,8 +188,8 @@ export class FileUploadService {
       }
       
       // Validate file type
-      // Allow .cs files (application/octet-stream) or files with .cs extension
-      const isCosineFile = file.name.toLowerCase().endsWith('.cs');
+      // Allow .cosine files (application/octet-stream) or files with .cosine extension
+      const isCosineFile = file.name.toLowerCase().endsWith('.cosine');
       const isAllowedType = this.ALLOWED_TYPES.includes(file.type) || isCosineFile;
       
       if (!isAllowedType) {

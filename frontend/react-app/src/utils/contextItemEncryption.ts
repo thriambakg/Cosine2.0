@@ -6,7 +6,7 @@
  * which should be provided via environment variable or API call
  */
 
-const FILE_EXTENSION = '.cs';
+const FILE_EXTENSION = '.cosine';
 const FILE_MIME_TYPE = 'application/x-cosine-context';
 
 // Legacy encryption key for frontend-encrypted context items (deprecated - use backend encryption)
@@ -181,7 +181,7 @@ export async function readContextItemFromFile(file: File): Promise<any> {
 
 /**
  * Derive Fernet key from user_id (matches backend implementation)
- * This is used to decrypt backend-encrypted .cs files
+ * This is used to decrypt backend-encrypted .cosine files
  */
 async function deriveFernetKeyFromUserId(userId: string, encryptionSecret: string): Promise<string> {
   // Step 1: Create salt from SHA256(ENCRYPTION_SECRET + user_id)[:16]

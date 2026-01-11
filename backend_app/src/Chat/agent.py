@@ -902,7 +902,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 5. calculate_stock_correlation(tickers, period) - LIVE correlation matrix between stocks using yfinance data
 6. python_financial_calculator(calculation) - Advanced calculations (Fama-French, VaR, Sharpe ratios)
 7. http_request - Web requests for additional context
-8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3. Automatically decrypts .cs encrypted context items from the filesystem.
+8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3. Automatically decrypts .cosine encrypted context items from the filesystem.
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
 11. get_chat_history_tool(session_id, user_id, limit, include_recent) - Get chat history on-demand with smart pagination
@@ -1190,52 +1190,52 @@ FOR UPLOADED FILE QUESTIONS:
 4. Use file content for analysis, calculations, or context
 5. Provide insights based on file data combined with market data
 
-🔐 .CS FILE DECRYPTION:
-- .cs files are encrypted context items stored in the user's filesystem (users/{user_id}/filesys/*)
+🔐 .COSINE FILE DECRYPTION:
+- .cosine files are encrypted context items stored in the user's filesystem (users/{user_id}/filesys/*)
 - These files contain encrypted context data (news articles, SEC filings, LDA disclosures, politician trades, etc.)
-- The read_s3_file_tool automatically decrypts .cs files when you read them - no special action needed
-- When you see a file with .cs extension in session context or file listings, you can read it normally using read_s3_file_tool(s3_key)
+- The read_s3_file_tool automatically decrypts .cosine files when you read them - no special action needed
+- When you see a file with .cosine extension in session context or file listings, you can read it normally using read_s3_file_tool(s3_key)
 - The tool will automatically:
-  1. Detect the .cs extension
+  1. Detect the .cosine extension
   2. Extract the user_id from the S3 key path
   3. Decrypt the file using the decryption helper
   4. Return the decrypted JSON data for analysis
-- Example: If you see "users/abc123/filesys/folder/item.cs" in file listings, simply call read_s3_file_tool("users/abc123/filesys/folder/item.cs")
+- Example: If you see "users/abc123/filesys/folder/item.cosine" in file listings, simply call read_s3_file_tool("users/abc123/filesys/folder/item.cosine")
 - The decrypted content will be a JSON object with context item data (type, title, subtitle, timestamp, and content fields)
-- NEVER say ".cs files are encrypted and cannot be read" - they CAN be read and decrypted automatically!
+- NEVER say ".cosine files are encrypted and cannot be read" - they CAN be read and decrypted automatically!
 
 📁 FILESYSTEM OBJECT HANDLING:
 When you encounter filesystem objects in session context (items with type "context_item" that have S3 keys in the users/{user_id}/filesys/* path):
 
-**CRITICAL: ALWAYS DECRYPT .CS FILES FROM CONTEXT ITEMS**
-- When you see a context item with a title ending in ".cs" or a subtitle indicating it's a filesystem item, you MUST decrypt it
+**CRITICAL: ALWAYS DECRYPT .COSINE FILES FROM CONTEXT ITEMS**
+- When you see a context item with a title ending in ".cosine" or a subtitle indicating it's a filesystem item, you MUST decrypt it
 - Context items from the filesystem will have an "s3_key" field in their data structure
 - To access the S3 key from a context item:
   - Check the context item's "data" field for "s3_key"
   - Or check if the context item has an "s3_key" field directly
-  - The S3 key will be in the format: "users/{user_id}/filesys/{folder}/{filename}.cs"
+  - The S3 key will be in the format: "users/{user_id}/filesys/{folder}/{filename}.cosine"
 - Example context item structure:
   {
     "id": "...",
     "type": "context_item",
-    "title": "Congress Bill.cs",
+    "title": "Congress Bill.cosine",
     "subtitle": "...",
     "data": {
-      "s3_key": "users/123/filesys/folder/Congress Bill.cs"
+      "s3_key": "users/123/filesys/folder/Congress Bill.cosine"
     }
   }
 - When you see this, IMMEDIATELY call: read_s3_file_tool(context_item["data"]["s3_key"])
 
-**FOR NON-CS FILES:**
+**FOR NON-COSINE FILES:**
 - Use read_s3_file_tool(s3_key, file_type) to read the file directly
 - The tool will automatically detect the file type and handle it appropriately
 - For PDFs: Use read_pdf_tool(s3_key) or analyze_pdf_content_tool(s3_key, analysis_type) for specialized PDF analysis
 - For other file types: Use read_s3_file_tool() and then use specialized tools as needed based on the content
 
-**FOR .CS FILES (Encrypted Context Items):**
-- .cs files are encrypted context items that represent tiles or other context items
+**FOR .COSINE FILES (Encrypted Context Items):**
+- .cosine files are encrypted context items that represent tiles or other context items
 - These files contain metadata and S3 keys that reference underlying data (e.g., HTML files for indexed filings)
-- To access .cs files:
+- To access .cosine files:
   1. Get the S3 key from the context item (from context_item["data"]["s3_key"] or context_item["s3_key"])
   2. Use read_s3_file_tool(s3_key) - it will automatically decrypt the file
   3. The decrypted content will be a JSON object with structure:
@@ -1252,30 +1252,30 @@ When you encounter filesystem objects in session context (items with type "conte
   4. After decrypting, check the "data.s3_key" field to find the underlying data file
   5. Use read_s3_file_tool(data.s3_key) to read the actual underlying data (HTML, JSON, etc.)
   6. For example:
-     - Get S3 key from context: context_item["data"]["s3_key"] = "users/123/filesys/item.cs"
-     - Decrypt: read_s3_file_tool("users/123/filesys/item.cs")
+     - Get S3 key from context: context_item["data"]["s3_key"] = "users/123/filesys/item.cosine"
+     - Decrypt: read_s3_file_tool("users/123/filesys/item.cosine")
      - Get underlying data: read_s3_file_tool(decrypted_data["data"]["s3_key"])
-- .cs files are typically tiles (Congress Bill, SEC Filing, LDA Disclosure, etc.) that have been saved to the filesystem
+- .cosine files are typically tiles (Congress Bill, SEC Filing, LDA Disclosure, etc.) that have been saved to the filesystem
 - The underlying S3 key in the decrypted data points to the actual indexed filing HTML, JSON data, or other source material
-- Always decrypt .cs files first, then read the underlying data using the S3 key from the decrypted content
-- NEVER skip decrypting .cs files - if you see a context item with ".cs" in the title or a filesystem path, you MUST decrypt it using read_s3_file_tool()
+- Always decrypt .cosine files first, then read the underlying data using the S3 key from the decrypted content
+- NEVER skip decrypting .cosine files - if you see a context item with ".cosine" in the title or a filesystem path, you MUST decrypt it using read_s3_file_tool()
 
 **WORKFLOW FOR FILESYSTEM OBJECTS:**
-1. When you see a context item with ".cs" in the title or filesystem path:
+1. When you see a context item with ".cosine" in the title or filesystem path:
    a. Extract the S3 key from context_item["data"]["s3_key"] or context_item["s3_key"]
    b. IMMEDIATELY call read_s3_file_tool(s3_key) to decrypt it
    c. Parse the decrypted JSON to extract the underlying S3 key from data.s3_key
    d. Use read_s3_file_tool() again with the underlying S3 key to read the actual data
-2. If it's a non-cs file:
+2. If it's a non-cosine file:
    a. Get the S3 key from the context item
    b. Use read_s3_file_tool() directly to read the file
    c. Use specialized tools (read_pdf_tool, analyze_pdf_content_tool, etc.) as needed
 3. Analyze and provide insights based on the file content
 
 **EXAMPLES:**
-- User: "Summarize this Congress Bill" and context has "Congress Bill.cs"
+- User: "Summarize this Congress Bill" and context has "Congress Bill.cosine"
   → Extract s3_key from context → read_s3_file_tool(s3_key) → Extract underlying s3_key → read_s3_file_tool(underlying_s3_key) → Summarize
-- User: "What's in this SEC filing?" and context has "SEC Filing.cs"
+- User: "What's in this SEC filing?" and context has "SEC Filing.cosine"
   → Extract s3_key from context → read_s3_file_tool(s3_key) → Extract underlying s3_key → read_s3_file_tool(underlying_s3_key) → Analyze
 
 FOR CRYPTOCURRENCY QUESTIONS:
@@ -1673,20 +1673,20 @@ class S3FileReader:
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()  # This is bytes, not string
             
-            # Handle .cs encrypted files (context items from filesystem)
+            # Handle .cosine encrypted files (context items from filesystem)
             # Check this FIRST before other file type logic
             s3_key_lower = s3_key.lower()
             file_type_lower = file_type.lower() if file_type else ''
             
-            # Check if this is a .cs file by extension or explicit file_type
-            is_cosine_file = s3_key_lower.endswith('.cs') or file_type_lower == 'cs'
+            # Check if this is a .cosine file by extension or explicit file_type
+            is_cosine_file = s3_key_lower.endswith('.cosine') or file_type_lower == 'cosine'
             
             # Also check if content looks like Fernet-encrypted data (starts with gAAAAAB)
             content_preview = content[:20] if len(content) >= 20 else content
             looks_encrypted = isinstance(content_preview, bytes) and content_preview.startswith(b'gAAAAAB')
             
             if is_cosine_file or (looks_encrypted and '/filesys/' in s3_key):
-                logger.info(f"🔐 Detected .cs file or encrypted content, attempting decryption")
+                logger.info(f"🔐 Detected .cosine file or encrypted content, attempting decryption")
                 logger.info(f"🔐 s3_key: {s3_key}, file_type: {file_type}, is_cosine_file: {is_cosine_file}, looks_encrypted: {looks_encrypted}")
                 try:
                     # Import decryption helper (following pattern used by other tools)
@@ -1729,7 +1729,7 @@ class S3FileReader:
                             logger.error(f"❌ S3 key parts: {s3_key_parts}")
                             logger.error(f"❌ Environment USER_ID: {os.environ.get('USER_ID')}")
                             logger.error(f"❌ Environment CURRENT_USER_ID: {os.environ.get('CURRENT_USER_ID')}")
-                            return f"Error: Cannot decrypt .cs file - user_id not found in S3 key or environment. S3 key: {s3_key}"
+                            return f"Error: Cannot decrypt .cosine file - user_id not found in S3 key or environment. S3 key: {s3_key}"
                     
                     # Ensure content is bytes (not string)
                     if isinstance(content, str):
@@ -1737,27 +1737,27 @@ class S3FileReader:
                         content = content.encode('utf-8')
                     
                     # Attempt decryption
-                    logger.info(f"🔐 Attempting to decrypt .cs file (size: {len(content)} bytes, type: {type(content).__name__}) for user {user_id}")
+                    logger.info(f"🔐 Attempting to decrypt .cosine file (size: {len(content)} bytes, type: {type(content).__name__}) for user {user_id}")
                     logger.info(f"🔐 Content preview (first 50 bytes): {content[:50] if len(content) >= 50 else content}")
                     try:
                         decrypted_data = decrypt_cosine_file(user_id, content)
-                        logger.info(f"✅ Successfully decrypted .cs file, returning JSON data")
+                        logger.info(f"✅ Successfully decrypted .cosine file, returning JSON data")
                         logger.info(f"✅ Decrypted data keys: {list(decrypted_data.keys()) if isinstance(decrypted_data, dict) else 'N/A'}")
                         return json.dumps(decrypted_data, indent=2, default=str)
                     except ValueError as ve:
                         logger.error(f"❌ Decryption failed with ValueError: {str(ve)}")
-                        return f"Error decrypting .cs file: {str(ve)}"
+                        return f"Error decrypting .cosine file: {str(ve)}"
                     except Exception as decrypt_err:
                         logger.error(f"❌ Decryption failed with exception: {str(decrypt_err)}")
                         import traceback
                         logger.error(f"❌ Decryption traceback: {traceback.format_exc()}")
-                        return f"Error decrypting .cs file: {str(decrypt_err)}"
+                        return f"Error decrypting .cosine file: {str(decrypt_err)}"
                         
                 except Exception as e:
-                    logger.error(f"❌ Unexpected error in .cs decryption block: {str(e)}")
+                    logger.error(f"❌ Unexpected error in .cosine decryption block: {str(e)}")
                     import traceback
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
-                    return f"Error decrypting .cs file: {str(e)}"
+                    return f"Error decrypting .cosine file: {str(e)}"
             
             # Determine content type
             content_type = response.get('ContentType', '')

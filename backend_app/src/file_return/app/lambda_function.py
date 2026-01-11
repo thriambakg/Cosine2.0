@@ -44,7 +44,7 @@ MANIFEST_FILE = '.manifest.json'
 
 def derive_platform_key() -> bytes:
     """Derive platform-wide encryption key from ENCRYPTION_SECRET (not user-specific)
-    This allows .cs files to be shared across all users in the platform"""
+    This allows .cosine files to be shared across all users in the platform"""
     salt = hashlib.sha256(f"{ENCRYPTION_SECRET}platform-wide".encode()).digest()[:16]
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -373,12 +373,12 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             else:
                 filename = s3_key.split('/')[-1]
             
-            # For .cs encrypted context items, ensure proper content-type and filename
-            is_cosine_file = s3_key.endswith('.cs')
+            # For .cosine encrypted context items, ensure proper content-type and filename
+            is_cosine_file = s3_key.endswith('.cosine')
             if is_cosine_file:
-                # Ensure filename has .cs extension
-                if not filename.endswith('.cs'):
-                    filename = f"{filename}.cs" if '.' not in filename else filename.rsplit('.', 1)[0] + '.cs'
+                # Ensure filename has .cosine extension
+                if not filename.endswith('.cosine'):
+                    filename = f"{filename}.cosine" if '.' not in filename else filename.rsplit('.', 1)[0] + '.cosine'
                 
                 # Set proper content-type for encrypted files
                 params = {
@@ -735,8 +735,8 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 raise e
         
         # Determine preview type based on content type and item type
-        # .cs files are ALWAYS encrypted context items (regardless of item_type parameter)
-        is_cosine_file = s3_key.lower().endswith('.cs')
+        # .cosine files are ALWAYS encrypted context items (regardless of item_type parameter)
+        is_cosine_file = s3_key.lower().endswith('.cosine')
         # Legacy .json files in filesys are context items if they match known context item types
         # Check if it's in the filesys directory to avoid false positives
         is_in_filesys = s3_key.startswith(f"users/{user_id}/filesys/")
@@ -748,7 +748,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                 content_type == 'application/json'  # JSON files in filesys are likely context items
             )
         )
-        # .cs files are always context items, legacy .json files in filesys may be context items
+        # .cosine files are always context items, legacy .json files in filesys may be context items
         is_context_item = is_cosine_file or is_legacy_json
         is_image = content_type.startswith('image/')
         is_pdf = content_type == 'application/pdf'
@@ -756,19 +756,19 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
         
         logger.info(f"🔍 Preview type detection: is_cosine_file={is_cosine_file}, is_legacy_json={is_legacy_json}, is_context_item={is_context_item}, content_type={content_type}, item_type={item_type}")
         
-        # Handle context items (.cs encrypted or legacy .json)
+        # Handle context items (.cosine encrypted or legacy .json)
         if is_context_item:
             try:
                 # Get file content from S3
                 response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
                 content_bytes = response['Body'].read()
                 
-                # For .cs files, decrypt on backend and return decrypted data
+                # For .cosine files, decrypt on backend and return decrypted data
                 if is_cosine_file:
-                    logger.info(f"🔐 Decrypting .cs encrypted file for preview: {s3_key}")
+                    logger.info(f"🔐 Decrypting .cosine encrypted file for preview: {s3_key}")
                     try:
                         context_data = decrypt_context_data(user_id, content_bytes)
-                        logger.info(f"✅ Successfully decrypted .cs file, data keys: {list(context_data.keys()) if isinstance(context_data, dict) else 'N/A'}")
+                        logger.info(f"✅ Successfully decrypted .cosine file, data keys: {list(context_data.keys()) if isinstance(context_data, dict) else 'N/A'}")
                         
                         return {
                             'statusCode': 200,
@@ -787,7 +787,7 @@ def handle_file_preview(event: Dict[str, Any], body: Dict[str, Any], authenticat
                             }, default=str)
                         }
                     except Exception as decrypt_error:
-                        logger.error(f"❌ Failed to decrypt .cs file: {str(decrypt_error)}")
+                        logger.error(f"❌ Failed to decrypt .cosine file: {str(decrypt_error)}")
                         import traceback
                         logger.error(f"❌ Decryption error traceback: {traceback.format_exc()}")
                         logger.error(f"❌ ENCRYPTION_SECRET configured: {bool(ENCRYPTION_SECRET)}")

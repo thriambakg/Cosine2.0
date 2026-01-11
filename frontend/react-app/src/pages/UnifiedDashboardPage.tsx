@@ -947,7 +947,7 @@ const UnifiedDashboardPage: React.FC = () => {
       console.log('Importing tile with backend decryption:', tileData);
 
       // The backend now handles the full import process including:
-      // - Decryption of .cs file
+      // - Decryption of .cosine file
       // - Validation of tile structure
       // - Creating new tile with fresh UUID
       // - Auto-positioning on grid
@@ -1956,7 +1956,7 @@ const UnifiedDashboardPage: React.FC = () => {
         // Create a temporary link and trigger download
         const link = document.createElement('a');
         link.href = response.downloadUrl;
-        link.download = `${activeTab.name || 'dashboard'}.cs`;
+        link.download = `${activeTab.name || 'dashboard'}.cosine`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -2165,7 +2165,7 @@ const UnifiedDashboardPage: React.FC = () => {
               <ListItemIcon>
                 <DownloadIcon fontSize="small" sx={{ color: '#60a5fa' }} />
               </ListItemIcon>
-              <ListItemText>Download as .cs</ListItemText>
+              <ListItemText>Download as .cosine</ListItemText>
             </MenuItem>
           </Menu>
           

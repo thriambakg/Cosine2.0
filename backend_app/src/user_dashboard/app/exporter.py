@@ -1,6 +1,6 @@
 """
 Dashboard Exporter
-Helper class for exporting dashboard configurations to .cs files
+Helper class for exporting dashboard configurations to .cosine files
 Handles both download (presigned URL) and share link functionality
 """
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Environment variables
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
-CONTEXT_ITEM_EXTENSION = '.cs'
+CONTEXT_ITEM_EXTENSION = '.cosine'
 
 # Initialize S3 client
 s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3v4'))
@@ -31,7 +31,7 @@ s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3
 
 class DashboardExporter:
     """
-    Exports dashboard configurations to encrypted .cs files
+    Exports dashboard configurations to encrypted .cosine files
     Supports both direct download (presigned URL) and share links
     """
     
@@ -126,7 +126,7 @@ class DashboardExporter:
     def export_for_download(self, tab: Dict[str, Any], user_id: str, tab_name: str) -> Dict[str, Any]:
         """
         Export dashboard for direct download
-        Returns presigned URL for the encrypted .cs file
+        Returns presigned URL for the encrypted .cosine file
         
         Args:
             tab: The dashboard tab data to export

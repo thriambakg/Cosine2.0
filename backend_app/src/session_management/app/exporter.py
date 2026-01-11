@@ -1,6 +1,6 @@
 """
 Chat Session Exporter
-Helper class for exporting chat sessions to .cs files
+Helper class for exporting chat sessions to .cosine files
 Handles both download (presigned URL) and share link functionality
 Exports all DynamoDB data and associated S3 objects (files, agent files)
 """
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 ENCRYPTION_SECRET = os.environ.get('ENCRYPTION_SECRET', 'default-secret-change-in-production')
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
 CHAT_SESSIONS_TABLE_NAME = os.environ.get('CHAT_SESSIONS_TABLE_NAME', 'cosine-chat-sessions-production')
-CONTEXT_ITEM_EXTENSION = '.cs'
+CONTEXT_ITEM_EXTENSION = '.cosine'
 
 # Initialize AWS clients
 s3_client = boto3.client('s3', config=boto3.session.Config(signature_version='s3v4'))
@@ -36,7 +36,7 @@ dynamodb = boto3.resource('dynamodb')
 
 class ChatSessionExporter:
     """
-    Exports chat sessions to encrypted .cs files
+    Exports chat sessions to encrypted .cosine files
     Supports both direct download (presigned URL) and share links
     Exports all DynamoDB data and associated S3 objects
     """
@@ -118,7 +118,7 @@ class ChatSessionExporter:
     def get_filesystem_items_for_session(self, user_id: str, session_id: str) -> Dict[str, bytes]:
         """
         Get all filesystem items referenced in the session's context_items
-        Downloads and decrypts .cs files from filesystem
+        Downloads and decrypts .cosine files from filesystem
         
         Args:
             user_id: User ID
@@ -165,7 +165,7 @@ class ChatSessionExporter:
                                     )
                                     file_content = obj_response['Body'].read()
                                     
-                                    # Decrypt if it's a .cs file
+                                    # Decrypt if it's a .cosine file
                                     if nested_key.endswith(CONTEXT_ITEM_EXTENSION):
                                         try:
                                             decrypted_data = self.decrypt_context_data(user_id, file_content)
@@ -192,7 +192,7 @@ class ChatSessionExporter:
                         )
                         file_content = obj_response['Body'].read()
                         
-                        # Decrypt if it's a .cs file
+                        # Decrypt if it's a .cosine file
                         if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
                             try:
                                 decrypted_data = self.decrypt_context_data(user_id, file_content)
@@ -349,7 +349,7 @@ class ChatSessionExporter:
     def export_for_download(self, user_id: str, session_id: str, session_title: str) -> Dict[str, Any]:
         """
         Export session for direct download
-        Returns presigned URL for the encrypted .cs file
+        Returns presigned URL for the encrypted .cosine file
         
         Args:
             user_id: User ID

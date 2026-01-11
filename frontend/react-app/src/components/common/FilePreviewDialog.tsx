@@ -300,16 +300,16 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     if (!user_id || !item.s3_key) {
       // Try to construct s3_key if missing
       const isCosineFile = item.type === 'context_item' || 
-                          item.name?.toLowerCase().endsWith('.cs') ||
+                          item.name?.toLowerCase().endsWith('.cosine') ||
                           item.metadata?.type === 'context_item';
       
       let s3_key = item.s3_key;
       
       if (!s3_key && isCosineFile) {
-        // Construct s3_key for .cs files
+        // Construct s3_key for .cosine files
         const folderPath = folder_path || (item.parentId && item.parentId !== 'root' ? item.parentId : '');
         const folderPathPart = folderPath ? `${folderPath}/` : '';
-        s3_key = `users/${user_id}/filesys/${folderPathPart}${item.id}.cs`;
+        s3_key = `users/${user_id}/filesys/${folderPathPart}${item.id}.cosine`;
       }
       
       if (!s3_key) {
@@ -362,7 +362,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
   }, [item, user_id, folder_path]);
 
   const handleDownload = async () => {
-    // Always make an API call to get the download URL (ensures encrypted .cs files are downloaded correctly)
+    // Always make an API call to get the download URL (ensures encrypted .cosine files are downloaded correctly)
     if (item.s3_key) {
       try {
         setDownloadLoading(true);
