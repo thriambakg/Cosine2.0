@@ -935,13 +935,16 @@ def search_congress_bills(
         call read_s3_file_tool("billtext/119-HR-5789.html") to get the complete bill text.
     """
     try:
-        agent_logger.info(f"Searching congress bills with filters: {filters}")
+        agent_logger.info(f"🔍 search_congress_bills called with filters: {filters}, limit: {limit}")
         
         # Parse filters JSON
         if isinstance(filters, str):
             filters_dict = json.loads(filters)
         else:
             filters_dict = filters
+        
+        agent_logger.info(f"📋 Parsed filters: {filters_dict}")
+        agent_logger.info(f"🔑 Filter keys: {list(filters_dict.keys())}")
         
         # Parse last_evaluated_key if provided
         last_key = None
@@ -950,6 +953,7 @@ def search_congress_bills(
                 last_key = json.loads(last_evaluated_key)
             else:
                 last_key = last_evaluated_key
+            agent_logger.info(f"📄 Pagination: Using last_evaluated_key for continuation")
         
         # Validate limit
         if limit > 1000:
@@ -957,12 +961,16 @@ def search_congress_bills(
         if limit < 1:
             limit = 5  # Default to 5 for compute efficiency
         
+        agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
+        
         # Perform search
         result = CongressBillsSearcher.search_bills_with_s3_passthrough(
             filters=filters_dict,
             limit=limit,
             last_evaluated_key=last_key
         )
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, method={result.get('method', 'unknown')}")
         
         # Return as JSON string
         return json.dumps(result, default=str)

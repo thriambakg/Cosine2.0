@@ -32,6 +32,7 @@ import {
   Folder as FolderIcon,
   InsertDriveFile as FileIcon,
   ArrowBack as ArrowBackIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { sessionManagementAPI, filesystemAPI, fileReturnAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -56,9 +57,11 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState(0);
   const [shareLink, setShareLink] = useState('');
+  const [downloadUrl, setDownloadUrl] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLink, setImportLink] = useState('');
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [copied, setCopied] = useState(false);
@@ -150,6 +153,7 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
   const handleClose = () => {
     setActiveTab(0);
     setShareLink('');
+    setDownloadUrl('');
     setImportFile(null);
     setImportLink('');
     setError('');
@@ -188,6 +192,39 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
       setError(err.message || 'Failed to generate share link');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExportDownload = async () => {
+    if (!sessionId) {
+      setError('No session selected');
+      return;
+    }
+
+    setDownloading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await sessionManagementAPI.shareSession(sessionId, userId, 'download');
+      if (response.success && response.downloadUrl) {
+        setDownloadUrl(response.downloadUrl);
+        setSuccess('Download file generated successfully!');
+        
+        // Trigger download
+        const link = document.createElement('a');
+        link.href = response.downloadUrl;
+        link.download = `${sessionId || 'chat-session'}.cosine`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        setError(response.error || 'Failed to generate download file');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to generate download file');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -373,13 +410,14 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
       <DialogContent>
         {mode === 'export' ? (
           <Box>
-            {!shareLink ? (
-              <Box>
+            {!shareLink && !downloadUrl ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Button
                   fullWidth
                   variant="outlined"
+                  startIcon={<LinkIcon />}
                   onClick={handleExportLink}
-                  disabled={loading || !sessionId}
+                  disabled={loading || downloading || !sessionId}
                   sx={{
                     backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
                     color: '#9ca3af !important',
@@ -408,8 +446,42 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
                 >
                   {loading ? <CircularProgress size={24} sx={{ color: '#9ca3af' }} /> : 'Generate Share Link'}
                 </Button>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleExportDownload}
+                  disabled={loading || downloading || !sessionId}
+                  sx={{
+                    backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
+                    color: '#9ca3af !important',
+                    borderRadius: '0px',
+                    border: '2px solid #4b5563 !important',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    px: 2,
+                    py: 1,
+                    '&.MuiButton-contained': {
+                      backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
+                      color: '#9ca3af !important',
+                      border: '2px solid #4b5563 !important',
+                    },
+                    '&:hover': {
+                      backgroundColor: '#475569 !important',
+                      borderColor: '#6b7280 !important',
+                      color: '#9ca3af !important',
+                    },
+                    '&:disabled': {
+                      backgroundColor: 'rgba(31, 41, 55, 0.3) !important',
+                      borderColor: '#4b5563 !important',
+                      color: '#6b7280 !important',
+                    },
+                  }}
+                >
+                  {downloading ? <CircularProgress size={24} sx={{ color: '#9ca3af' }} /> : 'Download as .cosine File'}
+                </Button>
               </Box>
-            ) : (
+            ) : shareLink ? (
               <Box>
                 <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
                   Copy this link to share your chat session:
@@ -428,16 +500,80 @@ const ChatImportExportDialog: React.FC<ChatImportExportDialogProps> = ({
                     ),
                   }}
                   sx={{
-                    mb: 0,
+                    mb: 2,
                     '& .MuiOutlinedInput-root': {
                       backgroundColor: 'rgba(31, 41, 55, 0.5)',
                       color: '#ffffff',
                     },
                   }}
                 />
-                <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mt: 1 }}>
+                <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mb: 2 }}>
                   {copied ? 'Link copied to clipboard!' : 'Click the copy icon to copy the link'}
                 </Typography>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleExportDownload}
+                  disabled={downloading || !sessionId}
+                  sx={{
+                    backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
+                    color: '#9ca3af !important',
+                    borderRadius: '0px',
+                    border: '2px solid #4b5563 !important',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    px: 2,
+                    py: 1,
+                    '&:hover': {
+                      backgroundColor: '#475569 !important',
+                      borderColor: '#6b7280 !important',
+                      color: '#9ca3af !important',
+                    },
+                    '&:disabled': {
+                      backgroundColor: 'rgba(31, 41, 55, 0.3) !important',
+                      borderColor: '#4b5563 !important',
+                      color: '#6b7280 !important',
+                    },
+                  }}
+                >
+                  {downloading ? <CircularProgress size={24} sx={{ color: '#9ca3af' }} /> : 'Also Download as .cosine File'}
+                </Button>
+              </Box>
+            ) : (
+              <Box>
+                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
+                  Your chat session has been downloaded as a .cosine file.
+                </Typography>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<LinkIcon />}
+                  onClick={handleExportLink}
+                  disabled={loading || !sessionId}
+                  sx={{
+                    backgroundColor: 'rgba(31, 41, 55, 0.5) !important',
+                    color: '#9ca3af !important',
+                    borderRadius: '0px',
+                    border: '2px solid #4b5563 !important',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    px: 2,
+                    py: 1,
+                    '&:hover': {
+                      backgroundColor: '#475569 !important',
+                      borderColor: '#6b7280 !important',
+                      color: '#9ca3af !important',
+                    },
+                    '&:disabled': {
+                      backgroundColor: 'rgba(31, 41, 55, 0.3) !important',
+                      borderColor: '#4b5563 !important',
+                      color: '#6b7280 !important',
+                    },
+                  }}
+                >
+                  {loading ? <CircularProgress size={24} sx={{ color: '#9ca3af' }} /> : 'Also Generate Share Link'}
+                </Button>
               </Box>
             )}
           </Box>

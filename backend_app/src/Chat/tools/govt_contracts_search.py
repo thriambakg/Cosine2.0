@@ -98,12 +98,17 @@ def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluat
     if not awards_table:
         raise Exception("DynamoDB awards table not initialized")
     
+    logger.info(f"🔍 search_awards_direct called with filters: {filters}, limit: {limit}")
+    logger.info(f"📋 Active filters: {list(filters.keys())}")
+    
     try:
         # Try to use AwardingAgencyNameFiscalYearIndex if agency name filter is present
         if filters.get('awarding_agency_name'):
             agency_names = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
             agency_name = agency_names[0].strip() if agency_names else None
             fiscal_year = filters.get('fiscal_year')
+            
+            logger.info(f"🏢 Using agency name filter: {agency_name}, fiscal_year: {fiscal_year}")
             
             if agency_name:
                 params = {
@@ -120,28 +125,47 @@ def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluat
                 if last_evaluated_key:
                     params['ExclusiveStartKey'] = last_evaluated_key
                 
+                logger.info(f"🔎 Querying GSI: {params['IndexName']} with hash_key: {agency_name}")
                 response = awards_table.query(**params)
                 items = response.get('Items', [])
                 last_eval_key = response.get('LastEvaluatedKey')
+                logger.info(f"✅ Query returned {len(items)} items (has_more: {last_eval_key is not None})")
             else:
                 # Fall back to scan
+                logger.warning("⚠️ Agency name filter present but empty, falling back to scan")
                 scan_params = {'Limit': limit * 10}
                 if last_evaluated_key:
                     scan_params['ExclusiveStartKey'] = last_evaluated_key
                 response = awards_table.scan(**scan_params)
                 items = response.get('Items', [])
                 last_eval_key = response.get('LastEvaluatedKey')
+                logger.info(f"📊 Scan returned {len(items)} items")
         else:
             # Fall back to scan with filters
+            logger.warning(f"⚠️ No awarding_agency_name filter - using TABLE SCAN (inefficient). Other filters present: {list(filters.keys())}")
+            logger.warning(f"⚠️ NOTE: This simplified search function does not support filters like recipient_zip_code. Consider using the Lambda API endpoint instead.")
             scan_params = {'Limit': limit * 10}
             if last_evaluated_key:
                 scan_params['ExclusiveStartKey'] = last_evaluated_key
             response = awards_table.scan(**scan_params)
             items = response.get('Items', [])
             last_eval_key = response.get('LastEvaluatedKey')
+            logger.info(f"📊 Scan returned {len(items)} items (no filtering applied)")
+        
+        # Log sample items before filtering
+        if items:
+            sample_item = items[0]
+            logger.info(f"📦 Sample item keys: {list(sample_item.keys())}")
+            if 'recipient_location_zip' in sample_item:
+                logger.info(f"📮 Sample recipient_location_zip: {sample_item.get('recipient_location_zip')}")
+            if 'recipient_zip_code' in sample_item:
+                logger.info(f"📮 Sample recipient_zip_code: {sample_item.get('recipient_zip_code')}")
+            logger.info(f"📍 Sample recipient location: {sample_item.get('recipient_location_city', 'N/A')}, {sample_item.get('recipient_location_state', 'N/A')}")
         
         # Apply Python filters (simplified - can be enhanced)
         filtered_items = items[:limit]  # Basic filtering - can be enhanced with full filter logic
+        logger.warning(f"⚠️ Using simplified filtering - only taking first {limit} items, no actual filter matching applied")
+        logger.info(f"📊 After simplified filtering: {len(filtered_items)} items")
         
         # Convert and enrich
         results = [convert_decimal_to_float(item) for item in filtered_items]
@@ -154,6 +178,14 @@ def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluat
                     award = convert_decimal_to_float(full_award)
             enriched_results.append(award)
         
+        # Log final results summary
+        logger.info(f"✅ Final results: {len(enriched_results)} awards returned")
+        if enriched_results:
+            sample_result = enriched_results[0]
+            logger.info(f"📦 Sample result - award_id: {sample_result.get('award_id', 'N/A')[:20]}...")
+            logger.info(f"📍 Sample result - location: {sample_result.get('recipient_location_city', 'N/A')}, {sample_result.get('recipient_location_state', 'N/A')}, zip: {sample_result.get('recipient_zip_code') or sample_result.get('recipient_location_zip', 'N/A')}")
+            logger.info(f"🏢 Sample result - recipient: {sample_result.get('recipient_name', 'N/A')[:50]}...")
+        
         # Convert last_evaluated_key
         serializable_last_key = None
         if last_eval_key:
@@ -162,13 +194,16 @@ def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluat
             except Exception as e:
                 logger.warning(f"Error converting last_evaluated_key: {e}")
         
+        search_method = 'query' if filters.get('awarding_agency_name') else 'scan'
+        logger.info(f"🔍 Search method used: {search_method}, has_more: {last_eval_key is not None}")
+        
         return {
             'success': True,
             'results': enriched_results,
             'count': len(enriched_results),
             'has_more': last_eval_key is not None,
             'last_evaluated_key': serializable_last_key,
-            'method': 'query' if filters.get('awarding_agency_name') else 'scan'
+            'method': search_method
         }
         
     except Exception as e:
@@ -191,12 +226,15 @@ class GovtContractsSearcher:
         Search awards and store large results in S3 if needed
         """
         try:
+            logger.info(f"🔍 search_awards_with_s3_passthrough: filters={filters}, limit={limit}")
             # Perform search
             result = search_awards_direct(filters, limit, last_evaluated_key)
+            logger.info(f"📊 Search result: count={result.get('count', 0)}, method={result.get('method', 'unknown')}, has_more={result.get('has_more', False)}")
             
             # Check if result is large enough to store in S3
             result_json = json.dumps(result)
             result_size = len(result_json)
+            logger.info(f"📦 Result size: {result_size} bytes, count: {result.get('count', 0)}")
             
             LARGE_DATA_THRESHOLD = 50000  # 50KB
             LARGE_RESULTS_THRESHOLD = 50  # 50 results
@@ -309,13 +347,16 @@ def search_govt_contracts(
         )
     """
     try:
-        agent_logger.info(f"Searching government contracts with filters: {filters}")
+        agent_logger.info(f"🔍 search_govt_contracts called with filters: {filters}, limit: {limit}")
         
         # Parse filters JSON
         if isinstance(filters, str):
             filters_dict = json.loads(filters)
         else:
             filters_dict = filters
+        
+        agent_logger.info(f"📋 Parsed filters: {filters_dict}")
+        agent_logger.info(f"🔑 Filter keys: {list(filters_dict.keys())}")
         
         # Parse last_evaluated_key if provided
         last_key = None
@@ -324,6 +365,7 @@ def search_govt_contracts(
                 last_key = json.loads(last_evaluated_key)
             else:
                 last_key = last_evaluated_key
+            agent_logger.info(f"📄 Pagination: Using last_evaluated_key for continuation")
         
         # Validate limit
         if limit > 1000:
@@ -331,12 +373,16 @@ def search_govt_contracts(
         if limit < 1:
             limit = 5
         
+        agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
+        
         # Perform search
         result = GovtContractsSearcher.search_awards_with_s3_passthrough(
             filters=filters_dict,
             limit=limit,
             last_evaluated_key=last_key
         )
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, method={result.get('method', 'unknown')}")
         
         # Return as JSON string
         return json.dumps(result, default=str)

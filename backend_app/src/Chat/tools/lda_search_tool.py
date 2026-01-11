@@ -564,13 +564,16 @@ def lda_search(
         lda_search('{"pac_name": "American Israel Public Affairs Committee"}')
     """
     try:
-        agent_logger.info(f"LDA Search: Searching with filters: {filters}")
+        agent_logger.info(f"🔍 lda_search called with filters: {filters}, limit: {limit}")
         
         # Parse filters JSON
         if isinstance(filters, str):
             filters_dict = json.loads(filters)
         else:
             filters_dict = filters
+        
+        agent_logger.info(f"📋 Parsed filters: {filters_dict}")
+        agent_logger.info(f"🔑 Filter keys: {list(filters_dict.keys())}")
         
         # Parse last_evaluated_key if provided
         last_key = None
@@ -579,6 +582,7 @@ def lda_search(
                 last_key = json.loads(last_evaluated_key)
             else:
                 last_key = last_evaluated_key
+            agent_logger.info(f"📄 Pagination: Using last_evaluated_key for continuation")
         
         # Validate limit
         if limit > 1000:
@@ -586,8 +590,12 @@ def lda_search(
         if limit < 1:
             limit = 5
         
+        agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
+        
         # Perform search
         result = search_filings_simplified(filters_dict, limit=limit, last_evaluated_key=last_key)
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, total_matched={result.get('total_matched', 'N/A')}, has_more={result.get('has_more', False)}")
         
         if not result.get('success'):
             return json.dumps(result, default=str)

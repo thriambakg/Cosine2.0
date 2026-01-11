@@ -319,13 +319,16 @@ def search_politician_trades(
         )
     """
     try:
-        agent_logger.info(f"Searching politician trades with filters: {filters}")
+        agent_logger.info(f"🔍 search_politician_trades called with filters: {filters}, page: {page}, page_size: {page_size}")
         
         # Parse filters JSON
         if isinstance(filters, str):
             filters_dict = json.loads(filters)
         else:
             filters_dict = filters
+        
+        agent_logger.info(f"📋 Parsed filters: {filters_dict}")
+        agent_logger.info(f"🔑 Filter keys: {list(filters_dict.keys())}")
         
         # Parse last_evaluated_key if provided
         last_key = None
@@ -334,6 +337,7 @@ def search_politician_trades(
                 last_key = json.loads(last_evaluated_key)
             else:
                 last_key = last_evaluated_key
+            agent_logger.info(f"📄 Pagination: Using last_evaluated_key for continuation")
         
         # Validate page_size
         if page_size > 100:
@@ -345,6 +349,8 @@ def search_politician_trades(
         if page < 1:
             page = 1
         
+        agent_logger.info(f"📊 Search parameters: page={page}, page_size={page_size}, pagination={'enabled' if last_key else 'disabled'}")
+        
         # Perform search
         result = PoliticianTradesSearcher.search_trades_with_s3_passthrough(
             filters=filters_dict,
@@ -352,6 +358,8 @@ def search_politician_trades(
             page_size=page_size,
             last_evaluated_key=last_key
         )
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, method={result.get('method', 'unknown')}")
         
         # Return as JSON string
         return json.dumps(result, default=str)
