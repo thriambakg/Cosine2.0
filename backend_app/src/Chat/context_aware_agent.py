@@ -377,7 +377,7 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
   
 - search_govt_contracts(filters, limit=5, last_evaluated_key) - Search government contracts/awards
   * Filters: awarding_agency_name/code, funding_agency_name/code, recipient_name, recipient_location_state/country,
-    award_type, naics_code, psc_code, cfda_number, fiscal_year, date_from/to, min/max_obligation
+    recipient_zip_code, award_type, naics_code, psc_code, cfda_number, fiscal_year, date_from/to, min/max_obligation
   * Default limit: 5 (max: 1000)
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key

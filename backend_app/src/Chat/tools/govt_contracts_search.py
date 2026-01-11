@@ -286,6 +286,7 @@ def search_govt_contracts(
             - recipient_name: List or string of recipient names (case-insensitive substring match)
             - recipient_location_state: List or string of recipient states (2-letter codes)
             - recipient_location_country: List or string of recipient countries
+            - recipient_zip_code: List or string of recipient zip codes (e.g., "61704")
             - award_type: List or string of award types (e.g., "A", "B", "C", "D", "IDV")
             - naics_code: List or string of NAICS codes
             - psc_code: List or string of PSC codes
