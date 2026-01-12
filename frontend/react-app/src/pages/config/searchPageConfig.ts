@@ -65,3 +65,4 @@ export function getSearchPageBatchSize(pageIdentifier: string): number {
   return getSearchPageBatchConfig(pageIdentifier).batchSize;
 }
 
+

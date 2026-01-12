@@ -590,25 +590,25 @@ def fetch_full_items(filing_ids: List[str]) -> List[Dict[str, Any]]:
         batch_ids = filing_ids[i:i + batch_size]
         
         # Try both FILING# and CONTRIBUTION# formats
-                keys = []
-                for fid in batch_ids:
-                    keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
-                    keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
-                
-                request_items = {
-                    FILINGS_TABLE_NAME: {
-                        'Keys': keys
-                    }
-                }
+        keys = []
+        for fid in batch_ids:
+            keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+            keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
         
-                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
-                deserializer = TypeDeserializer()
-                
-                for item in batch_items:
-                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                    items.append(converted_item)
-            
+        request_items = {
+            FILINGS_TABLE_NAME: {
+                'Keys': keys
+            }
+        }
+        
+        batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+        batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+        deserializer = TypeDeserializer()
+        
+        for item in batch_items:
+            converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+            items.append(converted_item)
+    
     return items
 
 
@@ -648,7 +648,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
     for query in all_queries:
         if query.get('filter_type') == 'amount':
             amount_queries.append(query)
-                else:
+        else:
             non_amount_queries.append(query)
     
     # Group non-amount queries by category for UNION within field
@@ -692,7 +692,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
                     max_items=50000
                 ))
                 field_ids.update(filing_uuids)
-                    else:
+            else:
                 # GSI query - fetch all items using pagination
                 pks = list(get_all_from_gsi(
                     query_func,
@@ -737,7 +737,7 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
         # Store which filters to apply in Python (all fields except the smallest one)
         # The state filter will be applied in Python via apply_python_filters
         logger.info(f"Will apply {len(sorted_fields) - 1} other field filter(s) in Python")
-            else:
+    else:
         all_filing_ids = set()
     
     # Step 3: Handle amount filters
@@ -811,15 +811,15 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
         }
     
     logger.info(f"Returning {len(results)} results, has_more: {has_more}")
-        
-        return {
-            'success': True,
-            'results': results,
-            'count': len(results),
-            'has_more': has_more,
+    
+    return {
+        'success': True,
+        'results': results,
+        'count': len(results),
+        'has_more': has_more,
         'last_evaluated_key': next_last_evaluated_key,
         'method': 'query'
-        }
+    }
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

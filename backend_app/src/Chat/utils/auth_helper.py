@@ -165,3 +165,4 @@ def get_secure_user_id(event: Dict[str, Any], fallback_to_env: bool = False) -> 
     
     return user_id
 
+
