@@ -11,8 +11,6 @@ import boto3
 import uuid
 import base64
 import hashlib
-import zipfile
-import io
 from typing import Dict, Any, Optional, List
 from botocore.exceptions import ClientError
 from datetime import datetime
@@ -845,6 +843,137 @@ def move_bulk_items(user_id: str, items: List[Dict[str, Any]], dest_folder_path:
         logger.error(f"Error in bulk move items: {str(e)}")
         raise
 
+def copy_bulk_items(user_id: str, items: List[Dict[str, Any]], dest_folder_path: str) -> Dict[str, Any]:
+    """Copy multiple items to a different folder in a single operation - more efficient than sequential calls
+    Uses S3 copy operations directly (no read + write) for better performance"""
+    try:
+        logger.info(f"📋 Copying {len(items)} items to {dest_folder_path}: user_id={user_id}")
+        
+        # Get destination manifest once
+        dest_manifest = get_folder_manifest(user_id, dest_folder_path)
+        
+        # Group items by source folder to minimize manifest reads/writes
+        items_by_source: Dict[str, List[Dict[str, Any]]] = {}
+        
+        for item in items:
+            source_folder_path = item.get('source_folder_path', '')
+            if source_folder_path not in items_by_source:
+                items_by_source[source_folder_path] = []
+            items_by_source[source_folder_path].append(item)
+        
+        results = []
+        errors = []
+        
+        # Process items grouped by source folder
+        for source_folder_path, source_items in items_by_source.items():
+            try:
+                # Skip if source and dest are the same (would create duplicates)
+                if source_folder_path == dest_folder_path:
+                    for item_data in source_items:
+                        errors.append({
+                            'item_id': item_data.get('item_id'),
+                            'error': 'Source and destination folders are the same'
+                        })
+                    continue
+                
+                source_manifest = get_folder_manifest(user_id, source_folder_path)
+                dest_manifest_updated = False
+                
+                for item_data in source_items:
+                    try:
+                        item_id = item_data.get('item_id')
+                        
+                        if item_id not in source_manifest['items']:
+                            errors.append({
+                                'item_id': item_id,
+                                'error': f"Item {item_id} not found in source folder"
+                            })
+                            continue
+                        
+                        source_item = source_manifest['items'][item_id]
+                        old_s3_key = source_item.get('s3_key')
+                        
+                        if not old_s3_key or not validate_s3_key(user_id, old_s3_key):
+                            errors.append({
+                                'item_id': item_id,
+                                'error': f"Invalid S3 key for item {item_id}"
+                            })
+                            continue
+                        
+                        # Generate new ID and S3 key for the copy
+                        new_item_id = str(uuid.uuid4())
+                        file_extension = os.path.splitext(old_s3_key)[1] if old_s3_key else ''
+                        if not file_extension and source_item.get('type') == 'context_item':
+                            file_extension = CONTEXT_ITEM_EXTENSION
+                        
+                        new_s3_key = f"users/{user_id}/filesys/{dest_folder_path}/{new_item_id}{file_extension}" if dest_folder_path else f"users/{user_id}/filesys/{new_item_id}{file_extension}"
+                        
+                        # Copy in S3 directly (no read + write needed)
+                        # This is much more efficient than reading and re-uploading
+                        copy_source = {'Bucket': CHAT_FILES_BUCKET_NAME, 'Key': old_s3_key}
+                        s3_client.copy_object(
+                            CopySource=copy_source,
+                            Bucket=CHAT_FILES_BUCKET_NAME,
+                            Key=new_s3_key
+                        )
+                        
+                        # Create new item entry (copy of source item)
+                        new_item = {
+                            'id': new_item_id,
+                            'name': source_item.get('name', 'Copied Item'),
+                            'type': source_item.get('type', 'context_item'),
+                            's3_key': new_s3_key,
+                            'metadata': source_item.get('metadata', {}).copy(),
+                            'created_at': int(datetime.now().timestamp()),
+                            'updated_at': int(datetime.now().timestamp())
+                        }
+                        
+                        # Add to destination manifest
+                        dest_manifest['items'][new_item_id] = new_item
+                        dest_manifest_updated = True
+                        
+                        results.append({
+                            'item_id': item_id,
+                            'new_item_id': new_item_id,
+                            'success': True,
+                            'result': new_item
+                        })
+                    except Exception as e:
+                        logger.error(f"Error copying item {item_data.get('item_id')}: {str(e)}")
+                        errors.append({
+                            'item_id': item_data.get('item_id'),
+                            'error': str(e)
+                        })
+                
+                # Save destination manifest once after all items from this source are processed
+                if dest_manifest_updated:
+                    save_folder_manifest(user_id, dest_folder_path, dest_manifest)
+                    # Re-read dest manifest for next source folder (if any)
+                    dest_manifest = get_folder_manifest(user_id, dest_folder_path)
+            except Exception as e:
+                logger.error(f"Error processing source folder {source_folder_path}: {str(e)}")
+                # Mark all items from this source as failed
+                for item_data in source_items:
+                    errors.append({
+                        'item_id': item_data.get('item_id'),
+                        'error': f"Source folder error: {str(e)}"
+                    })
+        
+        logger.info(f"✅ Successfully copied {len(results)} of {len(items)} items")
+        
+        return {
+            'success': len(errors) == 0,
+            'results': results,
+            'errors': errors,
+            'total': len(items),
+            'succeeded': len(results),
+            'failed': len(errors)
+        }
+    except Exception as e:
+        logger.error(f"Error in bulk copy items: {str(e)}")
+        raise
+
+
 def rename_item(user_id: str, folder_path: str, item_id: str, new_name: str) -> Dict[str, Any]:
     """Rename an item or folder"""
     try:
@@ -988,441 +1117,67 @@ def copy_folder(user_id: str, folder_path: str) -> Dict[str, Any]:
         logger.error(f"Error copying folder: {str(e)}")
         raise
 
-def download_folder(user_id: str, folder_path: str) -> Dict[str, Any]:
-    """
-    Download a folder as a .cosine encrypted zip file
-    Recursively includes all items and subfolders
-    """
-    try:
-        logger.info(f"📦 Starting folder download: user_id={user_id}, folder_path={folder_path}")
-        
-        # Get folder manifest
-        manifest = get_folder_manifest(user_id, folder_path)
-        folder_name = manifest.get('name', 'folder')
-        
-        # Create in-memory zip file
-        zip_buffer = io.BytesIO()
-        
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Helper function to recursively add folder contents
-            def add_folder_to_zip(current_path: str, zip_path: str):
-                current_manifest = get_folder_manifest(user_id, current_path)
-                
-                # Add all items in this folder
-                for item_id, item in current_manifest.get('items', {}).items():
-                    try:
-                        s3_key = item.get('s3_key')
-                        if s3_key and validate_s3_key(user_id, s3_key):
-                            # Get file content from S3
-                            response = s3_client.get_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
-                            content_bytes = response['Body'].read()
-                            
-                            # Determine file path in zip
-                            item_name = item.get('name', f'item_{item_id}')
-                            item_zip_path = f"{zip_path}/{item_name}"
-                            
-                            # For .cosine files, decrypt before adding to zip
-                            if s3_key.endswith(CONTEXT_ITEM_EXTENSION):
-                                try:
-                                    decrypted_data = decrypt_context_data(user_id, content_bytes)
-                                    # Store as JSON in zip
-                                    zip_file.writestr(
-                                        f"{item_zip_path}.json",
-                                        json.dumps(decrypted_data, default=str, indent=2)
-                                    )
-                                except Exception as e:
-                                    logger.warning(f"Error decrypting item {item_id}: {str(e)}")
-                                    # Add encrypted version as fallback
-                                    zip_file.writestr(f"{item_zip_path}.cosine", content_bytes)
-                            else:
-                                # For regular files, add with original extension
-                                file_extension = os.path.splitext(s3_key)[1] or ''
-                                zip_file.writestr(f"{item_zip_path}{file_extension}", content_bytes)
-                    except Exception as e:
-                        logger.warning(f"Error adding item {item_id} to zip: {str(e)}")
-                
-                # Recursively add subfolders
-                for subfolder_id, folder_info in current_manifest.get('folders', {}).items():
-                    subfolder_name = folder_info.get('name', f'folder_{subfolder_id}')
-                    subfolder_path = folder_info.get('path', f"{current_path}/{subfolder_name}")
-                    subfolder_zip_path = f"{zip_path}/{subfolder_name}"
-                    
-                    # Recursively add subfolder
-                    add_folder_to_zip(subfolder_path, subfolder_zip_path)
-            
-            # Add the root folder and all its contents
-            add_folder_to_zip(folder_path, folder_name)
-        
-        # Get zip content
-        zip_buffer.seek(0)
-        zip_content = zip_buffer.read()
-        
-        # Encrypt the zip file as .cosine
-        # Create a metadata structure for the folder
-        folder_metadata = {
-            'type': 'folder',
-            'name': folder_name,
-            'folder_path': folder_path,
-            'created_at': manifest.get('created_at', int(datetime.now().timestamp())),
-            'zip_content': base64.b64encode(zip_content).decode('utf-8')
-        }
-        
-        # Encrypt the folder metadata (which contains the zip)
-        encrypted_data = encrypt_context_data(user_id, folder_metadata)
-        
-        logger.info(f"✅ Folder download complete: {len(encrypted_data)} bytes encrypted")
-        
-        # Return encrypted data as base64 for easy transfer
-        return {
-            'encrypted_data': base64.b64encode(encrypted_data).decode('utf-8'),
-            'filename': f"{folder_name}.cosine",
-            'size': len(encrypted_data)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error downloading folder: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise
-
-def upload_folder(user_id: str, dest_folder_path: str, encrypted_data: bytes, filename: str) -> Dict[str, Any]:
-    """
-    Upload a folder from a .cosine encrypted zip file
-    Decrypts, unzips, and creates folders/items recursively
+def paste_items_by_ids(user_id: str, dest_folder_path: str, item_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Paste multiple items by copying them efficiently
+    item_data: List of {item_id, source_folder_path, is_folder}
+    Uses bulk copy operation for items (much more efficient than individual operations)
+    For folders, still uses recursive copy (they require special handling)
     """
     try:
-        logger.info(f"📤 Starting folder upload: user_id={user_id}, dest_folder_path={dest_folder_path}, filename={filename}")
+        # Separate items from folders
+        items_to_copy = []
+        folders_to_copy = []
         
-        # Decrypt the .cosine file
-        try:
-            folder_metadata = decrypt_context_data(user_id, encrypted_data)
-        except Exception as e:
-            logger.error(f"Error decrypting folder file: {str(e)}")
-            raise ValueError(f"Failed to decrypt folder file: {str(e)}")
-        
-        # Extract zip content
-        zip_content_b64 = folder_metadata.get('zip_content')
-        if not zip_content_b64:
-            raise ValueError("Folder metadata missing zip_content")
-        
-        zip_content = base64.b64decode(zip_content_b64)
-        
-        # Get folder name from metadata or filename
-        folder_name = folder_metadata.get('name') or os.path.splitext(filename)[0]
-        
-        # Create the folder in destination
-        new_folder = create_folder(user_id, folder_name, dest_folder_path)
-        new_folder_path = new_folder['path']
-        
-        # Unzip and process contents
-        zip_buffer = io.BytesIO(zip_content)
-        
-        with zipfile.ZipFile(zip_buffer, 'r') as zip_file:
-            # Get all file paths in zip
-            file_paths = zip_file.namelist()
-            
-            # Process files, maintaining folder structure
-            processed_paths = {}  # Track processed paths to avoid duplicates
-            
-            for file_path in file_paths:
-                # Skip empty directories
-                if file_path.endswith('/'):
-                    continue
-                
-                # Remove root folder name from path to get relative path
-                # e.g., "MyFolder/subfolder/file.json" -> "subfolder/file.json"
-                parts = file_path.split('/')
-                if len(parts) > 1 and parts[0] == folder_name:
-                    relative_path = '/'.join(parts[1:])
-                else:
-                    relative_path = file_path
-                
-                # Skip if already processed
-                if relative_path in processed_paths:
-                    continue
-                processed_paths[relative_path] = True
-                
-                # Determine if this is a file in a subfolder
-                path_parts = relative_path.split('/')
-                if len(path_parts) > 1:
-                    # File is in a subfolder
-                    subfolder_path_parts = path_parts[:-1]
-                    current_folder_path = new_folder_path
-                    
-                    # Create subfolder structure
-                    for subfolder_name in subfolder_path_parts:
-                        # Check if subfolder already exists
-                        current_manifest = get_folder_manifest(user_id, current_folder_path)
-                        subfolder_exists = False
-                        subfolder_id = None
-                        
-                        for fid, folder_info in current_manifest.get('folders', {}).items():
-                            if folder_info.get('name') == subfolder_name:
-                                subfolder_exists = True
-                                subfolder_id = fid
-                                break
-                        
-                        if not subfolder_exists:
-                            # Create subfolder
-                            subfolder = create_folder(user_id, subfolder_name, current_folder_path)
-                            current_folder_path = subfolder['path']
-                        else:
-                            # Use existing subfolder
-                            if subfolder_id:
-                                folder_info = current_manifest['folders'][subfolder_id]
-                                current_folder_path = folder_info.get('path', f"{current_folder_path}/{subfolder_name}")
-                    
-                    file_name = path_parts[-1]
-                else:
-                    # File is in root of the folder
-                    current_folder_path = new_folder_path
-                    file_name = relative_path
-                
-                # Read file content from zip
-                file_content = zip_file.read(file_path)
-                
-                # Determine file type and handle accordingly
-                if file_name.endswith('.json'):
-                    # Try to parse as context item
-                    try:
-                        context_data = json.loads(file_content.decode('utf-8'))
-                        item_name = os.path.splitext(file_name)[0]
-                        add_context_item(user_id, current_folder_path, context_data, item_name, 'context_item')
-                    except json.JSONDecodeError:
-                        # Not valid JSON, treat as regular file
-                        add_file_upload(user_id, current_folder_path, file_content, file_name)
-                elif file_name.endswith('.cosine'):
-                    # Encrypted file - decrypt and add as context item
-                    try:
-                        decrypted_data = decrypt_context_data(user_id, file_content)
-                        item_name = os.path.splitext(file_name)[0]
-                        add_context_item(user_id, current_folder_path, decrypted_data, item_name, 'context_item')
-                    except Exception as e:
-                        logger.warning(f"Error decrypting .cosine file {file_name}: {str(e)}")
-                        # Add as regular file if decryption fails
-                        add_file_upload(user_id, current_folder_path, file_content, file_name)
-                else:
-                    # Regular file
-                    add_file_upload(user_id, current_folder_path, file_content, file_name)
-        
-        logger.info(f"✅ Folder upload complete: {folder_name} with {len(processed_paths)} items")
-        
-        return {
-            'folder': new_folder,
-            'items_created': len(processed_paths)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error uploading folder: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise
-
-def copy_bulk_items(user_id: str, items: List[Dict[str, Any]], dest_folder_path: str) -> Dict[str, Any]:
-    """
-    Copy multiple items and folders in bulk - more efficient than sequential calls
-    Recursively collects all items from folders, creates folder structure, then bulk copies items
-    items: List of {item_id, source_folder_path, is_folder}
-    """
-    try:
-        logger.info(f"📋 Copying {len(items)} items in bulk: user_id={user_id}, dest={dest_folder_path}")
-        
-        # Collect all folders and items that need to be processed
-        all_folders = []  # List of {source_path, folder_name, parent_source_path}
-        all_items = []  # List of {item_id, source_folder_path, source_folder_path_for_mapping}
-        folder_path_map = {}  # Maps source folder path -> destination folder path
-        
-        def collect_folder_contents(source_folder_path: str, parent_source: Optional[str] = None):
-            """Recursively collect all folders and items from a folder"""
-            try:
-                manifest = get_folder_manifest(user_id, source_folder_path)
-                folder_name = manifest.get('name', 'folder')
-                
-                logger.debug(f"📂 Collecting from folder: {folder_name} at {source_folder_path}")
-                
-                # Add this folder to the list
-                all_folders.append({
-                    'source_path': source_folder_path,
-                    'folder_name': folder_name,
-                    'parent_source_path': parent_source
-                })
-                
-                # Collect all items in this folder
-                items_count = len(manifest.get('items', {}))
-                for item_id, item in manifest.get('items', {}).items():
-                    all_items.append({
-                        'item_id': item_id,
-                        'source_folder_path': source_folder_path,
-                        'source_folder_path_for_mapping': source_folder_path  # For mapping to dest
-                    })
-                logger.debug(f"  📄 Found {items_count} items in {folder_name}")
-                
-                # Recursively collect subfolders
-                subfolders_count = len(manifest.get('folders', {}))
-                for subfolder_id, folder_info in manifest.get('folders', {}).items():
-                    subfolder_path = folder_info.get('path', f"{source_folder_path}/{folder_info.get('name', subfolder_id)}")
-                    collect_folder_contents(subfolder_path, source_folder_path)
-                logger.debug(f"  📁 Found {subfolders_count} subfolders in {folder_name}")
-            
-            except Exception as e:
-                logger.error(f"Error collecting contents from {source_folder_path}: {str(e)}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Process each item/folder
-        for item_info in items:
+        for item_info in item_data:
             item_id = item_info.get('item_id')
             source_folder_path = item_info.get('source_folder_path', '')
             is_folder = item_info.get('is_folder', False)
             
             if is_folder:
-                # Collect all contents recursively
-                collect_folder_contents(source_folder_path)
-                logger.info(f"📁 Collected folder structure: {len(all_folders)} folders, {len(all_items)} items")
-            else:
-                # Regular item
-                all_items.append({
+                folders_to_copy.append({
                     'item_id': item_id,
-                    'source_folder_path': source_folder_path,
-                    'dest_folder_path': dest_folder_path  # Direct destination
+                    'source_folder_path': source_folder_path
+                })
+            else:
+                items_to_copy.append({
+                    'item_id': item_id,
+                    'source_folder_path': source_folder_path
                 })
         
-        # Step 2: Create all folders first (parents before children)
-        # Sort folders by depth (shallow first)
-        def get_depth(folder_info: Dict) -> int:
-            source_path = folder_info['source_path']
-            return source_path.count('/') if source_path else 0
-        
-        all_folders.sort(key=get_depth)
-        
-        for folder_info in all_folders:
-            try:
-                source_path = folder_info['source_path']
-                folder_name = folder_info['folder_name']
-                parent_source = folder_info['parent_source_path']
-                
-                # Determine destination parent path
-                if parent_source and parent_source in folder_path_map:
-                    dest_parent_path = folder_path_map[parent_source]
-                elif not parent_source:
-                    # Root folder being copied - use provided destination
-                    dest_parent_path = dest_folder_path
-                else:
-                    # Parent not yet mapped - this shouldn't happen if sorted correctly
-                    logger.warning(f"Parent folder {parent_source} not found in map, using root dest")
-                    dest_parent_path = dest_folder_path
-                
-                # Create the folder
-                new_folder = create_folder(user_id, folder_name, dest_parent_path)
-                new_folder_path = new_folder['path']
-                folder_path_map[source_path] = new_folder_path
-                
-                logger.info(f"✅ Created folder: {folder_name} at {new_folder_path} (from {source_path})")
-                
-            except Exception as e:
-                logger.error(f"Error creating folder {folder_info['folder_name']}: {str(e)}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Step 3: Map items to their destination folders
-        for item_info in all_items:
-            if 'dest_folder_path' not in item_info:
-                # Item from a folder - map to destination
-                source_key = item_info.get('source_folder_path_for_mapping')
-                if source_key and source_key in folder_path_map:
-                    item_info['dest_folder_path'] = folder_path_map[source_key]
-                else:
-                    # Fallback
-                    item_info['dest_folder_path'] = dest_folder_path
-        
-        logger.info(f"📋 Total items to copy: {len(all_items)}")
-        
-        # Step 4: Bulk copy all items
         results = []
-        errors = []
         
-        for item_info in all_items:
+        # Use bulk copy for items (efficient - uses S3 copy operations)
+        if items_to_copy:
+            logger.info(f"📋 Copying {len(items_to_copy)} items in bulk to {dest_folder_path}")
+            copy_result = copy_bulk_items(user_id, items_to_copy, dest_folder_path)
+            
+            # Extract results from bulk copy
+            for result in copy_result.get('results', []):
+                if result.get('success'):
+                    results.append(result.get('result'))
+            
+            # Log any errors
+            if copy_result.get('errors'):
+                logger.warning(f"⚠️ {len(copy_result.get('errors', []))} items failed to copy")
+                for error in copy_result.get('errors', []):
+                    logger.warning(f"  - Item {error.get('item_id')}: {error.get('error')}")
+        
+        # Handle folders individually (they require recursive copy)
+        for folder_info in folders_to_copy:
             try:
-                item_id = item_info['item_id']
-                source_path = item_info['source_folder_path']
-                dest_path = item_info.get('dest_folder_path', dest_folder_path)
-                
-                # Copy the item
-                clipboard_data = copy_item(user_id, source_path, item_id)
-                result = paste_item(user_id, dest_path, clipboard_data)
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Error copying item {item_info['item_id']}: {str(e)}")
-                errors.append({
-                    'item_id': item_info['item_id'],
-                    'error': str(e)
-                })
-        
-        # Step 5: Return folder results (root folders only)
-        folder_results = []
-        root_folder_sources = set()
-        for item_info in items:
-            if item_info.get('is_folder'):
-                root_folder_sources.add(item_info['source_folder_path'])
-        
-        for folder_info in all_folders:
-            source_path = folder_info['source_path']
-            if source_path in root_folder_sources and source_path in folder_path_map:
-                folder_results.append({
-                    'id': folder_path_map[source_path].split('/')[-1] if folder_path_map[source_path] else folder_info['folder_name'],
-                    'name': folder_info['folder_name'],
-                    'type': 'folder',
-                    'path': folder_path_map[source_path]
-                })
-        
-        # Combine results
-        all_results = folder_results + results
-        
-        logger.info(f"✅ Bulk copy complete: {len(all_results)} items/folders copied ({len(folder_results)} root folders, {len(results)} items), {len(errors)} errors")
-        
-        return {
-            'pasted_items': all_results,
-            'count': len(all_results),
-            'items_copied': len(results),
-            'folders_created': len(all_folders),
-            'errors': errors
-        }
-    except Exception as e:
-        logger.error(f"Error in bulk copy: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise
-
-def paste_items_by_ids(user_id: str, dest_folder_path: str, item_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Paste multiple items by copying them first, then pasting
-    Uses bulk copy for efficiency when folders are involved
-    item_data: List of {item_id, source_folder_path, is_folder}
-    """
-    try:
-        # Check if any items are folders - if so, use bulk copy
-        has_folders = any(item.get('is_folder', False) for item in item_data)
-        
-        if has_folders:
-            # Use bulk copy which handles folders recursively
-            return copy_bulk_items(user_id, item_data, dest_folder_path)
-        else:
-            # For single items, use the original method
-            results = []
-            for item_info in item_data:
-                item_id = item_info.get('item_id')
-                source_folder_path = item_info.get('source_folder_path', '')
-                
-                # Copy the item
-                clipboard_data = copy_item(user_id, source_folder_path, item_id)
-                
-                # Then paste it
+                source_folder_path = folder_info.get('source_folder_path', '')
+                clipboard_data = copy_folder(user_id, source_folder_path)
                 result = paste_item(user_id, dest_folder_path, clipboard_data)
                 results.append(result)
-            
-            return {
-                'pasted_items': results,
-                'count': len(results)
-            }
+            except Exception as e:
+                logger.error(f"Error pasting folder {folder_info.get('source_folder_path')}: {str(e)}")
+        
+        return {
+            'pasted_items': results,
+            'count': len(results),
+            'items_copied': len(items_to_copy),
+            'folders_copied': len(folders_to_copy)
+        }
     except Exception as e:
         logger.error(f"Error pasting items by IDs: {str(e)}")
         raise
@@ -1849,38 +1604,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             item_data = body.get('item_data', [])  # List of {item_id, source_folder_path, is_folder}
             result = paste_items_by_ids(user_id, dest_folder_path, item_data)
             
-        elif operation == 'download_folder':
-            folder_path = body.get('folder_path', '')
-            result = download_folder(user_id, folder_path)
-            # For download, return the encrypted data directly in response
-            # Frontend will handle creating download link
-            return {
-                'statusCode': 200,
-                'headers': {
-                    **build_cors_headers(origin),
-                    'Content-Type': 'application/json'
-                },
-                'body': json.dumps({
-                    'success': True,
-                    'result': result
-                }, default=str)
-            }
-            
-        elif operation == 'upload_folder':
+        elif operation == 'copy_bulk_items':
+            items = body.get('items', [])  # List of {item_id, source_folder_path}
             dest_folder_path = body.get('dest_folder_path', '')
-            encrypted_data_b64 = body.get('encrypted_data')  # Base64 encoded encrypted data
-            filename = body.get('filename', 'folder.cosine')
-            
-            if not encrypted_data_b64:
-                return {
-                    'statusCode': 400,
-                    'headers': build_cors_headers(origin),
-                    'body': json.dumps({'error': 'Missing encrypted_data'})
-                }
-            
-            # Decode base64 encrypted data
-            encrypted_data = base64.b64decode(encrypted_data_b64)
-            result = upload_folder(user_id, dest_folder_path, encrypted_data, filename)
+            result = copy_bulk_items(user_id, items, dest_folder_path)
             
         else:
             return {

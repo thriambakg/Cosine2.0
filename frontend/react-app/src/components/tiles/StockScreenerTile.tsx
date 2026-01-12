@@ -1053,25 +1053,36 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
         selectedStocks.has(stock.symbol)
       );
 
-      // Save each stock to the filesystem with FULL data
+      // Save all stocks to the filesystem with FULL data using bulk operation
       // Note: allResults contains the full stock objects from the screener API
       // This ensures we save the complete stock with all fields
-      for (const stock of selectedStockObjects) {
+      const items = selectedStockObjects.map(stock => {
         const title = `${stock.symbol || 'Stock'} - ${stock.name || 'Unknown'}`;
-        
-        // FULL DATA MODE for filesystem - send complete stock object with ALL fields
-        // Unlike chat agent context (which uses partial data), filesystem needs full data
-        // because it doesn't have database access to fetch missing fields
-        await filesystemAPI.addContextItem({
-          user_id: user.id,
-          folder_path: folderPath,
+        return {
           context_data: stock, // Full stock object with all fields
           title: title,
-          item_type: 'stock_result',
-        });
+          item_type: 'stock_result' as const,
+        };
+      });
+      
+      // Use bulk operation for better performance (much faster than individual calls)
+      const response = await filesystemAPI.addBulkContextItems({
+        user_id: user.id,
+        folder_path: folderPath,
+        items: items,
+      });
+      
+      if (response.success) {
+        const result = response.result as any;
+        const successCount = result?.succeeded || selectedStockObjects.length;
+        console.log(`✅ Saved ${successCount} of ${selectedStockObjects.length} stock(s) to filesystem`);
+        if (result?.errors && result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} stock(s) failed to save:`, result.errors);
+        }
+      } else {
+        throw new Error(response.error || 'Failed to save stocks');
       }
       
-      console.log(`✅ Saved ${selectedStockObjects.length} stock(s) to filesystem`);
       setSelectedStocks(new Set());
     } catch (error) {
       console.error('Error saving stocks to filesystem:', error);

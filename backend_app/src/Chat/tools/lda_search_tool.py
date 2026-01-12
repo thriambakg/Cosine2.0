@@ -8,7 +8,7 @@ import os
 import logging
 import boto3
 import gzip
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from decimal import Decimal
 from datetime import datetime
 import sys
@@ -133,6 +133,25 @@ def query_gsi_for_filing_ids(
         raise
 
 
+def get_all_from_gsi(query_func, *args, max_items: int = 50000, **kwargs) -> Set[str]:
+    """Get all items from a GSI using internal pagination"""
+    all_ids = set()
+    exclusive_start_key = kwargs.pop('exclusive_start_key', None)
+    
+    while len(all_ids) < max_items:
+        kwargs['exclusive_start_key'] = exclusive_start_key
+        kwargs['limit'] = 1000  # Use larger limit for efficiency
+        
+        ids, last_key = query_func(*args, **kwargs)
+        all_ids.update(ids)
+        
+        if not last_key or len(ids) == 0:
+            break
+        exclusive_start_key = last_key
+    
+    return all_ids
+
+
 def query_search_index(
     search_type: str,
     search_values: List[str],
@@ -247,11 +266,14 @@ def batch_get_filings(entity_pks: List[str], limit: int = 100) -> List[Dict[str,
 
 def search_filings_simplified(
     filters: Dict[str, Any],
-    limit: int = 100,
+    limit: int = 5,
     last_evaluated_key: Optional[Dict] = None
 ) -> Dict[str, Any]:
     """
     Simplified search filings function for agent tool
+    
+    Default limit is 5 to prevent massive searches without explicit user request.
+    Users can request pagination or narrow their search as needed.
     """
     if not filings_table:
         raise Exception("DynamoDB filings table not initialized")
@@ -277,160 +299,237 @@ def search_filings_simplified(
         
         # Query registrant if provided
         if registrant_name:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(registrant_name, list):
-                registrant_name = registrant_name[0]
-                filing_ids, last_key = query_gsi_for_filing_ids(
-                index_name='RegistrantPostedDateIndex',
-                hash_key_name='registrant_name',
-                hash_key_value=registrant_name,
-                range_key_name='dt_posted',
-                range_key_value=date_from if date_from else None,
-                range_key_condition='gte' if date_from else None,
-                limit=1000
-            )
-            # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
-            entity_pks = [f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids]
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['registrant'] = last_key
+                registrant_name = registrant_name[0] if registrant_name else None
+            if registrant_name:
+                registrant_name = clean_quotes(str(registrant_name).strip())
+                if registrant_name:
+                    # Get all filing IDs using pagination helper
+                    filing_ids_set = get_all_from_gsi(
+                        query_gsi_for_filing_ids,
+                        index_name='RegistrantPostedDateIndex',
+                        hash_key_name='registrant_name',
+                        hash_key_value=registrant_name,
+                        range_key_name='dt_posted',
+                        range_key_value=date_from if date_from else None,
+                        range_key_condition='gte' if date_from else None,
+                        max_items=50000
+                    )
+                    # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
+                    entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
+                    entity_pk_sets.append(entity_pks)
+                    logger.info(f"Registrant '{registrant_name}': Found {len(entity_pks)} entity PKs")
         
         # Query client if provided
         if client_name:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(client_name, list):
-                client_name = client_name[0]
-                filing_ids, last_key = query_gsi_for_filing_ids(
-                index_name='ClientPostedDateIndex',
-                hash_key_name='client_name',
-                hash_key_value=client_name,
-                range_key_name='dt_posted',
-                range_key_value=date_from if date_from else None,
-                range_key_condition='gte' if date_from else None,
-                limit=1000
-            )
-            # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
-            entity_pks = [f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids]
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['client'] = last_key
+                client_name = client_name[0] if client_name else None
+            if client_name:
+                client_name = clean_quotes(str(client_name).strip())
+                if client_name:
+                    # Get all filing IDs using pagination helper
+                    filing_ids_set = get_all_from_gsi(
+                        query_gsi_for_filing_ids,
+                        index_name='ClientPostedDateIndex',
+                        hash_key_name='client_name',
+                        hash_key_value=client_name,
+                        range_key_name='dt_posted',
+                        range_key_value=date_from if date_from else None,
+                        range_key_condition='gte' if date_from else None,
+                        max_items=50000
+                    )
+                    # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
+                    entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
+                    entity_pk_sets.append(entity_pks)
+                    logger.info(f"Client '{client_name}': Found {len(entity_pks)} entity PKs")
         
         # Query lobbyist using search index if provided
         if lobbyist_name:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(lobbyist_name, list):
-                lobbyist_name = lobbyist_name[0]
-            entity_pks, last_key = query_search_index(
-                search_type='LOBBYIST',
-                search_values=[lobbyist_name],
-                limit=1000,
-                date_from=date_from,
-                date_to=date_to
-            )
-            # Keep entity PKs as-is (already in FILING#uuid or CONTRIBUTION#uuid format)
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['lobbyist'] = {'search_index_key': last_key}
+                lobbyist_name = lobbyist_name[0] if lobbyist_name else None
+            if lobbyist_name:
+                lobbyist_name = clean_quotes(str(lobbyist_name).strip())
+                if lobbyist_name:
+                    # Get all entity PKs using pagination - need to implement pagination for search_index
+                    all_entity_pks_list = []
+                    exclusive_start_key = None
+                    while len(all_entity_pks_list) < 50000:
+                        entity_pks, last_key = query_search_index(
+                            search_type='LOBBYIST',
+                            search_values=[lobbyist_name],
+                            limit=1000,
+                            exclusive_start_key=exclusive_start_key,
+                            date_from=date_from,
+                            date_to=date_to
+                        )
+                        all_entity_pks_list.extend(entity_pks)
+                        if not last_key or len(entity_pks) == 0:
+                            break
+                        exclusive_start_key = last_key
+                    # Keep entity PKs as-is (already in FILING#uuid or CONTRIBUTION#uuid format)
+                    entity_pk_sets.append(set(all_entity_pks_list))
+                    logger.info(f"Lobbyist '{lobbyist_name}': Found {len(all_entity_pks_list)} entity PKs")
         
         # Query PAC using search index if provided
         if pac_name:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(pac_name, list):
-                pac_name = pac_name[0]
-            entity_pks, last_key = query_search_index(
-                search_type='PAC',
-                search_values=[pac_name],
-                limit=1000,
-                date_from=date_from,
-                date_to=date_to
-            )
-            # Keep entity PKs as-is (already in FILING#uuid or CONTRIBUTION#uuid format)
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['pac'] = {'search_index_key': last_key}
+                pac_name = pac_name[0] if pac_name else None
+            if pac_name:
+                pac_name = clean_quotes(str(pac_name).strip())
+                if pac_name:
+                    # Get all entity PKs using pagination
+                    all_entity_pks_list = []
+                    exclusive_start_key = None
+                    while len(all_entity_pks_list) < 50000:
+                        entity_pks, last_key = query_search_index(
+                            search_type='PAC',
+                            search_values=[pac_name],
+                            limit=1000,
+                            exclusive_start_key=exclusive_start_key,
+                            date_from=date_from,
+                            date_to=date_to
+                        )
+                        all_entity_pks_list.extend(entity_pks)
+                        if not last_key or len(entity_pks) == 0:
+                            break
+                        exclusive_start_key = last_key
+                    # Keep entity PKs as-is (already in FILING#uuid or CONTRIBUTION#uuid format)
+                    entity_pk_sets.append(set(all_entity_pks_list))
+                    logger.info(f"PAC '{pac_name}': Found {len(all_entity_pks_list)} entity PKs")
         
         # Query general issue code using search index if provided
         if general_issue_code:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(general_issue_code, list):
-                general_issue_code = general_issue_code[0]
-            entity_pks, last_key = query_search_index(
-                search_type='GENERAL_ISSUE',
-                search_values=[general_issue_code],
-                limit=1000,
-                date_from=date_from,
-                date_to=date_to
-            )
-            # Keep entity PKs as-is
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['general_issue'] = {'search_index_key': last_key}
+                general_issue_code = general_issue_code[0] if general_issue_code else None
+            if general_issue_code:
+                general_issue_code = clean_quotes(str(general_issue_code).strip())
+                if general_issue_code:
+                    # Get all entity PKs using pagination
+                    all_entity_pks_list = []
+                    exclusive_start_key = None
+                    while len(all_entity_pks_list) < 50000:
+                        entity_pks, last_key = query_search_index(
+                            search_type='GENERAL_ISSUE',
+                            search_values=[general_issue_code],
+                            limit=1000,
+                            exclusive_start_key=exclusive_start_key,
+                            date_from=date_from,
+                            date_to=date_to
+                        )
+                        all_entity_pks_list.extend(entity_pks)
+                        if not last_key or len(entity_pks) == 0:
+                            break
+                        exclusive_start_key = last_key
+                    entity_pk_sets.append(set(all_entity_pks_list))
+                    logger.info(f"General issue '{general_issue_code}': Found {len(all_entity_pks_list)} entity PKs")
         
         # Query government entity using search index if provided
         if government_entity:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(government_entity, list):
-                government_entity = government_entity[0]
-            entity_pks, last_key = query_search_index(
-                search_type='GOVERNMENT_ENTITY',
-                search_values=[government_entity],
-                limit=1000,
-                date_from=date_from,
-                date_to=date_to
-            )
-            # Keep entity PKs as-is
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['government_entity'] = {'search_index_key': last_key}
+                government_entity = government_entity[0] if government_entity else None
+            if government_entity:
+                government_entity = clean_quotes(str(government_entity).strip())
+                if government_entity:
+                    # Get all entity PKs using pagination
+                    all_entity_pks_list = []
+                    exclusive_start_key = None
+                    while len(all_entity_pks_list) < 50000:
+                        entity_pks, last_key = query_search_index(
+                            search_type='GOVERNMENT_ENTITY',
+                            search_values=[government_entity],
+                            limit=1000,
+                            exclusive_start_key=exclusive_start_key,
+                            date_from=date_from,
+                            date_to=date_to
+                        )
+                        all_entity_pks_list.extend(entity_pks)
+                        if not last_key or len(entity_pks) == 0:
+                            break
+                        exclusive_start_key = last_key
+                    entity_pk_sets.append(set(all_entity_pks_list))
+                    logger.info(f"Government entity '{government_entity}': Found {len(all_entity_pks_list)} entity PKs")
         
         # Query foreign entity using search index if provided
         if foreign_entity_name:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(foreign_entity_name, list):
-                foreign_entity_name = foreign_entity_name[0]
-            entity_pks, last_key = query_search_index(
-                search_type='FOREIGN_COUNTRY',
-                search_values=[foreign_entity_name],
-                limit=1000,
-                date_from=date_from,
-                date_to=date_to
-            )
-            # Keep entity PKs as-is
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['foreign_entity'] = {'search_index_key': last_key}
+                foreign_entity_name = foreign_entity_name[0] if foreign_entity_name else None
+            if foreign_entity_name:
+                foreign_entity_name = clean_quotes(str(foreign_entity_name).strip())
+                if foreign_entity_name:
+                    # Get all entity PKs using pagination
+                    all_entity_pks_list = []
+                    exclusive_start_key = None
+                    while len(all_entity_pks_list) < 50000:
+                        entity_pks, last_key = query_search_index(
+                            search_type='FOREIGN_COUNTRY',
+                            search_values=[foreign_entity_name],
+                            limit=1000,
+                            exclusive_start_key=exclusive_start_key,
+                            date_from=date_from,
+                            date_to=date_to
+                        )
+                        all_entity_pks_list.extend(entity_pks)
+                        if not last_key or len(entity_pks) == 0:
+                            break
+                        exclusive_start_key = last_key
+                    entity_pk_sets.append(set(all_entity_pks_list))
+                    logger.info(f"Foreign entity '{foreign_entity_name}': Found {len(all_entity_pks_list)} entity PKs")
         
         # Query by filing year if provided
         if filing_year:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(filing_year, list):
-                filing_year = filing_year[0]
-            filing_ids, last_key = query_gsi_for_filing_ids(
-                index_name='YearPostedDateIndex',
-                hash_key_name='filing_year',
-                hash_key_value=int(filing_year) if isinstance(filing_year, (int, str)) else filing_year,
-                range_key_name='dt_posted',
-                range_key_value=date_from if date_from else None,
-                range_key_condition='gte' if date_from else None,
-                limit=1000
-            )
-            # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
-            entity_pks = [f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids]
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['filing_year'] = last_key
+                filing_year = filing_year[0] if filing_year else None
+            if filing_year:
+                try:
+                    filing_year_int = int(filing_year) if isinstance(filing_year, (int, str)) else filing_year
+                    # Get all filing IDs using pagination helper
+                    filing_ids_set = get_all_from_gsi(
+                        query_gsi_for_filing_ids,
+                        index_name='YearPostedDateIndex',
+                        hash_key_name='filing_year',
+                        hash_key_value=filing_year_int,
+                        range_key_name='dt_posted',
+                        range_key_value=date_from if date_from else None,
+                        range_key_condition='gte' if date_from else None,
+                        max_items=50000
+                    )
+                    # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
+                    entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
+                    entity_pk_sets.append(entity_pks)
+                    logger.info(f"Filing year '{filing_year}': Found {len(entity_pks)} entity PKs")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error parsing filing_year: {e}")
         
         # Query by item type if provided
         if item_type:
+            # Extract first value if list (combinatorial logic handled by agent)
             if isinstance(item_type, list):
-                item_type = item_type[0]
-            item_type_upper = str(item_type).upper().strip()
-            filing_ids, last_key = query_gsi_for_filing_ids(
-                index_name='ItemTypePostedDateIndex',
-                hash_key_name='item_type',
-                hash_key_value=item_type_upper,
-                range_key_name='dt_posted',
-                range_key_value=date_from if date_from else None,
-                range_key_condition='gte' if date_from else None,
-                limit=1000
-            )
-            # Convert filing IDs to entity PKs (assume FILING# for GSI queries, but item_type filter will handle CONTRIBUTION#)
-            entity_pks = [f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids]
-            entity_pk_sets.append(set(entity_pks))
-            if last_key:
-                last_eval_keys['item_type'] = last_key
+                item_type = item_type[0] if item_type else None
+            if item_type:
+                item_type_upper = str(item_type).upper().strip()
+                # Get all filing IDs using pagination helper
+                filing_ids_set = get_all_from_gsi(
+                    query_gsi_for_filing_ids,
+                    index_name='ItemTypePostedDateIndex',
+                    hash_key_name='item_type',
+                    hash_key_value=item_type_upper,
+                    range_key_name='dt_posted',
+                    range_key_value=date_from if date_from else None,
+                    range_key_condition='gte' if date_from else None,
+                    max_items=50000
+                )
+                # Convert filing IDs to entity PKs (assume FILING# for GSI queries, but item_type filter will handle CONTRIBUTION#)
+                entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
+                entity_pk_sets.append(entity_pks)
+                logger.info(f"Item type '{item_type_upper}': Found {len(entity_pks)} entity PKs")
         
         # Intersect all entity PK sets (AND logic across filters)
         if entity_pk_sets:
@@ -458,7 +557,7 @@ def search_filings_simplified(
         results = [convert_decimal_to_float(item) for item in items]
         
         # Determine if there are more results
-        has_more = len(all_filing_ids) > len(results) or any(last_eval_keys.values())
+        has_more = len(all_entity_pks) > len(results)
         
         return {
             'success': True,

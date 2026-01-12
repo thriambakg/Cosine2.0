@@ -1982,6 +1982,15 @@ export interface FilesystemResponse<T = any> {
 
 export const filesystemAPI = {
   addFile: async (params: FilesystemAddFileRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Adding',
+        itemCount: 1
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2005,6 +2014,25 @@ export const filesystemAPI = {
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem add file error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'adding file'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to add file'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to add file',
@@ -2013,6 +2041,15 @@ export const filesystemAPI = {
   },
 
   addContextItem: async (params: FilesystemAddContextItemRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Adding',
+        itemCount: 1
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2036,6 +2073,25 @@ export const filesystemAPI = {
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem add context item error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'adding item'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to add context item'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to add context item',
@@ -2044,6 +2100,15 @@ export const filesystemAPI = {
   },
 
   addBulkContextItems: async (params: FilesystemAddBulkContextItemsRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Adding',
+        itemCount: params.items.length
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2069,6 +2134,25 @@ export const filesystemAPI = {
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem add bulk context items error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'adding items'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to add bulk context items'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to add bulk context items',
@@ -2096,6 +2180,15 @@ export const filesystemAPI = {
   },
 
   deleteItem: async (params: FilesystemDeleteItemRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Deleting',
+        itemCount: 1
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2104,9 +2197,40 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification if successful
+      if (response.success) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: 1,
+            itemName: 'Item'
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem delete item error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'deleting item'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to delete item'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to delete item',
@@ -2115,6 +2239,16 @@ export const filesystemAPI = {
   },
 
   deleteBulkItems: async (params: FilesystemDeleteBulkItemsRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const itemCount = params.items?.length || 1;
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Deleting',
+        itemCount: itemCount
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2123,9 +2257,40 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification if successful
+      if (response.success) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: itemCount,
+            itemName: itemCount === 1 ? 'Item' : `${itemCount} items`
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem delete bulk items error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'deleting items'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to delete bulk items'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to delete bulk items',
@@ -2134,6 +2299,15 @@ export const filesystemAPI = {
   },
 
   deleteFolder: async (params: FilesystemDeleteFolderRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Deleting',
+        itemCount: 1
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2142,9 +2316,40 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification if successful
+      if (response.success) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: 1,
+            itemName: 'Folder'
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem delete folder error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'deleting folder'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to delete folder'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to delete folder',
@@ -2153,6 +2358,15 @@ export const filesystemAPI = {
   },
 
   moveItem: async (params: FilesystemMoveItemRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Moving',
+        itemCount: 1
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2161,9 +2375,40 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification if successful
+      if (response.success) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: 1,
+            itemName: 'Item'
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem move item error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'moving item'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to move item'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to move item',
@@ -2172,6 +2417,16 @@ export const filesystemAPI = {
   },
 
   moveBulkItems: async (params: FilesystemMoveBulkItemsRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const itemCount = params.items?.length || 1;
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Moving',
+        itemCount: itemCount
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2180,9 +2435,40 @@ export const filesystemAPI = {
           ...params,
         }),
       });
+      
+      // Dispatch success notification if successful
+      if (response.success) {
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: itemCount,
+            itemName: itemCount === 1 ? 'Item' : `${itemCount} items`
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem move bulk items error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'moving items'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to move bulk items'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to move bulk items',
@@ -2336,59 +2622,17 @@ export const filesystemAPI = {
     }
   },
 
-  downloadFolder: async (params: { user_id: string; folder_path: string }): Promise<FilesystemResponse> => {
-    try {
-      const response = await apiRequest<FilesystemResponse>('/filesystem', {
-        method: 'POST',
-        body: JSON.stringify({
-          operation: 'download_folder',
-          ...params,
-        }),
-      });
-      return response;
-    } catch (error: any) {
-      console.error('❌ Filesystem download folder error:', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to download folder',
-      };
-    }
-  },
-
-  uploadFolder: async (params: { user_id: string; dest_folder_path: string; encrypted_data: string; filename: string }): Promise<FilesystemResponse> => {
-    try {
-      const response = await apiRequest<FilesystemResponse>('/filesystem', {
-        method: 'POST',
-        body: JSON.stringify({
-          operation: 'upload_folder',
-          ...params,
-        }),
-      });
-      
-      // Dispatch success notification
-      if (response.success && response.result) {
-        const folderName = response.result.folder?.name || 'Folder';
-        const itemCount = response.result.items_created || 0;
-        const successEvent = new CustomEvent('filesystem-success', {
-          detail: { 
-            itemCount: itemCount,
-            itemName: folderName
-          }
-        });
-        window.dispatchEvent(successEvent);
-      }
-      
-      return response;
-    } catch (error: any) {
-      console.error('❌ Filesystem upload folder error:', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to upload folder',
-      };
-    }
-  },
-
   pasteItemsByIds: async (params: FilesystemPasteItemsByIdsRequest): Promise<FilesystemResponse> => {
+    // Dispatch loading notification
+    const itemCount = params.item_data?.length || 1;
+    const loadingEvent = new CustomEvent('filesystem-loading', {
+      detail: { 
+        operation: 'Copying',
+        itemCount: itemCount
+      }
+    });
+    window.dispatchEvent(loadingEvent);
+    
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
         method: 'POST',
@@ -2400,7 +2644,7 @@ export const filesystemAPI = {
       
       // Dispatch success notification
       if (response.success && response.result) {
-        const count = response.result.count || 1;
+        const count = response.result.count || itemCount;
         const successEvent = new CustomEvent('filesystem-success', {
           detail: { 
             itemCount: count,
@@ -2413,6 +2657,25 @@ export const filesystemAPI = {
       return response;
     } catch (error: any) {
       console.error('❌ Filesystem paste items by IDs error:', error);
+      
+      // Handle 504 Gateway Timeout
+      if (error.response?.status === 504 || error.code === 'ECONNABORTED') {
+        const timeoutEvent = new CustomEvent('filesystem-timeout', {
+          detail: { 
+            operation: 'copying items'
+          }
+        });
+        window.dispatchEvent(timeoutEvent);
+      } else {
+        // Dispatch error notification for other errors
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: error.message || 'Failed to paste items'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+      }
+      
       return {
         success: false,
         error: error.message || 'Failed to paste items',
