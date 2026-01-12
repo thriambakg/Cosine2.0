@@ -547,11 +547,70 @@ def search_awards_union(
     
     logger.info(f"Union search with filters: {json.dumps(filters, default=str)}, limit: {limit}, offset: {offset}")
     
-    # Identify all GSI queries needed
-    union_queries = identify_union_queries(filters)
+    # Handle award_id filter separately (exact match, direct lookup)
+    award_ids_filter = filters.get('award_id')
+    award_id_set: Optional[Set[str]] = None
+    if award_ids_filter:
+        award_ids = award_ids_filter if isinstance(award_ids_filter, list) else [award_ids_filter]
+        award_ids = [str(aid).strip() for aid in award_ids if aid and str(aid).strip()]
+        if award_ids:
+            award_id_set = set(award_ids)
+            logger.info(f"Direct award_id filter: {len(award_id_set)} award IDs")
     
-    if not union_queries:
-        # No GSI queries available - return empty results
+    # If only award_id filter is provided, fetch directly without GSI queries
+    has_other_filters = any(
+        key != 'award_id' and filters.get(key) 
+        for key in filters.keys()
+    )
+    
+    if award_id_set and not has_other_filters:
+        # Only award_id filter - direct lookup
+        logger.info(f"Direct award_id lookup only: fetching {len(award_id_set)} awards")
+        award_ids_list = sorted(list(award_id_set))
+        
+        # Apply pagination
+        end_offset = offset + limit
+        paginated_ids = award_ids_list[offset:end_offset]
+        
+        # Fetch full awards
+        full_items = fetch_full_awards_batch(paginated_ids)
+        
+        # Enrich with S3 data
+        enriched_items = []
+        for item in full_items:
+            try:
+                enriched = enrich_award_with_details(item)
+                enriched_items.append(enriched)
+            except Exception as e:
+                logger.error(f"Error enriching award {item.get('award_id')}: {str(e)}")
+                enriched_items.append(item)
+        
+        # Convert decimals to floats
+        results = [convert_decimal_to_float(item) for item in enriched_items]
+        
+        has_more = end_offset < len(award_ids_list)
+        next_offset = end_offset if has_more else None
+        
+        return {
+            'success': True,
+            'results': results,
+            'count': len(results),
+            'has_more': has_more,
+            'last_evaluated_key': {
+                'offset': next_offset,
+                'total_items': len(award_ids_list),
+                'method': 'union'
+            } if next_offset is not None else None,
+            'method': 'union',
+            'index_used': 'direct_lookup'
+        }
+    
+    # Identify all GSI queries needed (excluding award_id which is handled separately)
+    filters_for_queries = {k: v for k, v in filters.items() if k != 'award_id'}
+    union_queries = identify_union_queries(filters_for_queries)
+    
+    if not union_queries and not award_id_set:
+        # No GSI queries available and no award_id filter - return empty results
         logger.warning("No GSI queries available for filters")
         return {
             'success': True,
@@ -610,23 +669,28 @@ def search_awards_union(
         logger.info(f"Field '{filter_type}' UNION complete: {len(field_award_ids)} unique award_ids")
     
     # Step 2: INTERSECT results across different fields (different fields = AND)
+    # If award_id filter is present, start with it; otherwise start with first field
+    all_award_ids: Set[str] = None
+    
+    if award_id_set:
+        # Start with award_id set if present
+        all_award_ids = award_id_set.copy()
+        logger.info(f"Starting with award_id filter: {len(all_award_ids)} award IDs")
+    
     if field_result_sets:
-        # Start with the first field's results
-        all_award_ids: Set[str] = None
-        
         for filter_type, field_ids in field_result_sets.items():
             if all_award_ids is None:
                 # First field: use its results as starting point
                 all_award_ids = field_ids.copy()
                 logger.info(f"Starting with field '{filter_type}': {len(all_award_ids)} award_ids")
-        else:
+            else:
                 # Subsequent fields: INTERSECT with existing results
                 before_count = len(all_award_ids)
                 all_award_ids &= field_ids  # INTERSECT: keep only IDs in both sets
                 logger.info(f"INTERSECT with field '{filter_type}': {before_count} -> {len(all_award_ids)} award_ids")
-        
-        if all_award_ids is None:
-            all_award_ids = set()
+    
+    if all_award_ids is None:
+        all_award_ids = set()
     
     # Step 3: If we have intersection queries (obligation ranges), intersect with field results
     # Note: Multiple fiscal year queries for obligation ranges should be UNIONed (match in ANY fiscal year)

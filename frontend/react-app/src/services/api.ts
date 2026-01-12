@@ -1179,6 +1179,7 @@ export const politicianTradesSearchAPI = {
 export interface GovtContractsSearchFilters {
   keywords?: string[];
   award_type?: string[];
+  award_id?: string[];  // Exact award ID queries (multi-select, no autocomplete)
   awarding_agency_name?: string[];
   awarding_agency_code?: string[];  // Added for API conversion
   funding_agency_name?: string[];

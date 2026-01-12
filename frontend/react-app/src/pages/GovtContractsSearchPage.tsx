@@ -140,6 +140,7 @@ const GovtContractsSearchPage: React.FC = () => {
     return {
       keywords: Array.isArray(saved?.keywords) ? saved.keywords : [],
       award_type: Array.isArray(saved?.award_type) ? saved.award_type : [],
+      award_id: Array.isArray(saved?.award_id) ? saved.award_id : [],
       awarding_agency_name: Array.isArray(saved?.awarding_agency_name) ? saved.awarding_agency_name : [],
       funding_agency_name: Array.isArray(saved?.funding_agency_name) ? saved.funding_agency_name : [],
       recipient_id: Array.isArray(saved?.recipient_id) ? saved.recipient_id : [],
@@ -1188,6 +1189,22 @@ const GovtContractsSearchPage: React.FC = () => {
                     }}
                     placeholder="Search for awarding agencies..."
                     allowCustomInput={false}
+                  />
+                  </Box>
+
+                  {/* Award ID - Exact match, multi-select, no autocomplete */}
+                  <Box data-tutorial="award-id">
+                  <MultiSelectField<string>
+                    label="Award ID"
+                    selectedItems={searchParams.award_id || []}
+                    onItemsChange={(awardIds) => {
+                      setSearchParams((prev) => ({ ...prev, award_id: awardIds }));
+                    }}
+                    suggestions={[]}
+                    onSearch={() => []}
+                    renderItem={(awardId) => awardId}
+                    placeholder="Enter award IDs (exact match)..."
+                    disableAutocomplete={true}
                   />
                   </Box>
 
