@@ -44,8 +44,12 @@ dynamodb_client = boto3.client('dynamodb')
 s3_client = boto3.client('s3')
 
 # Environment variables
-BILLS_TABLE_NAME = os.environ.get('BILLS_TABLE_NAME', 'cosine-congress-bills-production')
-S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-production')
+BILLS_TABLE_NAME = os.environ.get('BILLS_TABLE_NAME')
+if not BILLS_TABLE_NAME:
+    raise ValueError("BILLS_TABLE_NAME environment variable is required")
+S3_BUCKET_NAME = os.environ.get('CONGRESS_BILLS_DATA_S3_BUCKET_NAME') or os.environ.get('S3_BUCKET_NAME')
+if not S3_BUCKET_NAME:
+    raise ValueError("CONGRESS_BILLS_DATA_S3_BUCKET_NAME or S3_BUCKET_NAME environment variable is required")
 
 # Get DynamoDB table
 bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
@@ -826,7 +830,9 @@ class CongressBillsSearcher:
                 try:
                     user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
                     session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
-                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+                    if not bucket_name:
+                        raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
                     
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"congress_bills_search_{timestamp}.json"

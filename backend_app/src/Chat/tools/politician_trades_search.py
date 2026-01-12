@@ -39,7 +39,9 @@ except ImportError as e:
 dynamodb = boto3.resource('dynamodb')
 
 # Environment variables
-DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'cosine-politician-trades-production')
+DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
+if not DYNAMODB_TABLE_NAME:
+    raise ValueError("DYNAMODB_TABLE_NAME environment variable is required")
 
 # Get DynamoDB table
 trades_table = dynamodb.Table(DYNAMODB_TABLE_NAME) if DYNAMODB_TABLE_NAME else None
@@ -219,7 +221,9 @@ class PoliticianTradesSearcher:
                 try:
                     user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
                     session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
-                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+                    if not bucket_name:
+                        raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
                     s3_client = boto3.client('s3')
                     
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

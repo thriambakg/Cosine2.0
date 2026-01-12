@@ -42,8 +42,12 @@ dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
 
 # Environment variables
-FILINGS_TABLE_NAME = os.environ.get('FILINGS_TABLE_NAME', 'lda-filings')
-CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+FILINGS_TABLE_NAME = os.environ.get('FILINGS_TABLE_NAME')
+if not FILINGS_TABLE_NAME:
+    raise ValueError("FILINGS_TABLE_NAME environment variable is required")
+CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME')
+if not CHAT_FILES_BUCKET_NAME:
+    raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
 
 # Get DynamoDB table
 filings_table = dynamodb.Table(FILINGS_TABLE_NAME) if FILINGS_TABLE_NAME else None

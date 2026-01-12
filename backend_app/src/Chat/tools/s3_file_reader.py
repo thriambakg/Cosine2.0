@@ -67,6 +67,12 @@ class S3FileReader:
                 logger.info(f"Using congress bills data bucket for billtext file: {bucket_name}")
                 return bucket_name
             # Fallback: try to construct bucket name if env var not set
+            # Try environment variable first
+            bucket_name = os.environ.get('CONGRESS_BILLS_DATA_S3_BUCKET_NAME')
+            if bucket_name:
+                logger.info(f"Using congress bills data bucket from environment: {bucket_name}")
+                return bucket_name
+            # Fallback: construct from project name and environment
             project_name = os.environ.get('PROJECT_NAME', 'cosine')
             environment = os.environ.get('ENVIRONMENT', 'production')
             bucket_name = f"{project_name}-congress-bills-data-{environment}"

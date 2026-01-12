@@ -458,7 +458,9 @@ class FinancialTools:
                     
                     user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
                     session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
-                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+                    if not bucket_name:
+                        raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
                     
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"stock_data_{symbol}_{timeframe}_{timestamp}.json"
@@ -1653,7 +1655,9 @@ class S3FileReader:
         
         # Default to chat files bucket
         if self.bucket_name is None:
-            self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+            self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+            if not self.bucket_name:
+                raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
         return self.bucket_name
     
     def read_file(self, s3_key: str, file_type: str = "auto") -> str:

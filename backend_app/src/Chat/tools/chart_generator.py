@@ -70,7 +70,10 @@ class UnifiedChartGenerator:
     
     def _get_bucket_name(self):
         """Get bucket name dynamically from environment variables"""
-        return os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+        if not bucket_name:
+            raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
+        return bucket_name
 
     def _validate_env_vars(self):
         # Get current values dynamically

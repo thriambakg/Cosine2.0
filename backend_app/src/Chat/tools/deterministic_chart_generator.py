@@ -266,7 +266,9 @@ class ChartImageGenerator:
         plt.close(fig)
         
         # Upload to S3
-        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+        if not bucket_name:
+            raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         # Generate symbols string for filename
@@ -512,7 +514,9 @@ class SummaryMetricsCalculator:
         Returns:
             S3 key of the summary JSON
         """
-        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+        bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+        if not bucket_name:
+            raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         filename = f"chart_summary_metrics_{timestamp}.json"

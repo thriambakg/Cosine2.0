@@ -49,7 +49,9 @@ class PDFReader:
     def __init__(self):
         self.s3_client = boto3.client('s3')
         self.textract_client = boto3.client('textract')
-        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME', 'cosine-chat-files-production')
+        self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+        if not self.bucket_name:
+            raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
     
     def read_pdf_from_s3(self, s3_key: str, page_number: Optional[int] = None) -> Dict[str, Any]:
         """

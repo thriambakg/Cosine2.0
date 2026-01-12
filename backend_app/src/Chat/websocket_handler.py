@@ -114,9 +114,11 @@ class WebSocketHandler:
                             logger.info(f"Discovered WebSocket API endpoint: {websocket_endpoint}")
                             break
                 except Exception as e:
-                    logger.warning(f"Failed to discover WebSocket API: {e}, using default fallback")
-                    # Default fallback
-                    websocket_endpoint = "https://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production"
+                    logger.warning(f"Failed to discover WebSocket API: {e}")
+                    # Try to get from environment variable as last resort
+                    websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
+                    if not websocket_endpoint:
+                        raise ValueError("WebSocket endpoint could not be discovered and WEBSOCKET_ENDPOINT environment variable is not set")
         
         # Convert wss:// to https:// for the API Gateway Management API
         if websocket_endpoint.startswith('wss://'):

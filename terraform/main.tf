@@ -2105,6 +2105,15 @@ resource "aws_lambda_function" "chat_agent" {
       CHAT_FILES_BUCKET_NAME             = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
       CONGRESS_BILLS_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_name
       AGENT_FILES_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.chat_files_bucket_name
+      # S3 Bucket Names for Search Tools (using generic S3_BUCKET_NAME for tool compatibility)
+      USASPENDING_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_name
+      LDA_DISCLOSURES_S3_BUCKET_NAME  = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
+
+      # DynamoDB Table Names for Search Tools
+      FILINGS_TABLE_NAME  = data.terraform_remote_state.base_infra.outputs.lda_filings_table_name
+      AWARDS_TABLE_NAME   = data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_name
+      BILLS_TABLE_NAME    = data.terraform_remote_state.base_infra.outputs.congress_bills_table_name
+      DYNAMODB_TABLE_NAME = "${var.project_name}-politician-trades-${var.environment}"
 
       # Encryption secret for decrypting .cosine files from filesystem
       ENCRYPTION_SECRET = aws_secretsmanager_secret_version.encryption_secret.secret_string

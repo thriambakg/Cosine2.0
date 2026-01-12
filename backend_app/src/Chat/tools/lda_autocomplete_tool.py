@@ -38,7 +38,9 @@ except ImportError as e:
 s3_client = boto3.client('s3')
 
 # Environment variables
-S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-lda-disclosures-production')
+S3_BUCKET_NAME = os.environ.get('LDA_DISCLOSURES_S3_BUCKET_NAME') or os.environ.get('S3_BUCKET_NAME')
+if not S3_BUCKET_NAME:
+    raise ValueError("LDA_DISCLOSURES_S3_BUCKET_NAME or S3_BUCKET_NAME environment variable is required")
 S3_PREFIX = os.environ.get('S3_PREFIX', 'lists/')
 
 # Field type to S3 key mapping
