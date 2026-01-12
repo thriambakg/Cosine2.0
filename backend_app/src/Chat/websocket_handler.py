@@ -101,7 +101,7 @@ class WebSocketHandler:
                     apigw_client = boto3.client('apigatewayv2')
                     # List WebSocket APIs and find the one for this environment
                     environment = os.environ.get('ENVIRONMENT', 'production')
-                    project_name = 'cosine'  # Default, can be overridden
+                    project_name = os.environ.get('PROJECT_NAME', 'cosine')
                     api_name = f"{project_name}-websocket-api-{environment}"
                     
                     apis = apigw_client.get_apis()
@@ -115,19 +115,25 @@ class WebSocketHandler:
                             break
                 except Exception as e:
                     logger.warning(f"Failed to discover WebSocket API: {e}")
-                    # Try to get from environment variable as last resort
-                    websocket_endpoint = os.environ.get('WEBSOCKET_ENDPOINT')
-                    if not websocket_endpoint:
-                        raise ValueError("WebSocket endpoint could not be discovered and WEBSOCKET_ENDPOINT environment variable is not set")
+                    # If discovery fails, log a warning but don't raise - WebSocket functionality will be disabled
+                    # The endpoint will be None and send_message methods should handle this gracefully
+                    websocket_endpoint = None
+                    logger.error("WebSocket endpoint could not be determined. WebSocket message delivery will be disabled. Set WEBSOCKET_ENDPOINT or WEBSOCKET_API_ID environment variables to enable.")
         
-        # Convert wss:// to https:// for the API Gateway Management API
-        if websocket_endpoint.startswith('wss://'):
-            websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
-        
-        self.api_gateway = boto3.client(
-            'apigatewaymanagementapi',
-            endpoint_url=websocket_endpoint
-        )
+        # Initialize API Gateway client only if endpoint is available
+        if websocket_endpoint:
+            # Convert wss:// to https:// for the API Gateway Management API
+            if websocket_endpoint.startswith('wss://'):
+                websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
+            
+            self.api_gateway = boto3.client(
+                'apigatewaymanagementapi',
+                endpoint_url=websocket_endpoint
+            )
+        else:
+            # Set to None if endpoint couldn't be determined - methods will check this
+            self.api_gateway = None
+            logger.warning("WebSocket API Gateway client not initialized - message delivery will be disabled")
         
         # DynamoDB tables
         self.chat_connections_table = dynamodb.Table(os.environ['CHAT_CONNECTIONS_TABLE_NAME'])
@@ -177,6 +183,9 @@ class WebSocketHandler:
     
     def send_to_client(self, connection_id: str, message: Dict[str, Any]) -> bool:
         """Send message to WebSocket client"""
+        if not self.api_gateway:
+            logger.warning("Cannot send message: WebSocket API Gateway client not initialized")
+            return False
         try:
             self.api_gateway.post_to_connection(
                 ConnectionId=connection_id,
