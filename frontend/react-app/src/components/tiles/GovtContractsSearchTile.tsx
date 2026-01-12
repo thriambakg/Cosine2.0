@@ -137,6 +137,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   searchParams = {
     keywords: [],
     award_type: [],
+    award_id: [],
     awarding_agency_name: [],
     funding_agency_name: [],
     recipient_name: [],
@@ -2297,6 +2298,20 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               allowCustomInput={false}
             />
 
+            {/* Award ID - Exact match, multi-select, no autocomplete */}
+            <MultiSelectField<string>
+              label="Award ID"
+              selectedItems={currentSearchParams.award_id || []}
+              onItemsChange={(awardIds) => {
+                setCurrentSearchParams((prev) => ({ ...prev, award_id: awardIds }));
+              }}
+              suggestions={[]}
+              onSearch={() => []}
+              renderItem={(awardId) => awardId}
+              placeholder="Enter award IDs (exact match)..."
+              disableAutocomplete={true}
+            />
+
             {/* Recipient */}
             <MultiSelectField<{ id?: string; name?: string; text?: string; [key: string]: any }>
               label="Recipient"
@@ -2518,6 +2533,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               setCurrentSearchParams({
                 keywords: [],
                 award_type: [],
+                award_id: [],
                 awarding_agency_name: [],
                 funding_agency_name: [],
                 recipient_id: [],

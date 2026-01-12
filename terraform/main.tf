@@ -1115,6 +1115,8 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           "${data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn}/index/*",
           data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn}/index/*",
           "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}",
           "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}/index/*"
         ]
@@ -1651,10 +1653,107 @@ resource "aws_iam_role_policy_attachment" "chat_agent_ecr_policy" {
   policy_arn = aws_iam_policy.lambda_ecr_policy.arn
 }
 
-# Attach DynamoDB policy for chat agent
+# Dedicated DynamoDB policy for chat agent (principle of least privilege)
+# Chat agent only needs access to specific tables it uses, not all tables
+resource "aws_iam_policy" "chat_agent_dynamodb_policy" {
+  name        = "${var.project_name}-chat-agent-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for chat agent - only tables it needs access to"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # Chat sessions table - read-write access (needed for session management)
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+        ]
+      },
+      # Chat connections table - read-write access (needed for WebSocket connection management)
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*"
+        ]
+      },
+      # LDA filings table - read-only access (for LDA search tool)
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn}/index/*"
+        ]
+      },
+      # USAspending awards table - read-only access (for government contracts search tool)
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
+        ]
+      },
+      # Congress bills table - read-only access (for congress bills search tool)
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn}/index/*"
+        ]
+      },
+      # Politician trades table - read-only access (for politician trades search tool)
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Attach dedicated DynamoDB policy for chat agent
 resource "aws_iam_role_policy_attachment" "chat_agent_dynamodb_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
+  policy_arn = aws_iam_policy.chat_agent_dynamodb_policy.arn
 }
 
 # Attach KMS policy for DynamoDB encryption
