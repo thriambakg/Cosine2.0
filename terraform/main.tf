@@ -1080,10 +1080,17 @@ resource "aws_iam_policy" "congress_bills_s3_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Lambda functions to access DynamoDB
-resource "aws_iam_policy" "lambda_dynamodb_policy" {
-  name        = "${var.project_name}-lambda-dynamodb-policy-${var.environment}"
-  description = "Policy for Lambda functions to access DynamoDB"
+# REMOVED: Shared lambda_dynamodb_policy
+# Each Lambda now has its own dedicated DynamoDB policy with only the permissions it needs
+# This follows the principle of least privilege and improves security
+
+# Dedicated DynamoDB policies for each Lambda (principle of least privilege)
+# Each Lambda gets only the tables and actions it needs
+
+# User Dashboard Lambda - only needs user_profiles_table
+resource "aws_iam_policy" "user_dashboard_dynamodb_policy" {
+  name        = "${var.project_name}-user-dashboard-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for user_dashboard lambda - user_profiles_table only"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1092,33 +1099,175 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
-          "dynamodb:BatchGetItem",
           "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem",
-          "dynamodb:Query",
-          "dynamodb:Scan"
+          "dynamodb:UpdateItem"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*",
+          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Stock Alerts Lambda - needs alerts_table and user_profiles_table
+resource "aws_iam_policy" "stock_alerts_dynamodb_policy" {
+  name        = "${var.project_name}-stock-alerts-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for stock_alerts lambda - alerts_table and user_profiles_table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query"
+        ]
+        Resource = [
           data.terraform_remote_state.base_infra.outputs.alerts_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.alerts_table_arn}/index/*",
+          data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.user_profiles_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Stock Alert Trigger Lambda - only needs alerts_table (read and update)
+resource "aws_iam_policy" "stock_alert_trigger_dynamodb_policy" {
+  name        = "${var.project_name}-stock-alert-trigger-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for stock_alert_trigger lambda - alerts_table only"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.alerts_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.alerts_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# WebSocket Handler Lambda - needs chat_connections_table and chat_sessions_table
+resource "aws_iam_policy" "websocket_handler_dynamodb_policy" {
+  name        = "${var.project_name}-websocket-handler-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for websocket_handler lambda - chat_connections_table and chat_sessions_table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query"
+        ]
+        Resource = [
           data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn,
           "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*",
           data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*",
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# Session Management Lambda - only needs chat_sessions_table
+resource "aws_iam_policy" "session_management_dynamodb_policy" {
+  name        = "${var.project_name}-session-management-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for session_management lambda - chat_sessions_table only"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:BatchWriteItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# File Return Service Lambda - only needs chat_sessions_table (read-only)
+resource "aws_iam_policy" "file_return_dynamodb_policy" {
+  name        = "${var.project_name}-file-return-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for file_return lambda - chat_sessions_table read-only"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# News Search Lambda - only needs news_table
+resource "aws_iam_policy" "news_search_dynamodb_policy" {
+  name        = "${var.project_name}-news-search-dynamodb-policy-${var.environment}"
+  description = "Dedicated DynamoDB policy for news_search lambda - news_table only"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:GetItem"
+        ]
+        Resource = [
           data.terraform_remote_state.base_infra.outputs.news_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.news_table_arn}/index/*",
-          # Search tables for chat agent tools
-          data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn}/index/*",
-          data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*",
-          data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn}/index/*",
-          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}",
-          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/cosine-politician-trades-${var.environment}/index/*"
+          "${data.terraform_remote_state.base_infra.outputs.news_table_arn}/index/*"
         ]
       }
     ]
@@ -1375,7 +1524,7 @@ module "user_dashboard_lambda" {
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.user_dashboard_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
@@ -1431,7 +1580,7 @@ module "stock_alerts_lambda" {
   # Additional IAM policies
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.stock_alerts_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     module.ses.lambda_ses_policy_arn
   ]
@@ -1479,7 +1628,7 @@ module "stock_alert_trigger_lambda" {
 
   # Additional IAM policies
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.stock_alert_trigger_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     module.ses.lambda_ses_policy_arn
   ]
@@ -2043,7 +2192,7 @@ module "websocket_connection_lambda" {
 
   # Additional IAM policies
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.websocket_handler_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_websocket_policy.arn
   ]
@@ -2309,8 +2458,8 @@ module "stock_data_lambda" {
   ]
 
   # Additional IAM policies
+  # Note: stock_data lambda does not use DynamoDB - removed lambda_dynamodb_policy
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_secrets_policy.arn
   ]
@@ -2359,8 +2508,8 @@ module "stock_statistics_lambda" {
   ]
 
   # Additional IAM policies
+  # Note: stock_statistics lambda does not use DynamoDB - removed lambda_dynamodb_policy
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 
@@ -2409,8 +2558,8 @@ module "volatility_fetch_lambda" {
   ]
 
   # Additional IAM policies
+  # Note: volatility_fetch lambda does not use DynamoDB - removed lambda_dynamodb_policy
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 
@@ -2460,8 +2609,8 @@ module "robinhood_integration_lambda" {
   ]
 
   # Additional IAM policies
+  # Note: robinhood_integration lambda does not use DynamoDB - removed lambda_dynamodb_policy
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn
   ]
@@ -2509,7 +2658,7 @@ module "session_management_lambda" {
   ]
 
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.session_management_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_invoke_policy.arn,
     aws_iam_policy.lambda_secrets_policy.arn,
@@ -2604,7 +2753,7 @@ module "file_return_lambda" {
   ]
 
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.file_return_dynamodb_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
     aws_iam_policy.lambda_websocket_policy.arn,
     data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
@@ -2803,7 +2952,7 @@ module "news_search_lambda" {
   layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
 
   additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb_policy.arn,
+    aws_iam_policy.news_search_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 
