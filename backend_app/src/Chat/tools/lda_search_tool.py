@@ -723,7 +723,19 @@ def lda_search(
         if should_store_in_s3:
             # Store in S3
             try:
-                user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
+                # SECURITY: Get user_id from secure source (set by lambda_handler from authorizer/headers)
+                try:
+                    from utils.auth_helper import get_secure_user_id
+                    user_id = get_secure_user_id({}, fallback_to_env=True)
+                    if not user_id:
+                        raise ValueError("User ID not available from secure authentication source")
+                except ImportError:
+                    # Fallback if auth_helper not available
+                    user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+                    if not user_id:
+                        raise ValueError("User ID not available - authentication required")
+                    logger.warning("⚠️ Using user_id from environment (auth_helper not available)")
+                
                 session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
                 
                 s3_key = store_results_in_s3(result, user_id, session_id)

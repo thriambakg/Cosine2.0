@@ -562,7 +562,17 @@ def generate_chart_image_tool(
     """
     try:
         # Get user_id and session_id from environment (set by orchestrator)
-        user_id = os.environ.get('USER_ID')
+        # SECURITY: Get user_id from secure source (set by lambda_handler from authorizer/headers)
+        try:
+            from utils.auth_helper import get_secure_user_id
+            user_id = get_secure_user_id({}, fallback_to_env=True)
+            if not user_id:
+                raise ValueError("User ID not available from secure authentication source")
+        except ImportError:
+            user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+            if not user_id:
+                raise ValueError("User ID not available - authentication required")
+            logger.warning("⚠️ Using user_id from environment (auth_helper not available)")
         session_id = os.environ.get('SESSION_ID')
         
         if not user_id or not session_id:
@@ -607,7 +617,17 @@ def calculate_summary_metrics_tool(
     """
     try:
         # Get user_id and session_id from environment (set by orchestrator)
-        user_id = os.environ.get('USER_ID')
+        # SECURITY: Get user_id from secure source (set by lambda_handler from authorizer/headers)
+        try:
+            from utils.auth_helper import get_secure_user_id
+            user_id = get_secure_user_id({}, fallback_to_env=True)
+            if not user_id:
+                raise ValueError("User ID not available from secure authentication source")
+        except ImportError:
+            user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+            if not user_id:
+                raise ValueError("User ID not available - authentication required")
+            logger.warning("⚠️ Using user_id from environment (auth_helper not available)")
         session_id = os.environ.get('SESSION_ID')
         
         if not user_id or not session_id:

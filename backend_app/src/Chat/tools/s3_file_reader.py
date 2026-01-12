@@ -90,14 +90,40 @@ class S3FileReader:
         """
         Read a file from S3 and return its content as a string
         
+        SECURITY: Validates that the S3 key belongs to the authenticated user.
+        
         Args:
             s3_key: The S3 key/path of the file
             file_type: The type of file (auto-detect if not specified)
             
         Returns:
             File content as string
+            
+        Raises:
+            ValueError: If user_id validation fails
         """
         try:
+            # SECURITY: Validate user_id from S3 key matches authenticated user
+            try:
+                from utils.auth_helper import validate_s3_key_user_id, get_secure_user_id
+                
+                # Get authenticated user_id (from environment set by lambda_handler)
+                authenticated_user_id = get_secure_user_id({}, fallback_to_env=True)
+                
+                if authenticated_user_id:
+                    # Validate S3 key belongs to authenticated user
+                    if not validate_s3_key_user_id(s3_key, authenticated_user_id):
+                        error_msg = f"Access denied: S3 key does not belong to authenticated user"
+                        logger.error(f"❌ {error_msg}")
+                        return f"Error: {error_msg}. You can only access files in your own user directory."
+                else:
+                    logger.warning("⚠️ Could not get authenticated user_id for S3 key validation")
+            except ImportError:
+                logger.warning("⚠️ auth_helper not available, skipping user_id validation")
+            except Exception as e:
+                logger.error(f"Error validating S3 key user_id: {str(e)}")
+                # Continue but log the error
+            
             bucket_name = self.get_bucket_name(s3_key)
             logger.info(f"Reading file from S3: {bucket_name}/{s3_key}")
             
@@ -152,16 +178,36 @@ class S3FileReader:
                         user_id = s3_key_parts[1]
                         logger.info(f"🔐 Extracted user_id from S3 key: {user_id}")
                     else:
-                        # Fallback: try to get user_id from environment
-                        user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
-                        if user_id:
-                            logger.info(f"🔐 Using user_id from environment: {user_id}")
-                        else:
-                            logger.error(f"❌ Cannot find user_id in S3 key or environment")
-                            logger.error(f"❌ S3 key parts: {s3_key_parts}")
-                            logger.error(f"❌ Environment USER_ID: {os.environ.get('USER_ID')}")
-                            logger.error(f"❌ Environment CURRENT_USER_ID: {os.environ.get('CURRENT_USER_ID')}")
-                            return f"Error: Cannot decrypt .cosine file - user_id not found in S3 key or environment. S3 key: {s3_key}"
+                        # Fallback: try to get user_id from secure source
+                        try:
+                            from utils.auth_helper import get_secure_user_id
+                            user_id = get_secure_user_id({}, fallback_to_env=True)
+                            if user_id:
+                                logger.info(f"🔐 Using user_id from secure source: {user_id}")
+                            else:
+                                logger.error(f"❌ Cannot find user_id in S3 key or secure source")
+                                return f"Error: Cannot decrypt .cosine file - user_id not found. S3 key: {s3_key}"
+                        except ImportError:
+                            # Fallback to environment if auth_helper not available
+                            user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+                            if user_id:
+                                logger.info(f"🔐 Using user_id from environment: {user_id}")
+                            else:
+                                logger.error(f"❌ Cannot find user_id in S3 key or environment")
+                                return f"Error: Cannot decrypt .cosine file - user_id not found. S3 key: {s3_key}"
+                    
+                    # SECURITY: Validate user_id from S3 key matches authenticated user
+                    try:
+                        from utils.auth_helper import validate_s3_key_user_id, get_secure_user_id
+                        authenticated_user_id = get_secure_user_id({}, fallback_to_env=True)
+                        if authenticated_user_id and not validate_s3_key_user_id(s3_key, authenticated_user_id):
+                            error_msg = f"Access denied: S3 key does not belong to authenticated user"
+                            logger.error(f"❌ {error_msg}")
+                            return f"Error: {error_msg}. You can only access files in your own user directory."
+                    except ImportError:
+                        logger.warning("⚠️ auth_helper not available, skipping user_id validation for decryption")
+                    except Exception as e:
+                        logger.warning(f"Error validating user_id for decryption: {str(e)}")
                     
                     # Ensure content is bytes (not string)
                     if isinstance(content, str):

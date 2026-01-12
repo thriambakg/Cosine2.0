@@ -828,7 +828,17 @@ class CongressBillsSearcher:
             if should_store_in_s3:
                 # Store in data-files and return S3 key
                 try:
-                    user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID', 'default')
+                    # SECURITY: Get user_id from secure source (set by lambda_handler from authorizer/headers)
+                    try:
+                        from utils.auth_helper import get_secure_user_id
+                        user_id = get_secure_user_id({}, fallback_to_env=True)
+                        if not user_id:
+                            raise ValueError("User ID not available from secure authentication source")
+                    except ImportError:
+                        user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+                        if not user_id:
+                            raise ValueError("User ID not available - authentication required")
+                        logger.warning("⚠️ Using user_id from environment (auth_helper not available)")
                     session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
                     bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
                     if not bucket_name:

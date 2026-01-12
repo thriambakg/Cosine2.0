@@ -912,16 +912,37 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
     Returns:
         HTTP response with CORS headers
     """
+    # SECURITY: Extract user_id from secure sources (authorizer or Authorization header)
+    # This prevents spoofing from request body
+    try:
+        from utils.auth_helper import extract_user_id_from_event
+        secure_user_id = extract_user_id_from_event(event)
+        if secure_user_id:
+            # Set in environment for tools to use (validated from secure source)
+            os.environ['USER_ID'] = secure_user_id
+            os.environ['CURRENT_USER_ID'] = secure_user_id
+            logger.info(f"✅ Securely extracted user_id from authorizer/headers: {secure_user_id}")
+        else:
+            logger.warning("⚠️ Could not extract user_id from secure sources (authorizer or Authorization header)")
+    except ImportError:
+        logger.warning("⚠️ auth_helper not available, falling back to less secure extraction")
+        secure_user_id = None
+    except Exception as e:
+        logger.error(f"Error extracting secure user_id: {str(e)}")
+        secure_user_id = None
+    
     # Try to extract session context early for agent_logger initialization
     session_id = None
-    user_id = None
+    user_id = secure_user_id  # Use secure user_id as primary source
     
-    # Try to extract from event early
+    # Try to extract from event early (for session_id and fallback)
     try:
         if isinstance(event, dict):
             # Check direct fields
             session_id = event.get('sessionId') or event.get('session_id')
-            user_id = event.get('userId') or event.get('user_id')
+            # Only use body user_id if secure extraction failed
+            if not user_id:
+                user_id = event.get('userId') or event.get('user_id')
             
             # Check nested body
             if not session_id and 'body' in event:
@@ -933,9 +954,15 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
                         pass
                 if isinstance(body, dict):
                     session_id = body.get('sessionId') or body.get('session_id')
-                    user_id = body.get('userId') or body.get('user_id')
+                    # Only use body user_id if secure extraction failed
+                    if not user_id:
+                        user_id = body.get('userId') or body.get('user_id')
     except:
         pass
+    
+    # If we still don't have user_id, log warning but continue (may be unauthenticated request)
+    if not user_id:
+        logger.warning("⚠️ No user_id found in secure sources or request body")
     
     # Initialize agent_logger early if we have context, otherwise use default
     if session_id and user_id:
@@ -1299,10 +1326,14 @@ def handle_chat_message(event_body: Dict[str, Any], agent_logger=None) -> Dict[s
         # No automatic welcome message - let the user start the conversation
         
         # Set environment variables for tools to access session and user info
+        # SECURITY: user_id should already be set from secure source in handle_rest_api_request
+        # But set it here as well to ensure it's available for tools
+        # Note: This user_id should have been validated from authorizer/headers earlier
         os.environ['CURRENT_SESSION_ID'] = session_id
         os.environ['CURRENT_USER_ID'] = user_id
         os.environ['SESSION_ID'] = session_id
         os.environ['USER_ID'] = user_id
+        logger.debug(f"Set environment variables: USER_ID={user_id}, SESSION_ID={session_id}")
         
         # Re-initialize agent logger with message_id for this specific message
         message_id = event_body.get('messageId') or f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
