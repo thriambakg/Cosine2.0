@@ -44,6 +44,7 @@ import { addArticleToContext, addMultipleArticlesToContext } from '../components
 import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
+import { getSearchPageBatchSize } from './config/searchPageConfig';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -310,7 +311,7 @@ const NewsSearchPage: React.FC = () => {
     setHasMore(false);
     
     try {
-      const fetchPageSize = 50; // Use smaller page size for better pagination
+      const fetchPageSize = getSearchPageBatchSize('news');
       
       // Build search request - only keywords are sent to API (same logic as NewsTile)
       const searchRequest: NewsSearchRequest = {
@@ -321,7 +322,7 @@ const NewsSearchPage: React.FC = () => {
         },
         dateFrom: searchParams.dateFrom || undefined,
         dateTo: searchParams.dateTo || undefined,
-        limit: fetchPageSize,
+        limit: getSearchPageBatchSize('news'),
       };
       
       console.log('🔍 News Search Request:', {
@@ -373,7 +374,7 @@ const NewsSearchPage: React.FC = () => {
     setSearchError(null);
     
     try {
-      const fetchPageSize = 50; // Use same page size as initial search
+      const fetchPageSize = getSearchPageBatchSize('news');
       
       // Build search request - only keywords are sent to API (same logic as NewsTile)
       const searchRequest: NewsSearchRequest = {

@@ -41,6 +41,7 @@ import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { addStockToContext, addMultipleStocksToContext } from '../components/tiles/common';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { useAuth } from '@/contexts/AuthContext';
+import { getSearchPageBatchSize } from './config/searchPageConfig';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -279,7 +280,7 @@ const StockScreenerSearchPage: React.FC = () => {
       
       const requestPayload = {
         criteria: backendCriteria,
-        maxResults: 100  // Page size
+        maxResults: getSearchPageBatchSize('stock_screener')
       };
       
       console.log('📊 Stock Screener: Making API call with payload:', requestPayload);
@@ -361,7 +362,7 @@ const StockScreenerSearchPage: React.FC = () => {
       
       const requestPayload = {
         criteria: backendCriteria,
-        maxResults: 100,  // Page size
+        maxResults: getSearchPageBatchSize('stock_screener'),
         lastEvaluatedKey: lastEvaluatedKey
       };
       

@@ -609,3 +609,4 @@ Based on the current webpage and user intent, focus on:
             return {'error': str(e)}
 
 # Global context-aware agent instance
+context_aware_agent = ContextAwareAgent()

@@ -52,6 +52,7 @@ import { addAwardToContext, addMultipleAwardsToContext } from '../components/til
 import { compressedSessionStorage } from '../utils/compressedStorage';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
+import { getSearchPageBatchSize } from './config/searchPageConfig';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -697,7 +698,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       const response = await govtContractsSearchAPI.search({
         filters,
-        limit: 25,
+        limit: getSearchPageBatchSize('govt_contracts'),
       });
 
       if (response.success) {
@@ -762,7 +763,7 @@ const GovtContractsSearchPage: React.FC = () => {
 
       const response = await govtContractsSearchAPI.search({
         filters,
-        limit: 25,
+        limit: getSearchPageBatchSize('govt_contracts'),
         last_evaluated_key: lastEvaluatedKey,
       });
 

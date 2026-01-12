@@ -50,6 +50,7 @@ import MultiSelectField from '../components/MultiSelectField';
 import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../services/api';
+import { getSearchPageBatchSize } from './config/searchPageConfig';
 
 // Minimum date for date filters (January 1, 2025)
 const MIN_DATE = '2025-01-01';
@@ -519,7 +520,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     setHasMore(false);
     
     try {
-      const fetchPageSize = 100; // Use large page size to minimize API calls
+      const fetchPageSize = getSearchPageBatchSize('politician_trades');
       
       // Convert amountMin/amountMax to amountRange for API
       const amountRange = convertAmountRangeToAPI(amountMin, amountMax);
@@ -575,7 +576,7 @@ const PoliticianTradesSearchPage: React.FC = () => {
     setSearchError(null);
     
     try {
-      const fetchPageSize = 100; // Use same page size as initial search
+      const fetchPageSize = getSearchPageBatchSize('politician_trades');
       
       // Convert amountMin/amountMax to amountRange for API
       const amountRange = convertAmountRangeToAPI(amountMin, amountMax);

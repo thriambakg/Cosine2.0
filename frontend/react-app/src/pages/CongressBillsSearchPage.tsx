@@ -52,6 +52,7 @@ import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import MultiSelectField from '../components/MultiSelectField';
 import { addBillToContext, addMultipleBillsToContext } from '../components/tiles/common/contextManager';
+import { getSearchPageBatchSize } from './config/searchPageConfig';
 
 // Custom styled components
 const GlassCard = ({ children, sx = {}, ...props }: any) => {
@@ -605,6 +606,7 @@ const CongressBillsSearchPage: React.FC = () => {
 
       const response = await congressBillsSearchAPI.search({
         filters,
+        limit: getSearchPageBatchSize('congress_bills'),
         last_evaluated_key: lastEvaluatedKey,
       });
 

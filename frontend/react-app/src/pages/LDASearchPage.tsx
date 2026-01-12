@@ -44,6 +44,7 @@ import FileBrowserDialog from '../components/common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../hooks/useDialogManagerHelpers';
 import { filesystemAPI } from '../services/api';
 import { compressedSessionStorage } from '../utils/compressedStorage';
+import { getSearchPageBatchSize } from './config/searchPageConfig';
 
 // Minimum date for date filters (January 1, 2000)
 const MIN_DATE = '2000-01-01';
@@ -789,6 +790,7 @@ const LDASearchPage: React.FC = () => {
       
       const response = await ldaSearchAPI.search({
         filters: filters,
+        limit: getSearchPageBatchSize('lda'),
         last_evaluated_key: lastEvaluatedKey,
       });
       
