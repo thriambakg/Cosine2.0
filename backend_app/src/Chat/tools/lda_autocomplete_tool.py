@@ -238,12 +238,23 @@ def handle_autocomplete_request(
         
         logger.info(f"Found {len(matches)} matches for field_type={field_type}")
         
-        # Add field type indicator to results
+        # Add field type indicator to results with clear labels
+        # Map field types to human-readable descriptions
+        type_descriptions = {
+            'registrant': 'as a registrant',
+            'client': 'as a client',
+            'lobbyist': 'as a lobbyist',
+            'pac': 'as a PAC',
+            'foreign': 'as a foreign entity',
+            'country': 'as a country'
+        }
+        type_description = type_descriptions.get(field_type, f'({field_type})')
+        
         all_results[field_type] = [
             {
                 'value': match,
                 'type': field_type,
-                'label': f"{match} ({field_type})"
+                'label': f"{match} {type_description}"
             }
             for match in matches
         ]
@@ -270,12 +281,21 @@ def lda_autocomplete(
     Search for LDA autocomplete suggestions across multiple field types.
     Useful for finding registrants, clients, lobbyists, PACs, or foreign entities.
     
-    When a generic name is provided (e.g., "Apple"), this will search across all field types
-    and return matches grouped by type. The agent should ask the user to clarify which type
-    they're interested in if multiple types have matches.
+    **CRITICAL: When multiple types have matches, you MUST ask the user to select which one to use.**
+    
+    Workflow:
+    1. User asks for lobbying documents from "Tesla" (or similar generic name)
+    2. Call lda_autocomplete("Tesla") to find all matches across all types
+    3. If results show matches in multiple types (e.g., client, registrant), you MUST:
+       - Present the options clearly: "I found Tesla as both a client and a registrant. Which one would you like to search for?"
+       - Wait for user response
+       - Use the exact value from the autocomplete results when calling lda_search
+    4. If only one type has matches, proceed directly with lda_search using that value
+    
+    The response includes a "clarification_needed" flag - if True, you MUST ask the user before proceeding.
     
     Args:
-        query: Search query (e.g., "Apple", "Microsoft", "John Smith")
+        query: Search query (e.g., "Apple", "Microsoft", "John Smith", "Tesla")
         field_types: JSON string or comma-separated string of field types to search.
                     Options: 'registrant', 'client', 'lobbyist', 'pac', 'foreign', 'country'.
                     If not provided, searches all types.
@@ -283,11 +303,17 @@ def lda_autocomplete(
     
     Returns:
         JSON string with autocomplete results grouped by field type.
-        Each field type contains a list of matches with 'value', 'type', and 'label'.
+        - Each result has 'value' (exact name to use in lda_search), 'type', and 'label' (e.g., "Tesla as a client")
+        - If "clarification_needed": true, you MUST ask the user which type to use
+        - Use the exact 'value' from results when calling lda_search
         
     Example:
-        # Search for "Apple" across all types
-        lda_autocomplete("Apple")
+        # Search for "Tesla" across all types
+        result = lda_autocomplete("Tesla")
+        # If result shows matches in both 'client' and 'registrant':
+        # -> Ask user: "I found Tesla as both a client and a registrant. Which one would you like to search for?"
+        # -> Wait for user response
+        # -> Use exact value from results: lda_search('{"client_name": "TESLA INC."}') or lda_search('{"registrant_name": "TESLA INC."}')
         
         # Search only registrants and clients
         lda_autocomplete("Apple", '["registrant", "client"]')
@@ -338,15 +364,41 @@ def lda_autocomplete(
         
         # Add helpful message if multiple types have matches
         matches_by_type = {k: len(v) for k, v in result['results'].items() if v}
+        type_descriptions = {
+            'registrant': 'registrant',
+            'client': 'client',
+            'lobbyist': 'lobbyist',
+            'pac': 'PAC',
+            'foreign': 'foreign entity',
+            'country': 'country'
+        }
+        
         if len(matches_by_type) > 1:
             response["clarification_needed"] = True
+            # Create a detailed list of matches by type
+            type_summary = []
+            for field_type, count in matches_by_type.items():
+                type_name = type_descriptions.get(field_type, field_type)
+                type_summary.append(f"{count} as {type_name}")
+            
             response["message"] = (
-                f"Found matches across {len(matches_by_type)} different types: {', '.join(matches_by_type.keys())}. "
-                f"Please ask the user which type they're interested in, or search all if they want comprehensive results."
+                f"Found multiple matches for '{query}' across different roles:\n"
+                f"- {', '.join(type_summary)}\n\n"
+                f"**IMPORTANT: You must ask the user to specify which role they want to search for.** "
+                f"For example: 'I found Tesla as both a client and a registrant. Which one would you like to search for?' "
+                f"Then use the exact value from the results when calling lda_search."
             )
+            # Include sample results for each type to help the agent present options
+            response["sample_results"] = {
+                field_type: results[:3]  # First 3 results per type
+                for field_type, results in result['results'].items()
+                if results
+            }
         elif len(matches_by_type) == 1:
             response["clarification_needed"] = False
-            response["message"] = f"Found {result['total_count']} match(es) in {list(matches_by_type.keys())[0]}"
+            field_type = list(matches_by_type.keys())[0]
+            type_name = type_descriptions.get(field_type, field_type)
+            response["message"] = f"Found {result['total_count']} match(es) for '{query}' as {type_name}"
         else:
             response["clarification_needed"] = False
             response["message"] = f"No matches found for '{query}'"

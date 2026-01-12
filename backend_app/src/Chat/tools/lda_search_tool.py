@@ -618,15 +618,19 @@ def lda_search(
     
     **IMPORTANT: Use autocomplete before searching:**
     Before using this tool, you should first use lda_autocomplete to find the exact names of registrants, clients,
-    lobbyists, or PACs, especially if the user provides a generic name like "Apple" or "Microsoft".
+    lobbyists, or PACs, especially if the user provides a generic name like "Apple", "Microsoft", or "Tesla".
+    
+    **CRITICAL: When autocomplete returns multiple types, you MUST ask the user to select which one to use.**
     
     **Workflow for generic names:**
-    1. User asks for contracts/filings on "X company"
+    1. User asks for lobbying documents from "X company" (e.g., "Tesla", "Apple")
     2. First use lda_autocomplete("X company") to find all matches (limit: 10)
-    3. If multiple types have matches (e.g., "Apple" as both client and registrant),
-       ask the user to clarify which type they want, OR if matches are very similar, run searches for all matches
-    4. User selects or agent proceeds with autocompleted value(s)
-    5. Use lda_search with the exact autocompleted name(s)
+    3. **If autocomplete returns "clarification_needed": true:**
+       - You MUST ask the user: "I found [company] as both a [type1] and a [type2]. Which one would you like to search for?"
+       - Wait for the user's response
+       - Use the exact 'value' from the autocomplete results (e.g., "TESLA INC." not "Tesla")
+    4. If only one type has matches, proceed directly with the exact autocompleted value
+    5. Use lda_search with the exact autocompleted name(s) from the results
     
     **Pagination:**
     - Default limit is 5 results to conserve compute
