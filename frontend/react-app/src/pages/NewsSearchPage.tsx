@@ -322,7 +322,7 @@ const NewsSearchPage: React.FC = () => {
         },
         dateFrom: searchParams.dateFrom || undefined,
         dateTo: searchParams.dateTo || undefined,
-        limit: getSearchPageBatchSize('news'),
+        limit: fetchPageSize,
       };
       
       console.log('🔍 News Search Request:', {

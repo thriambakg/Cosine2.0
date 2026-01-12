@@ -39,6 +39,8 @@ import {
   Chat as SidebarChatIcon,
   ContentCopy as CopyIcon,
   ContentPaste as PasteIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
 } from '@mui/icons-material';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDialogManagerHelpers } from '@/hooks/useDialogManagerHelpers';
@@ -87,6 +89,7 @@ interface FileSystemItem {
 
 interface Folder extends FileSystemItem {
   type: 'folder';
+  path?: string; // Folder path for copying operations
 }
 
 interface FileItem extends FileSystemItem {
@@ -921,6 +924,7 @@ const FilesPage: React.FC = () => {
               parentId: folderPath || 'root',
               created_at: folder.created_at || Date.now(),
               updated_at: folder.updated_at || Date.now(),
+              path: folder.path || (folderPath ? `${folderPath}/${folder.name}` : folder.name), // Store folder path
             };
             folderMap.set(folder.id, folderItem);
           });
@@ -1338,7 +1342,24 @@ const FilesPage: React.FC = () => {
     // Add all items to clipboard (just UUIDs and metadata, no content)
     for (const item of itemsToCopy) {
       const isFolder = item.type === 'folder';
-      const sourcePath = isFolder ? (item.id === 'root' ? '' : item.id) : folderPath;
+      // For folders, use the stored path if available, otherwise construct it
+      let sourcePath: string;
+      if (isFolder) {
+        if (item.id === 'root') {
+          sourcePath = '';
+        } else {
+          // Use stored path if available (from folder.path)
+          const folderItem = item as Folder;
+          if (folderItem.path) {
+            sourcePath = folderItem.path;
+          } else {
+            // Fallback: construct path from current folder + folder name
+            sourcePath = currentFolderId === 'root' ? item.name : `${currentFolderId}/${item.name}`;
+          }
+        }
+      } else {
+        sourcePath = folderPath;
+      }
       
       const clipboardItem = {
         item_id: item.id,
@@ -1396,6 +1417,118 @@ const FilesPage: React.FC = () => {
     } catch (error: any) {
       console.error('Error pasting items:', error);
       alert(`Failed to paste: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleDownloadFolder = async () => {
+    if (!selectedItem || selectedItem.type !== 'folder' || !user) return;
+    
+    try {
+      const folderPath = selectedItem.id === 'root' ? '' : selectedItem.id;
+      
+      const response = await filesystemAPI.downloadFolder({
+        user_id: user.id,
+        folder_path: folderPath,
+      });
+      
+      if (response.success && response.result) {
+        const { encrypted_data, filename } = response.result;
+        
+        // Convert base64 to blob
+        const binaryString = atob(encrypted_data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'application/octet-stream' });
+        
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        console.log('✅ Folder download started');
+      } else {
+        alert(`Failed to download folder: ${response.error || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      console.error('Error downloading folder:', error);
+      alert(`Failed to download folder: ${error.message || 'Unknown error'}`);
+    }
+    
+    setContextMenuAnchor(null);
+    setSelectedItem(null);
+  };
+
+  const handleUploadFolder = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!user || !event.target.files || event.target.files.length === 0) return;
+    
+    const file = event.target.files[0];
+    if (!file.name.endsWith('.cosine')) {
+      alert('Please select a .cosine folder file');
+      return;
+    }
+    
+    try {
+      setIsUploading(true);
+      
+      // Read file as base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const arrayBuffer = e.target?.result as ArrayBuffer;
+          const bytes = new Uint8Array(arrayBuffer);
+          
+          // Convert to base64
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const encrypted_data = btoa(binary);
+          
+          const folderPath = currentFolderId === 'root' ? '' : currentFolderId || '';
+          
+          const response = await filesystemAPI.uploadFolder({
+            user_id: user.id,
+            dest_folder_path: folderPath,
+            encrypted_data: encrypted_data,
+            filename: file.name,
+          });
+          
+          if (response.success) {
+            // Reload folder contents
+            await loadFolderContents(folderPath);
+            console.log('✅ Folder uploaded successfully');
+          } else {
+            alert(`Failed to upload folder: ${response.error || 'Unknown error'}`);
+          }
+        } catch (error: any) {
+          console.error('Error processing folder upload:', error);
+          alert(`Failed to upload folder: ${error.message || 'Unknown error'}`);
+        } finally {
+          setIsUploading(false);
+          // Reset file input
+          event.target.value = '';
+        }
+      };
+      
+      reader.onerror = () => {
+        alert('Error reading file');
+        setIsUploading(false);
+        event.target.value = '';
+      };
+      
+      reader.readAsArrayBuffer(file);
+    } catch (error: any) {
+      console.error('Error uploading folder:', error);
+      alert(`Failed to upload folder: ${error.message || 'Unknown error'}`);
+      setIsUploading(false);
+      event.target.value = '';
     }
   };
 
@@ -1668,6 +1801,48 @@ const FilesPage: React.FC = () => {
           >
             Add File
           </Button>
+          <input
+            accept=".cosine"
+            style={{ display: 'none' }}
+            id="folder-upload-input"
+            type="file"
+            onChange={handleUploadFolder}
+            disabled={isUploading}
+          />
+          <label htmlFor="folder-upload-input">
+            <Button
+              component="span"
+              startIcon={<UploadIcon />}
+              disabled={isUploading}
+              sx={{
+                backgroundColor: 'transparent',
+                color: '#9ca3af',
+                borderRadius: '0px',
+                border: '1px solid #374151',
+                fontWeight: 600,
+                textTransform: 'none',
+                px: 2,
+                py: 1,
+                '&:hover': { 
+                  backgroundColor: '#475569',
+                  borderColor: '#334155',
+                  color: '#9ca3af',
+                },
+                '&:disabled': {
+                  opacity: 0.5,
+                },
+                '& .MuiButton-startIcon': {
+                  color: '#9ca3af',
+                  marginRight: '8px',
+                },
+                '&:hover .MuiButton-startIcon': {
+                  color: '#9ca3af',
+                },
+              }}
+            >
+              Upload Folder
+            </Button>
+          </label>
         </Box>
       </Box>
 
@@ -2463,6 +2638,12 @@ const FilesPage: React.FC = () => {
           }}>
             <ViewIcon sx={{ mr: 1.5, fontSize: 18, color: '#3b82f6' }} />
             View
+          </MenuItem>
+        )}
+        {selectedItem && selectedItem.type === 'folder' && (
+          <MenuItem onClick={handleDownloadFolder}>
+            <DownloadIcon sx={{ mr: 1.5, fontSize: 18, color: '#10b981' }} />
+            Download Folder
           </MenuItem>
         )}
         {selectedItem && (

@@ -2336,6 +2336,58 @@ export const filesystemAPI = {
     }
   },
 
+  downloadFolder: async (params: { user_id: string; folder_path: string }): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'download_folder',
+          ...params,
+        }),
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem download folder error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to download folder',
+      };
+    }
+  },
+
+  uploadFolder: async (params: { user_id: string; dest_folder_path: string; encrypted_data: string; filename: string }): Promise<FilesystemResponse> => {
+    try {
+      const response = await apiRequest<FilesystemResponse>('/filesystem', {
+        method: 'POST',
+        body: JSON.stringify({
+          operation: 'upload_folder',
+          ...params,
+        }),
+      });
+      
+      // Dispatch success notification
+      if (response.success && response.result) {
+        const folderName = response.result.folder?.name || 'Folder';
+        const itemCount = response.result.items_created || 0;
+        const successEvent = new CustomEvent('filesystem-success', {
+          detail: { 
+            itemCount: itemCount,
+            itemName: folderName
+          }
+        });
+        window.dispatchEvent(successEvent);
+      }
+      
+      return response;
+    } catch (error: any) {
+      console.error('❌ Filesystem upload folder error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to upload folder',
+      };
+    }
+  },
+
   pasteItemsByIds: async (params: FilesystemPasteItemsByIdsRequest): Promise<FilesystemResponse> => {
     try {
       const response = await apiRequest<FilesystemResponse>('/filesystem', {
