@@ -1218,31 +1218,175 @@ def upload_folder(user_id: str, dest_folder_path: str, encrypted_data: bytes, fi
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise
 
-def paste_items_by_ids(user_id: str, dest_folder_path: str, item_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Paste multiple items by copying them first, then pasting
-    item_data: List of {item_id, source_folder_path, is_folder}
+def get_folder_structure_recursively(user_id: str, folder_path: str, base_path: str = '') -> Dict[str, Any]:
+    """
+    Recursively get folder structure with all items
+    Returns: {
+        'items': [{item_id, source_folder_path}],
+        'subfolders': {subfolder_name: {items: [...], subfolders: {...}}}
+    }
+    """
+    structure = {
+        'items': [],
+        'subfolders': {}
+    }
+    
+    try:
+        manifest = get_folder_manifest(user_id, folder_path)
+        
+        # Add all items in current folder
+        for item_id, item in manifest.get('items', {}).items():
+            structure['items'].append({
+                'item_id': item_id,
+                'source_folder_path': folder_path
+            })
+        
+        # Recursively get subfolders
+        for subfolder_id, folder_info in manifest.get('folders', {}).items():
+            subfolder_name = folder_info.get('name', f'folder_{subfolder_id}')
+            subfolder_path = folder_info.get('path', f"{folder_path}/{subfolder_name}")
+            
+            # Get subfolder structure
+            subfolder_structure = get_folder_structure_recursively(user_id, subfolder_path, base_path)
+            structure['subfolders'][subfolder_name] = subfolder_structure
+    
+    except Exception as e:
+        logger.warning(f"Error getting structure from folder {folder_path}: {str(e)}")
+    
+    return structure
+
+def copy_bulk_items(user_id: str, items: List[Dict[str, Any]], dest_folder_path: str) -> Dict[str, Any]:
+    """
+    Copy multiple items and folders in bulk - more efficient than sequential calls
+    Recursively collects all items from folders and maintains folder structure
+    items: List of {item_id, source_folder_path, is_folder}
     """
     try:
+        logger.info(f"📋 Copying {len(items)} items in bulk: user_id={user_id}, dest={dest_folder_path}")
+        
+        # Process each item/folder
         results = []
-        for item_info in item_data:
+        errors = []
+        folder_path_map = {}  # Map source folder path to destination folder path
+        
+        def copy_folder_recursive(source_folder_path: str, dest_parent_path: str, folder_name: str) -> str:
+            """Recursively copy a folder and return its new path"""
+            try:
+                # Create the folder
+                new_folder = create_folder(user_id, folder_name, dest_parent_path)
+                new_folder_path = new_folder['path']
+                folder_path_map[source_folder_path] = new_folder_path
+                
+                # Get folder structure
+                structure = get_folder_structure_recursively(user_id, source_folder_path)
+                
+                # Copy all items in this folder
+                for item_info in structure['items']:
+                    try:
+                        item_id = item_info['item_id']
+                        clipboard_data = copy_item(user_id, source_folder_path, item_id)
+                        result = paste_item(user_id, new_folder_path, clipboard_data)
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Error copying item {item_info['item_id']}: {str(e)}")
+                        errors.append({
+                            'item_id': item_info['item_id'],
+                            'error': str(e)
+                        })
+                
+                # Recursively copy subfolders
+                for subfolder_name, subfolder_structure in structure['subfolders'].items():
+                    # Find the subfolder's source path
+                    manifest = get_folder_manifest(user_id, source_folder_path)
+                    subfolder_source_path = None
+                    for subfolder_id, folder_info in manifest.get('folders', {}).items():
+                        if folder_info.get('name') == subfolder_name:
+                            subfolder_source_path = folder_info.get('path', f"{source_folder_path}/{subfolder_name}")
+                            break
+                    
+                    if subfolder_source_path:
+                        copy_folder_recursive(subfolder_source_path, new_folder_path, subfolder_name)
+                
+                return new_folder_path
+            except Exception as e:
+                logger.error(f"Error copying folder {folder_name}: {str(e)}")
+                errors.append({
+                    'item_id': source_folder_path,
+                    'error': str(e)
+                })
+                raise
+        
+        # Process each item
+        for item_info in items:
             item_id = item_info.get('item_id')
             source_folder_path = item_info.get('source_folder_path', '')
             is_folder = item_info.get('is_folder', False)
             
-            # Copy the item/folder first
-            if is_folder:
-                clipboard_data = copy_folder(user_id, source_folder_path)
-            else:
-                clipboard_data = copy_item(user_id, source_folder_path, item_id)
-            
-            # Then paste it
-            result = paste_item(user_id, dest_folder_path, clipboard_data)
-            results.append(result)
+            try:
+                if is_folder:
+                    # Get folder name
+                    manifest = get_folder_manifest(user_id, source_folder_path)
+                    folder_name = manifest.get('name', f'folder_{item_id}')
+                    
+                    # Recursively copy folder
+                    new_folder_path = copy_folder_recursive(source_folder_path, dest_folder_path, folder_name)
+                    results.append({
+                        'id': new_folder_path.split('/')[-1] if new_folder_path else item_id,
+                        'name': folder_name,
+                        'type': 'folder',
+                        'path': new_folder_path
+                    })
+                else:
+                    # Copy regular item
+                    clipboard_data = copy_item(user_id, source_folder_path, item_id)
+                    result = paste_item(user_id, dest_folder_path, clipboard_data)
+                    results.append(result)
+            except Exception as e:
+                logger.error(f"Error copying item {item_id}: {str(e)}")
+                errors.append({
+                    'item_id': item_id,
+                    'error': str(e)
+                })
         
         return {
             'pasted_items': results,
-            'count': len(results)
+            'count': len(results),
+            'errors': errors
         }
+    except Exception as e:
+        logger.error(f"Error in bulk copy: {str(e)}")
+        raise
+
+def paste_items_by_ids(user_id: str, dest_folder_path: str, item_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Paste multiple items by copying them first, then pasting
+    Uses bulk copy for efficiency when folders are involved
+    item_data: List of {item_id, source_folder_path, is_folder}
+    """
+    try:
+        # Check if any items are folders - if so, use bulk copy
+        has_folders = any(item.get('is_folder', False) for item in item_data)
+        
+        if has_folders:
+            # Use bulk copy which handles folders recursively
+            return copy_bulk_items(user_id, item_data, dest_folder_path)
+        else:
+            # For single items, use the original method
+            results = []
+            for item_info in item_data:
+                item_id = item_info.get('item_id')
+                source_folder_path = item_info.get('source_folder_path', '')
+                
+                # Copy the item
+                clipboard_data = copy_item(user_id, source_folder_path, item_id)
+                
+                # Then paste it
+                result = paste_item(user_id, dest_folder_path, clipboard_data)
+                results.append(result)
+            
+            return {
+                'pasted_items': results,
+                'count': len(results)
+            }
     except Exception as e:
         logger.error(f"Error pasting items by IDs: {str(e)}")
         raise
