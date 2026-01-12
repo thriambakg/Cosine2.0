@@ -1696,39 +1696,28 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
 }
 
 # IAM Policy for Chat Agent S3 access with restricted filesys permissions
-# Chat agent can only read from filesys folder, but has full access elsewhere
+# Chat agent is completely denied access to filesys folder - no read, no write, nothing
 resource "aws_iam_policy" "chat_agent_s3_restricted_policy" {
   name        = "${var.project_name}-chat-agent-s3-restricted-${var.environment}"
-  description = "Allows Chat Agent to read from filesys folder (read-only) and full access to other chat files"
+  description = "Allows Chat Agent full access to chat files, but completely denies ALL access to filesys folder"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # Explicitly deny write operations to filesys folder (must come first - Deny takes precedence)
+      # Explicitly deny ALL operations on filesys folder (must come first - Deny takes precedence)
+      # This completely prevents the agent from accessing filesystem items
       {
         Effect = "Deny"
         Action = [
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:PutObjectAcl",
-          "s3:DeleteObjectVersion"
+          "s3:*"
         ]
         Resource = [
           "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/users/*/filesys/*"
         ]
       },
-      # Allow read-only access to filesys folder
+      # Also deny ListBucket operations on filesys prefix
       {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject"
-        ]
-        Resource = [
-          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/users/*/filesys/*"
-        ]
-      },
-      {
-        Effect = "Allow"
+        Effect = "Deny"
         Action = [
           "s3:ListBucket"
         ]
