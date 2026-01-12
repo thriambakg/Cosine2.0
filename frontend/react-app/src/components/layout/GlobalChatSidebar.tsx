@@ -722,28 +722,52 @@ const GlobalChatSidebar: React.FC = () => {
   const previousFilesLengthRef = useRef<number>(0);
   
   // Track files changes for animation indicator (must be after uploadedFiles declaration)
+  // Tracks both user uploaded files and agent files from session variables
   // Only shows indicator when files are ADDED, not removed
   useEffect(() => {
-    const currentLength = uploadedFiles.length;
+    // Get total file count: user uploaded files + agent files from session
+    const userFilesCount = uploadedFiles.length;
+    const agentFilesCount = currentSession?.session_variables?.agent_files?.length || 0;
+    const totalFilesCount = userFilesCount + agentFilesCount;
     const previousLength = previousFilesLengthRef.current;
     
-    if (activeSessionId && currentLength > previousLength) {
+    console.log('📁 Files tracking:', { 
+      userFilesCount, 
+      agentFilesCount, 
+      totalFilesCount, 
+      previousLength,
+      activeSessionId 
+    });
+    
+    // Only trigger if total count INCREASED (files were added)
+    // This includes the first file (0 -> 1)
+    if (activeSessionId && totalFilesCount > previousLength) {
+      console.log('✅ Files count increased - showing blue indicator');
       // Files added - show indicator
       setShowFilesIndicator(true);
-      previousFilesLengthRef.current = currentLength;
+      previousFilesLengthRef.current = totalFilesCount;
       // Hide indicator after animation completes (3 seconds for 3 flashes)
       const timer = setTimeout(() => {
         setShowFilesIndicator(false);
       }, 3000);
       return () => clearTimeout(timer);
-    } else if (activeSessionId && currentLength < previousLength) {
+    } else if (activeSessionId && totalFilesCount < previousLength) {
       // Files were removed - update ref but don't show indicator
-      previousFilesLengthRef.current = currentLength;
+      console.log('📉 Files count decreased - updating ref only');
+      previousFilesLengthRef.current = totalFilesCount;
     } else if (!activeSessionId) {
       // Reset when session is cleared
+      console.log('🔄 Session cleared - resetting files ref');
       previousFilesLengthRef.current = 0;
+    } else {
+      // Update ref even if count unchanged (for initial load)
+      previousFilesLengthRef.current = totalFilesCount;
     }
-  }, [uploadedFiles.length, activeSessionId]);
+  }, [
+    uploadedFiles.length, 
+    currentSession?.session_variables?.agent_files?.length, 
+    activeSessionId
+  ]);
   // COMMENTED OUT: Old WebSocket ref (replaced by messaging service)
   // const sidebarWebSocketRef = useRef<WebSocket | null>(null);
   
@@ -1843,6 +1867,7 @@ const GlobalChatSidebar: React.FC = () => {
       const { sessionId, sessionVariables } = event.detail;
       console.log('📁 GlobalChatSidebar: Session variables updated:', sessionId, sessionVariables);
       console.log('📁 Sidebar: Uploaded files count:', sessionVariables?.uploaded_files?.length || 0);
+      console.log('📁 Sidebar: Agent files count:', sessionVariables?.agent_files?.length || 0);
       
       if (sessionId === activeSessionId) {
         // Update current session with new session variables
@@ -1852,7 +1877,10 @@ const GlobalChatSidebar: React.FC = () => {
         } : null);
         
         console.log('✅ Updated sidebar session variables in real-time');
-        console.log('📁 Sidebar: Files section should now show', sessionVariables?.uploaded_files?.length || 0, 'files');
+        console.log('📁 Sidebar: Files section should now show', 
+          (sessionVariables?.uploaded_files?.length || 0) + (sessionVariables?.agent_files?.length || 0), 
+          'total files'
+        );
       }
     };
 
@@ -2096,6 +2124,7 @@ const GlobalChatSidebar: React.FC = () => {
       const { sessionId, sessionVariables } = event.detail;
       console.log('📁 GlobalChatSidebar: Session variables updated:', sessionId, sessionVariables);
       console.log('📁 Sidebar: Uploaded files count:', sessionVariables?.uploaded_files?.length || 0);
+      console.log('📁 Sidebar: Agent files count:', sessionVariables?.agent_files?.length || 0);
       
       if (sessionId === activeSessionId) {
         // Update current session with new session variables
@@ -2105,7 +2134,10 @@ const GlobalChatSidebar: React.FC = () => {
         } : null);
         
         console.log('✅ Updated sidebar session variables in real-time');
-        console.log('📁 Sidebar: Files section should now show', sessionVariables?.uploaded_files?.length || 0, 'files');
+        console.log('📁 Sidebar: Files section should now show', 
+          (sessionVariables?.uploaded_files?.length || 0) + (sessionVariables?.agent_files?.length || 0), 
+          'total files'
+        );
       }
     };
 

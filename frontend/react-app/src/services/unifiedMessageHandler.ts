@@ -867,17 +867,38 @@ class UnifiedMessageHandlerService {
         const url = `${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`;
         const requestBody = JSON.stringify(fileUploadRequest);
         
+        // Get authorization token
+        let authHeader: Record<string, string> = {};
+        try {
+          const { fetchAuthSession } = await import('aws-amplify/auth');
+          const session = await fetchAuthSession();
+          const idToken = session.tokens?.idToken;
+          const accessToken = session.tokens?.accessToken;
+          const token = idToken || accessToken;
+          
+          if (token) {
+            authHeader = { Authorization: `Bearer ${token.toString()}` };
+            console.log('🔒 UnifiedMessageHandler: Added Authorization header for file upload');
+          } else {
+            console.warn('⚠️ UnifiedMessageHandler: No auth token found for file upload');
+          }
+        } catch (authErr) {
+          console.warn('⚠️ UnifiedMessageHandler: Failed to get auth token for file upload:', authErr);
+        }
+        
         console.log('📁 UnifiedMessageHandler: Uploading files via REST API:', {
           url,
           fileCount: filesData.length,
           messageId: messageData.messageId,
-          sessionId: sessionId
+          sessionId: sessionId,
+          hasAuth: !!authHeader.Authorization
         });
         
         const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...authHeader
           },
           body: requestBody
         });
@@ -952,8 +973,18 @@ class UnifiedMessageHandlerService {
         });
         window.dispatchEvent(fileMessageSentEvent);
         console.log('✅ UnifiedMessageHandler: Dispatched file-message-sent event to reset timeout');
-      } catch (error) {
+      } catch (error: any) {
         console.error('❌ UnifiedMessageHandler: Error in file message flow:', error);
+        // Provide more detailed error information
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+          console.error('❌ UnifiedMessageHandler: Network error - possible causes:');
+          console.error('   - CORS issue with API Gateway');
+          console.error('   - Network connectivity problem');
+          console.error('   - API Gateway endpoint not accessible');
+          console.error('   - Missing or invalid Authorization header');
+          console.error('   - Request blocked by browser security policy');
+          throw new Error('Failed to upload files: Network error. Please check your connection and try again.');
+        }
         throw error;
       }
     } else {

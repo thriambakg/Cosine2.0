@@ -58,6 +58,13 @@ class FileUploadHandler:
                 "text": "string", 
                 "timestamp": "number"
             },
+        
+        Args:
+            event: API Gateway event containing headers and body
+        """
+        # Extract origin from event headers for CORS
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
             "files": [
                 {
                     "filename": "string",
@@ -68,6 +75,10 @@ class FileUploadHandler:
             "context_items": []
         }
         """
+        # Extract origin from event headers for CORS
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
+        
         try:
             logger.info(f"File upload request received")
             logger.debug(f"Event structure: {json.dumps({k: str(type(v).__name__) for k, v in event.items() if k != 'body'}, indent=2)}")

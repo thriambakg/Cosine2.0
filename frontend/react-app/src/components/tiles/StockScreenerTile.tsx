@@ -1067,8 +1067,8 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       
       // Use bulk operation for better performance (much faster than individual calls)
       const response = await filesystemAPI.addBulkContextItems({
-        user_id: user.id,
-        folder_path: folderPath,
+          user_id: user.id,
+          folder_path: folderPath,
         items: items,
       });
       
