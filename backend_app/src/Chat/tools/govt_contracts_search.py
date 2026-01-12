@@ -93,7 +93,8 @@ def fetch_oversized_award_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
 
 def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
-    Search awards in DynamoDB directly
+    Search awards in DynamoDB using the same union-based approach as the Lambda function
+    Uses proper GSI queries for all filter types (zip code, recipient name, agency, etc.)
     """
     if not awards_table:
         raise Exception("DynamoDB awards table not initialized")
@@ -102,109 +103,66 @@ def search_awards_direct(filters: Dict[str, Any], limit: int = 100, last_evaluat
     logger.info(f"📋 Active filters: {list(filters.keys())}")
     
     try:
-        # Try to use AwardingAgencyNameFiscalYearIndex if agency name filter is present
-        if filters.get('awarding_agency_name'):
-            agency_names = filters['awarding_agency_name'] if isinstance(filters['awarding_agency_name'], list) else [filters['awarding_agency_name']]
-            agency_name = agency_names[0].strip() if agency_names else None
-            fiscal_year = filters.get('fiscal_year')
+        # Import the union search function from the Lambda module
+        # Add parent directories to path to import from govt_contracts module
+        backend_src_path = os.path.join(os.path.dirname(__file__), '..', '..')
+        if backend_src_path not in sys.path:
+            sys.path.insert(0, backend_src_path)
+        
+        try:
+            # Set environment variable to ensure Lambda function uses correct table name
+            original_table_name = os.environ.get('AWARDS_TABLE_NAME')
+            if AWARDS_TABLE_NAME:
+                os.environ['AWARDS_TABLE_NAME'] = AWARDS_TABLE_NAME
             
-            logger.info(f"🏢 Using agency name filter: {agency_name}, fiscal_year: {fiscal_year}")
+            from govt_contracts.search.lambda_function import search_awards_union
+            logger.info("✅ Using union-based search from Lambda function")
+            result = search_awards_union(filters=filters, limit=limit, last_evaluated_key=last_evaluated_key)
             
-            if agency_name:
-                params = {
-                    'IndexName': 'AwardingAgencyNameFiscalYearIndex',
-                    'KeyConditionExpression': Key('awarding_agency_name').eq(agency_name),
-                    'Limit': limit * 5
-                }
-                
-                if fiscal_year:
-                    fiscal_years = fiscal_year if isinstance(fiscal_year, list) else [fiscal_year]
-                    if fiscal_years:
-                        params['KeyConditionExpression'] = params['KeyConditionExpression'] & Key('fiscal_year').eq(fiscal_years[0])
-                
-                if last_evaluated_key:
-                    params['ExclusiveStartKey'] = last_evaluated_key
-                
-                logger.info(f"🔎 Querying GSI: {params['IndexName']} with hash_key: {agency_name}")
-                response = awards_table.query(**params)
-                items = response.get('Items', [])
-                last_eval_key = response.get('LastEvaluatedKey')
-                logger.info(f"✅ Query returned {len(items)} items (has_more: {last_eval_key is not None})")
-            else:
-                # Fall back to scan
-                logger.warning("⚠️ Agency name filter present but empty, falling back to scan")
-                scan_params = {'Limit': limit * 10}
-                if last_evaluated_key:
-                    scan_params['ExclusiveStartKey'] = last_evaluated_key
-                response = awards_table.scan(**scan_params)
-                items = response.get('Items', [])
-                last_eval_key = response.get('LastEvaluatedKey')
-                logger.info(f"📊 Scan returned {len(items)} items")
-        else:
-            # Fall back to scan with filters
-            logger.warning(f"⚠️ No awarding_agency_name filter - using TABLE SCAN (inefficient). Other filters present: {list(filters.keys())}")
-            logger.warning(f"⚠️ NOTE: This simplified search function does not support filters like recipient_zip_code. Consider using the Lambda API endpoint instead.")
+            # Restore original environment variable if needed
+            if original_table_name is not None:
+                os.environ['AWARDS_TABLE_NAME'] = original_table_name
+            elif 'AWARDS_TABLE_NAME' in os.environ and not AWARDS_TABLE_NAME:
+                del os.environ['AWARDS_TABLE_NAME']
+            
+            return result
+        except ImportError as e:
+            logger.warning(f"⚠️ Could not import search_awards_union from Lambda function: {e}")
+            logger.warning("⚠️ Falling back to simplified search (may not work correctly for all filters)")
+            # Fallback to basic scan (should not normally happen)
             scan_params = {'Limit': limit * 10}
             if last_evaluated_key:
                 scan_params['ExclusiveStartKey'] = last_evaluated_key
             response = awards_table.scan(**scan_params)
             items = response.get('Items', [])
             last_eval_key = response.get('LastEvaluatedKey')
-            logger.info(f"📊 Scan returned {len(items)} items (no filtering applied)")
-        
-        # Log sample items before filtering
-        if items:
-            sample_item = items[0]
-            logger.info(f"📦 Sample item keys: {list(sample_item.keys())}")
-            if 'recipient_location_zip' in sample_item:
-                logger.info(f"📮 Sample recipient_location_zip: {sample_item.get('recipient_location_zip')}")
-            if 'recipient_zip_code' in sample_item:
-                logger.info(f"📮 Sample recipient_zip_code: {sample_item.get('recipient_zip_code')}")
-            logger.info(f"📍 Sample recipient location: {sample_item.get('recipient_location_city', 'N/A')}, {sample_item.get('recipient_location_state', 'N/A')}")
-        
-        # Apply Python filters (simplified - can be enhanced)
-        filtered_items = items[:limit]  # Basic filtering - can be enhanced with full filter logic
-        logger.warning(f"⚠️ Using simplified filtering - only taking first {limit} items, no actual filter matching applied")
-        logger.info(f"📊 After simplified filtering: {len(filtered_items)} items")
-        
-        # Convert and enrich
-        results = [convert_decimal_to_float(item) for item in filtered_items]
-        enriched_results = []
-        for award in results:
-            oversize_s3_key = award.get('oversize_s3_key')
-            if oversize_s3_key:
-                full_award = fetch_oversized_award_from_s3(oversize_s3_key)
-                if full_award:
-                    award = convert_decimal_to_float(full_award)
-            enriched_results.append(award)
-        
-        # Log final results summary
-        logger.info(f"✅ Final results: {len(enriched_results)} awards returned")
-        if enriched_results:
-            sample_result = enriched_results[0]
-            logger.info(f"📦 Sample result - award_id: {sample_result.get('award_id', 'N/A')[:20]}...")
-            logger.info(f"📍 Sample result - location: {sample_result.get('recipient_location_city', 'N/A')}, {sample_result.get('recipient_location_state', 'N/A')}, zip: {sample_result.get('recipient_zip_code') or sample_result.get('recipient_location_zip', 'N/A')}")
-            logger.info(f"🏢 Sample result - recipient: {sample_result.get('recipient_name', 'N/A')[:50]}...")
-        
-        # Convert last_evaluated_key
-        serializable_last_key = None
-        if last_eval_key:
-            try:
-                serializable_last_key = convert_decimal_to_float(last_eval_key)
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key: {e}")
-        
-        search_method = 'query' if filters.get('awarding_agency_name') else 'scan'
-        logger.info(f"🔍 Search method used: {search_method}, has_more: {last_eval_key is not None}")
-        
-        return {
-            'success': True,
-            'results': enriched_results,
-            'count': len(enriched_results),
-            'has_more': last_eval_key is not None,
-            'last_evaluated_key': serializable_last_key,
-            'method': search_method
-        }
+            
+            # Convert and enrich
+            results = [convert_decimal_to_float(item) for item in items[:limit]]
+            enriched_results = []
+            for award in results:
+                oversize_s3_key = award.get('oversize_s3_key')
+                if oversize_s3_key:
+                    full_award = fetch_oversized_award_from_s3(oversize_s3_key)
+                    if full_award:
+                        award = convert_decimal_to_float(full_award)
+                enriched_results.append(award)
+            
+            serializable_last_key = None
+            if last_eval_key:
+                try:
+                    serializable_last_key = convert_decimal_to_float(last_eval_key)
+                except Exception as e:
+                    logger.warning(f"Error converting last_evaluated_key: {e}")
+            
+            return {
+                'success': True,
+                'results': enriched_results,
+                'count': len(enriched_results),
+                'has_more': last_eval_key is not None,
+                'last_evaluated_key': serializable_last_key,
+                'method': 'scan'
+            }
         
     except Exception as e:
         logger.error(f"Error searching awards: {str(e)}", exc_info=True)

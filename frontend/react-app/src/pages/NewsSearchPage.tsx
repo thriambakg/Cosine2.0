@@ -1883,4 +1883,3 @@ const NewsSearchPage: React.FC = () => {
 };
 
 export default NewsSearchPage;
-

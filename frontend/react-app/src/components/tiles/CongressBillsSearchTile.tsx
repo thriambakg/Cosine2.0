@@ -51,10 +51,11 @@ import {
   CongressBillsSearchFilters,
   CongressBill 
 } from '../../services/api';
-import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addBillToContext, addMultipleBillsToContext, getIconByName, getDefaultIconForTileType } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addBillToContext, addMultipleBillsToContext, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { policyAreaSuggestionsService } from '../../services/policyAreaSuggestions';
+import { getTileBatchSize, getTileMaxPages, getTileMaxPaginationKeys } from './config/tileConfig';
 
 // Bill Type options
 const BILL_TYPES = ['HR', 'S', 'HRES', 'SRES', 'HJRES', 'SJRES', 'HCONRES', 'SCONRES'];
@@ -178,6 +179,11 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   customColor,
   customIcon,
 }) => {
+  // Tile pagination configuration
+  const TILE_BATCH_SIZE = getTileBatchSize('congress_bills');
+  const TILE_MAX_PAGES = getTileMaxPages('congress_bills');
+  const TILE_MAX_PAGINATION_KEYS = getTileMaxPaginationKeys('congress_bills');
+  
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
   const { user } = useAuth();
@@ -250,14 +256,84 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     policyAreas: Set<string>;
     congresses: Set<number>;
     bipartisan: Set<number>;
-  }>({
-    billTypes: new Set(initialFilterSettings?.billTypes || []),
-    sponsorParties: new Set(initialFilterSettings?.sponsorParties || []),
-    sponsorStates: new Set(initialFilterSettings?.sponsorStates || []),
-    policyAreas: new Set(initialFilterSettings?.policyAreas || []),
-    congresses: new Set(initialFilterSettings?.congresses || []),
-    bipartisan: new Set(initialFilterSettings?.bipartisan || []),
+  }>(() => {
+    const initial = {
+      billTypes: new Set(initialFilterSettings?.billTypes || []),
+      sponsorParties: new Set(initialFilterSettings?.sponsorParties || []),
+      sponsorStates: new Set(initialFilterSettings?.sponsorStates || []),
+      policyAreas: new Set(initialFilterSettings?.policyAreas || []),
+      congresses: new Set(initialFilterSettings?.congresses || []),
+      bipartisan: new Set(initialFilterSettings?.bipartisan || []),
+    };
+    console.log('🔄 CongressBillsSearchTile: Initializing selectedFilters from props', {
+      tileId: id,
+      initialFilterSettings,
+      initializedFilters: {
+        billTypes: Array.from(initial.billTypes),
+        sponsorParties: Array.from(initial.sponsorParties),
+        sponsorStates: Array.from(initial.sponsorStates),
+        policyAreas: Array.from(initial.policyAreas),
+        congresses: Array.from(initial.congresses),
+        bipartisan: Array.from(initial.bipartisan),
+      },
+    });
+    return initial;
   });
+  
+  // Sync filterSettings prop to state (only if actually different)
+  useEffect(() => {
+    console.log('🔄 CongressBillsSearchTile: filterSettings sync effect triggered', {
+      tileId: id,
+      initialFilterSettings,
+    });
+    if (initialFilterSettings) {
+      setSelectedFilters(prev => {
+        const newFilters = {
+          billTypes: new Set(initialFilterSettings.billTypes || []),
+          sponsorParties: new Set(initialFilterSettings.sponsorParties || []),
+          sponsorStates: new Set(initialFilterSettings.sponsorStates || []),
+          policyAreas: new Set(initialFilterSettings.policyAreas || []),
+          congresses: new Set(initialFilterSettings.congresses || []),
+          bipartisan: new Set(initialFilterSettings.bipartisan || []),
+        };
+        // Check if filters actually changed
+        const prevAll = JSON.stringify({
+          billTypes: Array.from(prev.billTypes).sort(),
+          sponsorParties: Array.from(prev.sponsorParties).sort(),
+          sponsorStates: Array.from(prev.sponsorStates).sort(),
+          policyAreas: Array.from(prev.policyAreas).sort(),
+          congresses: Array.from(prev.congresses).sort(),
+          bipartisan: Array.from(prev.bipartisan).sort(),
+        });
+        const newAll = JSON.stringify({
+          billTypes: Array.from(newFilters.billTypes).sort(),
+          sponsorParties: Array.from(newFilters.sponsorParties).sort(),
+          sponsorStates: Array.from(newFilters.sponsorStates).sort(),
+          policyAreas: Array.from(newFilters.policyAreas).sort(),
+          congresses: Array.from(newFilters.congresses).sort(),
+          bipartisan: Array.from(newFilters.bipartisan).sort(),
+        });
+        if (prevAll === newAll) {
+          console.log('🔄 CongressBillsSearchTile: filterSettings unchanged, skipping update', {
+            tileId: id,
+            currentFilters: prevAll,
+            newFilters: newAll,
+          });
+          return prev;
+        }
+        console.log('🔄 CongressBillsSearchTile: Updating selectedFilters from filterSettings prop', {
+          tileId: id,
+          previousFilters: prevAll,
+          newFilters: newAll,
+        });
+        return newFilters;
+      });
+    } else {
+      console.log('🔄 CongressBillsSearchTile: No initialFilterSettings prop provided', {
+        tileId: id,
+      });
+    }
+  }, [initialFilterSettings, id]);
   
   const [selectedBills, setSelectedBills] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -437,15 +513,27 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     return policyAreaSuggestionsService.getSuggestions(query, 20);
   }, [isPolicyAreaDataLoaded]);
   
-  const performSearch = useCallback(async () => {
+  const performSearch = useCallback(async (clearFilters: boolean = true) => {
     if (!currentSearchParams) return;
     
-    console.log('📋 CongressBillsSearchTile: Starting search with params:', currentSearchParams);
+    console.log('📋 CongressBillsSearchTile: Starting search with params:', currentSearchParams, 'clearFilters:', clearFilters);
     setIsLoading(true);
     setError(null);
     setLastEvaluatedKey(null);
     setHasMore(false);
     setLastEvaluatedKeys([]); // Clear keys on new search
+    
+    // Clear client-side filters only on new search (not on refresh)
+    if (clearFilters) {
+      setSelectedFilters({
+        billTypes: new Set(),
+        sponsorParties: new Set(),
+        sponsorStates: new Set(),
+        policyAreas: new Set(),
+        congresses: new Set(),
+        bipartisan: new Set(),
+      });
+    }
     
     try {
       const filters: any = {
@@ -495,6 +583,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       
       const searchRequest = {
         filters,
+        limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
       };
       
       const response = await congressBillsSearchAPI.search(searchRequest);
@@ -574,7 +663,16 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   
   // Load more results
   const handleLoadMore = useCallback(async () => {
-    if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams) return;
+    // Check if we've reached the page limit
+    const currentPageCount = lastEvaluatedKeys.length + 1; // +1 for initial page
+    const hasReachedPageLimit = currentPageCount >= TILE_MAX_PAGES;
+    
+    if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams || hasReachedPageLimit) {
+      if (hasReachedPageLimit) {
+        console.log('📋 CongressBillsSearchTile: Reached maximum page limit (4 pages)');
+      }
+      return;
+    }
     
     setIsLoadingMore(true);
     setError(null);
@@ -605,7 +703,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       const searchRequest = {
         filters,
         last_evaluated_key: lastEvaluatedKey,
-        limit: 100, // Explicit limit for load more requests
+        limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
         is_restoration: false, // Explicitly mark as continuation, not restoration
       };
       
@@ -614,23 +712,30 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
       if (response.success && response.results) {
         const updatedResults = [...allResults, ...response.results];
         const newLastEvaluatedKey = response.last_evaluated_key || null;
+        const newPageCount = currentPageCount + 1; // Increment page count
+        
+        // Check if we've reached the page limit after loading this page
+        const willReachPageLimit = newPageCount >= TILE_MAX_PAGES;
+        
         setAllResults(updatedResults);
         setFilteredResults(updatedResults);
-        setHasMore(response.has_more || false);
+        
+        // Only allow hasMore if backend says there's more AND we haven't reached the page limit
+        setHasMore((response.has_more ?? false) && !willReachPageLimit && newLastEvaluatedKey !== null);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
-        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        // Update lastEvaluatedKeys array - limit to MAX_PAGINATION_KEYS (3 keys)
         const updatedKeys = newLastEvaluatedKey 
-          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(0, TILE_MAX_PAGINATION_KEYS) // Keep only first 3 keys
           : lastEvaluatedKeys;
         setLastEvaluatedKeys(updatedKeys);
         
-        // Persist pagination state
+        // Persist pagination state (max 4 pages)
         onSettingsChange(id, {
           paginationState: {
             totalResultsLoaded: updatedResults.length,
             lastEvaluatedKeys: updatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: response.has_more && !willReachPageLimit && newLastEvaluatedKey !== null,
           },
         });
         
@@ -638,10 +743,14 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           paginationState: {
             totalResultsLoaded: updatedResults.length,
             lastEvaluatedKeys: updatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: response.has_more && !willReachPageLimit && newLastEvaluatedKey !== null,
           },
           lastUpdated: Date.now(),
         });
+        
+        if (willReachPageLimit) {
+          console.log('📋 CongressBillsSearchTile: Reached maximum page limit (4 pages) after loading');
+        }
       } else {
         console.error('📋 CongressBillsSearchTile: Load more failed');
         setError('Load more failed');
@@ -945,18 +1054,8 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     }
   }, [results, allResults.length]);
   
-  const handleRemove = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Remove Tile',
-      message: 'Remove Congress Bills Tile from dashboard?',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmColor: 'error',
-    });
-    
-    if (confirmed) {
-      onRemove(id);
-    }
+  const handleRemove = () => {
+    onRemove(id); // No local confirmation, handled by parent
   };
   
   // Legacy context menu handler (kept for backward compatibility)
@@ -1087,9 +1186,189 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   };
   
   
-  const handleRefresh = () => {
-    performSearch();
-  };
+  const handleRefresh = useCallback(async () => {
+    if (!currentSearchParams) return;
+    
+    // Calculate pageCount from lastEvaluatedKeys (if lastEvaluatedKeys.length = 1, we're on page 2)
+    const currentPageCount = lastEvaluatedKeys.length > 0 ? lastEvaluatedKeys.length + 1 : 1;
+    
+    console.log('🔄 CongressBillsSearchTile: Refreshing with pagination state:', { 
+      currentPageCount, 
+      lastEvaluatedKeys: lastEvaluatedKeys.length,
+      totalResultsLoaded: allResults.length 
+    });
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      let currentResults: CongressBill[] = [];
+      let newLastEvaluatedKeys: any[] = [];
+      let currentLastEvaluatedKey: any = null;
+      
+      // Build filters for search
+      const filters: any = { ...currentSearchParams };
+      
+      // Remove empty arrays and empty strings
+      Object.keys(filters).forEach((key) => {
+        const value = filters[key];
+        if (Array.isArray(value) && value.length === 0) {
+          delete filters[key];
+        }
+        if (value === '' || value === null || value === undefined) {
+          delete filters[key];
+        }
+      });
+      
+      // Clean up legacy sponsor_name field
+      if (filters.sponsor_name) {
+        if (!filters.politician_name) {
+          filters.politician_name = filters.sponsor_name;
+        }
+        delete filters.sponsor_name;
+      }
+      
+      // Fetch initial page (page 1)
+      const initialSearchRequest = {
+        filters,
+        limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
+      };
+      
+      const initialResponse = await congressBillsSearchAPI.search(initialSearchRequest);
+      
+      if (initialResponse.success && initialResponse.results) {
+        currentResults = [...initialResponse.results];
+        currentLastEvaluatedKey = initialResponse.last_evaluated_key || null;
+        
+        // If we need more pages, fetch them sequentially
+        if (currentPageCount > 1 && currentLastEvaluatedKey !== null) {
+          // Store the key from the initial page if we need more pages
+          if (newLastEvaluatedKeys.length === 0) {
+            newLastEvaluatedKeys.push(currentLastEvaluatedKey);
+          }
+          
+          // Fetch continuation pages (we need currentPageCount - 1 more pages since we already have page 1)
+          const pagesToFetch = currentPageCount - 1;
+          let pagesFetched = 0;
+          while (pagesFetched < pagesToFetch && currentLastEvaluatedKey !== null) {
+            const searchRequest = {
+              filters,
+              last_evaluated_key: currentLastEvaluatedKey,
+              limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
+              is_restoration: false,
+            };
+            
+            const response = await congressBillsSearchAPI.search(searchRequest);
+            
+            if (response.success && response.results && response.results.length > 0) {
+              currentResults = [...currentResults, ...response.results];
+              pagesFetched++;
+              
+              // Get next key for next iteration
+              const nextLastEvaluatedKey = response.last_evaluated_key || null;
+              
+              // Store key for this page (limit to MAX_PAGINATION_KEYS)
+              if (currentLastEvaluatedKey && newLastEvaluatedKeys.length < TILE_MAX_PAGINATION_KEYS) {
+                newLastEvaluatedKeys.push(currentLastEvaluatedKey);
+              }
+              
+              currentLastEvaluatedKey = nextLastEvaluatedKey;
+            } else {
+              // No more results or error, stop loading
+              break;
+            }
+          }
+        }
+      }
+      
+      // Update state with all fetched results
+      setAllResults(currentResults);
+      
+      // Apply filters after fetching all pages (filters are maintained, not cleared)
+      let filtered = [...currentResults];
+      
+      // Filter by bill types
+      if (selectedFilters.billTypes.size > 0) {
+        filtered = filtered.filter(bill => 
+          bill.bill_type && selectedFilters.billTypes.has(bill.bill_type)
+        );
+      }
+      
+      // Filter by sponsor parties
+      if (selectedFilters.sponsorParties.size > 0) {
+        filtered = filtered.filter(bill =>
+          bill.sponsor_party && selectedFilters.sponsorParties.has(bill.sponsor_party)
+        );
+      }
+      
+      // Filter by sponsor states
+      if (selectedFilters.sponsorStates.size > 0) {
+        filtered = filtered.filter(bill =>
+          bill.sponsor_state && selectedFilters.sponsorStates.has(bill.sponsor_state)
+        );
+      }
+      
+      // Filter by policy areas
+      if (selectedFilters.policyAreas.size > 0) {
+        filtered = filtered.filter(bill =>
+          bill.policy_area && selectedFilters.policyAreas.has(bill.policy_area)
+        );
+      }
+      
+      // Filter by congresses
+      if (selectedFilters.congresses.size > 0) {
+        filtered = filtered.filter(bill =>
+          bill.congress !== undefined && bill.congress !== null && selectedFilters.congresses.has(bill.congress)
+        );
+      }
+      
+      // Filter by bipartisan
+      if (selectedFilters.bipartisan.size > 0) {
+        filtered = filtered.filter(bill =>
+          bill.bipartisan !== undefined && bill.bipartisan !== null && selectedFilters.bipartisan.has(bill.bipartisan)
+        );
+      }
+      
+      setFilteredResults(filtered);
+      
+      // Update pagination state
+      setHasMore(!!currentLastEvaluatedKey);
+      setLastEvaluatedKey(currentLastEvaluatedKey);
+      setLastEvaluatedKeys(newLastEvaluatedKeys);
+      setHasPerformedInitialSearch(true);
+      
+      // Persist pagination state
+      onSettingsChange(id, {
+        searchParams: currentSearchParams,
+        paginationState: {
+          totalResultsLoaded: currentResults.length,
+          lastEvaluatedKeys: newLastEvaluatedKeys,
+          hasMore: !!currentLastEvaluatedKey,
+        },
+      });
+      
+      // Update parent component
+      onUpdate(id, {
+        paginationState: {
+          totalResultsLoaded: currentResults.length,
+          lastEvaluatedKeys: newLastEvaluatedKeys,
+          hasMore: !!currentLastEvaluatedKey,
+        },
+        lastUpdated: Date.now(),
+      });
+      
+      console.log('✅ CongressBillsSearchTile: Refresh complete', {
+        pagesFetched: currentPageCount,
+        totalResults: currentResults.length,
+        filteredResults: filtered.length,
+        hasMore: !!currentLastEvaluatedKey,
+      });
+    } catch (err: any) {
+      console.error('❌ CongressBillsSearchTile: Refresh error:', err);
+      setError(err.message || 'An error occurred during refresh');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentSearchParams, lastEvaluatedKeys, allResults.length, selectedFilters, id, onSettingsChange, onUpdate]);
   
   // Client-side filtering function
   const applyFilters = useCallback(() => {
@@ -3062,4 +3341,3 @@ const CongressBillsSearchTileMemo = memo(CongressBillsSearchTile, (prevProps, ne
 CongressBillsSearchTileMemo.displayName = 'CongressBillsSearchTile';
 
 export default CongressBillsSearchTileMemo;
-

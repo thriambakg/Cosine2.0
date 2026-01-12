@@ -48,6 +48,7 @@ import { loadConfig, validateConfig, getConfig } from '../config/configLoader';
 import { logApiConfig } from '../config/api';
 import GridDashboard from '../components/dashboard/GridDashboard';
 import { getDefaultTileSize } from '../components/tiles/tileConfig';
+import { confirmDialog } from '../components/tiles/common';
 import AddTileMenu from '../components/dialogs/AddTileMenu';
 // import { safeLoadDashboard } from '../utils/dashboardMigration';
 import AddCryptoModal from '../components/tiles/AddCryptoModal';
@@ -929,8 +930,7 @@ const UnifiedDashboardPage: React.FC = () => {
         await handleCreateFolderTile();
       }
 
-      // Reload data from database after tile is created
-      await reloadFromDatabase();
+      // Don't reload from database - state is updated directly in the handlers
       setAddTileMenuOpen(false);
     } catch (error) {
       console.error(`Failed to create tile ${tileId}:`, error);
@@ -954,10 +954,14 @@ const UnifiedDashboardPage: React.FC = () => {
       // - Saving to database
       
       // The tileData here is the imported tile returned from backend
-      // Just reload from database to get the updated state
-      await reloadFromDatabase();
-      
-      console.log('✅ Tile imported successfully');
+      // Update state directly with the imported tile
+      if (tileData && tileData.id) {
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), tileData as UnifiedTile]);
+        console.log('✅ Tile imported and added to state directly');
+      } else {
+        console.warn('⚠️ Imported tile data missing ID, falling back to database reload');
+        await reloadFromDatabase();
+      }
       setAddTileMenuOpen(false);
     } catch (error) {
       console.error('Failed to import tile:', error);
@@ -1093,8 +1097,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create stock screener tile:', error);
     }
@@ -1137,8 +1144,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create news tile:', error);
     }
@@ -1169,8 +1179,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create portfolio tile:', error);
     }
@@ -1210,8 +1223,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create politician trades tile:', error);
     }
@@ -1250,8 +1266,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create SEC search tile:', error);
     }
@@ -1298,8 +1317,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create government contracts tile:', error);
     }
@@ -1350,8 +1372,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create congress bills tile:', error);
     }
@@ -1406,8 +1431,11 @@ const UnifiedDashboardPage: React.FC = () => {
     };
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create LDA search tile:', error);
     }
@@ -1435,8 +1463,11 @@ const UnifiedDashboardPage: React.FC = () => {
     // folderId is optional, so we don't include it if undefined
 
     try {
-      await dashboardAPI.addTile(newTile, activeTab.id, user.id);
-      await reloadFromDatabase();
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        // Update state directly with the new tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
     } catch (error) {
       console.error('Failed to create folder tile:', error);
     }
@@ -1565,9 +1596,11 @@ const UnifiedDashboardPage: React.FC = () => {
       const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
       console.log('Tile created successfully:', response);
       
-      // Reload data from database to get the updated tiles
-      await reloadFromDatabase();
-      console.log('✅ Data reloaded from database after tile creation');
+      // Update state directly with the new tile from API response
+      if (response.tile) {
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+        console.log('✅ Tile added to state directly from API response');
+      }
       
     } catch (error) {
       console.error('Failed to create tile:', error);
@@ -1577,24 +1610,135 @@ const UnifiedDashboardPage: React.FC = () => {
 
   // const getExistingSymbols = () => tiles.map(tile => tile.symbol).filter((symbol): symbol is string => Boolean(symbol));
 
+  // Track deletion state (use ref for synchronous guard, state for UI updates)
+  const [isDeletingTiles, setIsDeletingTiles] = useState(false);
+  const isDeletingRef = useRef(false);
+
   const handleRemoveTile = useCallback(async (id: string) => {
     if (!activeTab || !user?.id) {
       console.warn('No active tab or user found, cannot remove tile');
       return;
     }
 
-    // Optimistically update local state first for immediate UI feedback
-    const updatedTiles = (activeTab.tiles || []).filter((tile: any) => tile.id !== id);
-    updateTabTiles(activeTab.id, updatedTiles);
+    // If already deleting, don't proceed (use ref for synchronous check)
+    if (isDeletingRef.current) {
+      console.log('⏸️ Deletion already in progress, ignoring request', { refValue: isDeletingRef.current, stateValue: isDeletingTiles });
+      return;
+    }
+
+    // Show confirmation dialog
+    const tileToRemove = (activeTab.tiles || []).find((tile: any) => tile.id === id);
+    const tileTitle = tileToRemove?.customTitle || tileToRemove?.title || tileToRemove?.symbol || tileToRemove?.name || 'this tile';
+    
+    const confirmed = await confirmDialog({
+      title: 'Remove Tile',
+      message: `Remove ${tileTitle} from dashboard?`,
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      confirmColor: 'error',
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    // Check again after confirmation (in case another deletion started during dialog)
+    if (isDeletingRef.current) {
+      console.log('⏸️ Deletion started during confirmation, ignoring request');
+      return;
+    }
+
+    // Set both ref (synchronous) and state (for UI updates)
+    isDeletingRef.current = true;
+    setIsDeletingTiles(true);
+
+    const tileInfo = tileToRemove ? {
+      id: tileToRemove.id,
+      type: tileToRemove.type,
+      title: tileToRemove.title || tileToRemove.symbol || tileToRemove.name || `${tileToRemove.type} tile`,
+      customTitle: tileToRemove.customTitle,
+    } : { id, type: 'unknown', title: 'unknown' };
+
+    console.log('🗑️ Removing tile from dashboard:', tileInfo);
 
     try {
-      // Then try to delete from backend
+      // Delete from backend first
       await dashboardAPI.removeTile(id);
-      console.log('✅ Tile deleted from backend:', id);
+      console.log('✅ Tile deleted from backend:', tileInfo);
+      
+      // Only update local state after successful deletion
+      // Skip database save since the backend DELETE endpoint has already updated the database
+      // Use functional update to filter from current state, not stale closure
+      updateTabTiles(activeTab.id, (currentTiles) => currentTiles.filter((tile: any) => tile.id !== id), true); // true = skip database save
     } catch (error) {
-      console.warn('⚠️ Tile removed from UI but backend deletion failed. The tile may reappear on refresh:', error);
-      // Note: We don't revert the local state since the user expects the tile to be gone
-      // and showing it again would be confusing. The tile will reappear on refresh if the backend deletion truly failed.
+      console.error('❌ Failed to delete tile from backend:', { tileInfo, error });
+      setSnackbar({
+        open: true,
+        message: 'Failed to delete tile. Please try again.',
+        severity: 'error'
+      });
+      // Don't update local state if deletion failed - tile remains visible
+    } finally {
+      // ALWAYS clear both ref and state (ref first for immediate effect)
+      // This ensures deletion can proceed even if there was an error
+      console.log('🔄 Clearing deletion state (ref and state)', { refBefore: isDeletingRef.current });
+      isDeletingRef.current = false;
+      setIsDeletingTiles(false);
+      console.log('✅ Deletion state cleared', { refAfter: isDeletingRef.current });
+    }
+  }, [activeTab, updateTabTiles, user?.id]);
+
+  const handleRemoveMultipleTiles = useCallback(async (ids: string[]) => {
+    if (!activeTab || !user?.id || ids.length === 0) {
+      console.warn('No active tab, user, or tile IDs found, cannot remove tiles');
+      return;
+    }
+
+    // Show confirmation dialog
+    const confirmed = await confirmDialog({
+      title: 'Delete Tiles',
+      message: `Are you sure you want to delete ${ids.length} tile${ids.length > 1 ? 's' : ''}? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      confirmColor: 'error',
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    // If already deleting, don't proceed (use ref for synchronous check)
+    if (isDeletingRef.current) {
+      console.log('⏸️ Deletion already in progress (bulk), ignoring request');
+      return;
+    }
+
+    // Set both ref (synchronous) and state (for UI updates)
+    isDeletingRef.current = true;
+    setIsDeletingTiles(true);
+
+    try {
+      // Delete all tiles from backend
+      const deletePromises = ids.map(id => dashboardAPI.removeTile(id));
+      await Promise.all(deletePromises);
+      console.log(`✅ ${ids.length} tiles deleted from backend`);
+      
+      // Only update local state after successful deletions
+      // Skip database save since the backend DELETE endpoints have already updated the database
+      // Use functional update to filter from current state, not stale closure
+      updateTabTiles(activeTab.id, (currentTiles) => currentTiles.filter((tile: any) => !ids.includes(tile.id)), true); // true = skip database save
+    } catch (error) {
+      console.error('❌ Failed to delete tiles from backend:', { ids, error });
+      setSnackbar({
+        open: true,
+        message: 'Failed to delete some tiles. Please try again.',
+        severity: 'error'
+      });
+      // Don't update local state if deletion failed - tiles remain visible
+    } finally {
+      // Clear both ref and state
+      isDeletingRef.current = false;
+      setIsDeletingTiles(false);
     }
   }, [activeTab, updateTabTiles, user?.id]);
 
@@ -1624,8 +1768,8 @@ const UnifiedDashboardPage: React.FC = () => {
 
       const response = await dashboardAPI.duplicateTile(tileId, activeTab.id, user.id, gridPosition);
       if (response.success && response.tile) {
-        // Reload from database to get the duplicated tile
-        await reloadFromDatabase();
+        // Update state directly with the duplicated tile from API response
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
         setSnackbar({
           open: true,
           message: 'Tile duplicated successfully',
@@ -1805,6 +1949,13 @@ const UnifiedDashboardPage: React.FC = () => {
     // Results are NOT saved to avoid excessive storage - they're restored from API on page load
     if (Object.keys(configData).length > 0) {
       updateTabTiles(activeTabId, (currentTiles) => {
+        // Check if the tile exists - if not, skip the update (tile may have been deleted)
+        const tileExists = currentTiles.some((tile: any) => tile.id === id);
+        if (!tileExists) {
+          console.warn(`⚠️ handleUpdateTile: Tile ${id} no longer exists, skipping update`);
+          return currentTiles; // Return unchanged tiles
+        }
+        
         const updatedTiles = currentTiles.map((tile: any) => 
           tile.id === id ? { ...tile, ...configData } : tile
         );
@@ -1829,11 +1980,26 @@ const UnifiedDashboardPage: React.FC = () => {
       });
     }
     
+    // Log when filterSettings are being saved
+    if (settings.filterSettings) {
+      console.log('💾 UnifiedDashboardPage: handleSettingsChange called with filterSettings:', {
+        tileId: id,
+        filterSettings: settings.filterSettings,
+      });
+    }
+    
     // Use a function-based approach to get CURRENT tiles from state
     // This ensures we always work with the latest data, not stale closures
     // Note: All settings (including paginationState) are persisted to database via updateTabTiles -> debouncedSaveToDatabase
     // Deep merge for nested objects like paginationState to preserve existing values
     updateTabTiles(activeTabId, (currentTiles: any[]) => {
+      // Check if the tile exists - if not, skip the update (tile may have been deleted)
+      const tileExists = currentTiles.some((tile: any) => tile.id === id);
+      if (!tileExists) {
+        console.warn(`⚠️ handleSettingsChange: Tile ${id} no longer exists, skipping update`);
+        return currentTiles; // Return unchanged tiles
+      }
+      
       const updatedTiles = currentTiles.map((tile: any) => {
         if (tile.id === id) {
           // Deep merge for nested objects (paginationState, displayOptions, etc.)
@@ -1846,8 +2012,16 @@ const UnifiedDashboardPage: React.FC = () => {
             } else if (key === 'searchParams' && settings[key] && typeof settings[key] === 'object' && !Array.isArray(settings[key])) {
               // Special handling for searchParams - replace entirely to preserve nested structure (general_text_search_fields, arrays, etc.)
               mergedSettings[key] = JSON.parse(JSON.stringify(settings[key])); // Deep copy to ensure all nested objects/arrays are preserved
+            } else if (key === 'filterSettings' && settings[key] && typeof settings[key] === 'object' && !Array.isArray(settings[key])) {
+              // Special handling for filterSettings - replace entirely (don't merge) to preserve filter arrays
+              console.log('💾 UnifiedDashboardPage: Merging filterSettings', {
+                tileId: id,
+                previousFilterSettings: tile[key],
+                newFilterSettings: settings[key],
+              });
+              mergedSettings[key] = JSON.parse(JSON.stringify(settings[key])); // Deep copy to ensure all arrays are preserved
             } else if (typeof settings[key] === 'object' && settings[key] !== null && !Array.isArray(settings[key]) && tile[key]) {
-              // Deep merge for other objects (displayOptions, filterSettings, etc.)
+              // Deep merge for other objects (displayOptions, etc.)
               mergedSettings[key] = { ...tile[key], ...settings[key] };
             } else {
               // Shallow merge for primitives and arrays
@@ -2301,6 +2475,8 @@ const UnifiedDashboardPage: React.FC = () => {
               onResizeTile={handleResizeTile}
               onMoveTile={handleMoveTile}
               onDuplicateTile={handleDuplicateTile}
+              onRemoveMultipleTiles={handleRemoveMultipleTiles}
+              isDeletingTiles={isDeletingTiles}
               zoomLevel={zoomLevel}
             />
           </Box>

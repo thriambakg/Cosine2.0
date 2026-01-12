@@ -47,7 +47,7 @@ import {
   Folder as FolderIcon,
 } from '@mui/icons-material';
 import { secSearchAPI, SECSearchParams, SECSearchResult, SECAutocompleteSuggestion } from '../../services/api';
-import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addFilingToContext, addMultipleFilingsToContext } from './common';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
@@ -73,27 +73,52 @@ const SEC_FORM_CATEGORIES: FormCategory[] = [
   {
     id: 'form-cat1',
     label: 'All annual, quarterly, and current reports',
-    formTypes: ['1-K', '10-K', '10-Q', '8-K', '20-F', '6-K', '11-K', 'N-CSR', 'N-Q'],
+    formTypes: ['1-K', '1-SA', '1-U', '1-Z', '1-Z-W', '10-D', '10-K', '10-KT', '10-Q', '10-QT', '11-K', '11-KT', '13F-HR', '13F-NT', '15-12B', '15-12G', '15-15D', '15F-12B', '15F-12G', '15F-15D', '18-K', '20-F', '24F-2NT', '25', '25-NSE', '40-17F2', '40-17G', '40-F', '6-K', '8-K', '8-K12G3', '8-K15D5', 'ABS-15G', 'ABS-EE', 'ANNLRPT', 'DSTRBRPT', 'IRANNOTICE', 'N-30B-2', 'N-30D', 'N-CEN', 'N-CSR', 'N-CSRS', 'N-MFP', 'N-MFP1', 'N-MFP2', 'N-PX', 'N-Q', 'NPORT-EX', 'NSAR-A', 'NSAR-B', 'NSAR-U', 'NT 10-D', 'NT 10-K', 'NT 10-Q', 'NT 11-K', 'NT 20-F', 'QRTLYRPT', 'SD', 'SP 15D2'],
   },
   {
     id: 'form-cat2',
-    label: 'Insider transactions (Section 16)',
+    label: 'Insider equity awards, transactions, and ownership (Section 16 Reports)',
     formTypes: ['3', '4', '5'],
   },
   {
     id: 'form-cat3',
     label: 'Beneficial ownership reports',
-    formTypes: ['SC 13D', 'SC 13G'],
+    formTypes: ['SC 13D', 'SCHEDULE 13D', 'SC 13G', 'SCHEDULE 13G'],
   },
   {
     id: 'form-cat4',
-    label: 'Registration statements',
-    formTypes: ['S-1', 'S-3', 'S-4', 'F-1', 'F-3', '424B2', '424B3'],
+    label: 'Exempt offerings',
+    formTypes: ['1-A', '1-A POS', '1-A-W', '253G1', '253G2', '253G3', '253G4', 'C', 'D', 'DOS'],
   },
   {
     id: 'form-cat5',
+    label: 'Registration statements and prospectuses',
+    formTypes: ['10-12B', '10-12G', '18-12B', '20FR12B', '20FR12G', '40-24B2', '40FR12B', '40FR12G', '424A', '424B1', '424B2', '424B3', '424B4', '424B5', '424B7', '424B8', '424H', '425', '485APOS', '485BPOS', '485BXT', '487', '497', '497J', '497K', '8-A12B', '8-A12G', 'AW', 'AW WD', 'DEL AM', 'DRS', 'F-1', 'F-10', 'F-10EF', 'F-10POS', 'F-3', 'F-3ASR', 'F-3D', 'F-3DPOS', 'F-3MEF', 'F-4', 'F-4 POS', 'F-4MEF', 'F-6', 'F-6 POS', 'F-6EF', 'F-7', 'F-7 POS', 'F-8', 'F-8 POS', 'F-80', 'F-80POS', 'F-9', 'F-9 POS', 'F-N', 'F-X', 'FWP', 'N-2', 'POS AM', 'POS EX', 'POS462B', 'POS462C', 'POSASR', 'RW', 'RW WD', 'S-1', 'S-11', 'S-11MEF', 'S-1MEF', 'S-20', 'S-3', 'S-3ASR', 'S-3D', 'S-3DPOS', 'S-3MEF', 'S-4', 'S-4 POS', 'S-4EF', 'S-4MEF', 'S-6', 'S-8', 'S-8 POS', 'S-B', 'S-BMEF', 'SF-1', 'SF-3', 'SUPPL', 'UNDER'],
+  },
+  {
+    id: 'form-cat6',
+    label: 'Filing review correspondence',
+    formTypes: ['CORRESP', 'DOSLTR', 'DRSLTR', 'UPLOAD'],
+  },
+  {
+    id: 'form-cat7',
+    label: 'SEC orders and notices',
+    formTypes: ['40-APP', 'CT ORDER', 'EFFECT', 'QUALIF', 'REVOKED'],
+  },
+  {
+    id: 'form-cat8',
     label: 'Proxy materials',
-    formTypes: ['DEF 14A', 'DEFA14A', 'PRE 14A'],
+    formTypes: ['ARS', 'DEF 14A', 'DEF 14C', 'DEFA14A', 'DEFA14C', 'DEFC14A', 'DEFC14C', 'DEFM14A', 'DEFM14C', 'DEFN14A', 'DEFR14A', 'DEFR14C', 'DFAN14A', 'DFRN14A', 'PRE 14A', 'PRE 14C', 'PREC14A', 'PREC14C', 'PREM14A', 'PREM14C', 'PREN14A', 'PRER14A', 'PRER14C', 'PRRN14A', 'PX14A6G', 'PX14A6N', 'SC 14N'],
+  },
+  {
+    id: 'form-cat9',
+    label: 'Tender offers and going private transactions',
+    formTypes: ['CB', 'SC 13E1', 'SC 13E3', 'SC 14D9', 'SC 14F1', 'SC TO-C', 'SC TO-I', 'SC TO-T', 'SC13E4F', 'SC14D9C', 'SC14D9F', 'SC14D1F'],
+  },
+  {
+    id: 'form-cat10',
+    label: 'Trust indenture filings',
+    formTypes: ['305B2', 'T-3'],
   },
 ];
 
@@ -106,9 +131,13 @@ interface FormType {
 const buildFormTypes = (): FormType[] => {
   const formTypeMap = new Map<string, FormType>();
   
+  // Add forms from categories (these are the main ones)
   SEC_FORM_CATEGORIES.forEach(category => {
     if (category.id !== 'all') {
       category.formTypes.forEach(formId => {
+        // Handle negative forms (exclusions) - skip them for now
+        if (formId.startsWith('-')) return;
+        
         if (!formTypeMap.has(formId)) {
           formTypeMap.set(formId, {
             id: formId,
@@ -119,7 +148,172 @@ const buildFormTypes = (): FormType[] => {
     }
   });
   
-  return Array.from(formTypeMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+  // Add additional common form types from SEC website (extracted from HTML)
+  // These are forms that may not be in categories but are available
+  const additionalForms = [
+    '1', '1-E', '1-E AD', '1-K', '1-SA', '1-U', '1-Z', '1-Z-W',
+    '10-12B', '10-12G', '10-C', '10-D', '10-K', '10-K405', '10-KT', '10-M', '10-Q', '10-QT',
+    '10KSB', '10KSB40', '10KSB405', '10KT405', '10QSB', '10SB12B', '10SB12G',
+    '11-K', '11-KT',
+    '12G-2', '12G3-2A', '12G3-2B', '12G32BR',
+    '13F-E', '13F-HR', '13F-NT', '13FCONP',
+    '144',
+    '15-12B', '15-12G', '15-15D', '15F-12B', '15F-12G', '15F-15D',
+    '18-12B', '18-12G', '18-K',
+    '19-B', '19B-4', '19B-4E',
+    '2-A', '2-AF', '2-E',
+    '20-F', '20-FR', '20FR12B', '20FR12G',
+    '24F-1', '24F-2EL', '24F-2NT', '24F-2TM',
+    '25', '25-NSE',
+    '253G1', '253G2', '253G3', '253G4',
+    '26', '27', '28',
+    '3', '305B2',
+    '34-12H', '34-36CF', '34-36MR',
+    '35-11', '35-2', '35-3', '35-7B', '35-APP', '35-CERT',
+    '39-10B2', '39-304C', '39-304D', '39-310B',
+    '4',
+    '40-17F1', '40-17F2', '40-17G', '40-17GCS', '40-202A', '40-203A', '40-205A', '40-205E', '40-206A',
+    '40-24B2', '40-33', '40-6B', '40-6C', '40-8B25', '40-8F-2', '40-8F-A', '40-8F-B', '40-8F-L', '40-8F-M',
+    '40-8FC', '40-APP', '40-F', '40-OIP', '40-RPT',
+    '40FR12B', '40FR12G',
+    '424A', '424B1', '424B2', '424B3', '424B4', '424B5', '424B7', '424B8', '424H', '425',
+    '45B-3',
+    '485A24E', '485A24F', '485APOS', '485B24E', '485B24F', '485BPOS', '485BXT', '485BXTF',
+    '486A24E', '486APOS', '486B24E', '486BPOS', '486BXT',
+    '487', '497', '497AD', '497H2', '497J', '497K', '497K1', '497K2', '497K3A', '497K3B', '497VPI', '497VPU',
+    '5',
+    '6-K', '6B NTC', '6B ORDR',
+    '7-A',
+    '8-A12B', '8-A12G', '8-B12B', '8-B12G', '8-K', '8-K12B', '8-K12G3', '8-K15D5', '8-M',
+    '8A12BEF', '8A12BT', '8F-2 NTC', '8F-2 ORDR',
+    '9-M',
+    'ABS-15G', 'ABS-EE',
+    'ADB', 'ADN-MTL', 'ADV', 'ADV-E', 'ADV-H-C', 'ADV-H-T', 'ADV-NR', 'ADVCO', 'ADVW',
+    'AFDB',
+    'ANNLRPT',
+    'APP NTC', 'APP ORDR', 'APP WD', 'APP WDG',
+    'ARS',
+    'ATS-N', 'ATS-N ORDR INEFF', 'ATS-N ORDR LTD OPN', 'ATS-N ORDR REVK', 'ATS-N ORDR SUSP',
+    'ATS-N-C', 'ATS-N-W', 'ATS-N/A ORDR INEFF', 'ATS-N/CA', 'ATS-N/MA', 'ATS-N/MA CP', 'ATS-N/OFA', 'ATS-N/UA',
+    'AW', 'AW WD',
+    'BDCO',
+    'BW-2', 'BW-3',
+    'C', 'C-AR', 'C-AR-W', 'C-AR/A-W', 'C-TR', 'C-TR-W', 'C-U', 'C-U-W', 'C-W', 'C/A-W',
+    'CA-1',
+    'CB',
+    'CERT', 'CERTAMX', 'CERTARCA', 'CERTBATS', 'CERTBSE', 'CERTCBO', 'CERTCIN', 'CERTCSE', 'CERTISE', 'CERTNAS', 'CERTNYS', 'CERTPAC', 'CERTPBS',
+    'CFPORTAL', 'CFPORTAL-W',
+    'CORRESP',
+    'CT ORDER',
+    'D',
+    'DEF 14A', 'DEF 14C', 'DEF-OC', 'DEF13E3', 'DEFA14A', 'DEFA14C', 'DEFC14A', 'DEFC14C',
+    'DEFM14A', 'DEFM14C', 'DEFN14A', 'DEFR14A', 'DEFR14C', 'DEFS14A', 'DEFS14C',
+    'DEL AM',
+    'DFAN14A', 'DFRN14A',
+    'DOS',
+    'DOSLTR',
+    'DRS',
+    'DRSLTR',
+    'DSTRBRPT',
+    'EBRD',
+    'EFFECT',
+    'F-1', 'F-10', 'F-10EF', 'F-10MEF', 'F-10POS', 'F-1MEF', 'F-2', 'F-2D', 'F-2DPOS', 'F-2MEF',
+    'F-3', 'F-3ASR', 'F-3D', 'F-3DPOS', 'F-3MEF', 'F-4', 'F-4 POS', 'F-4EF', 'F-4MEF',
+    'F-6', 'F-6 POS', 'F-6EF', 'F-7', 'F-7 POS', 'F-8', 'F-8 POS', 'F-80', 'F-80POS',
+    'F-9', 'F-9 POS', 'F-9EF', 'F-9MEF', 'F-N', 'F-X',
+    'FOCUSN',
+    'FWP',
+    'G-405', 'G-405N', 'G-FIN', 'G-FINW',
+    'HISTORY',
+    'IADB',
+    'IBRD',
+    'ID-NEWCIK',
+    'IFC',
+    'IRANNOTICE',
+    'MA', 'MA-A', 'MA-I', 'MA-W',
+    'MSD', 'MSDCO', 'MSDW',
+    'N-1', 'N-14', 'N-14 8C', 'N-14AE', 'N-14MEF', 'N-18F1', 'N-1A', 'N-1A EL',
+    'N-2', 'N-2 POSASR', 'N-23C-1', 'N-23C-2', 'N-23C3A', 'N-23C3B', 'N-23C3C', 'N-27D-1', 'N-2ASR', 'N-2MEF',
+    'N-3', 'N-3 EL', 'N-30B-2', 'N-30D',
+    'N-4', 'N-4 EL', 'N-5', 'N-54A', 'N-54C',
+    'N-6', 'N-6C9', 'N-6F',
+    'N-8A', 'N-8B-2', 'N-8B-3', 'N-8B-4', 'N-8F', 'N-8F NTC', 'N-8F ORDR',
+    'N-CEN', 'N-CR', 'N-CSR', 'N-CSRS',
+    'N-MFP', 'N-MFP1', 'N-MFP2',
+    'N-PX',
+    'N-Q',
+    'N-VP', 'N-VPFS',
+    'N14AE24', 'N14EL24',
+    'NO ACT',
+    'NPORT-EX', 'NPORT-NP', 'NPORT-P',
+    'NRSRO-CE', 'NRSRO-UPD',
+    'NSAR-A', 'NSAR-AT', 'NSAR-B', 'NSAR-BT', 'NSAR-U',
+    'NT 10-D', 'NT 10-K', 'NT 10-Q', 'NT 11-K', 'NT 15D2', 'NT 20-F',
+    'NT N-CEN', 'NT N-MFP', 'NT N-MFP1', 'NT N-MFP2', 'NT NPORT-EX', 'NT NPORT-N', 'NT NPORT-P',
+    'NT-NCEN', 'NT-NCSR', 'NT-NSAR',
+    'NTFNCEN', 'NTFNCSR', 'NTFNSAR',
+    'NTN 10-D', 'NTN 10D', 'NTN 10K', 'NTN 10Q', 'NTN 11K', 'NTN 20F', 'NTN15D2',
+    'OC',
+    'OIP NTC', 'OIP ORDR',
+    'POS 8C', 'POS AM', 'POS AMC', 'POS AMI', 'POS EX', 'POS462B', 'POS462C', 'POSASR',
+    'PRE 14A', 'PRE 14C', 'PRE13E3', 'PREA14A', 'PREA14C', 'PREC14A', 'PREC14C',
+    'PREM14A', 'PREM14C', 'PREN14A', 'PRER14A', 'PRER14C', 'PRES14A', 'PRES14C', 'PRRN14A',
+    'PWR-ATT',
+    'PX14A6G', 'PX14A6N',
+    'QRTLYRPT',
+    'QUALIF',
+    'REG-NR',
+    'REGDEX',
+    'REVOKED',
+    'RW', 'RW WD',
+    'S-1', 'S-11', 'S-11MEF', 'S-1MEF', 'S-2', 'S-20', 'S-2MEF',
+    'S-3', 'S-3ASR', 'S-3D', 'S-3DPOS', 'S-3MEF',
+    'S-4', 'S-4 POS', 'S-4EF', 'S-4MEF',
+    'S-6', 'S-6EL24',
+    'S-8', 'S-8 POS',
+    'S-B', 'S-BMEF',
+    'SB-1', 'SB-1MEF', 'SB-2', 'SB-2MEF',
+    'SBSE', 'SBSE-A', 'SBSE-BD', 'SBSE-C', 'SBSE-W',
+    'SBSEF', 'SBSEF-V', 'SBSEF-W', 'SBSEF/A',
+    'SC 13D', 'SC 13E1', 'SC 13E3', 'SC 13E4', 'SC 13G',
+    'SC 14D1', 'SC 14D9', 'SC 14F1', 'SC 14N', 'SC 14N-S',
+    'SC TO-C', 'SC TO-I', 'SC TO-T',
+    'SC13E4F', 'SC14D1F', 'SC14D9', 'SC14D9C', 'SC14D9F',
+    'SCHEDULE 13D', 'SCHEDULE 13G',
+    'SD',
+    'SDR', 'SDR-A', 'SDR-W',
+    'SE',
+    'SEC ACTION', 'SEC STAFF ACTION', 'SEC STAFF LETTER',
+    'SF-1', 'SF-3',
+    'SH-ER', 'SH-NT',
+    'SL',
+    'SP 15D2',
+    'SPDSCL',
+    'STOP ORDER',
+    'SUPPL',
+    'T-3',
+    'TA-1', 'TA-2', 'TA-W', 'TACO',
+    'TH',
+    'TTW',
+    'U-1', 'U-12-IA', 'U-12-IB', 'U-13-1', 'U-13-60', 'U-13E-1', 'U-33-S',
+    'U-3A-2', 'U-3A3-1', 'U-57', 'U-6B-2', 'U-7D', 'U-9C-3', 'U-R-1',
+    'U5A', 'U5B', 'U5S',
+    'UNDER',
+    'UPLOAD',
+    'WDL-REQ',
+    'X-17A-5',
+  ];
+  
+  additionalForms.forEach(formId => {
+    if (!formTypeMap.has(formId)) {
+      formTypeMap.set(formId, {
+        id: formId,
+        label: formId,
+      });
+    }
+  });
+  
+  return Array.from(formTypeMap.values()).sort((a, b) => a.label.localeCompare(b.label));
 };
 
 const ALL_FORM_TYPES = buildFormTypes();
@@ -307,6 +501,49 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     }
   }, [initialDisplayOptions.results, allResults.length]);
 
+  // Sync filterSettings prop to state (only if actually different)
+  useEffect(() => {
+    console.log('🔄 SECSearchTile: filterSettings sync effect triggered', {
+      tileId: id,
+      initialFilterSettings,
+    });
+    if (initialFilterSettings) {
+      setSelectedFilters(prev => {
+        const newFilters = {
+          entities: initialFilterSettings.entities?.map(e => 
+            typeof e === 'string' 
+              ? { entity: e }
+              : { entity: e.entity, cik: e.cik }
+          ) || [],
+          forms: initialFilterSettings.forms || [],
+          locations: initialFilterSettings.locations || [],
+          incorporationStates: initialFilterSettings.incorporationStates || [],
+        };
+        // Check if filters actually changed
+        const prevStr = JSON.stringify(prev);
+        const newStr = JSON.stringify(newFilters);
+        if (prevStr === newStr) {
+          console.log('🔄 SECSearchTile: filterSettings unchanged, skipping update', {
+            tileId: id,
+            currentFilters: prev,
+            newFilters,
+          });
+          return prev;
+        }
+        console.log('🔄 SECSearchTile: Updating selectedFilters from filterSettings prop', {
+          tileId: id,
+          previousFilters: prev,
+          newFilters,
+        });
+        return newFilters;
+      });
+    } else {
+      console.log('🔄 SECSearchTile: No initialFilterSettings prop provided', {
+        tileId: id,
+      });
+    }
+  }, [initialFilterSettings, id]);
+
   // Persist filter settings to backend when they change
   // Use a ref to track previous filters to avoid unnecessary updates
   const prevFiltersRef = useRef(selectedFilters);
@@ -318,6 +555,10 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       
       if (filtersChanged) {
         prevFiltersRef.current = selectedFilters;
+        console.log('💾 SECSearchTile: Persisting filterSettings', {
+          tileId: id,
+          filterSettings: selectedFilters,
+        });
         onSettingsChange(id, { filterSettings: selectedFilters });
       }
     }
@@ -1118,18 +1359,8 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   };
 
 
-  const handleRemove = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Remove Tile',
-      message: 'Remove SEC Search Tile from dashboard?',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmColor: 'error',
-    });
-
-    if (confirmed) {
-      onRemove(id);
-    }
+  const handleRemove = () => {
+    onRemove(id);
   };
 
   // Context menu handlers
@@ -1501,6 +1732,13 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         </Button>
         <Button
           onClick={() => {
+            // Clear client-side filters when performing a new search (matching SECSearchPage behavior)
+            setSelectedFilters({
+              entities: [],
+              forms: [],
+              locations: [],
+              incorporationStates: [],
+            });
             // Persist search params before performing search
             onSettingsChange(id, { searchParams: currentSearchParams, filers: persistedFilers });
             performSearch();

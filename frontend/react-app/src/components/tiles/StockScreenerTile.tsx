@@ -224,12 +224,74 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     marketCapRanges: Set<string>;
     volatilityRanges: Set<string>;
     priceChangeRanges: Set<string>;
-  }>({
-    industries: new Set(initialFilterSettings?.industries || []),
-    marketCapRanges: new Set(initialFilterSettings?.marketCapRanges || []),
-    volatilityRanges: new Set(initialFilterSettings?.volatilityRanges || []),
-    priceChangeRanges: new Set(initialFilterSettings?.priceChangeRanges || []),
+  }>(() => {
+    const initial = {
+      industries: new Set(initialFilterSettings?.industries || []),
+      marketCapRanges: new Set(initialFilterSettings?.marketCapRanges || []),
+      volatilityRanges: new Set(initialFilterSettings?.volatilityRanges || []),
+      priceChangeRanges: new Set(initialFilterSettings?.priceChangeRanges || []),
+    };
+    console.log('🔄 StockScreenerTile: Initializing selectedFilters from props', {
+      tileId: id,
+      initialFilterSettings,
+      initializedFilters: {
+        industries: Array.from(initial.industries),
+        marketCapRanges: Array.from(initial.marketCapRanges),
+        volatilityRanges: Array.from(initial.volatilityRanges),
+        priceChangeRanges: Array.from(initial.priceChangeRanges),
+      },
+    });
+    return initial;
   });
+  
+  // Sync filterSettings prop to state (only if actually different)
+  useEffect(() => {
+    console.log('🔄 StockScreenerTile: filterSettings sync effect triggered', {
+      tileId: id,
+      initialFilterSettings,
+    });
+    if (initialFilterSettings) {
+      setSelectedFilters(prev => {
+        const newFilters = {
+          industries: new Set(initialFilterSettings.industries || []),
+          marketCapRanges: new Set(initialFilterSettings.marketCapRanges || []),
+          volatilityRanges: new Set(initialFilterSettings.volatilityRanges || []),
+          priceChangeRanges: new Set(initialFilterSettings.priceChangeRanges || []),
+        };
+        // Check if filters actually changed
+        const prevAll = JSON.stringify({
+          industries: Array.from(prev.industries).sort(),
+          marketCapRanges: Array.from(prev.marketCapRanges).sort(),
+          volatilityRanges: Array.from(prev.volatilityRanges).sort(),
+          priceChangeRanges: Array.from(prev.priceChangeRanges).sort(),
+        });
+        const newAll = JSON.stringify({
+          industries: Array.from(newFilters.industries).sort(),
+          marketCapRanges: Array.from(newFilters.marketCapRanges).sort(),
+          volatilityRanges: Array.from(newFilters.volatilityRanges).sort(),
+          priceChangeRanges: Array.from(newFilters.priceChangeRanges).sort(),
+        });
+        if (prevAll === newAll) {
+          console.log('🔄 StockScreenerTile: filterSettings unchanged, skipping update', {
+            tileId: id,
+            currentFilters: prevAll,
+            newFilters: newAll,
+          });
+          return prev;
+        }
+        console.log('🔄 StockScreenerTile: Updating selectedFilters from filterSettings prop', {
+          tileId: id,
+          previousFilters: prevAll,
+          newFilters: newAll,
+        });
+        return newFilters;
+      });
+    } else {
+      console.log('🔄 StockScreenerTile: No initialFilterSettings prop provided', {
+        tileId: id,
+      });
+    }
+  }, [initialFilterSettings, id]);
   
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState({
@@ -1208,6 +1270,34 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   useEffect(() => {
     applyFilters();
   }, [applyFilters]);
+  
+  // Persist filterSettings when selectedFilters change
+  // Use ref to track previous value and only persist when it actually changes
+  const prevFilterSettingsRef = useRef({
+    industries: Array.from(selectedFilters.industries),
+    marketCapRanges: Array.from(selectedFilters.marketCapRanges),
+    volatilityRanges: Array.from(selectedFilters.volatilityRanges),
+    priceChangeRanges: Array.from(selectedFilters.priceChangeRanges),
+  });
+  useEffect(() => {
+    const filterSettings = {
+      industries: Array.from(selectedFilters.industries),
+      marketCapRanges: Array.from(selectedFilters.marketCapRanges),
+      volatilityRanges: Array.from(selectedFilters.volatilityRanges),
+      priceChangeRanges: Array.from(selectedFilters.priceChangeRanges),
+    };
+    // Only persist if filterSettings actually changed (deep comparison)
+    const prev = prevFilterSettingsRef.current;
+    const hasChanged = JSON.stringify(prev) !== JSON.stringify(filterSettings);
+    if (hasChanged) {
+      prevFilterSettingsRef.current = filterSettings;
+      console.log('💾 StockScreenerTile: Persisting filterSettings', {
+        tileId: id,
+        filterSettings,
+      });
+      onSettingsChange(id, { filterSettings });
+    }
+  }, [selectedFilters, id, onSettingsChange]);
 
   // Generate available filters from all results
   const availableFilters = useMemo(() => {

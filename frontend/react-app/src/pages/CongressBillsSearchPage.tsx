@@ -2843,4 +2843,3 @@ const CongressBillsSearchPage: React.FC = () => {
 };
 
 export default CongressBillsSearchPage;
-

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy } from '@mui/icons-material';
+import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy, DeleteOutline } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI, GovtContractAward, CongressBill } from '@/services/api';
@@ -29,6 +29,8 @@ interface GridDashboardProps {
   onResizeTile: (id: string, size: { width: number; height: number }) => void;
   onMoveTile: (id: string, position: GridPosition) => void;
   onDuplicateTile?: (tileId: string) => void;
+  onRemoveMultipleTiles?: (ids: string[]) => void;
+  isDeletingTiles?: boolean;
   zoomLevel?: number;
 }
 
@@ -72,6 +74,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onResizeTile,
   onMoveTile: _onMoveTile,
   onDuplicateTile,
+  onRemoveMultipleTiles,
+  isDeletingTiles = false,
   zoomLevel: zoomLevelProp = 1.0,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -214,7 +218,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     return () => window.removeEventListener('resize', updateGridDimensions);
   }, [calculateGridColumns, calculateCellSize]);
 
-  // Track tile changes for debugging (only pin state changes)
+  // Track tile changes and log tile list
   useEffect(() => {
     const prevTiles = prevTilesRef.current;
     prevTiles.forEach(prevTile => {
@@ -223,6 +227,18 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         // Pin state changed - position should be preserved
       }
     });
+    
+    // Log current tile list
+    console.log('📋 GridDashboard: Current tiles on dashboard', {
+      tileCount: tiles.length,
+      tiles: tiles.map(t => ({
+        id: t.id,
+        type: t.type,
+        title: t.title || t.symbol || t.name || `${t.type} tile`,
+        customTitle: t.customTitle,
+      }))
+    });
+    
     prevTilesRef.current = tiles;
   }, [tiles]);
 
@@ -935,6 +951,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       isSelected: isTileSelected,
       onSelectionChange: handleTileSelection,
       onDuplicate: onDuplicateTile,
+      isDeletingTiles,
     };
 
     // Type-specific props
@@ -983,6 +1000,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const stockScreenerProps = {
       ...commonProps,
       criteria: tile.criteria,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateScreener,
       results: sessionResultsScreener,
       displayOptions: (tile.displayOptions as any) || {
@@ -1057,6 +1075,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const politicianTradesProps = {
       ...commonProps,
       searchParams: tile.searchParams,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateTrades,
       results: sessionResultsTrades,
       displayOptions: (tile.displayOptions as any) || {
@@ -1077,6 +1096,14 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customColor: tile.customColor,
       customIcon: tile.customIcon,
     };
+    
+    // Log filterSettings for debugging
+    if (tile.type === 'politician_trades') {
+      console.log('📋 GridDashboard: Rendering PoliticianTradesSearchTile with filterSettings', {
+        tileId: tile.id,
+        filterSettings: tile.filterSettings,
+      });
+    }
 
     // Restore paginationState and results from sessionStorage for SEC tile
     let sessionPaginationStateSEC = tile.paginationState;
@@ -1100,6 +1127,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (isSelected: boolean) => handleTileSelection(tile.id, isSelected),
       searchParams: tile.searchParams,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateSEC,
       results: sessionResultsSEC,
       displayOptions: {
@@ -1131,25 +1159,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         const parsed = JSON.parse(sessionData);
         if (parsed.paginationState) {
           sessionPaginationState = parsed.paginationState;
-          console.log('🏛️ GridDashboard: Restored pagination state for govt contracts tile', {
-            tileId: tile.id,
-            totalResultsLoaded: parsed.paginationState.totalResultsLoaded,
-            keysCount: parsed.paginationState.lastEvaluatedKeys?.length || 0,
-            hasMore: parsed.paginationState.hasMore,
-            keys: parsed.paginationState.lastEvaluatedKeys,
-          });
         }
         if (parsed.results) {
           sessionResults = parsed.results;
-          console.log('🏛️ GridDashboard: Restored results for govt contracts tile', {
-            tileId: tile.id,
-            resultsCount: parsed.results.length,
-            firstResult: parsed.results[0]?.award_id || parsed.results[0]?.recipient_name || 'N/A',
-            lastResult: parsed.results[parsed.results.length - 1]?.award_id || 'N/A',
-          });
         }
-      } else {
-        console.log('🏛️ GridDashboard: No sessionStorage data for govt contracts tile', { tileId: tile.id });
       }
     } catch (error) {
       console.error('🏛️ GridDashboard: Error restoring session data', error);
@@ -1159,6 +1172,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
+      filterSettings: tile.filterSettings,
       paginationState: sessionPaginationState,
       results: sessionResults as GovtContractAward[] | undefined,
       displayOptions: {
@@ -1205,6 +1219,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateBills,
       results: sessionResultsBills as CongressBill[] | undefined,
       displayOptions: {
@@ -1712,15 +1727,36 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         </MenuItem>
 
         {onDuplicateTile && selectionState.selectedTiles.size === 1 && (
-          <MenuItem onClick={() => {
-            const tileId = Array.from(selectionState.selectedTiles)[0];
-            onDuplicateTile(tileId);
-            handleContextMenuClose();
-          }}>
+          <MenuItem 
+            onClick={() => {
+              const tileId = Array.from(selectionState.selectedTiles)[0];
+              onDuplicateTile(tileId);
+              handleContextMenuClose();
+            }}
+            disabled={isDeletingTiles}
+          >
             <ListItemIcon>
               <ContentCopy sx={{ color: '#9ca3af' }} />
             </ListItemIcon>
             <ListItemText>Duplicate Tile</ListItemText>
+          </MenuItem>
+        )}
+
+        {onRemoveMultipleTiles && selectionState.selectedTiles.size > 0 && (
+          <MenuItem 
+            onClick={() => {
+              const tileIds = Array.from(selectionState.selectedTiles);
+              onRemoveMultipleTiles(tileIds);
+              handleContextMenuClose();
+            }}
+            disabled={isDeletingTiles}
+          >
+            <ListItemIcon>
+              <DeleteOutline sx={{ color: '#ef4444' }} />
+            </ListItemIcon>
+            <ListItemText>
+              Delete {selectionState.selectedTiles.size} Tile{selectionState.selectedTiles.size > 1 ? 's' : ''}
+            </ListItemText>
           </MenuItem>
         )}
       </Menu>

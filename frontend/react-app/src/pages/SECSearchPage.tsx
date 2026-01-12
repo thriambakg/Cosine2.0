@@ -108,11 +108,6 @@ const SEC_FORM_CATEGORIES: FormCategory[] = [
     formTypes: [], // Empty means all forms
   },
   {
-    id: 'form-cat0',
-    label: 'Exclude insider equity awards, transactions, and ownership (Section 16 Reports)',
-    formTypes: ['-3', '-4', '-5'],
-  },
-  {
     id: 'form-cat1',
     label: 'All annual, quarterly, and current reports',
     formTypes: ['1-K', '1-SA', '1-U', '1-Z', '1-Z-W', '10-D', '10-K', '10-KT', '10-Q', '10-QT', '11-K', '11-KT', '13F-HR', '13F-NT', '15-12B', '15-12G', '15-15D', '15F-12B', '15F-12G', '15F-15D', '18-K', '20-F', '24F-2NT', '25', '25-NSE', '40-17F2', '40-17G', '40-F', '6-K', '8-K', '8-K12G3', '8-K15D5', 'ABS-15G', 'ABS-EE', 'ANNLRPT', 'DSTRBRPT', 'IRANNOTICE', 'N-30B-2', 'N-30D', 'N-CEN', 'N-CSR', 'N-CSRS', 'N-MFP', 'N-MFP1', 'N-MFP2', 'N-PX', 'N-Q', 'NPORT-EX', 'NSAR-A', 'NSAR-B', 'NSAR-U', 'NT 10-D', 'NT 10-K', 'NT 10-Q', 'NT 11-K', 'NT 20-F', 'QRTLYRPT', 'SD', 'SP 15D2'],
@@ -3745,4 +3740,3 @@ const SECSearchPage: React.FC = () => {
 };
 
 export default SECSearchPage;
-

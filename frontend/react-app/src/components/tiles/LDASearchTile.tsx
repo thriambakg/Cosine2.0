@@ -50,8 +50,9 @@ import {
   LDAFiling,
   LDAAutocompleteItem 
 } from '../../services/api';
-import { useTilePinning, TileHeaderActions, TileCustomizationDialog, confirmDialog, getIconByName, getDefaultIconForTileType } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, getIconByName, getDefaultIconForTileType } from './common';
 import { addLDAFilingToContext, addMultipleLDAFilingsToContext } from './common/contextManager';
+import { getTileMaxPages, getTileMaxPaginationKeys } from './config/tileConfig';
 
 // Minimum date for date filters (January 1, 2000)
 const MIN_DATE = '2000-01-01';
@@ -75,6 +76,7 @@ interface LDASearchTileProps {
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
+  isDeletingTiles?: boolean;
   onResize?: (id: string, size: { width: number; height: number }) => void;
   onDragStart?: (event: React.MouseEvent) => void;
   onResizeStart?: (event: React.MouseEvent) => void;
@@ -126,6 +128,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   onRemove,
   onUpdate,
   onSettingsChange,
+  isDeletingTiles = false,
   onDragStart,
   isDragging = false,
   isResizing = false,
@@ -188,14 +191,124 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     filingTypes: Set<string>;
     issueCodes: Set<string>;
     states: Set<string>;
-  }>({
-    registrants: new Set(initialFilterSettings?.registrants || []),
-    clients: new Set(initialFilterSettings?.clients || []),
-    lobbyists: new Set(initialFilterSettings?.lobbyists || []),
-    filingTypes: new Set(initialFilterSettings?.filingTypes || []),
-    issueCodes: new Set(initialFilterSettings?.issueCodes || []),
-    states: new Set(initialFilterSettings?.states || []),
+  }>(() => {
+    const initial = {
+      registrants: new Set(initialFilterSettings?.registrants || []),
+      clients: new Set(initialFilterSettings?.clients || []),
+      lobbyists: new Set(initialFilterSettings?.lobbyists || []),
+      filingTypes: new Set(initialFilterSettings?.filingTypes || []),
+      issueCodes: new Set(initialFilterSettings?.issueCodes || []),
+      states: new Set(initialFilterSettings?.states || []),
+    };
+    console.log('🔄 LDASearchTile: Initializing selectedFilters from props', {
+      tileId: id,
+      initialFilterSettings,
+      initializedFilters: {
+        registrants: Array.from(initial.registrants),
+        clients: Array.from(initial.clients),
+        lobbyists: Array.from(initial.lobbyists),
+        filingTypes: Array.from(initial.filingTypes),
+        issueCodes: Array.from(initial.issueCodes),
+        states: Array.from(initial.states),
+      },
+    });
+    return initial;
   });
+  
+  // Sync filterSettings prop to state (only if actually different)
+  useEffect(() => {
+    console.log('🔄 LDASearchTile: filterSettings sync effect triggered', {
+      tileId: id,
+      initialFilterSettings,
+    });
+    if (initialFilterSettings) {
+      setSelectedFilters(prev => {
+        const newFilters = {
+          registrants: new Set(initialFilterSettings.registrants || []),
+          clients: new Set(initialFilterSettings.clients || []),
+          lobbyists: new Set(initialFilterSettings.lobbyists || []),
+          filingTypes: new Set(initialFilterSettings.filingTypes || []),
+          issueCodes: new Set(initialFilterSettings.issueCodes || []),
+          states: new Set(initialFilterSettings.states || []),
+        };
+        // Check if filters actually changed
+        const prevAll = JSON.stringify({
+          registrants: Array.from(prev.registrants).sort(),
+          clients: Array.from(prev.clients).sort(),
+          lobbyists: Array.from(prev.lobbyists).sort(),
+          filingTypes: Array.from(prev.filingTypes).sort(),
+          issueCodes: Array.from(prev.issueCodes).sort(),
+          states: Array.from(prev.states).sort(),
+        });
+        const newAll = JSON.stringify({
+          registrants: Array.from(newFilters.registrants).sort(),
+          clients: Array.from(newFilters.clients).sort(),
+          lobbyists: Array.from(newFilters.lobbyists).sort(),
+          filingTypes: Array.from(newFilters.filingTypes).sort(),
+          issueCodes: Array.from(newFilters.issueCodes).sort(),
+          states: Array.from(newFilters.states).sort(),
+        });
+        if (prevAll === newAll) {
+          console.log('🔄 LDASearchTile: filterSettings unchanged, skipping update', {
+            tileId: id,
+            currentFilters: prevAll,
+            newFilters: newAll,
+          });
+          return prev;
+        }
+        console.log('🔄 LDASearchTile: Updating selectedFilters from filterSettings prop', {
+          tileId: id,
+          previousFilters: prevAll,
+          newFilters: newAll,
+        });
+        return newFilters;
+      });
+    } else {
+      console.log('🔄 LDASearchTile: No initialFilterSettings prop provided', {
+        tileId: id,
+      });
+    }
+  }, [initialFilterSettings, id]);
+
+  // Persist filterSettings when selectedFilters change
+  const prevFilterSettingsRef = useRef(selectedFilters);
+  useEffect(() => {
+    const filterSettings = {
+      registrants: Array.from(selectedFilters.registrants),
+      clients: Array.from(selectedFilters.clients),
+      lobbyists: Array.from(selectedFilters.lobbyists),
+      filingTypes: Array.from(selectedFilters.filingTypes),
+      issueCodes: Array.from(selectedFilters.issueCodes),
+      states: Array.from(selectedFilters.states),
+    };
+    // Only persist if filterSettings actually changed (deep comparison)
+    const prev = prevFilterSettingsRef.current;
+    const prevSettings = {
+      registrants: Array.from(prev.registrants).sort(),
+      clients: Array.from(prev.clients).sort(),
+      lobbyists: Array.from(prev.lobbyists).sort(),
+      filingTypes: Array.from(prev.filingTypes).sort(),
+      issueCodes: Array.from(prev.issueCodes).sort(),
+      states: Array.from(prev.states).sort(),
+    };
+    const newSettings = {
+      registrants: Array.from(filterSettings.registrants).sort(),
+      clients: Array.from(filterSettings.clients).sort(),
+      lobbyists: Array.from(filterSettings.lobbyists).sort(),
+      filingTypes: Array.from(filterSettings.filingTypes).sort(),
+      issueCodes: Array.from(filterSettings.issueCodes).sort(),
+      states: Array.from(filterSettings.states).sort(),
+    };
+    const hasChanged = JSON.stringify(prevSettings) !== JSON.stringify(newSettings);
+    if (hasChanged) {
+      prevFilterSettingsRef.current = selectedFilters; // Update ref with new Set
+      console.log('💾 LDASearchTile: Persisting filterSettings', {
+        tileId: id,
+        filterSettings,
+      });
+      onSettingsChange(id, { filterSettings });
+    }
+  }, [selectedFilters, id, onSettingsChange]);
 
   const [selectedFilings, setSelectedFilings] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -245,9 +358,9 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
   
-  // Pagination limits: 4 pages total (1 initial + 3 load more) = 100 results max (25 per page)
-  const MAX_PAGES = 4;
-  const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+  // Tile pagination configuration
+  const MAX_PAGES = getTileMaxPages('lda_disclosures');
+  const MAX_PAGINATION_KEYS = getTileMaxPaginationKeys('lda_disclosures');
   
   const defaultDisplayOptions = {
     showFilingType: true,
@@ -418,25 +531,27 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   // Advanced search expanded state
   const [advancedSearchExpanded, setAdvancedSearchExpanded] = useState(false);
 
-  const performSearch = useCallback(async () => {
+  const performSearch = useCallback(async (clearFilters: boolean = true) => {
     if (!currentSearchParams) return;
     
-    console.log('📋 LDASearchTile: Starting search with params:', currentSearchParams);
+    console.log('📋 LDASearchTile: Starting search with params:', currentSearchParams, 'clearFilters:', clearFilters);
     setIsLoading(true);
     setError(null);
     setLastEvaluatedKey(null);
     setHasMore(false);
     setLastEvaluatedKeys([]); // Clear keys on new search
     
-    // Reset client-side filters on new search
-    setSelectedFilters({
-      registrants: new Set(),
-      clients: new Set(),
-      lobbyists: new Set(),
-      filingTypes: new Set(),
-      issueCodes: new Set(),
-      states: new Set(),
-    });
+    // Clear client-side filters only on new search (not on refresh)
+    if (clearFilters) {
+      setSelectedFilters({
+        registrants: new Set(),
+        clients: new Set(),
+        lobbyists: new Set(),
+        filingTypes: new Set(),
+        issueCodes: new Set(),
+        states: new Set(),
+      });
+    }
     
     try {
       const filters: LDASearchFilters = { ...currentSearchParams };
@@ -1177,18 +1292,8 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
     }
   }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch, isRestoringPagination]);
 
-  const handleRemove = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Remove Tile',
-      message: 'Remove LDA Disclosures Tile from dashboard?',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmColor: 'error',
-    });
-
-    if (confirmed) {
-      onRemove(id);
-    }
+  const handleRemove = () => {
+    onRemove(id);
   };
 
   const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -1284,9 +1389,222 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
   };
 
   
-  const handleRefresh = () => {
-    performSearch();
-  };
+  const handleRefresh = useCallback(async () => {
+    if (!currentSearchParams) return;
+    
+    console.log('🔄 LDASearchTile: Refreshing with pagination state:', { pageCount, lastEvaluatedKeys: lastEvaluatedKeys.length });
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const filters: LDASearchFilters = { ...currentSearchParams };
+      
+      // Build general_text_search_fields from generalSearchItems
+      if (generalSearchItems.length > 0) {
+        const generalTextSearchFields: {
+          registrant?: string[] | false;
+          client?: string[] | false;
+          lobbyist?: string[] | false;
+          pac?: string[] | false;
+          foreign?: string[] | false;
+        } = {
+          registrant: false,
+          client: false,
+          lobbyist: false,
+          pac: false,
+          foreign: false,
+        };
+        
+        const itemsByType: Record<string, string[]> = {};
+        generalSearchItems.forEach(item => {
+          const type = item.type || 'unknown';
+          if (!itemsByType[type]) {
+            itemsByType[type] = [];
+          }
+          itemsByType[type].push(item.value);
+        });
+        
+        if (itemsByType['registrant']) {
+          generalTextSearchFields.registrant = itemsByType['registrant'];
+        }
+        if (itemsByType['client']) {
+          generalTextSearchFields.client = itemsByType['client'];
+        }
+        if (itemsByType['lobbyist']) {
+          generalTextSearchFields.lobbyist = itemsByType['lobbyist'];
+        }
+        if (itemsByType['pac']) {
+          generalTextSearchFields.pac = itemsByType['pac'];
+        }
+        if (itemsByType['foreign']) {
+          generalTextSearchFields.foreign = itemsByType['foreign'];
+        }
+        
+        filters.general_text_search_fields = generalTextSearchFields;
+      }
+      
+      // Remove empty arrays
+      Object.keys(filters).forEach((key) => {
+        const value = filters[key];
+        if (Array.isArray(value) && value.length === 0) {
+          delete filters[key];
+        }
+      });
+      
+      // Fetch initial page (page 1)
+      let currentResults: LDAFiling[] = [];
+      let currentPageCount = 0;
+      let newLastEvaluatedKeys: any[] = [];
+      let currentLastEvaluatedKey: any = null;
+      
+      const initialSearchRequest = {
+        filters,
+        limit: 25, // Tile: 25 per batch
+      };
+      
+      const initialResponse = await ldaSearchAPI.search(initialSearchRequest);
+      
+      if (initialResponse.success && initialResponse.results) {
+        currentResults = [...initialResponse.results];
+        currentPageCount = 1;
+        
+        // Handle last_evaluated_key: convert false/undefined to null, keep objects/truthy values
+        const newLastEvaluatedKey = (initialResponse.last_evaluated_key && typeof initialResponse.last_evaluated_key === 'object') 
+          ? initialResponse.last_evaluated_key 
+          : null;
+        currentLastEvaluatedKey = newLastEvaluatedKey;
+        
+        // If we need more pages, fetch them sequentially
+        const targetPageCount = Math.min(pageCount, MAX_PAGES);
+        while (currentPageCount < targetPageCount && currentLastEvaluatedKey !== null) {
+          const searchRequest = {
+            filters,
+            limit: 25, // Tile: 25 per batch
+            last_evaluated_key: currentLastEvaluatedKey,
+          };
+          
+          const response = await ldaSearchAPI.search(searchRequest);
+          
+          if (response.success && response.results) {
+            currentResults = [...currentResults, ...response.results];
+            currentPageCount++;
+            
+            // Handle last_evaluated_key for next iteration
+            const nextLastEvaluatedKey = (response.last_evaluated_key && typeof response.last_evaluated_key === 'object') 
+              ? response.last_evaluated_key 
+              : null;
+            
+            // Store key for this page (limit to MAX_PAGINATION_KEYS)
+            if (currentLastEvaluatedKey && newLastEvaluatedKeys.length < MAX_PAGINATION_KEYS) {
+              newLastEvaluatedKeys.push(currentLastEvaluatedKey);
+            }
+            
+            currentLastEvaluatedKey = nextLastEvaluatedKey;
+          } else {
+            // No more results or error, stop loading
+            break;
+          }
+        }
+      }
+      
+      // Update state with all fetched results
+      setAllResults(currentResults);
+      
+      // Apply filters after fetching all pages (filters are maintained, not cleared)
+      let filtered = [...currentResults];
+      
+      // Filter by registrants
+      if (selectedFilters.registrants.size > 0) {
+        filtered = filtered.filter(filing => 
+          filing.registrant_name && selectedFilters.registrants.has(filing.registrant_name)
+        );
+      }
+      
+      // Filter by clients
+      if (selectedFilters.clients.size > 0) {
+        filtered = filtered.filter(filing =>
+          filing.client_name && selectedFilters.clients.has(filing.client_name)
+        );
+      }
+      
+      // Filter by lobbyists
+      if (selectedFilters.lobbyists.size > 0) {
+        filtered = filtered.filter(filing =>
+          filing.lobbyist_name && selectedFilters.lobbyists.has(filing.lobbyist_name)
+        );
+      }
+      
+      // Filter by filing types
+      if (selectedFilters.filingTypes.size > 0) {
+        filtered = filtered.filter(filing =>
+          filing.report_type && selectedFilters.filingTypes.has(filing.report_type)
+        );
+      }
+      
+      // Filter by issue codes
+      if (selectedFilters.issueCodes.size > 0) {
+        filtered = filtered.filter(filing =>
+          filing.general_issue_code && selectedFilters.issueCodes.has(filing.general_issue_code)
+        );
+      }
+      
+      // Filter by states
+      if (selectedFilters.states.size > 0) {
+        filtered = filtered.filter(filing =>
+          filing.state && selectedFilters.states.has(filing.state)
+        );
+      }
+      
+      setFilteredResults(filtered);
+      setCurrentResults(filtered);
+      
+      // Update pagination state
+      const hasValidPaginationKey = currentLastEvaluatedKey !== null && currentLastEvaluatedKey !== undefined;
+      const hasReachedPageLimit = currentPageCount >= MAX_PAGES;
+      const canLoadMore = hasValidPaginationKey && !hasReachedPageLimit;
+      
+      setHasMore(canLoadMore);
+      setLastEvaluatedKey(currentLastEvaluatedKey);
+      setLastEvaluatedKeys(newLastEvaluatedKeys.slice(0, MAX_PAGINATION_KEYS));
+      setPageCount(currentPageCount);
+      setHasPerformedInitialSearch(true);
+      
+      // Persist pagination state
+      const persistentHasMore = canLoadMore;
+      onSettingsChange(id, {
+        searchParams: currentSearchParams,
+        paginationState: {
+          pageCount: currentPageCount,
+          totalResultsLoaded: currentResults.length,
+          lastEvaluatedKeys: newLastEvaluatedKeys.slice(0, MAX_PAGINATION_KEYS),
+          hasMore: persistentHasMore,
+        },
+      });
+      
+      // Update parent component
+      onUpdate(id, {
+        paginationState: {
+          pageCount: currentPageCount,
+          totalResultsLoaded: currentResults.length,
+          lastEvaluatedKeys: newLastEvaluatedKeys.slice(0, MAX_PAGINATION_KEYS),
+          hasMore: persistentHasMore,
+        },
+        lastUpdated: Date.now(),
+      });
+      
+      console.log('✅ LDASearchTile: Refresh complete', {
+        pagesFetched: currentPageCount,
+        totalResults: currentResults.length,
+        filteredResults: filtered.length,
+        hasMore: persistentHasMore,
+      });
+    } catch (err: any) {
+      console.error('❌ LDASearchTile: Refresh error:', err);
+      setError(err.message || 'An error occurred during refresh');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentSearchParams, pageCount, generalSearchItems, selectedFilters, id, onSettingsChange, onUpdate]);
 
   // Client-side filtering function
   const applyFilters = useCallback(() => {
@@ -1826,6 +2144,7 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
+            disabled: isDeletingTiles,
           }}
           collapsibleActions={
             <>
@@ -3394,4 +3713,3 @@ const LDASearchTileMemo = memo(LDASearchTile, (prevProps, nextProps) => {
 LDASearchTileMemo.displayName = 'LDASearchTile';
 
 export default LDASearchTileMemo;
-

@@ -480,11 +480,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       
       // Use the API service wrapper for better error handling
       const response = await fileReturnAPI.downloadFile({
-        user_id: user_id,
+          user_id: user_id,
         session_id: '', // Optional for politician trades, SEC filings, etc.
-        bucket: bucket,
-        s3_key: s3Key,
-        filename: filename
+          bucket: bucket,
+          s3_key: s3Key,
+          filename: filename
       });
       
       if (!response.success || !response.data?.download_url) {
@@ -4198,4 +4198,3 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 };
 
 export default ItemDetailsDialog;
-

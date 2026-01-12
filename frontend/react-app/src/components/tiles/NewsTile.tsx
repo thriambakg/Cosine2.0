@@ -49,7 +49,7 @@ import {
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
 import { filesystemAPI } from '../../services/api';
-import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleToContext, addMultipleArticlesToContext, confirmDialog, getIconByName, getDefaultIconForTileType } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleToContext, addMultipleArticlesToContext, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -921,18 +921,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPerformedInitialSearch, isLoading, isRestoringPagination, paginationState?.totalResultsLoaded]);
 
-  const handleRemove = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Remove Tile',
-      message: 'Remove News Tile from dashboard?',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmColor: 'error',
-    });
-
-    if (confirmed) {
-      onRemove(id);
-    }
+  const handleRemove = () => {
+    onRemove(id); // No local confirmation, handled by parent
   };
 
   const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -2909,4 +2899,3 @@ const NewsTileMemo = memo(NewsTile, (prevProps, nextProps) => {
 NewsTileMemo.displayName = 'NewsTile';
 
 export default NewsTileMemo;
-

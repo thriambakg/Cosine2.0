@@ -3744,4 +3744,3 @@ const PoliticianTradesSearchPage: React.FC = () => {
 };
 
 export default PoliticianTradesSearchPage;
-

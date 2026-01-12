@@ -40,7 +40,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI } from '@/services/api';
 import { addToContext } from './common/contextManager';
-import { TileHeaderActions, TileCustomizationDialog, confirmDialog, useTilePinning, getIconByName, getDefaultIconForTileType } from './common';
+import { TileHeaderActions, TileCustomizationDialog, useTilePinning, getIconByName, getDefaultIconForTileType } from './common';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 
@@ -77,6 +77,7 @@ interface FolderTileProps {
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
+  isDeletingTiles?: boolean;
   onResize?: (id: string, size: { width: number; height: number }) => void;
   onDragStart?: (event: React.MouseEvent) => void;
   onResizeStart?: (event: React.MouseEvent) => void;
@@ -96,6 +97,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
   onRemove,
   onUpdate,
   onSettingsChange,
+  isDeletingTiles = false,
   onDragStart,
   isDragging = false,
   isSelected = false,
@@ -340,19 +342,9 @@ const FolderTile: React.FC<FolderTileProps> = ({
     }
   };
 
-  // Handle remove tile with confirmation
-  const handleRemove = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Remove Tile',
-      message: 'Remove Folder Tile from dashboard?',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmColor: 'error',
-    });
-
-    if (confirmed) {
-      onRemove(id);
-    }
+  // Handle remove tile
+  const handleRemove = () => {
+    onRemove(id);
   };
 
 
@@ -1285,6 +1277,7 @@ const FolderTile: React.FC<FolderTileProps> = ({
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
+            disabled: isDeletingTiles,
           }}
         />
       </Box>
@@ -2081,4 +2074,3 @@ const FolderTileMemo = memo(FolderTile, (prevProps, nextProps) => {
 });
 
 export default FolderTileMemo;
-

@@ -47,12 +47,13 @@ import {
   GovtContractAward 
 } from '../../services/api';
 import { filesystemAPI } from '../../services/api';
-import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addAwardToContext, addMultipleAwardsToContext, confirmDialog, getIconByName, getDefaultIconForTileType } from './common';
+import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addAwardToContext, addMultipleAwardsToContext, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEasyMode } from '@/contexts/EasyModeContext';
+import { getTileBatchSize, getTileMaxPages, getTileMaxPaginationKeys } from './config/tileConfig';
 
 // US States
 const US_STATES = [
@@ -70,6 +71,7 @@ interface GovtContractsSearchTileProps {
   onRemove: (id: string) => void;
   onUpdate: (id: string, data: any) => void;
   onSettingsChange: (id: string, settings: any) => void;
+  isDeletingTiles?: boolean;
   onResize?: (id: string, size: { width: number; height: number }) => void;
   onDragStart?: (event: React.MouseEvent) => void;
   onResizeStart?: (event: React.MouseEvent) => void;
@@ -126,6 +128,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   onRemove,
   onUpdate,
   onSettingsChange,
+  isDeletingTiles = false,
   onDragStart,
   isDragging = false,
   isResizing = false,
@@ -169,6 +172,11 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   customColor,
   customIcon,
 }) => {
+  // Tile pagination configuration
+  const TILE_BATCH_SIZE = getTileBatchSize('govt_contracts');
+  const TILE_MAX_PAGES = getTileMaxPages('govt_contracts');
+  const TILE_MAX_PAGINATION_KEYS = getTileMaxPaginationKeys('govt_contracts');
+  
   // Alias paginationState for consistency
   const paginationState = initialPaginationState;
   
@@ -567,15 +575,30 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     return suggestions.find(opt => opt.name === name || opt.text === name);
   }, [recipientSuggestions, awardingAgencySuggestions, fundingAgencySuggestions]);
 
-  const performSearch = useCallback(async () => {
+  const performSearch = useCallback(async (clearFilters: boolean = true) => {
     if (!currentSearchParams) return;
     
-    console.log('🏛️ GovtContractsSearchTile: Starting search with params:', currentSearchParams);
+    console.log('🏛️ GovtContractsSearchTile: Starting search with params:', currentSearchParams, 'clearFilters:', clearFilters);
     setIsLoading(true);
     setError(null);
     setLastEvaluatedKey(null);
     setHasMore(false);
     setLastEvaluatedKeys([]); // Clear keys on new search
+    
+    // Clear client-side filters only on new search (not on refresh)
+    if (clearFilters) {
+      setSelectedFilters({
+        awardTypes: new Set(),
+        agencies: new Set(),
+        recipients: new Set(),
+        states: new Set(),
+        countries: new Set(),
+        naics: new Set(),
+        psc: new Set(),
+        cfda: new Set(),
+        months: new Set(),
+      });
+    }
     
     try {
       const filters: any = {
@@ -602,7 +625,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: 25,
+        limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
       };
       
       const response = await govtContractsSearchAPI.search(searchRequest);
@@ -616,9 +639,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         setCurrentResults(response.results);
         setHasPerformedInitialSearch(true);
         
-        // Limit pagination to 4 pages total (1 initial + 3 more)
-        const MAX_PAGES = 4;
-        const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+        // Limit pagination to TILE_MAX_PAGES (4 pages = 100 total results)
+        const MAX_PAGINATION_KEYS = TILE_MAX_PAGINATION_KEYS;
         
         // Only allow hasMore if we haven't reached the page limit
         const canLoadMore = response.has_more && newLastEvaluatedKey !== null;
@@ -689,10 +711,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange]);
   
-  // Load more results - limited to 4 pages total
+  // Load more results - limited to TILE_MAX_PAGES (4 pages = 100 total results)
   const handleLoadMore = useCallback(async () => {
-    const MAX_PAGES = 4;
-    const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+    const MAX_PAGES = TILE_MAX_PAGES;
+    const MAX_PAGINATION_KEYS = TILE_MAX_PAGINATION_KEYS;
     
     // Check if we've reached the page limit
     const currentPageCount = lastEvaluatedKeys.length + 1; // +1 for initial page
@@ -733,14 +755,17 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
       const searchRequest = {
         filters,
-        limit: 25,
+        limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
         last_evaluated_key: lastEvaluatedKey,
       };
       
       const response = await govtContractsSearchAPI.search(searchRequest);
       
       if (response.success && response.results) {
-        const updatedResults = [...allResults, ...response.results];
+        // Deduplicate results by award_id to prevent duplicate keys
+        const existingIds = new Set(allResults.map(award => award.award_id));
+        const newResults = response.results.filter(award => !existingIds.has(award.award_id));
+        const updatedResults = [...allResults, ...newResults];
         const newLastEvaluatedKey = response.last_evaluated_key || null;
         const newPageCount = currentPageCount + 1; // Increment page count
         
@@ -812,10 +837,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
 
-  // Restore pagination state on mount - limited to 4 pages
+  // Restore pagination state on mount - limited to TILE_MAX_PAGES (4 pages = 100 total results)
   const restorePaginationState = useCallback(async () => {
-    const MAX_PAGES = 4;
-    const MAX_PAGINATION_KEYS = MAX_PAGES - 1; // 3 keys for pages 2, 3, 4
+    const MAX_PAGES = TILE_MAX_PAGES;
+    const MAX_PAGINATION_KEYS = TILE_MAX_PAGINATION_KEYS;
     
     if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
       return;
@@ -865,7 +890,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         // Load the initial page (no pagination key)
         const initialSearchRequest = {
           filters,
-          limit: 25,
+          limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
         };
         
         const initialResponse = await govtContractsSearchAPI.search(initialSearchRequest);
@@ -897,14 +922,17 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         
         const searchRequest = {
           filters,
-          limit: 25,
+          limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
           last_evaluated_key: nextKey,
         };
         
         const response = await govtContractsSearchAPI.search(searchRequest);
         
         if (response.success && response.results && response.results.length > 0) {
-          currentResults = [...currentResults, ...response.results];
+          // Deduplicate results by award_id to prevent duplicate keys
+          const existingIds = new Set(currentResults.map(award => award.award_id));
+          const newResults = response.results.filter(award => !existingIds.has(award.award_id));
+          currentResults = [...currentResults, ...newResults];
           currentPageCount += 1;
         } else {
           // No more results, stop loading
@@ -1078,18 +1106,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch]);
 
-  const handleRemove = async () => {
-    const confirmed = await confirmDialog({
-      title: 'Remove Tile',
-      message: 'Remove Government Contracts Tile from dashboard?',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmColor: 'error',
-    });
-
-    if (confirmed) {
-      onRemove(id);
-    }
+  const handleRemove = () => {
+    onRemove(id);
   };
 
   const handleContextMenuClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -1311,6 +1329,70 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     setFilteredResults(filtered);
     setCurrentResults(filtered);
   }, [allResults, selectedFilters]);
+
+  // Sync filterSettings prop to state (only if actually different)
+  useEffect(() => {
+    console.log('🔄 GovtContractsSearchTile: filterSettings sync effect triggered', {
+      tileId: id,
+      initialFilterSettings,
+    });
+    if (initialFilterSettings) {
+      setSelectedFilters(prev => {
+        const newFilters = {
+          awardTypes: new Set(initialFilterSettings.awardTypes || []),
+          agencies: new Set(initialFilterSettings.agencies || []),
+          recipients: new Set(initialFilterSettings.recipients || []),
+          states: new Set(initialFilterSettings.states || []),
+          countries: new Set(initialFilterSettings.countries || []),
+          naics: new Set(initialFilterSettings.naics || []),
+          psc: new Set(initialFilterSettings.psc || []),
+          cfda: new Set(initialFilterSettings.cfda || []),
+          months: new Set(initialFilterSettings.months || []),
+        };
+        // Compare all sets
+        const prevAll = JSON.stringify({
+          awardTypes: Array.from(prev.awardTypes).sort(),
+          agencies: Array.from(prev.agencies).sort(),
+          recipients: Array.from(prev.recipients).sort(),
+          states: Array.from(prev.states).sort(),
+          countries: Array.from(prev.countries).sort(),
+          naics: Array.from(prev.naics).sort(),
+          psc: Array.from(prev.psc).sort(),
+          cfda: Array.from(prev.cfda).sort(),
+          months: Array.from(prev.months).sort(),
+        });
+        const newAll = JSON.stringify({
+          awardTypes: Array.from(newFilters.awardTypes).sort(),
+          agencies: Array.from(newFilters.agencies).sort(),
+          recipients: Array.from(newFilters.recipients).sort(),
+          states: Array.from(newFilters.states).sort(),
+          countries: Array.from(newFilters.countries).sort(),
+          naics: Array.from(newFilters.naics).sort(),
+          psc: Array.from(newFilters.psc).sort(),
+          cfda: Array.from(newFilters.cfda).sort(),
+          months: Array.from(newFilters.months).sort(),
+        });
+        if (prevAll === newAll) {
+          console.log('🔄 GovtContractsSearchTile: filterSettings unchanged, skipping update', {
+            tileId: id,
+            currentFilters: prevAll,
+            newFilters: newAll,
+          });
+          return prev;
+        }
+        console.log('🔄 GovtContractsSearchTile: Updating selectedFilters from filterSettings prop', {
+          tileId: id,
+          previousFilters: prevAll,
+          newFilters: newAll,
+        });
+        return newFilters;
+      });
+    } else {
+      console.log('🔄 GovtContractsSearchTile: No initialFilterSettings prop provided', {
+        tileId: id,
+      });
+    }
+  }, [initialFilterSettings, id]);
 
   // Apply filters when selectedFilters change
   useEffect(() => {
@@ -1757,6 +1839,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           deleteButton={{
             onClick: handleRemove,
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
+            disabled: isDeletingTiles,
           }}
           collapsibleActions={
             <>
@@ -3444,4 +3527,3 @@ const GovtContractsSearchTileMemo = memo(GovtContractsSearchTile, (prevProps, ne
 GovtContractsSearchTileMemo.displayName = 'GovtContractsSearchTile';
 
 export default GovtContractsSearchTileMemo;
-

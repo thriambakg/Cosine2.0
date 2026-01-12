@@ -18,6 +18,7 @@ interface TileHeaderActionsProps {
   deleteButton: {
     onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
     icon: React.ReactNode;
+    disabled?: boolean;
   };
   // Customize button (optional) - shown when expanded, hidden when collapsed
   customizeButton?: {
@@ -201,16 +202,22 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
 
       {/* Always visible: Delete Button */}
       <Tooltip title="Remove tile">
-        <IconButton
-          size="small"
-          onClick={deleteButton.onClick}
-          onMouseDown={(e) => e.stopPropagation()}
-          sx={{ color: '#9ca3af', '&:hover': { color: '#dc2626' } }}
-        >
-          {deleteButton.icon}
-        </IconButton>
+        <span>
+          <IconButton
+            size="small"
+            onClick={deleteButton.onClick}
+            disabled={deleteButton.disabled}
+            onMouseDown={(e) => e.stopPropagation()}
+            sx={{
+              color: deleteButton.disabled ? '#6b7280' : '#9ca3af',
+              '&:hover': { color: deleteButton.disabled ? '#6b7280' : '#dc2626' },
+              '&.Mui-disabled': { color: '#6b7280' },
+            }}
+          >
+            {deleteButton.icon}
+          </IconButton>
+        </span>
       </Tooltip>
     </Box>
   );
 };
-

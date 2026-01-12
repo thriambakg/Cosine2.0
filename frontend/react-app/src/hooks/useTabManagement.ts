@@ -735,7 +735,7 @@ export const useTabManagement = ({
   }, [state.dashboards, updateState]);
 
   // Update tiles for a specific tab
-  const updateTabTiles = useCallback((tabId: string, tiles: UnifiedTile[] | ((currentTiles: UnifiedTile[]) => UnifiedTile[])) => {
+  const updateTabTiles = useCallback((tabId: string, tiles: UnifiedTile[] | ((currentTiles: UnifiedTile[]) => UnifiedTile[]), skipDatabaseSave: boolean = false) => {
     // Use functional update to get CURRENT state, not stale closure
     setState(prevState => {
       const updatedTabs = prevState.tabs.map(tab => {
@@ -752,7 +752,18 @@ export const useTabManagement = ({
       
       const newState = { ...prevState, tabs: updatedTabs };
       saveToStorage(newState);
-      debouncedSaveToDatabase(newState);
+      // Skip database save if requested (e.g., backend already updated the database)
+      if (!skipDatabaseSave) {
+        debouncedSaveToDatabase(newState);
+      } else {
+        console.log('⏭️ Skipping database save for updateTabTiles (backend already saved)');
+        // Cancel any pending debounced save to prevent stale state from being saved
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+          saveTimeoutRef.current = null;
+        }
+        pendingSaveRef.current = null;
+      }
       return newState;
     });
   }, [saveToStorage, debouncedSaveToDatabase]);
