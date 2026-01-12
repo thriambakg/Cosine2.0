@@ -1371,11 +1371,14 @@ resource "aws_iam_policy" "lambda_websocket_policy" {
       {
         Effect = "Allow"
         Action = [
-          "apigatewayv2:GetApis"
+          "apigatewayv2:GetApis",
+          "apigatewayv2:GetApi",
+          "apigateway:GET"
         ]
         Resource = "*"
         # Read-only permission to discover WebSocket API ID at runtime
         # Used when environment variables aren't set to avoid circular dependencies
+        # Note: apigateway:GET is needed as boto3 may use v1 API internally
       }
     ]
   })
