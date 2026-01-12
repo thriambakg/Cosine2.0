@@ -14,6 +14,7 @@ import base64
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
+from utils.auth_helper import extract_user_id_from_event
 
 
 # Configure logging
@@ -58,13 +59,6 @@ class FileUploadHandler:
                 "text": "string", 
                 "timestamp": "number"
             },
-        
-        Args:
-            event: API Gateway event containing headers and body
-        """
-        # Extract origin from event headers for CORS
-        headers = event.get('headers', {}) if isinstance(event, dict) else {}
-        origin = headers.get('Origin') or headers.get('origin')
             "files": [
                 {
                     "filename": "string",
@@ -74,10 +68,31 @@ class FileUploadHandler:
             ],
             "context_items": []
         }
+        
+        Args:
+            event: API Gateway event containing headers and body
         """
         # Extract origin from event headers for CORS
         headers = event.get('headers', {}) if isinstance(event, dict) else {}
         origin = headers.get('Origin') or headers.get('origin')
+        
+        # SECURITY: Extract and validate user_id from bearer token (most secure)
+        authenticated_user_id = None
+        try:
+            authenticated_user_id = extract_user_id_from_event(event)
+            if authenticated_user_id:
+                logger.info(f"🔐 File upload: Authenticated user_id from bearer token: {authenticated_user_id}")
+            else:
+                logger.warning("⚠️ File upload: No user_id found in bearer token or authorizer")
+        except Exception as e:
+            logger.error(f"❌ File upload: Error extracting user_id from bearer token: {str(e)}")
+        
+        # Log Authorization header presence (without logging the actual token)
+        auth_header = headers.get('Authorization') or headers.get('authorization')
+        if auth_header:
+            logger.info(f"🔒 File upload: Authorization header present: {'Bearer ' + auth_header[:20] + '...' if len(auth_header) > 20 else 'Bearer [token]'}")
+        else:
+            logger.warning("⚠️ File upload: No Authorization header found in request")
         
         try:
             logger.info(f"File upload request received")
@@ -107,8 +122,35 @@ class FileUploadHandler:
             
             logger.debug(f"Parsed body keys: {list(body.keys()) if isinstance(body, dict) else 'not a dict'}")
             
-            user_id = body.get('user_id')
+            # Get user_id from body (for comparison/fallback)
+            body_user_id = body.get('user_id')
             session_id = body.get('session_id')
+            
+            # SECURITY: Use authenticated user_id if available, otherwise fall back to body (less secure)
+            # If authenticated user_id exists, validate it matches body user_id
+            if authenticated_user_id:
+                user_id = authenticated_user_id
+                # Validate that body user_id matches authenticated user_id (prevent spoofing)
+                if body_user_id and body_user_id != authenticated_user_id:
+                    logger.error(f"❌ File upload: user_id mismatch! Body: {body_user_id}, Authenticated: {authenticated_user_id}")
+                    return {
+                        'statusCode': 403,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            **get_cors_headers(origin),
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                        },
+                        'body': json.dumps({
+                            'error': 'Forbidden: user_id in request body does not match authenticated user',
+                            'message': 'Authentication failed'
+                        })
+                    }
+                logger.info(f"✅ File upload: user_id validated - authenticated: {authenticated_user_id}")
+            else:
+                # Fallback to body user_id if no authentication (less secure, but for backward compatibility)
+                user_id = body_user_id
+                logger.warning(f"⚠️ File upload: Using user_id from request body (not authenticated): {user_id}")
             message = body.get('message', {})
             files = body.get('files', [])
             context_items = body.get('context_items', [])
