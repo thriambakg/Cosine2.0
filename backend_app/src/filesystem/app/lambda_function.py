@@ -1218,143 +1218,179 @@ def upload_folder(user_id: str, dest_folder_path: str, encrypted_data: bytes, fi
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise
 
-def get_folder_structure_recursively(user_id: str, folder_path: str, base_path: str = '') -> Dict[str, Any]:
-    """
-    Recursively get folder structure with all items
-    Returns: {
-        'items': [{item_id, source_folder_path}],
-        'subfolders': {subfolder_name: {items: [...], subfolders: {...}}}
-    }
-    """
-    structure = {
-        'items': [],
-        'subfolders': {}
-    }
-    
-    try:
-        manifest = get_folder_manifest(user_id, folder_path)
-        
-        # Add all items in current folder
-        for item_id, item in manifest.get('items', {}).items():
-            structure['items'].append({
-                'item_id': item_id,
-                'source_folder_path': folder_path
-            })
-        
-        # Recursively get subfolders
-        for subfolder_id, folder_info in manifest.get('folders', {}).items():
-            subfolder_name = folder_info.get('name', f'folder_{subfolder_id}')
-            subfolder_path = folder_info.get('path', f"{folder_path}/{subfolder_name}")
-            
-            # Get subfolder structure
-            subfolder_structure = get_folder_structure_recursively(user_id, subfolder_path, base_path)
-            structure['subfolders'][subfolder_name] = subfolder_structure
-    
-    except Exception as e:
-        logger.warning(f"Error getting structure from folder {folder_path}: {str(e)}")
-    
-    return structure
-
 def copy_bulk_items(user_id: str, items: List[Dict[str, Any]], dest_folder_path: str) -> Dict[str, Any]:
     """
     Copy multiple items and folders in bulk - more efficient than sequential calls
-    Recursively collects all items from folders and maintains folder structure
+    Recursively collects all items from folders, creates folder structure, then bulk copies items
     items: List of {item_id, source_folder_path, is_folder}
     """
     try:
         logger.info(f"📋 Copying {len(items)} items in bulk: user_id={user_id}, dest={dest_folder_path}")
         
-        # Process each item/folder
-        results = []
-        errors = []
-        folder_path_map = {}  # Map source folder path to destination folder path
+        # Collect all folders and items that need to be processed
+        all_folders = []  # List of {source_path, folder_name, parent_source_path}
+        all_items = []  # List of {item_id, source_folder_path, source_folder_path_for_mapping}
+        folder_path_map = {}  # Maps source folder path -> destination folder path
         
-        def copy_folder_recursive(source_folder_path: str, dest_parent_path: str, folder_name: str) -> str:
-            """Recursively copy a folder and return its new path"""
+        def collect_folder_contents(source_folder_path: str, parent_source: Optional[str] = None):
+            """Recursively collect all folders and items from a folder"""
             try:
-                # Create the folder
-                new_folder = create_folder(user_id, folder_name, dest_parent_path)
-                new_folder_path = new_folder['path']
-                folder_path_map[source_folder_path] = new_folder_path
+                manifest = get_folder_manifest(user_id, source_folder_path)
+                folder_name = manifest.get('name', 'folder')
                 
-                # Get folder structure
-                structure = get_folder_structure_recursively(user_id, source_folder_path)
+                logger.debug(f"📂 Collecting from folder: {folder_name} at {source_folder_path}")
                 
-                # Copy all items in this folder
-                for item_info in structure['items']:
-                    try:
-                        item_id = item_info['item_id']
-                        clipboard_data = copy_item(user_id, source_folder_path, item_id)
-                        result = paste_item(user_id, new_folder_path, clipboard_data)
-                        results.append(result)
-                    except Exception as e:
-                        logger.error(f"Error copying item {item_info['item_id']}: {str(e)}")
-                        errors.append({
-                            'item_id': item_info['item_id'],
-                            'error': str(e)
-                        })
-                
-                # Recursively copy subfolders
-                for subfolder_name, subfolder_structure in structure['subfolders'].items():
-                    # Find the subfolder's source path
-                    manifest = get_folder_manifest(user_id, source_folder_path)
-                    subfolder_source_path = None
-                    for subfolder_id, folder_info in manifest.get('folders', {}).items():
-                        if folder_info.get('name') == subfolder_name:
-                            subfolder_source_path = folder_info.get('path', f"{source_folder_path}/{subfolder_name}")
-                            break
-                    
-                    if subfolder_source_path:
-                        copy_folder_recursive(subfolder_source_path, new_folder_path, subfolder_name)
-                
-                return new_folder_path
-            except Exception as e:
-                logger.error(f"Error copying folder {folder_name}: {str(e)}")
-                errors.append({
-                    'item_id': source_folder_path,
-                    'error': str(e)
+                # Add this folder to the list
+                all_folders.append({
+                    'source_path': source_folder_path,
+                    'folder_name': folder_name,
+                    'parent_source_path': parent_source
                 })
-                raise
+                
+                # Collect all items in this folder
+                items_count = len(manifest.get('items', {}))
+                for item_id, item in manifest.get('items', {}).items():
+                    all_items.append({
+                        'item_id': item_id,
+                        'source_folder_path': source_folder_path,
+                        'source_folder_path_for_mapping': source_folder_path  # For mapping to dest
+                    })
+                logger.debug(f"  📄 Found {items_count} items in {folder_name}")
+                
+                # Recursively collect subfolders
+                subfolders_count = len(manifest.get('folders', {}))
+                for subfolder_id, folder_info in manifest.get('folders', {}).items():
+                    subfolder_path = folder_info.get('path', f"{source_folder_path}/{folder_info.get('name', subfolder_id)}")
+                    collect_folder_contents(subfolder_path, source_folder_path)
+                logger.debug(f"  📁 Found {subfolders_count} subfolders in {folder_name}")
+            
+            except Exception as e:
+                logger.error(f"Error collecting contents from {source_folder_path}: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
-        # Process each item
+        # Process each item/folder
         for item_info in items:
             item_id = item_info.get('item_id')
             source_folder_path = item_info.get('source_folder_path', '')
             is_folder = item_info.get('is_folder', False)
             
-            try:
-                if is_folder:
-                    # Get folder name
-                    manifest = get_folder_manifest(user_id, source_folder_path)
-                    folder_name = manifest.get('name', f'folder_{item_id}')
-                    
-                    # Recursively copy folder
-                    new_folder_path = copy_folder_recursive(source_folder_path, dest_folder_path, folder_name)
-                    results.append({
-                        'id': new_folder_path.split('/')[-1] if new_folder_path else item_id,
-                        'name': folder_name,
-                        'type': 'folder',
-                        'path': new_folder_path
-                    })
-                else:
-                    # Copy regular item
-                    clipboard_data = copy_item(user_id, source_folder_path, item_id)
-                    result = paste_item(user_id, dest_folder_path, clipboard_data)
-                    results.append(result)
-            except Exception as e:
-                logger.error(f"Error copying item {item_id}: {str(e)}")
-                errors.append({
+            if is_folder:
+                # Collect all contents recursively
+                collect_folder_contents(source_folder_path)
+                logger.info(f"📁 Collected folder structure: {len(all_folders)} folders, {len(all_items)} items")
+            else:
+                # Regular item
+                all_items.append({
                     'item_id': item_id,
+                    'source_folder_path': source_folder_path,
+                    'dest_folder_path': dest_folder_path  # Direct destination
+                })
+        
+        # Step 2: Create all folders first (parents before children)
+        # Sort folders by depth (shallow first)
+        def get_depth(folder_info: Dict) -> int:
+            source_path = folder_info['source_path']
+            return source_path.count('/') if source_path else 0
+        
+        all_folders.sort(key=get_depth)
+        
+        for folder_info in all_folders:
+            try:
+                source_path = folder_info['source_path']
+                folder_name = folder_info['folder_name']
+                parent_source = folder_info['parent_source_path']
+                
+                # Determine destination parent path
+                if parent_source and parent_source in folder_path_map:
+                    dest_parent_path = folder_path_map[parent_source]
+                elif not parent_source:
+                    # Root folder being copied - use provided destination
+                    dest_parent_path = dest_folder_path
+                else:
+                    # Parent not yet mapped - this shouldn't happen if sorted correctly
+                    logger.warning(f"Parent folder {parent_source} not found in map, using root dest")
+                    dest_parent_path = dest_folder_path
+                
+                # Create the folder
+                new_folder = create_folder(user_id, folder_name, dest_parent_path)
+                new_folder_path = new_folder['path']
+                folder_path_map[source_path] = new_folder_path
+                
+                logger.info(f"✅ Created folder: {folder_name} at {new_folder_path} (from {source_path})")
+                
+            except Exception as e:
+                logger.error(f"Error creating folder {folder_info['folder_name']}: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Step 3: Map items to their destination folders
+        for item_info in all_items:
+            if 'dest_folder_path' not in item_info:
+                # Item from a folder - map to destination
+                source_key = item_info.get('source_folder_path_for_mapping')
+                if source_key and source_key in folder_path_map:
+                    item_info['dest_folder_path'] = folder_path_map[source_key]
+                else:
+                    # Fallback
+                    item_info['dest_folder_path'] = dest_folder_path
+        
+        logger.info(f"📋 Total items to copy: {len(all_items)}")
+        
+        # Step 4: Bulk copy all items
+        results = []
+        errors = []
+        
+        for item_info in all_items:
+            try:
+                item_id = item_info['item_id']
+                source_path = item_info['source_folder_path']
+                dest_path = item_info.get('dest_folder_path', dest_folder_path)
+                
+                # Copy the item
+                clipboard_data = copy_item(user_id, source_path, item_id)
+                result = paste_item(user_id, dest_path, clipboard_data)
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Error copying item {item_info['item_id']}: {str(e)}")
+                errors.append({
+                    'item_id': item_info['item_id'],
                     'error': str(e)
                 })
         
+        # Step 5: Return folder results (root folders only)
+        folder_results = []
+        root_folder_sources = set()
+        for item_info in items:
+            if item_info.get('is_folder'):
+                root_folder_sources.add(item_info['source_folder_path'])
+        
+        for folder_info in all_folders:
+            source_path = folder_info['source_path']
+            if source_path in root_folder_sources and source_path in folder_path_map:
+                folder_results.append({
+                    'id': folder_path_map[source_path].split('/')[-1] if folder_path_map[source_path] else folder_info['folder_name'],
+                    'name': folder_info['folder_name'],
+                    'type': 'folder',
+                    'path': folder_path_map[source_path]
+                })
+        
+        # Combine results
+        all_results = folder_results + results
+        
+        logger.info(f"✅ Bulk copy complete: {len(all_results)} items/folders copied ({len(folder_results)} root folders, {len(results)} items), {len(errors)} errors")
+        
         return {
-            'pasted_items': results,
-            'count': len(results),
+            'pasted_items': all_results,
+            'count': len(all_results),
+            'items_copied': len(results),
+            'folders_created': len(all_folders),
             'errors': errors
         }
     except Exception as e:
         logger.error(f"Error in bulk copy: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise
 
 def paste_items_by_ids(user_id: str, dest_folder_path: str, item_data: List[Dict[str, Any]]) -> Dict[str, Any]:
