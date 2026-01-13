@@ -2968,7 +2968,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.awardTypes.map((filter) => (
                         <Box
                           key={filter.awardType}
@@ -3025,7 +3044,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.agencies.map((filter) => (
                         <Box
                           key={filter.agency}
@@ -3082,7 +3120,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.recipients.map((filter) => (
                         <Box
                           key={filter.recipient}
@@ -3139,7 +3196,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.states.map((filter) => (
                         <Box
                           key={filter.state}
@@ -3196,7 +3272,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.countries.map((filter) => (
                         <Box
                           key={filter.country}
@@ -3253,7 +3348,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.naics.map((filter) => (
                         <Box
                           key={filter.naics}
@@ -3310,7 +3424,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.psc.map((filter) => (
                         <Box
                           key={filter.psc}
@@ -3367,7 +3500,26 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <Box 
+                      sx={{ 
+                        maxHeight: '200px', 
+                        overflowY: 'auto',
+                        '&::-webkit-scrollbar': {
+                          width: '6px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          backgroundColor: '#475569',
+                          borderRadius: '3px',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '3px',
+                          '&:hover': {
+                            backgroundColor: '#2563eb',
+                          },
+                        },
+                      }}
+                    >
                       {availableFilters.cfda.map((filter) => (
                         <Box
                           key={filter.cfda}

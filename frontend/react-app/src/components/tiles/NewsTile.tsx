@@ -447,11 +447,24 @@ const NewsTile: React.FC<NewsTileProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [resultsPerPage, setResultsPerPage] = useState(() => {
     const saved = localStorage.getItem(`newsTile_pageSize_${id}`);
-    return saved ? parseInt(saved) : 5;
+    const parsed = saved ? parseInt(saved) : 5;
+    // Validate: must be one of the allowed values (10, 25, 50, 100)
+    const validValues = [10, 25, 50, 100];
+    return validValues.includes(parsed) ? parsed : 25; // Default to 25 if invalid
   });
   const [isPageSizeManuallySet, setIsPageSizeManuallySet] = useState(() => {
     return localStorage.getItem(`newsTile_pageSize_${id}`) !== null;
   });
+  
+  // Validate and normalize resultsPerPage value
+  useEffect(() => {
+    const validValues = [10, 25, 50, 100];
+    if (!validValues.includes(resultsPerPage)) {
+      const normalizedValue = 25; // Default to 25 if invalid
+      setResultsPerPage(normalizedValue);
+      localStorage.setItem(`newsTile_pageSize_${id}`, normalizedValue.toString());
+    }
+  }, [resultsPerPage, id]);
   const tileRef = useRef<HTMLDivElement>(null);
   
   // Ref to track pending onUpdate calls (to avoid calling during render) without persisting bulky article payloads
@@ -2860,10 +2873,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
           </Button>
           <Button
             onClick={() => {
-              onSettingsChange(id, { 
-                displayOptions: localDisplayOptions,
-                filterSettings: selectedFilters 
-              });
+              // Filters are client-side only - just close the dialog
               setFilterDialogOpen(false);
             }}
             variant="contained"

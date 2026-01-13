@@ -581,6 +581,22 @@ export default function AppHeader() {
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
                   boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  maxHeight: '70vh',
+                  overflowY: 'auto',
+                  '&::-webkit-scrollbar': {
+                    width: '6px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    backgroundColor: '#475569',
+                    borderRadius: '3px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: '#3b82f6',
+                    borderRadius: '3px',
+                    '&:hover': {
+                      backgroundColor: '#2563eb',
+                    },
+                  },
                   '& .MuiMenuItem-root': {
                     color: '#ffffff',
                     fontSize: '0.875rem',

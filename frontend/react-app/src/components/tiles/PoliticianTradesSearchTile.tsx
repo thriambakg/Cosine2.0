@@ -3258,15 +3258,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           </Button>
           <Button
             onClick={() => {
-              console.log('💾 PoliticianTradesSearchTile: Persisting filterSettings via Apply Filters button', {
-                tileId: id,
-                filterSettings: selectedFilters,
-              });
-              // Update parent display options and filter settings
-              onSettingsChange(id, { 
-                displayOptions: localDisplayOptions,
-                filterSettings: selectedFilters 
-              });
+              // Filters are client-side only - just close the dialog
               setFilterDialogOpen(false);
             }}
             variant="contained"
