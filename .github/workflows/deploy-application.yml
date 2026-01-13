@@ -288,20 +288,37 @@ jobs:
       - name: Run Terraform Plan
         env:
           ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          BUILD_SKIPPED: ${{ needs.build-chat-agent-container.outputs.build-skipped }}
         run: |
           cd terraform
           echo "🔍 Running terraform plan for environment: $ENVIRONMENT..."
           terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend"
-          terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars"
+          
+          # If build was skipped, only plan the ECR repository (not Lambda function)
+          if [ "$BUILD_SKIPPED" = "true" ]; then
+            echo "⏭️ Build was skipped - planning only ECR repository and dependencies (excluding Lambda function)"
+            terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr
+          else
+            terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars"
+          fi
           
       - name: Run Terraform Apply
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop'
         env:
           ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          BUILD_SKIPPED: ${{ needs.build-chat-agent-container.outputs.build-skipped }}
         run: |
           cd terraform
           echo "🔧 Running terraform apply for environment: $ENVIRONMENT..."
-          terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -auto-approve
+          
+          # If build was skipped, only create the ECR repository (not Lambda function)
+          if [ "$BUILD_SKIPPED" = "true" ]; then
+            echo "⏭️ Build was skipped - applying only ECR repository and dependencies (excluding Lambda function)"
+            echo "💡 Lambda function will be created on the next pipeline run after the image is built"
+            terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr -auto-approve
+          else
+            terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -auto-approve
+          fi
 
   update-lambda-container:
     name: 'Update Lambda Container Image'
