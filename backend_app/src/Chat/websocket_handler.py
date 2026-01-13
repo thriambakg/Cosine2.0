@@ -122,14 +122,14 @@ class WebSocketHandler:
         
         # Initialize API Gateway client only if endpoint is available
         if websocket_endpoint:
-        # Convert wss:// to https:// for the API Gateway Management API
-        if websocket_endpoint.startswith('wss://'):
-            websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
-        
-        self.api_gateway = boto3.client(
-            'apigatewaymanagementapi',
-            endpoint_url=websocket_endpoint
-        )
+            # Convert wss:// to https:// for the API Gateway Management API
+            if websocket_endpoint.startswith('wss://'):
+                websocket_endpoint = websocket_endpoint.replace('wss://', 'https://')
+            
+            self.api_gateway = boto3.client(
+                'apigatewaymanagementapi',
+                endpoint_url=websocket_endpoint
+            )
         else:
             # Set to None if endpoint couldn't be determined - methods will check this
             self.api_gateway = None

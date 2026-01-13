@@ -652,27 +652,3 @@ def calculate_summary_metrics_tool(
             'success': False,
             'error': str(e)
         })
-
-        
-        if not user_id or not session_id:
-            return json.dumps({
-                'success': False,
-                'error': 'USER_ID and SESSION_ID environment variables required'
-            })
-        
-        result = summary_metrics_calculator.calculate_summary_metrics(
-            data_json=data_json,
-            user_id=user_id,
-            session_id=session_id
-        )
-        
-        return json.dumps(result, indent=2)
-        
-    except Exception as e:
-        logger.error(f"Error in calculate_summary_metrics_tool: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return json.dumps({
-            'success': False,
-            'error': str(e)
-        })

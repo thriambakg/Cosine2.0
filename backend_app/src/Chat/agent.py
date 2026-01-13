@@ -2516,7 +2516,3 @@ def chat_with_agent():
 
 if __name__ == "__main__":
     chat_with_agent()
-            print("Please try rephrasing your question or try again.")
-
-if __name__ == "__main__":
-    chat_with_agent()

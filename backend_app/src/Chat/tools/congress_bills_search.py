@@ -1005,37 +1005,3 @@ def search_congress_bills(
             "success": False,
             "error": error_msg
         })
-        # Validate limit
-        if limit > 1000:
-            limit = 1000
-        if limit < 1:
-            limit = 5  # Default to 5 for compute efficiency
-        
-        agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
-        
-        # Perform search
-        result = CongressBillsSearcher.search_bills_with_s3_passthrough(
-            filters=filters_dict,
-            limit=limit,
-            last_evaluated_key=last_key
-        )
-        
-        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, method={result.get('method', 'unknown')}")
-        
-        # Return as JSON string
-        return json.dumps(result, default=str)
-        
-    except json.JSONDecodeError as e:
-        error_msg = f"Invalid JSON in filters: {str(e)}"
-        logger.error(error_msg)
-        return json.dumps({
-            "success": False,
-            "error": error_msg
-        })
-    except Exception as e:
-        error_msg = f"Error searching congress bills: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return json.dumps({
-            "success": False,
-            "error": error_msg
-        })
