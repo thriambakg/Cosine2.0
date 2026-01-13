@@ -2505,7 +2505,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             selectedFilters.parties.length > 0 || 
             selectedFilters.positions.length > 0 || 
             selectedFilters.securities.length > 0 || 
-            selectedFilters.transactionTypes.length > 0) && (
+            selectedFilters.transactionTypes.length > 0 ||
+            selectedFilters.files.length > 0) && (
             <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
               <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
                 Applied Filters:
@@ -2603,6 +2604,25 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                       color: '#ec4899',
                       border: '1px solid #ec4899',
                       '& .MuiChip-deleteIcon': { color: '#ec4899' }
+                    }}
+                  />
+                ))}
+                {selectedFilters.files.map(file => (
+                  <Chip
+                    key={`file-${file}`}
+                    label={`File: ${file.split('/').pop() || file}`}
+                    onDelete={() => {
+                      setSelectedFilters(prev => ({
+                        ...prev,
+                        files: prev.files.filter(f => f !== file)
+                      }));
+                    }}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'rgba(251, 191, 36, 0.2)',
+                      color: '#fbbf24',
+                      border: '1px solid #fbbf24',
+                      '& .MuiChip-deleteIcon': { color: '#fbbf24' }
                     }}
                   />
                 ))}
