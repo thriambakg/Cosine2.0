@@ -253,18 +253,22 @@ jobs:
           cat terraform/additional_vars.tfvars
 
       - name: Run Terraform Plan
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
         run: |
           cd terraform
-          echo "🔍 Running terraform plan..."
-          terraform init -backend-config="backend-configs/production.tfbackend"
-          terraform plan -var-file="environments/production.auto.tfvars" -var-file="additional_vars.tfvars"
+          echo "🔍 Running terraform plan for environment: $ENVIRONMENT..."
+          terraform init -backend-config="backend-configs/${ENVIRONMENT}.tfbackend"
+          terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars"
           
       - name: Run Terraform Apply
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop'
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
         run: |
           cd terraform
-          echo "🔧 Running terraform apply..."
-          terraform apply -var-file="environments/production.auto.tfvars" -var-file="additional_vars.tfvars" -auto-approve
+          echo "🔧 Running terraform apply for environment: $ENVIRONMENT..."
+          terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -auto-approve
 
   update-lambda-container:
     name: 'Update Lambda Container Image'
@@ -367,50 +371,6 @@ jobs:
             - **Infrastructure Type:** Application
             - **Base Infrastructure Required:** ✅ Verified
             - **Chat Agent Container:** ✅ Built and pushed to ECR
-            - **Infrastructure Deployment:** ${infraStatus === 'success' ? '✅ Success' : infraStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
-            - **Lambda Container Update:** ${lambdaUpdateStatus === 'success' ? '✅ Success' : lambdaUpdateStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
-            
-            ### 🔧 Build Results:
-            - **Container Image:** ✅ Built with all dependencies (strands-agents, financial libraries, etc.)
-            - **ECR Repository:** ✅ cosine-chat-agent-${environment}
-            - **Lambda Function:** ✅ Container-based deployment ready
-            - **Lambda Container Update:** ✅ Forced Lambda to pull latest container image
-            
-            ### 🔍 Security Scans:
-            - **TFLint:** ✅ Passed
-            - **tfsec:** ✅ Passed  
-            - **Checkov:** ✅ Passed
-            
-            ### 📊 Next Steps:
-            - Merge this PR to apply the infrastructure changes
-            - Monitor the deployment in the Actions tab
-            - Test the chat agent functionality
-            
-            <details>
-            <summary>📖 Deployment Guide</summary>
-            
-            1. **Merge Requirements:**
-               - All security scans must pass
-               - Base infrastructure must be deployed
-               - PR must be approved by a reviewer
-            
-            2. **Post-Merge:**
-               - Infrastructure will be automatically deployed
-               - Check deployment summary in Actions
-               - Test application functionality
-            
-            3. **Rollback:**
-               - Use workflow dispatch with destroy option
-               - Or revert this commit and re-deploy
-            
-            </details>`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
             - **Infrastructure Deployment:** ${infraStatus === 'success' ? '✅ Success' : infraStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
             - **Lambda Container Update:** ${lambdaUpdateStatus === 'success' ? '✅ Success' : lambdaUpdateStatus === 'failure' ? '❌ Failed' : '⏳ In Progress'}
             
