@@ -252,8 +252,69 @@ def get_all_items_from_gsi(
         return []
 
 
+def fetch_minimal_awards_batch(award_ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch minimal award fields using BatchGetItem with ProjectionExpression
+    Only fetches fields needed for search results table display
+    """
+    if not award_ids:
+        return []
+    
+    # Essential fields for search results table and filtering
+    # Includes all columns: Recipient, Awarding Agency, Funding Agency, 
+    # Recipient Location, Amount, Period Start/End Dates, NAICS Code, PSC Code, Last Updated
+    # Plus fields needed for filtering: recipient_id, cfda_number
+    projection_expression = (
+        'award_id, '
+        'award_type, '
+        'total_obligation, '
+        'total_obligated_amount, '
+        'fiscal_year, '
+        'awarding_agency_name, '
+        'awarding_agency_code, '
+        'funding_agency_name, '
+        'funding_agency_code, '
+        'recipient_id, '
+        'recipient_name, '
+        'recipient_location_state, '
+        'recipient_location_country, '
+        'recipient_zip_code, '
+        'period_of_performance_start_date, '
+        'period_of_performance_current_end_date, '
+        'naics_code, '
+        'psc_code, '
+        'cfda_number, '
+        'last_modified_date'
+    )
+    
+    all_items = []
+    batch_size = 100
+    
+    for i in range(0, len(award_ids), batch_size):
+        batch_ids = award_ids[i:i + batch_size]
+        try:
+            request_items = {
+                AWARDS_TABLE_NAME: {
+                    'Keys': [{'award_id': {'S': str(aid)}} for aid in batch_ids],
+                    'ProjectionExpression': projection_expression
+                }
+            }
+            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+            batch_items = batch_response.get('Responses', {}).get(AWARDS_TABLE_NAME, [])
+            
+            deserializer = TypeDeserializer()
+            for item in batch_items:
+                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                all_items.append(converted_item)
+        except Exception as e:
+            logger.error(f"Error fetching batch: {str(e)}", exc_info=True)
+            continue
+    
+    return all_items
+
+
 def fetch_full_awards_batch(award_ids: List[str]) -> List[Dict[str, Any]]:
-    """Fetch full award items using BatchGetItem"""
+    """Fetch full award items using BatchGetItem (for individual award lookups)"""
     if not award_ids:
         return []
     
@@ -572,21 +633,14 @@ def search_awards_union(
         end_offset = offset + limit
         paginated_ids = award_ids_list[offset:end_offset]
         
-        # Fetch full awards
-        full_items = fetch_full_awards_batch(paginated_ids)
+        # Fetch minimal award fields for search results
+        full_items = fetch_minimal_awards_batch(paginated_ids)
         
-        # Enrich with S3 data
-        enriched_items = []
-        for item in full_items:
-            try:
-                enriched = enrich_award_with_details(item)
-                enriched_items.append(enriched)
-            except Exception as e:
-                logger.error(f"Error enriching award {item.get('award_id')}: {str(e)}")
-                enriched_items.append(item)
+        # Skip S3 enrichment for search results to keep response size manageable
+        # Enrichment is only done for individual award lookups (get_award_by_id)
         
         # Convert decimals to floats
-        results = [convert_decimal_to_float(item) for item in enriched_items]
+        results = [convert_decimal_to_float(item) for item in full_items]
         
         has_more = end_offset < len(award_ids_list)
         next_offset = end_offset if has_more else None
@@ -818,35 +872,28 @@ def search_awards_union(
     # Calculate how many items we need to fetch (offset + limit + buffer for enrichment)
     items_to_fetch = min(offset + limit * 5, total_unique_award_ids)  # Fetch enough for offset + limit + buffer
     
-    logger.info(f"Fetching full items for {items_to_fetch} award_ids (offset: {offset}, limit: {limit}, total: {total_unique_award_ids})")
+    logger.info(f"Fetching minimal award fields for {items_to_fetch} award_ids (offset: {offset}, limit: {limit}, total: {total_unique_award_ids})")
     
     # Convert set to sorted list for consistent ordering
     award_ids_list = sorted(list(all_award_ids))[:items_to_fetch]
-    full_items = fetch_full_awards_batch(award_ids_list)
+    full_items = fetch_minimal_awards_batch(award_ids_list)
     
-    # Step 4: Enrich items with S3 data if needed
-    enriched_items = []
-    for item in full_items:
-        try:
-            enriched = enrich_award_with_details(item)
-            enriched_items.append(enriched)
-        except Exception as e:
-            logger.error(f"Error enriching award {item.get('award_id')}: {str(e)}")
-            enriched_items.append(item)
+    # Step 4: Skip S3 enrichment for search results to keep response size manageable
+    # Enrichment is only done for individual award lookups (get_award_by_id)
     
     # Step 5: Sort by fiscal_year descending (most recent first), then by total_obligation descending
-    enriched_items.sort(key=lambda x: (
+    full_items.sort(key=lambda x: (
         x.get('fiscal_year', 0) or 0,
         x.get('total_obligation', 0) or 0
     ), reverse=True)
     
     # Step 6: Apply offset and limit for pagination
-    paginated_items = enriched_items[offset:offset + limit]
+    paginated_items = full_items[offset:offset + limit]
     results = [convert_decimal_to_float(item) for item in paginated_items]
     
     # Step 7: Determine pagination info
     next_offset = offset + len(results)
-    has_more = next_offset < len(enriched_items) or next_offset < total_unique_award_ids
+    has_more = next_offset < len(full_items) or next_offset < total_unique_award_ids
     
     # Create pagination token for next page
     next_last_evaluated_key = None
@@ -856,6 +903,119 @@ def search_awards_union(
             'total_items': total_unique_award_ids,
             'method': 'union'  # Indicate this is union-based pagination
         }
+    
+    logger.info(f"Returning {len(results)} results (union search), offset: {offset}, next_offset: {next_offset}, total: {total_unique_award_ids}, has_more: {has_more}")
+    
+    return {
+        'success': True,
+        'results': results,
+        'count': len(results),
+        'has_more': has_more,
+        'last_evaluated_key': next_last_evaluated_key,
+        'method': 'union',
+        'index_used': f"{len(union_queries)}_GSIs"
+    }
+
+
+def get_award_by_id(award_id: str) -> Optional[Dict[str, Any]]:
+    """Get a single award by ID directly from DynamoDB"""
+    try:
+        if not award_id:
+            return None
+        
+        response = awards_table.get_item(Key={'award_id': award_id})
+        item = response.get('Item')
+        
+        if item:
+            # Enrich with S3 data if needed
+            enriched = enrich_award_with_details(item)
+            return enriched
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching award {award_id}: {str(e)}", exc_info=True)
+        return None
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Lambda handler for union-based award search"""
+    try:
+        # Parse request
+        http_method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method', 'POST'))
+        origin = event.get('headers', {}).get('Origin') or event.get('headers', {}).get('origin')
+        
+        # Handle OPTIONS request
+        if http_method == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': build_cors_headers(origin),
+                'body': ''
+            }
+        
+        # Parse request body
+        if isinstance(event.get('body'), str):
+            body = json.loads(event['body'])
+        else:
+            body = event.get('body', {})
+        
+        # Check if this is a direct award_id lookup (getAward request)
+        award_id = body.get('award_id')
+        if award_id:
+            logger.info(f"Direct award lookup requested for award_id: {award_id}")
+            award = get_award_by_id(award_id)
+            
+            if award:
+                # Convert to response format matching search results
+                result = convert_decimal_to_float(award)
+                return {
+                    'statusCode': 200,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({
+                        'success': True,
+                        'result': result,
+                        'count': 1
+                    }, default=str)
+                }
+            else:
+                # Award not found
+                return {
+                    'statusCode': 200,
+                        'headers': build_cors_headers(origin),
+                        'body': json.dumps({
+                            'success': True,
+                            'result': None,
+                            'count': 0,
+                            'error': f'Award {award_id} not found'
+                        }, default=str)
+                    }
+            
+        # Extract search parameters (regular search)
+        filters = body.get('filters', {})
+        limit = body.get('limit', 100)
+        last_evaluated_key = body.get('last_evaluated_key')
+            
+        # Perform union search
+        result = search_awards_union(filters=filters, limit=limit, last_evaluated_key=last_evaluated_key)
+        
+        # Return response
+        return {
+            'statusCode': 200,
+            'headers': build_cors_headers(origin),
+            'body': json.dumps(result, default=str)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in lambda_handler: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': build_cors_headers(event.get('headers', {}).get('Origin')),
+            'body': json.dumps({
+                'success': False,
+                'error': str(e)
+            })
+        }
+
+
     
     logger.info(f"Returning {len(results)} results (union search), offset: {offset}, next_offset: {next_offset}, total: {total_unique_award_ids}, has_more: {has_more}")
     

@@ -786,3 +786,146 @@ def lda_search(
             "success": False,
             "error": error_msg
         })
+
+            - general_issue_code: General issue code name (e.g., "Foreign Relations")
+            - government_entity: Government entity name (e.g., "State, Dept of (DOS)")
+            - foreign_entity_name: Foreign country/entity name
+            - date_from: Start date in YYYY-MM-DD format
+            - date_to: End date in YYYY-MM-DD format
+            - filing_year: Filing year (integer, e.g., 2023)
+            - item_type: Item type - "FILING" or "CONTRIBUTION" (default: both)
+        limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)
+        last_evaluated_key: JSON string of pagination token from previous request (optional)
+        
+    Note: Multiple filters use AND logic (intersection) - results must match ALL specified filters.
+    
+    Returns:
+        JSON string with search results. For large results (>50 items or >50KB), returns S3 key reference.
+        Results include filing details such as registrant, client, filing dates, amounts, and lobbying activities.
+        
+    Example:
+        # Search for Apple as a client
+        lda_search('{"client_name": "APPLE INC.", "date_from": "2020-01-01"}')
+        
+        # Search for a specific lobbyist
+        lda_search('{"lobbyist_name": "JOHN SMITH"}')
+        
+        # Search for PAC contributions
+        lda_search('{"pac_name": "American Israel Public Affairs Committee"}')
+    """
+    try:
+        agent_logger.info(f"🔍 lda_search called with filters: {filters}, limit: {limit}")
+        
+        # Parse filters JSON
+        if isinstance(filters, str):
+            filters_dict = json.loads(filters)
+        else:
+            filters_dict = filters
+        
+        agent_logger.info(f"📋 Parsed filters: {filters_dict}")
+        agent_logger.info(f"🔑 Filter keys: {list(filters_dict.keys())}")
+        
+        # Parse last_evaluated_key if provided
+        last_key = None
+        if last_evaluated_key:
+            if isinstance(last_evaluated_key, str):
+                last_key = json.loads(last_evaluated_key)
+            else:
+                last_key = last_evaluated_key
+            agent_logger.info(f"📄 Pagination: Using last_evaluated_key for continuation")
+        
+        # Validate limit
+        if limit > 1000:
+            limit = 1000
+        if limit < 1:
+            limit = 5
+        
+        agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
+        
+        # Perform search
+        result = search_filings_simplified(filters_dict, limit=limit, last_evaluated_key=last_key)
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, total_matched={result.get('total_matched', 'N/A')}, has_more={result.get('has_more', False)}")
+        
+        if not result.get('success'):
+            return json.dumps(result, default=str)
+        
+        # Check if result is large enough to store in S3
+        result_json = json.dumps(result)
+        result_size = len(result_json)
+        result_count = result.get('count', 0)
+        
+        LARGE_DATA_THRESHOLD = 50000  # 50KB
+        LARGE_RESULTS_THRESHOLD = 50  # 50 results
+        
+        should_store_in_s3 = (
+            result_size > LARGE_DATA_THRESHOLD or 
+            result_count > LARGE_RESULTS_THRESHOLD
+        )
+        
+        if should_store_in_s3:
+            # Store in S3
+            try:
+                # SECURITY: Get user_id from secure source (set by lambda_handler from authorizer/headers)
+                try:
+                    from utils.auth_helper import get_secure_user_id
+                    user_id = get_secure_user_id({}, fallback_to_env=True)
+                    if not user_id:
+                        raise ValueError("User ID not available from secure authentication source")
+                except ImportError:
+                    # Fallback if auth_helper not available
+                    user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+                    if not user_id:
+                        raise ValueError("User ID not available - authentication required")
+                    logger.warning("⚠️ Using user_id from environment (auth_helper not available)")
+                
+                session_id = os.environ.get('SESSION_ID') or os.environ.get('CURRENT_SESSION_ID', 'default')
+                
+                s3_key = store_results_in_s3(result, user_id, session_id)
+                
+                agent_logger.info(f"Stored LDA search results in S3: {s3_key} ({result_size} bytes, {result_count} results)")
+                
+                # Create summary
+                results_list = result.get('results', [])
+                summary = {
+                    "status": "success",
+                    "s3_key": s3_key,
+                    "data_size_bytes": result_size,
+                    "count": result_count,
+                    "total_matched": result.get('total_matched', result_count),
+                    "has_more": result.get('has_more', False),
+                    "message": f"Large dataset ({result_count} results) stored in S3. Use read_s3_file_tool to access: {s3_key}",
+                    "summary": {
+                        "total_results": result_count,
+                        "total_matched": result.get('total_matched', result_count),
+                        "has_more": result.get('has_more', False),
+                        "sample_results": results_list[:5] if results_list else []  # Include first 5 as sample
+                    }
+                }
+                
+                return json.dumps(summary, default=str)
+                
+            except Exception as s3_error:
+                logger.error(f"Error storing results in S3: {str(s3_error)}")
+                # Fall back to returning result directly (may be truncated)
+                return json.dumps(result, default=str)
+        
+        # Return result directly for small datasets
+        return json.dumps(result, default=str)
+        
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid JSON in filters: {str(e)}"
+        logger.error(error_msg)
+        agent_logger.error(error_msg)
+        return json.dumps({
+            "success": False,
+            "error": error_msg
+        })
+    except Exception as e:
+        error_msg = f"Error searching LDA filings: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        agent_logger.error(error_msg)
+        return json.dumps({
+            "success": False,
+            "error": error_msg
+        })

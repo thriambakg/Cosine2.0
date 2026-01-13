@@ -697,28 +697,53 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
     
     logger.info(f"Total unique bill_ids after union/intersection: {len(all_bill_ids)}")
     
-    # Step 2: Fetch full items
+    # Step 2: Convert to sorted list for consistent pagination
+    # IMPORTANT: Sort bill_ids consistently (by bill_id string) so pagination works correctly
+    # This ensures the same bill_ids appear in the same order across page requests
     bill_ids_list = sorted(list(all_bill_ids))
-    items_to_fetch = min(offset + limit * 5, len(bill_ids_list))
-    logger.info(f"Fetching full items for {items_to_fetch} bill_ids (offset: {offset}, limit: {limit}, total: {len(bill_ids_list)})")
-    full_items = fetch_full_bills_batch(bill_ids_list[:items_to_fetch])
+    logger.info(f"Sorted bill_ids list: {len(bill_ids_list)} total bill_ids (offset: {offset}, limit: {limit})")
+    
+    # Step 3: Fetch full items for ALL bill_ids (we need to filter and sort before pagination)
+    # Fetch in batches to avoid memory issues, but we need all items for consistent sorting
+    logger.info(f"Fetching full items for all {len(bill_ids_list)} bill_ids")
+    full_items = fetch_full_bills_batch(bill_ids_list)
     
     logger.info(f"Fetched {len(full_items)} full items from DynamoDB")
     
-    # Step 3: Apply post-query filters
+    # Step 4: Apply post-query filters (date filters, etc.)
     filtered_items = [item for item in full_items if apply_python_filters(item, filters)]
     logger.info(f"After Python filters: {len(filtered_items)} items")
     
-    # Step 4: Sort by introduced_date descending (most recent first)
-    filtered_items.sort(key=lambda x: x.get('introduced_date', ''), reverse=True)
+    # Step 5: Create a mapping of bill_id -> item for consistent lookup
+    bill_id_to_item = {item.get('bill_id'): item for item in filtered_items}
     
-    # Step 5: Apply offset and limit
-    paginated_items = filtered_items[offset:offset + limit]
+    # Step 6: Build result list in the same order as bill_ids_list (consistent sorting)
+    # This ensures pagination works correctly across page requests
+    ordered_results = []
+    for bill_id in bill_ids_list:
+        if bill_id in bill_id_to_item:
+            ordered_results.append(bill_id_to_item[bill_id])
+    
+    logger.info(f"Ordered results: {len(ordered_results)} items (maintaining bill_ids_list order)")
+    
+    # Step 7: Sort by introduced_date descending (most recent first) while maintaining stable sort
+    # Use bill_id as secondary key to ensure consistent ordering
+    ordered_results.sort(key=lambda x: (
+        x.get('introduced_date') or '',  # Primary: introduced_date (descending)
+        x.get('bill_id') or ''  # Secondary: bill_id for stable sort
+    ), reverse=True)
+    
+    logger.info(f"Sorted results by introduced_date: {len(ordered_results)} items")
+    
+    # Step 8: Apply offset and limit to sorted results
+    paginated_items = ordered_results[offset:offset + limit]
     results = [convert_decimal_to_float(item) for item in paginated_items]
     
-    # Step 6: Determine pagination
+    logger.info(f"Paginated results: {len(results)} items (offset: {offset}, limit: {limit})")
+    
+    # Step 9: Determine pagination
     next_offset = offset + len(results)
-    has_more = next_offset < len(filtered_items) or next_offset < len(all_bill_ids)
+    has_more = next_offset < len(ordered_results)
     
     next_last_evaluated_key = None
     if has_more:

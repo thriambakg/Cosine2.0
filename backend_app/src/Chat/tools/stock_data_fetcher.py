@@ -810,3 +810,17 @@ def get_volatility_surface(symbol: str) -> str:
     except Exception as e:
         return f"Error calculating volatility surface: {str(e)}"
 
+
+    except Exception as e:
+        return f"Error calculating correlation: {str(e)}"
+
+@tool
+def get_volatility_surface(symbol: str) -> str:
+    """Calculate implied volatility surface and historical volatility patterns for a stock using real market data."""
+    try:
+        agent_logger.info(f"Getting volatility surface for {symbol}")
+        volatility_data = StockDataFetcher.calculate_volatility_surface(symbol)
+        return json.dumps(volatility_data, indent=2)
+    except Exception as e:
+        return f"Error calculating volatility surface: {str(e)}"
+

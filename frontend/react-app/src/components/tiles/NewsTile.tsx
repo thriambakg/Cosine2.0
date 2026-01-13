@@ -55,6 +55,7 @@ import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
+import { getTileBatchSize, getTileMaxPages, getTileMaxResults } from './config/tileConfig';
 
 interface NewsTileProps {
   id: string;
@@ -206,6 +207,11 @@ const NewsTile: React.FC<NewsTileProps> = ({
   });
   const [currentResults, setCurrentResults] = useState<NewsArticle[]>([]);
   
+  // Tile pagination configuration
+  const TILE_BATCH_SIZE = getTileBatchSize('news'); // 25
+  const MAX_PAGES = getTileMaxPages('news'); // 4
+  const MAX_RESULTS = getTileMaxResults('news'); // 100
+  
   // Ensure defaults are set for display options first (before useCallback)
   const defaultDisplayOptions = {
     showTitle: true,
@@ -215,7 +221,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     showDate: true,
     showImage: true,
     showResultsTable: true,
-    maxResults: 200,
+    maxResults: MAX_RESULTS, // 100 (not 200)
     compactView: false,
   };
   
@@ -253,6 +259,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     }
     return [];
   });
+  const [pageCount, setPageCount] = useState<number>(0); // Track additional pages loaded (0 = initial search only, 1-3 = additional pages)
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   
   const [hasMore, setHasMore] = useState<boolean>(() => {
@@ -297,7 +304,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               ? currentSearchParams.keywords
               : undefined,
           },
-          limit: 200,
+          limit: TILE_BATCH_SIZE, // 25
         };
 
         const initialResponse = await newsSearchAPI.searchNews(searchRequest);
@@ -321,7 +328,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
               ? currentSearchParams.keywords
               : undefined,
           },
-          limit: 200,
+          limit: TILE_BATCH_SIZE, // 25
           lastEvaluatedKey: nextKey,
         };
 
@@ -519,7 +526,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             ? currentSearchParams.keywords
             : undefined,
         },
-        limit: localDisplayOptions.maxResults || 200,
+        limit: TILE_BATCH_SIZE, // 25 (not maxResults)
       };
       
 
@@ -537,12 +544,17 @@ const NewsTile: React.FC<NewsTileProps> = ({
         // Store all results for filtering
         const newLastEvaluatedKey = response.last_evaluated_key || null;
 
-        
+        // Set allResults - the applyFilters useEffect will automatically filter and update
+        // filteredResults and currentResults when allResults changes
         setAllResults(processedResults);
-        setFilteredResults(processedResults);
-        setCurrentResults(processedResults);
         setHasPerformedInitialSearch(true);
-        setHasMore(response.has_more || false);
+        setPageCount(0); // Initial search doesn't count as an additional page (0 = just initial, 1+ = additional pages)
+        
+        // Only set hasMore if we have a valid last_evaluated_key and haven't reached page limit
+        const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
+        const canLoadMore = (response.has_more || false) && hasValidPaginationKey;
+        const hasReachedPageLimit = false; // Initial page, we haven't loaded any additional pages yet
+        setHasMore(canLoadMore && !hasReachedPageLimit);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
         // Store pagination state (only first page key for initial search)
@@ -553,9 +565,10 @@ const NewsTile: React.FC<NewsTileProps> = ({
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
+            pageCount: 0, // Initial page (0 additional pages loaded)
             totalResultsLoaded: processedResults.length,
             lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: canLoadMore && !hasReachedPageLimit,
           },
         });
         
@@ -564,13 +577,13 @@ const NewsTile: React.FC<NewsTileProps> = ({
           paginationState: {
             totalResultsLoaded: processedResults.length,
             lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: response.has_more || false,
+            hasMore: canLoadMore && !hasReachedPageLimit,
           },
         };
       } else {
         console.error('📰 NewsTile: Search failed - no articles returned');
         setError('Search failed - no articles returned');
-        setCurrentResults([]);
+        setAllResults([]); // Clear all results - filters will handle the rest
         setHasMore(false);
         setHasPerformedInitialSearch(true);
         setLastEvaluatedKeys([]);
@@ -587,7 +600,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     } catch (err: any) {
       console.error('📰 NewsTile: Search error:', err);
       setError(err.message || 'An error occurred during search');
-      setCurrentResults([]);
+      setAllResults([]); // Clear all results - filters will handle the rest
       setHasPerformedInitialSearch(true);
       setHasMore(false);
       setLastEvaluatedKeys([]);
@@ -607,6 +620,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
   
   // Load more results using cursor-based pagination
   const handleLoadMore = useCallback(async () => {
+    // Check if we've reached the page limit (4 pages total)
+    // pageCount represents additional pages loaded (0 = initial, 1-3 = additional)
+    // MAX_PAGES = 4 means 4 total pages, so we stop when pageCount >= 3 (which means 4 total pages)
+    if (pageCount >= MAX_PAGES - 1) {
+      console.warn('📋 NewsTile: Load more blocked - reached maximum page limit', { 
+        pageCount, 
+        MAX_PAGES, 
+        totalPages: pageCount + 1,
+        maxTotalPages: MAX_PAGES 
+      });
+      setHasMore(false);
+      return;
+    }
+    
     if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams) return;
     
     setIsLoadingMore(true);
@@ -621,7 +648,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             ? currentSearchParams.keywords
             : undefined,
         },
-        limit: localDisplayOptions.maxResults || 200,
+        limit: TILE_BATCH_SIZE, // 25 (not maxResults)
         lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
       };
       
@@ -637,7 +664,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
         // Append new results to existing results
         const newLastEvaluatedKey = response.last_evaluated_key || null;
         
-        // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
+        // Update page count - calculate first, then set
+        // pageCount represents additional pages loaded (0 = just initial, 1+ = additional pages)
+        const newPageCount = pageCount + 1;
+        setPageCount(newPageCount);
+        
+        // Update lastEvaluatedKeys array - limit to MAX_PAGES - 1 (3 keys for pages 2, 3, 4)
         let updatedKeys: any[] = [];
         let updatedResultsLength = 0;
         
@@ -649,7 +681,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
             paginationState: {
               totalResultsLoaded: updated.length,
               lastEvaluatedKeys: newLastEvaluatedKey 
-                ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100)
+                ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(0, MAX_PAGES - 1) // Max 3 keys
                 : lastEvaluatedKeys,
               hasMore: response.has_more || false,
             },
@@ -659,24 +691,31 @@ const NewsTile: React.FC<NewsTileProps> = ({
         
         setLastEvaluatedKeys(prev => {
           updatedKeys = newLastEvaluatedKey 
-            ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+            ? [...prev, newLastEvaluatedKey].slice(0, MAX_PAGES - 1) // Max 3 keys (for pages 2, 3, 4)
             : prev;
-          
-          // Persist pagination state
-          onSettingsChange(id, {
-            paginationState: {
-              totalResultsLoaded: updatedResultsLength,
-              lastEvaluatedKeys: updatedKeys,
-              hasMore: response.has_more || false,
-            },
-          });
           
           return updatedKeys;
         });
-        setFilteredResults(prev => [...prev, ...processedResults]);
-        setCurrentResults(prev => [...prev, ...processedResults]);
-        setHasMore(response.has_more || false);
+        
+        // Don't set filteredResults/currentResults here - let applyFilters handle it after allResults updates
+        // This ensures filters are properly applied and prevents duplicates
+        
+        // Only set hasMore if we have a valid last_evaluated_key and haven't reached page limit
+        const hasValidPaginationKey = newLastEvaluatedKey !== null && newLastEvaluatedKey !== undefined;
+        const canLoadMore = (response.has_more || false) && hasValidPaginationKey;
+        const hasReachedPageLimit = newPageCount >= MAX_PAGES - 1;
+        setHasMore(canLoadMore && !hasReachedPageLimit);
         setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Persist pagination state
+        onSettingsChange(id, {
+          paginationState: {
+            pageCount: newPageCount, // Additional pages loaded
+            totalResultsLoaded: updatedResultsLength,
+            lastEvaluatedKeys: updatedKeys,
+            hasMore: canLoadMore && !hasReachedPageLimit,
+          },
+        });
       } else {
         console.error('📰 NewsTile: Load more failed - no articles returned');
         setError('Load more failed - no articles returned');
@@ -1055,7 +1094,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setCurrentResults(filtered);
   }, [allResults, selectedFilters]);
 
-  // Apply filters when selectedFilters change
+  // Apply filters when selectedFilters or allResults change
   useEffect(() => {
     console.log('🔍 NewsTile: Applying filters', {
       selectedFilters,
@@ -1063,7 +1102,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
       beforeFilter: filteredResults.length
     });
     applyFilters();
-  }, [applyFilters]);
+  }, [applyFilters, allResults.length]); // Add allResults.length to ensure filters apply after new search
   
   // Log when key state changes that affect load more visibility
   useEffect(() => {
@@ -2109,12 +2148,78 @@ const NewsTile: React.FC<NewsTileProps> = ({
         </Box>
       )}
 
-      {/* No Results */}
+      {/* No Results / No Search */}
       {!isLoading && !isRestoringPagination && currentResults.length === 0 && !error && (
-        <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
-          <Typography variant="body2" color="#9ca3af">
-            No articles match your criteria. Try adjusting your search parameters.
-          </Typography>
+        <Box 
+          sx={{ 
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            py: 6,
+            px: 3,
+            flexShrink: 0,
+            minHeight: '200px',
+          }}
+        >
+          {(() => {
+            // Check if there's any search criteria
+            const hasSearchCriteria = 
+              (currentSearchParams.keywords && currentSearchParams.keywords.length > 0) ||
+              (currentSearchParams.sources && currentSearchParams.sources.length > 0) ||
+              (currentSearchParams.categories && currentSearchParams.categories.length > 0) ||
+              (currentSearchParams.countries && currentSearchParams.countries.length > 0);
+            
+            if (!hasPerformedInitialSearch && !hasSearchCriteria) {
+              return (
+                <>
+                  <IconButton
+                    onClick={() => setSearchDialogOpen(true)}
+                    sx={{
+                      color: '#3b82f6',
+                      mb: 2,
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        transform: 'scale(1.1)',
+                      },
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <SearchIcon sx={{ fontSize: '4rem' }} />
+                  </IconButton>
+                  <Typography variant="h6" color="#3b82f6" sx={{ fontWeight: 600, mb: 1 }}>
+                    Start Your Search
+                  </Typography>
+                  <Typography variant="body2" color="#9ca3af" sx={{ textAlign: 'center', maxWidth: '300px' }}>
+                    Click the magnifying glass above to configure your search parameters
+                  </Typography>
+                </>
+              );
+            } else {
+              return (
+                <>
+                  <Typography variant="body2" color="#9ca3af" sx={{ mb: 2 }}>
+                    No articles match your criteria
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<SearchIcon />}
+                    onClick={() => setSearchDialogOpen(true)}
+                    sx={{
+                      color: '#3b82f6',
+                      borderColor: '#3b82f6',
+                      '&:hover': {
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      },
+                    }}
+                  >
+                    Adjust Search Parameters
+                  </Button>
+                </>
+              );
+            }
+          })()}
         </Box>
       )}
 

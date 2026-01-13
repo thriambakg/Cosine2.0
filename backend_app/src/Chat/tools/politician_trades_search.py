@@ -392,3 +392,30 @@ def search_politician_trades(
             "success": False,
             "error": error_msg
         })
+        # Perform search
+        result = PoliticianTradesSearcher.search_trades_with_s3_passthrough(
+            filters=filters_dict,
+            page=page,
+            page_size=page_size,
+            last_evaluated_key=last_key
+        )
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, method={result.get('method', 'unknown')}")
+        
+        # Return as JSON string
+        return json.dumps(result, default=str)
+        
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid JSON in filters: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({
+            "success": False,
+            "error": error_msg
+        })
+    except Exception as e:
+        error_msg = f"Error searching politician trades: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return json.dumps({
+            "success": False,
+            "error": error_msg
+        })

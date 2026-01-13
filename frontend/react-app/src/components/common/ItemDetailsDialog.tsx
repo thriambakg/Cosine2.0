@@ -128,11 +128,34 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   // Dialog manager helpers for opening new dialogs (e.g., parent contract)
   const { openItemDetails } = useDialogManagerHelpers();
   
+  // State for loading full award data
+  const [loadingFullAward, setLoadingFullAward] = useState<boolean>(false);
+  
   // Update itemData when data prop changes (e.g., when dialog is opened with new data)
   useEffect(() => {
     const newItemData = data?.data && typeof data.data === 'object' ? data.data : data;
     setItemData(newItemData);
-  }, [data]);
+    
+    // For government contracts, always fetch full award data when dialog opens
+    // This ensures we have complete data including transactions and subawards
+    if (itemType === 'govt_contract' && newItemData?.award_id && open) {
+      setLoadingFullAward(true);
+      govtContractsSearchAPI.getAward({ award_id: newItemData.award_id })
+        .then((response) => {
+          if (response.success && response.result) {
+            setItemData(response.result);
+          }
+        })
+        .catch((error) => {
+          console.error('Error fetching full award data:', error);
+        })
+        .finally(() => {
+          setLoadingFullAward(false);
+        });
+    } else {
+      setLoadingFullAward(false);
+    }
+  }, [data, itemType, open]);
   
   // Dialog manager for minimize functionality (only use if not already managed)
   const safeDialogManager = useSafeDialogManager();
@@ -546,6 +569,18 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     }
 
     // Use itemData state (already handles nested/flat structure)
+    
+    // Show loading state for government contracts while fetching full award data
+    if (itemType === 'govt_contract' && loadingFullAward) {
+      return (
+        <Box sx={{ p: 3, textAlign: 'center' }}>
+          <CircularProgress sx={{ color: '#3b82f6', mb: 2 }} />
+          <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+            Loading award details...
+          </Typography>
+        </Box>
+      );
+    }
 
     // Politician Trade
     if (itemType === 'politician_trade' || itemData?.tradeId || itemData?.politicianName || itemData?.transactionType) {

@@ -1381,47 +1381,6 @@ export default function ChatPage() {
   }, [currentSession?.session_id, user?.id, isUnifiedProcessing]);
 
 
-  // Track files for jump animation (user files + agent files)
-  const previousFilesCountRef = useRef<number>(0);
-  const [shouldJumpFilesMenu, setShouldJumpFilesMenu] = useState(false);
-  
-  // Track total file count changes (user files + agent files) for jump animation
-  useEffect(() => {
-    if (!currentSession?.session_id) {
-      previousFilesCountRef.current = 0;
-      return;
-    }
-    
-    const userFilesCount = uploadedFiles.length;
-    const agentFilesCount = currentSession?.session_variables?.agent_files?.length || 0;
-    const totalFilesCount = userFilesCount + agentFilesCount;
-    const previousCount = previousFilesCountRef.current;
-    
-    console.log('📁 ChatPage: Files tracking:', { 
-      userFilesCount, 
-      agentFilesCount, 
-      totalFilesCount, 
-      previousCount,
-      sessionId: currentSession?.session_id 
-    });
-    
-    // Trigger jump animation if files were added
-    if (totalFilesCount > previousCount) {
-      console.log('📁 ChatPage: Files added - triggering jump animation');
-      setShouldJumpFilesMenu(true);
-      // Reset jump animation after it completes
-      setTimeout(() => {
-        setShouldJumpFilesMenu(false);
-      }, 600); // Animation duration
-    }
-    
-    previousFilesCountRef.current = totalFilesCount;
-  }, [
-    uploadedFiles.length,
-    currentSession?.session_variables?.agent_files?.length,
-    currentSession?.session_id
-  ]);
-  
   // Listen for session variable updates (including file uploads)
   useEffect(() => {
     const handleSessionVariablesUpdate = (event: CustomEvent) => {
@@ -2800,13 +2759,6 @@ export default function ChatPage() {
                 color: isFilesDrawerOpen ? '#3b82f6' : '#9ca3af',
                 backgroundColor: 'rgba(15, 23, 42, 0.9)',
                 border: '1px solid #374151',
-                transform: shouldJumpFilesMenu ? 'translateY(-8px)' : 'translateY(0)',
-                transition: 'transform 0.3s ease-in-out',
-                animation: shouldJumpFilesMenu ? 'fileJump 0.6s ease-in-out' : 'none',
-                '@keyframes fileJump': {
-                  '0%, 100%': { transform: 'translateY(0)' },
-                  '50%': { transform: 'translateY(-8px)' },
-                },
                 '&:hover': {
                   color: '#3b82f6',
                   backgroundColor: 'rgba(59, 130, 246, 0.1)',

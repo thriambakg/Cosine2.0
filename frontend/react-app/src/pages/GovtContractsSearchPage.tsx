@@ -333,8 +333,8 @@ const GovtContractsSearchPage: React.FC = () => {
       if (award.cfda_number) {
         cfdaMap.set(award.cfda_number, (cfdaMap.get(award.cfda_number) || 0) + 1);
       }
-      // Extract month from period_start_date or period_end_date
-      const dateStr = award.period_start_date || award.period_end_date;
+      // Extract month from period_of_performance_start_date or period_of_performance_current_end_date
+      const dateStr = award.period_of_performance_start_date || award.period_of_performance_current_end_date;
       if (dateStr) {
         try {
           const date = new Date(dateStr);
@@ -433,10 +433,10 @@ const GovtContractsSearchPage: React.FC = () => {
       );
     }
 
-    // Filter by month (extract month from period_start_date or period_end_date)
+    // Filter by month (extract month from period_of_performance_start_date or period_of_performance_current_end_date)
     if (selectedFilters.months.size > 0) {
       filtered = filtered.filter((award) => {
-        const dateStr = award.period_start_date || award.period_end_date;
+        const dateStr = award.period_of_performance_start_date || award.period_of_performance_current_end_date;
         if (!dateStr) return false;
         
         try {
@@ -1447,8 +1447,8 @@ const GovtContractsSearchPage: React.FC = () => {
                     />
                   </Box>
 
-                  {/* NAICS Code - Direct search, no autocomplete */}
-                  <MultiSelectField<string>
+                  {/* NAICS Code - Hidden (no GSI available, may implement later) */}
+                  {/* <MultiSelectField<string>
                     label="NAICS Code"
                     selectedItems={searchParams.naics_code || []}
                     onItemsChange={(codes) => {
@@ -1459,10 +1459,10 @@ const GovtContractsSearchPage: React.FC = () => {
                     renderItem={(code) => code}
                     placeholder="Enter NAICS codes..."
                     disableAutocomplete={true}
-                  />
+                  /> */}
 
-                  {/* PSC Code - Direct search, no autocomplete */}
-                  <MultiSelectField<string>
+                  {/* PSC Code - Hidden (no GSI available, may implement later) */}
+                  {/* <MultiSelectField<string>
                     label="PSC Code"
                     selectedItems={searchParams.psc_code || []}
                     onItemsChange={(codes) => {
@@ -1473,10 +1473,10 @@ const GovtContractsSearchPage: React.FC = () => {
                     renderItem={(code) => code}
                     placeholder="Enter PSC codes..."
                     disableAutocomplete={true}
-                  />
+                  /> */}
 
-                  {/* CFDA Number - Direct search, no autocomplete */}
-                  <MultiSelectField<string>
+                  {/* CFDA Number - Hidden (no GSI available, may implement later) */}
+                  {/* <MultiSelectField<string>
                     label="CFDA Number"
                     selectedItems={searchParams.cfda_number || []}
                     onItemsChange={(numbers) => {
@@ -1487,7 +1487,7 @@ const GovtContractsSearchPage: React.FC = () => {
                     renderItem={(number) => number}
                     placeholder="Enter CFDA numbers..."
                     disableAutocomplete={true}
-                  />
+                  /> */}
 
                   </Box>
                 </Collapse>
@@ -1746,7 +1746,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         period_end_date: 'Period End Date',
                         naics_code: 'NAICS Code',
                         psc_code: 'PSC Code',
-                        last_updated: 'Last Updated',
+                        last_updated: 'Last Modified',
                         // Note: 'actions' removed - always visible, not selectable
                       };
                       return (
@@ -1908,7 +1908,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                   color: '#9ca3af', 
                                   fontWeight: 600, 
                                   fontSize: '0.875rem',
-                                }}>Last Updated</TableCell>
+                                }}>Last Modified</TableCell>
                               )}
                             </TableRow>
                           </TableHead>
@@ -2006,7 +2006,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                     fontSize: '0.875rem',
                                     padding: '12px',
                                   }}>
-                                    {formatDate(award.period_start_date)}
+                                    {formatDate(award.period_of_performance_start_date)}
                                   </TableCell>
                                 )}
                                 {visibleColumns.includes('period_end_date') && (
@@ -2042,7 +2042,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                     fontSize: '0.875rem',
                                     padding: '12px',
                                   }}>
-                                    {formatLastUpdated(award.last_updated)}
+                                    {formatLastUpdated(award.last_modified_date)}
                                   </TableCell>
                                 )}
                                 {/* Actions column removed - use double-click to open details */}

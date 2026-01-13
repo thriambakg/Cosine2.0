@@ -1637,3 +1637,175 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
 
+
+        # Route to appropriate operation
+        result = None
+        if operation == 'add_file':
+            # Handle file upload (multipart/form-data or base64)
+            folder_path = body.get('folder_path', '')
+            file_content = body.get('file_content')  # Base64 encoded or bytes
+            filename = body.get('filename', 'untitled')
+            title = body.get('title')
+            description = body.get('description')
+            
+            # Decode base64 if provided
+            if isinstance(file_content, str):
+                import base64
+                file_content = base64.b64decode(file_content)
+            
+            result = add_file_upload(user_id, folder_path, file_content, filename, title, description)
+            
+        elif operation == 'add_context_item':
+            context_data = body.get('context_data', {})
+            title = body.get('title', 'Untitled')
+            item_type = body.get('item_type', 'context_item')
+            folder_path = body.get('folder_path', '')
+            result = add_context_item(user_id, folder_path, context_data, title, item_type)
+            
+        elif operation == 'add_bulk_context_items':
+            items = body.get('items', [])
+            folder_path = body.get('folder_path', '')
+            if not items or not isinstance(items, list):
+                return {
+                    'statusCode': 400,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                }
+            result = add_bulk_context_items(user_id, folder_path, items)
+            
+        elif operation == 'create_folder':
+            folder_name = body.get('folder_name')
+            parent_path = body.get('parent_path')
+            result = create_folder(user_id, folder_name, parent_path)
+            
+        elif operation == 'delete_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            result = delete_item(user_id, folder_path, item_id)
+            
+        elif operation == 'delete_bulk_items':
+            items = body.get('items', [])
+            if not items or not isinstance(items, list):
+                return {
+                    'statusCode': 400,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                }
+            result = delete_bulk_items(user_id, items)
+            
+        elif operation == 'delete_folder':
+            folder_path = body.get('folder_path', '')
+            folder_id = body.get('folder_id')
+            
+            # If folder_path looks like a UUID (folder_id), try to find the actual path
+            if folder_path and len(folder_path) == 36 and folder_path.count('-') == 4:
+                # Likely a UUID, try to find the actual folder path
+                logger.info(f"folder_path looks like a UUID, searching for actual path...")
+                actual_path = find_folder_by_id(user_id, folder_path, '')
+                if actual_path:
+                    folder_path = actual_path
+                    logger.info(f"Found folder path: {folder_path}")
+                else:
+                    logger.warning(f"Could not find folder path for folder_id: {folder_path}")
+            elif folder_id:
+                # If folder_id is provided separately, use it to find the path
+                logger.info(f"folder_id provided, searching for actual path...")
+                actual_path = find_folder_by_id(user_id, folder_id, '')
+                if actual_path:
+                    folder_path = actual_path
+                    logger.info(f"Found folder path: {folder_path}")
+                else:
+                    logger.warning(f"Could not find folder path for folder_id: {folder_id}")
+            
+            result = delete_folder(user_id, folder_path)
+            
+        elif operation == 'move_item':
+            item_id = body.get('item_id')
+            source_folder_path = body.get('source_folder_path', '')
+            dest_folder_path = body.get('dest_folder_path', '')
+            result = move_item(user_id, item_id, source_folder_path, dest_folder_path)
+            
+        elif operation == 'move_bulk_items':
+            items = body.get('items', [])
+            dest_folder_path = body.get('dest_folder_path', '')
+            if not items or not isinstance(items, list):
+                return {
+                    'statusCode': 400,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                }
+            result = move_bulk_items(user_id, items, dest_folder_path)
+            
+        elif operation == 'update_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            content_data = body.get('content_data', {})
+            result = update_item(user_id, folder_path, item_id, content_data)
+            
+        elif operation == 'rename_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            new_name = body.get('new_name')
+            result = rename_item(user_id, folder_path, item_id, new_name)
+            
+        elif operation == 'list_folder':
+            folder_path = body.get('folder_path', '')
+            result = list_folder(user_id, folder_path)
+            
+        elif operation == 'get_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            result = get_item(user_id, folder_path, item_id)
+            
+        elif operation == 'copy_item':
+            folder_path = body.get('folder_path', '')
+            item_id = body.get('item_id')
+            result = copy_item(user_id, folder_path, item_id)
+            
+        elif operation == 'copy_folder':
+            folder_path = body.get('folder_path', '')
+            result = copy_folder(user_id, folder_path)
+            
+        elif operation == 'paste_item':
+            dest_folder_path = body.get('dest_folder_path', '')
+            clipboard_data = body.get('clipboard_data', {})
+            result = paste_item(user_id, dest_folder_path, clipboard_data)
+            
+        elif operation == 'paste_items_by_ids':
+            dest_folder_path = body.get('dest_folder_path', '')
+            item_data = body.get('item_data', [])  # List of {item_id, source_folder_path, is_folder}
+            result = paste_items_by_ids(user_id, dest_folder_path, item_data)
+            
+        elif operation == 'copy_bulk_items':
+            items = body.get('items', [])  # List of {item_id, source_folder_path}
+            dest_folder_path = body.get('dest_folder_path', '')
+            result = copy_bulk_items(user_id, items, dest_folder_path)
+            
+        else:
+            return {
+                'statusCode': 400,
+                'headers': build_cors_headers(origin),
+                'body': json.dumps({'error': f'Unknown operation: {operation}'})
+            }
+        
+        return {
+            'statusCode': 200,
+            'headers': build_cors_headers(origin),
+            'body': json.dumps({
+                'success': True,
+                'result': result
+            }, default=str)
+        }
+        
+    except Exception as e:
+        logger.error(f"Lambda handler error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return {
+            'statusCode': 500,
+            'headers': build_cors_headers(origin),
+            'body': json.dumps({'error': str(e)})
+        }
+
+

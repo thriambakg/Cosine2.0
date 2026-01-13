@@ -2250,24 +2250,73 @@ def handle_search(event: Dict[str, Any]) -> Dict[str, Any]:
             )
             
             if job_status:
-                # Job exists - return job_id as before
-                logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists, returning job_id")
-                return {
-                    'statusCode': 202,  # Accepted
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        **get_cors_headers(origin),
-                        'Access-Control-Allow-Headers': 'Content-Type',
-                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
-                    },
-                    'body': json.dumps({
-                        'success': True,
-                        'job_id': job_id,
-                            'status': job_status.get('status', 'COMPLETED'),
+                status = job_status.get('status', 'UNKNOWN')
+                
+                # Check if job is stuck IN_PROGRESS (timeout detection)
+                if status == 'IN_PROGRESS':
+                    updated_at_str = job_status.get('updated_at')
+                    if updated_at_str:
+                        try:
+                            updated_at = datetime.fromisoformat(updated_at_str.replace('Z', '+00:00'))
+                            time_since_update = (datetime.now(timezone.utc) - updated_at).total_seconds()
+                            # Lambda timeout is typically 15 minutes, so if job hasn't been updated in 20 minutes, it's stuck
+                            TIMEOUT_THRESHOLD_SECONDS = 20 * 60  # 20 minutes
+                            
+                            if time_since_update > TIMEOUT_THRESHOLD_SECONDS:
+                                logger.warning(f"⚠️ Job {job_id} is stuck IN_PROGRESS (last updated {time_since_update/60:.1f} minutes ago), marking as FAILED and creating new job")
+                                # Mark the old job as failed due to timeout
+                                fail_job(job_id, f'Job timed out after {time_since_update/60:.1f} minutes without progress')
+                                # Fall through to create new job
+                            else:
+                                # Job is still active, return it
+                                logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists and is IN_PROGRESS (updated {time_since_update/60:.1f} min ago), returning job_id")
+                                return {
+                                    'statusCode': 202,  # Accepted
+                                    'headers': {
+                                        'Content-Type': 'application/json',
+                                        **get_cors_headers(origin),
+                                        'Access-Control-Allow-Headers': 'Content-Type',
+                                        'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                                    },
+                                    'body': json.dumps({
+                                        'success': True,
+                                        'job_id': job_id,
+                                        'status': status,
+                                        'message': 'Search in progress',
+                                        'cached': True
+                                    })
+                                }
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"⚠️ Could not parse updated_at timestamp for job {job_id}: {e}, treating as stuck")
+                            fail_job(job_id, 'Job timestamp invalid, treating as timeout')
+                            # Fall through to create new job
+                    else:
+                        logger.warning(f"⚠️ Job {job_id} is IN_PROGRESS but has no updated_at timestamp, treating as stuck")
+                        fail_job(job_id, 'Job missing timestamp, treating as timeout')
+                        # Fall through to create new job
+                elif status == 'COMPLETED':
+                    # Job is completed - return job_id as before
+                    logger.info(f"Query cache hit for hash {query_hash}, job {job_id} exists with status {status}, returning job_id")
+                    return {
+                        'statusCode': 202,  # Accepted
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            **get_cors_headers(origin),
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Allow-Methods': 'POST,GET,OPTIONS'
+                        },
+                        'body': json.dumps({
+                            'success': True,
+                            'job_id': job_id,
+                            'status': status,
                             'message': 'Search results retrieved from cache',
                             'cached': True
-                    })
-                }
+                        })
+                    }
+                else:
+                    # Job is CANCELLED, FAILED, or other terminal state - create a new job
+                    logger.info(f"Query cache hit for hash {query_hash}, but job {job_id} has status {status} (CANCELLED/FAILED), creating new job")
+                    # Fall through to create new job
             elif results_s3_key:
                 # Job doesn't exist but S3 key available - verify it exists and return it
                 from query_cache import check_s3_key_exists

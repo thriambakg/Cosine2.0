@@ -544,25 +544,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     }
   }, [initialFilterSettings, id]);
 
-  // Persist filter settings to backend when they change
-  // Use a ref to track previous filters to avoid unnecessary updates
-  const prevFiltersRef = useRef(selectedFilters);
-  useEffect(() => {
-    if (hasPerformedInitialSearch) {
-      // Only persist if filters actually changed
-      const filtersChanged = 
-        JSON.stringify(prevFiltersRef.current) !== JSON.stringify(selectedFilters);
-      
-      if (filtersChanged) {
-        prevFiltersRef.current = selectedFilters;
-        console.log('💾 SECSearchTile: Persisting filterSettings', {
-          tileId: id,
-          filterSettings: selectedFilters,
-        });
-        onSettingsChange(id, { filterSettings: selectedFilters });
-      }
-    }
-  }, [selectedFilters, id, onSettingsChange, hasPerformedInitialSearch]);
+  // Filters are client-side only - not persisted to dashboard
   
   // Compute available filters from all results
   const availableFilters = useMemo(() => {
@@ -2890,6 +2872,85 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         minHeight: 0,
         mt: 1 // Small top margin
       }}>
+        {/* No Results / No Search */}
+        {!isLoading && currentResults.length === 0 && !error && (
+          <Box 
+            sx={{ 
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              py: 6,
+              px: 3,
+              flexShrink: 0,
+              minHeight: '200px',
+            }}
+          >
+            {(() => {
+              // Check if there's any search criteria
+              const hasSearchCriteria = 
+                (currentSearchParams.cik && (Array.isArray(currentSearchParams.cik) ? currentSearchParams.cik.length > 0 : currentSearchParams.cik.trim() !== '')) ||
+                (Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName.length > 0 && currentSearchParams.entityName.some(name => name && name.trim() !== '')) ||
+                (!Array.isArray(currentSearchParams.entityName) && currentSearchParams.entityName && currentSearchParams.entityName.trim() !== '') ||
+                (Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords.length > 0 && currentSearchParams.keywords.some(kw => kw && kw.trim() !== '')) ||
+                (!Array.isArray(currentSearchParams.keywords) && currentSearchParams.keywords && currentSearchParams.keywords.trim() !== '') ||
+                (currentSearchParams.formTypes && currentSearchParams.formTypes.length > 0) ||
+                (currentSearchParams.dateFrom && currentSearchParams.dateFrom.trim() !== '') ||
+                (currentSearchParams.dateTo && currentSearchParams.dateTo.trim() !== '');
+              
+              if (!hasPerformedInitialSearch && !hasSearchCriteria) {
+                return (
+                  <>
+                    <IconButton
+                      onClick={() => setSearchDialogOpen(true)}
+                      sx={{
+                        color: '#3b82f6',
+                        mb: 2,
+                        '&:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          transform: 'scale(1.1)',
+                        },
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <SearchIcon sx={{ fontSize: '4rem' }} />
+                    </IconButton>
+                    <Typography variant="h6" color="#3b82f6" sx={{ fontWeight: 600, mb: 1 }}>
+                      Start Your Search
+                    </Typography>
+                    <Typography variant="body2" color="#9ca3af" sx={{ textAlign: 'center', maxWidth: '300px' }}>
+                      Click the magnifying glass above to configure your search parameters
+                    </Typography>
+                  </>
+                );
+              } else {
+                return (
+                  <>
+                    <Typography variant="body2" color="#9ca3af" sx={{ mb: 2 }}>
+                      No results found
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      startIcon={<SearchIcon />}
+                      onClick={() => setSearchDialogOpen(true)}
+                      sx={{
+                        color: '#3b82f6',
+                        borderColor: '#3b82f6',
+                        '&:hover': {
+                          borderColor: '#2563eb',
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        },
+                      }}
+                    >
+                      Adjust Search Parameters
+                    </Button>
+                  </>
+                );
+              }
+            })()}
+          </Box>
+        )}
+        {currentResults.length > 0 && (
         <TableContainer sx={{ 
           flex: 1,
           backgroundColor: 'transparent',
@@ -3155,9 +3216,10 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
             </TableBody>
           </Table>
         </TableContainer>
+        )}
         
         {/* Pagination */}
-        {totalPages > 1 && (
+        {currentResults.length > 0 && totalPages > 1 && (
           <Box sx={{ 
             display: 'flex', 
             justifyContent: 'center', 

@@ -791,3 +791,6 @@ def generate_excel_with_charts_tool(
             'message': error_msg
         })
 
+
+        })
+

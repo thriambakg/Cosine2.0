@@ -44,13 +44,14 @@ export interface TileConfig {
 
 /**
  * Pagination configuration for search tiles
- * All search tiles use the same pagination settings: 25 results per batch, 4 pages max = 100 results total
+ * Simplified: Fixed batch size of 100, no limits on pagination
+ * On refresh, only the first batch (100 results) is shown
  */
 export const SEARCH_TILE_PAGINATION: TilePaginationConfig = {
-  batchSize: 25,
-  maxPages: 4,
-  maxPaginationKeys: 3, // maxPages - 1
-  maxResults: 100, // batchSize * maxPages
+  batchSize: 100, // Fixed batch size
+  maxPages: 999, // No practical limit - users can paginate as much as they want
+  maxPaginationKeys: 998, // No practical limit
+  maxResults: 99900, // No practical limit (999 pages * 100 results)
 };
 
 /**
@@ -131,7 +132,7 @@ export function getTileSizeConfig(tileType: string): TileSizeConfig {
  * Helper function to get batch size for a tile
  */
 export function getTileBatchSize(tileType: string): number {
-  return getTilePaginationConfig(tileType)?.batchSize || 25;
+  return getTilePaginationConfig(tileType)?.batchSize || 100;
 }
 
 /**
@@ -152,6 +153,6 @@ export function getTileMaxPaginationKeys(tileType: string): number {
  * Helper function to get max results for a tile
  */
 export function getTileMaxResults(tileType: string): number {
-  return getTilePaginationConfig(tileType)?.maxResults || 100;
+  return getTilePaginationConfig(tileType)?.maxResults || 99900;
 }
 

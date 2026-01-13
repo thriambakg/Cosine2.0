@@ -40,6 +40,8 @@ interface TileHeaderActionsProps {
   };
   // Collapsible actions (optional)
   collapsibleActions?: React.ReactNode;
+  // Optional: element to show right before the collapse toggle (moves with toggle)
+  preToggleElement?: React.ReactNode;
   // Optional: persist collapse state
   defaultCollapsed?: boolean;
   onCollapseChange?: (collapsed: boolean) => void;
@@ -58,6 +60,7 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
   editButton,
   refreshButton,
   collapsibleActions,
+  preToggleElement,
   defaultCollapsed = true,
   onCollapseChange,
 }) => {
@@ -71,6 +74,9 @@ export const TileHeaderActions: React.FC<TileHeaderActionsProps> = ({
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      {/* Pre-toggle element (e.g., disclaimer tooltip) - appears right before collapse toggle */}
+      {preToggleElement}
+      
       {/* Collapse/Expand Button */}
       {collapsibleActions && (
         <Tooltip title={collapsed ? 'Expand options' : 'Collapse options'}>

@@ -610,3 +610,32 @@ Based on the current webpage and user intent, focus on:
 
 # Global context-aware agent instance
 context_aware_agent = ContextAwareAgent()
+        Args:
+            session_context: Complete session context
+            
+        Returns:
+            summary: Session summary information
+        """
+        try:
+            metadata = session_context.get('metadata', {})
+            context = session_context.get('context', {})
+            session_variables = context.get('session_variables', {})
+            
+            return {
+                'session_id': session_context['session_id'],
+                'user_id': session_context['user_id'],
+                'page_type': session_variables.get('page_type', 'unknown'),
+                'user_intent': metadata.get('user_intent', 'general'),
+                'conversation_count': metadata.get('conversation_count', 0),
+                'last_activity': metadata.get('last_activity', 0),
+                'relevant_tools': session_variables.get('relevant_tools', []),
+                'webpage_url': metadata.get('page_url', ''),
+                'has_webpage_content': bool(context.get('webpage_content', ''))
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting session summary: {str(e)}")
+            return {'error': str(e)}
+
+# Global context-aware agent instance
+context_aware_agent = ContextAwareAgent()

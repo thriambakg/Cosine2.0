@@ -46,6 +46,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   ViewColumn as ViewColumnIcon,
   Folder as FolderIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -59,6 +60,7 @@ import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { securitySuggestionsServiceV2 } from '../../services/securitySuggestionsV2';
+import { getTileBatchSize } from './config/tileConfig';
 
 // Minimum date for date filters (January 1, 2025)
 const MIN_DATE = '2025-01-01';
@@ -101,11 +103,6 @@ interface PoliticianTradesSearchTileProps {
     maxResults: number;
     compactView: boolean;
   };
-  paginationState?: {
-    totalResultsLoaded: number;
-    lastEvaluatedKeys: any[];
-    hasMore: boolean;
-  };
   autoRefresh?: boolean;
   isPinned?: boolean;
   customTitle?: string;
@@ -136,11 +133,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     transactionType: [],
   },
   filterSettings: initialFilterSettings,
-  paginationState: _ = {
-    totalResultsLoaded: 0,
-    lastEvaluatedKeys: [],
-    hasMore: false,
-  },
   results = [],
   displayOptions = {
     showPolitician: true,
@@ -192,6 +184,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     positions: string[];
     securities: string[];
     transactionTypes: string[];
+    files: string[];
   }>(() => {
     const initial = {
       politicians: initialFilterSettings?.politicians || [],
@@ -199,6 +192,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       positions: initialFilterSettings?.positions || [],
       securities: initialFilterSettings?.securities || [],
       transactionTypes: initialFilterSettings?.transactionTypes || [],
+      files: [],
     };
     console.log('🔄 PoliticianTradesSearchTile: [INIT] Initializing selectedFilters from props', {
       tileId: id,
@@ -210,8 +204,18 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     return initial;
   });
 
-  const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>({
-    ...searchParams,
+  // Initialize search params and validate dateFrom against MIN_DATE
+  const [currentSearchParams, setCurrentSearchParams] = useState<PoliticianTradesSearchParams>(() => {
+    const params = { ...searchParams };
+    // Ensure dateFrom is not before MIN_DATE (enforce minimum date)
+    if (params.dateFrom && params.dateFrom < MIN_DATE) {
+      params.dateFrom = MIN_DATE;
+    }
+    // If dateFrom is not set, use MIN_DATE as default
+    if (!params.dateFrom) {
+      params.dateFrom = MIN_DATE;
+    }
+    return params;
   });
   
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
@@ -220,11 +224,13 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentResults, setCurrentResults] = useState<PoliticianTrade[]>(results);
-  const paginationState = _ as any;
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<{ transactionDate?: number; tradeId?: string } | null>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
-  const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
+  
+  // Tile pagination configuration
+  const TILE_BATCH_SIZE = getTileBatchSize('politician_trades'); // 100 (fixed batch size)
+  
   // Ensure defaults are set
   const defaultDisplayOptions = {
     showPolitician: true,
@@ -238,7 +244,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     showDate: true,
     showFile: true,
     showResultsTable: true,
-    maxResults: 50,
+    maxResults: TILE_BATCH_SIZE, // 100 (fixed batch size)
     compactView: false,
   };
   
@@ -389,14 +395,24 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         positions: [],
         securities: [],
         transactionTypes: [],
+        files: [],
       });
     }
     
     try {
+      // Validate and enforce MIN_DATE before making API call
+      const validatedParams = { ...currentSearchParams };
+      if (validatedParams.dateFrom && validatedParams.dateFrom < MIN_DATE) {
+        validatedParams.dateFrom = MIN_DATE;
+      }
+      if (!validatedParams.dateFrom) {
+        validatedParams.dateFrom = MIN_DATE;
+      }
+      
       const searchRequest = {
-        ...currentSearchParams,
+        ...validatedParams,
         page: 1,
-        pageSize: displayOptions.maxResults,
+        pageSize: TILE_BATCH_SIZE, // 100 (fixed batch size)
       };
       
       const response = await politicianTradesSearchAPI.search(searchRequest);
@@ -419,29 +435,18 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         setHasMore(response.has_more || false);
         setLastEvaluatedKey(newLastEvaluatedKey);
         
-        // Store pagination state (only first page key for initial search)
+        // Store pagination key for load more (not persisted)
         const newLastEvaluatedKeys = newLastEvaluatedKey ? [newLastEvaluatedKey] : [];
         setLastEvaluatedKeys(newLastEvaluatedKeys);
         
-        // Persist pagination state
+        // Persist search params only (no pagination state)
         onSettingsChange(id, {
           searchParams: currentSearchParams,
-          paginationState: {
-            totalResultsLoaded: processedResults.length,
-            lastEvaluatedKeys: newLastEvaluatedKeys,
-            hasMore: response.has_more || false,
-          },
         });
         
         // Update parent component - persist results in session only (not database)
-        // Include pagination state in session state
         onUpdate(id, {
           results: processedResults, // Session persistence - full results for duration of login only
-          paginationState: {
-            totalResultsLoaded: processedResults.length,
-            lastEvaluatedKeys: response.last_evaluated_key ? [response.last_evaluated_key] : [],
-            hasMore: response.has_more || false,
-          },
           lastUpdated: Date.now(),
         });
       } else {
@@ -451,14 +456,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         setHasMore(false);
         setHasPerformedInitialSearch(true);
         setLastEvaluatedKeys([]);
-        // Clear pagination state
+        // Persist search params only
         onSettingsChange(id, {
           searchParams: currentSearchParams,
-          paginationState: {
-            totalResultsLoaded: 0,
-            lastEvaluatedKeys: [],
-            hasMore: false,
-          },
         });
       }
     } catch (err: any) {
@@ -468,123 +468,15 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       setHasPerformedInitialSearch(true);
       setHasMore(false);
       setLastEvaluatedKeys([]);
-      // Clear pagination state on error
+      // Persist search params only
       onSettingsChange(id, {
         searchParams: currentSearchParams,
-        paginationState: {
-          totalResultsLoaded: 0,
-          lastEvaluatedKeys: [],
-          hasMore: false,
-        },
       });
     } finally {
       setIsLoading(false);
     }
-  }, [currentSearchParams, displayOptions.maxResults, id, onUpdate, onSettingsChange]);
+  }, [currentSearchParams, TILE_BATCH_SIZE, id, onUpdate, onSettingsChange]);
 
-  // Restore pagination state by reloading results from saved pagination keys
-  const restorePaginationState = useCallback(async () => {
-    if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
-      return;
-    }
-
-    if (paginationState.totalResultsLoaded <= (currentResults?.length || 0)) {
-      // Already have all results, no need to restore
-      return;
-    }
-
-    console.log('🔄 PoliticianTradesSearchTile: Restoring pagination state', {
-      totalResultsLoaded: paginationState.totalResultsLoaded,
-      currentResults: currentResults?.length || 0,
-      keysToLoad: paginationState.lastEvaluatedKeys.length,
-    });
-
-    setIsRestoringPagination(true);
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      let restoredResults = [...(currentResults || [])];
-      let keysToLoad = [...paginationState.lastEvaluatedKeys];
-      
-      // If we don't have the initial page (currentResults is empty), 
-      // we need to load it first before loading continuation pages
-      if (restoredResults.length === 0 && currentSearchParams) {
-        const searchRequest = {
-          ...currentSearchParams,
-          page: 1,
-          pageSize: displayOptions.maxResults,
-        };
-
-        const initialResponse = await politicianTradesSearchAPI.search(searchRequest);
-
-        if (initialResponse.success && initialResponse.results) {
-          const processedResults = initialResponse.results.map((trade, index) => ({
-            ...trade,
-            tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
-          }));
-          restoredResults = [...processedResults];
-        }
-      }
-
-      // Load each continuation page sequentially until we reach totalResultsLoaded
-      while (restoredResults.length < paginationState.totalResultsLoaded && keysToLoad.length > 0) {
-        const nextKey = keysToLoad[0];
-
-        const searchRequest = {
-          ...currentSearchParams,
-          page: 1,
-          pageSize: displayOptions.maxResults,
-          lastEvaluatedKey: nextKey,
-        };
-
-        const response = await politicianTradesSearchAPI.search(searchRequest);
-
-        if (response.success && response.results && response.results.length > 0) {
-          const processedResults = response.results.map((trade, index) => ({
-            ...trade,
-            tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
-          }));
-          restoredResults = [...restoredResults, ...processedResults];
-          keysToLoad = keysToLoad.slice(1);
-        } else {
-          // No more results or error, stop loading
-          break;
-        }
-      }
-
-      // Update state with restored results
-      setAllResults(restoredResults);
-      setFilteredResults(restoredResults);
-      setCurrentResults(restoredResults);
-      setLastEvaluatedKeys(paginationState.lastEvaluatedKeys);
-      setLastEvaluatedKey(paginationState.lastEvaluatedKeys[paginationState.lastEvaluatedKeys.length - 1] || null);
-      setHasMore(paginationState.hasMore);
-      setHasPerformedInitialSearch(true);
-
-      // Update tile with restored results - include pagination state
-      onUpdate(id, {
-        results: restoredResults,
-        paginationState: {
-          totalResultsLoaded: restoredResults.length,
-          lastEvaluatedKeys: paginationState.lastEvaluatedKeys,
-          hasMore: paginationState.hasMore,
-        },
-        lastUpdated: Date.now(),
-      });
-
-      console.log('✅ PoliticianTradesSearchTile: Pagination state restored', {
-        restoredCount: restoredResults.length,
-        targetCount: paginationState.totalResultsLoaded,
-      });
-    } catch (err) {
-      console.error('❌ PoliticianTradesSearchTile: Error restoring pagination state', err);
-      setError('Failed to restore previous results. Please refresh.');
-    } finally {
-      setIsRestoringPagination(false);
-      setIsLoading(false);
-    }
-  }, [paginationState, currentResults, currentSearchParams, displayOptions.maxResults, id, onUpdate]);
   
   // Load more results using cursor-based pagination
   const handleLoadMore = useCallback(async () => {
@@ -597,7 +489,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       const searchRequest = {
         ...currentSearchParams,
         page: 1, // Not used when lastEvaluatedKey is provided
-        pageSize: displayOptions.maxResults,
+        pageSize: TILE_BATCH_SIZE, // 100 (fixed batch size)
         lastEvaluatedKey: lastEvaluatedKey, // Cursor for pagination
       };
       
@@ -619,71 +511,40 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         const newLastEvaluatedKey = response.last_evaluated_key || null;
         
         // Update lastEvaluatedKeys array (add new key if exists, limit to 100 pages)
-        let updatedKeys: any[] = [];
-        setLastEvaluatedKeys(prev => {
-          updatedKeys = newLastEvaluatedKey 
-            ? [...prev, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
-            : prev;
-          
-          // Persist pagination state
-          onSettingsChange(id, {
-            paginationState: {
-              totalResultsLoaded: allResults.length + processedResults.length,
-              lastEvaluatedKeys: updatedKeys,
-              hasMore: response.has_more || false,
-            },
-          });
-          
-          return updatedKeys;
-        });
+        const updatedKeys = newLastEvaluatedKey 
+          ? [...lastEvaluatedKeys, newLastEvaluatedKey].slice(-100) // Keep last 100 keys
+          : lastEvaluatedKeys;
         
-        setAllResults(prev => {
-          const updated = [...prev, ...processedResults];
-          // Update parent component - include pagination state
-          onUpdate(id, {
-            results: updated,
-            paginationState: {
-              totalResultsLoaded: updated.length,
-              lastEvaluatedKeys: updatedKeys,
-              hasMore: response.has_more || false,
-            },
-            lastUpdated: Date.now(),
-          });
-          return updated;
-        });
+        setLastEvaluatedKeys(updatedKeys);
+        
+        // Calculate updated results
+        const updated = [...allResults, ...processedResults];
+        const hasMoreResults = response.has_more || false;
+        
+        setAllResults(updated);
         setFilteredResults(prev => [...prev, ...processedResults]);
         setCurrentResults(prev => [...prev, ...processedResults]);
-        setHasMore(response.has_more || false);
+        setHasMore(hasMoreResults);
         setLastEvaluatedKey(newLastEvaluatedKey);
+        
+        // Update parent component (no pagination state persistence)
+        onUpdate(id, {
+          results: updated,
+          lastUpdated: Date.now(),
+        });
       } else {
         console.error('🏛️ PoliticianTradesSearchTile: Load more failed:', response.error);
         setError(response.error || 'Load more failed');
         setHasMore(false);
-        // Update pagination state to reflect no more results
-        onSettingsChange(id, {
-          paginationState: {
-            totalResultsLoaded: allResults.length,
-            lastEvaluatedKeys: lastEvaluatedKeys,
-            hasMore: false,
-          },
-        });
       }
     } catch (err: any) {
       console.error('🏛️ PoliticianTradesSearchTile: Load more error:', err);
       setError(err.message || 'An error occurred while loading more results');
       setHasMore(false);
-      // Preserve current pagination state on error
-      onSettingsChange(id, {
-        paginationState: {
-          totalResultsLoaded: allResults.length,
-          lastEvaluatedKeys: lastEvaluatedKeys,
-          hasMore: false,
-        },
-      });
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, displayOptions.maxResults, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
+  }, [hasMore, lastEvaluatedKey, isLoadingMore, currentSearchParams, TILE_BATCH_SIZE, id, onUpdate, allResults, lastEvaluatedKeys, onSettingsChange]);
 
   // Dynamic pagination based on tile height
   const calculateResultsPerPage = useCallback(() => {
@@ -742,12 +603,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     }
   }, [autoRefresh, performSearch, isDragging, isResizing]);
 
-  // Restore pagination state on mount if needed
-  useEffect(() => {
-    if (paginationState && paginationState.totalResultsLoaded > (currentResults?.length || 0) && !isRestoringPagination && !isLoading) {
-      restorePaginationState();
-    }
-  }, [paginationState, currentResults?.length, isRestoringPagination, isLoading, restorePaginationState]);
 
   // Load suggestion data on mount
   useEffect(() => {
@@ -772,6 +627,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
           positions: initialFilterSettings.positions || [],
           securities: initialFilterSettings.securities || [],
           transactionTypes: initialFilterSettings.transactionTypes || [],
+          files: [],
         };
         // Check if filters actually changed
         const prevStr = JSON.stringify(prev);
@@ -812,12 +668,6 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   // Preview mode: Run fresh query when opened in preview ONLY if no pagination state exists
   useEffect(() => {
     if (dashboardContext === 'filesystem_preview' && !isLoading) {
-      // Skip fresh query if tile already has pagination state (preserve "load more +X" state)
-      if (paginationState && paginationState.totalResultsLoaded > 0) {
-        console.log('🔄 PoliticianTradesSearchTile: Preview mode - preserving existing pagination state (totalResultsLoaded:', paginationState.totalResultsLoaded, ')');
-        return;
-      }
-      
       const hasSearchCriteria = 
         (currentSearchParams.politicianName && currentSearchParams.politicianName.length > 0) ||
         (currentSearchParams.security && currentSearchParams.security.length > 0) ||
@@ -834,9 +684,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
 
-  // Initial load: Fetch fresh results if none exist
+  // Initial load: Fetch fresh results if none exist (on refresh, only show first batch)
   useEffect(() => {
-    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
+    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading) {
       // Only auto-search if we have meaningful search params (not just defaults)
       const hasSearchCriteria = 
         (currentSearchParams.politicianName && currentSearchParams.politicianName.length > 0) ||
@@ -988,179 +838,30 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   }, [localDisplayOptions, id, onSettingsChange]);
 
   // Persist searchParams when they change
+  // Sync searchParams prop to state and validate dateFrom
+  useEffect(() => {
+    if (searchParams) {
+      const validatedParams = { ...searchParams };
+      // Ensure dateFrom is not before MIN_DATE (enforce minimum date)
+      if (validatedParams.dateFrom && validatedParams.dateFrom < MIN_DATE) {
+        validatedParams.dateFrom = MIN_DATE;
+      }
+      // If dateFrom is not set, use MIN_DATE as default
+      if (!validatedParams.dateFrom) {
+        validatedParams.dateFrom = MIN_DATE;
+      }
+      setCurrentSearchParams(validatedParams);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     onSettingsChange(id, { searchParams: currentSearchParams });
   }, [currentSearchParams, id, onSettingsChange]);
 
   const handleRefresh = useCallback(async () => {
-    if (!currentSearchParams) return;
-    
-    // Calculate pageCount from lastEvaluatedKeys (if lastEvaluatedKeys.length = 1, we're on page 2)
-    const currentPageCount = lastEvaluatedKeys.length > 0 ? lastEvaluatedKeys.length + 1 : 1;
-    
-    console.log('🔄 PoliticianTradesSearchTile: Refreshing with pagination state:', { 
-      currentPageCount, 
-      lastEvaluatedKeys: lastEvaluatedKeys.length,
-      totalResultsLoaded: allResults.length 
-    });
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      let currentResults: any[] = [];
-      let newLastEvaluatedKeys: any[] = [];
-      let currentLastEvaluatedKey: any = null;
-      
-      // Fetch initial page (page 1)
-      const initialSearchRequest = {
-        ...currentSearchParams,
-        page: 1,
-        pageSize: displayOptions.maxResults,
-      };
-      
-      const initialResponse = await politicianTradesSearchAPI.search(initialSearchRequest);
-      
-      if (initialResponse.success && initialResponse.results) {
-        const processedResults = initialResponse.results.map((trade: any, index: number) => ({
-          ...trade,
-          tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
-        }));
-        currentResults = [...processedResults];
-        currentLastEvaluatedKey = initialResponse.last_evaluated_key || null;
-        
-        // If we need more pages, fetch them sequentially
-        if (currentPageCount > 1 && currentLastEvaluatedKey !== null) {
-          // Store the key from the initial page if we need more pages
-          if (newLastEvaluatedKeys.length === 0) {
-            newLastEvaluatedKeys.push(currentLastEvaluatedKey);
-          }
-          
-          // Fetch continuation pages
-          let currentPageNum = 2;
-          while (currentPageNum <= currentPageCount && currentLastEvaluatedKey !== null) {
-            const searchRequest = {
-              ...currentSearchParams,
-              page: 1,
-              pageSize: displayOptions.maxResults,
-              lastEvaluatedKey: currentLastEvaluatedKey,
-            };
-            
-            const response = await politicianTradesSearchAPI.search(searchRequest);
-            
-            if (response.success && response.results && response.results.length > 0) {
-              const processedPageResults = response.results.map((trade: any, index: number) => ({
-                ...trade,
-                tradeId: trade.tradeId || `trade_${index}_${Date.now()}`,
-              }));
-              currentResults = [...currentResults, ...processedPageResults];
-              currentPageNum++;
-              
-              // Get next key for next iteration
-              const nextLastEvaluatedKey = response.last_evaluated_key || null;
-              
-              // Store key for this page
-              if (currentLastEvaluatedKey && newLastEvaluatedKeys.length < 10) {
-                newLastEvaluatedKeys.push(currentLastEvaluatedKey);
-              }
-              
-              currentLastEvaluatedKey = nextLastEvaluatedKey;
-            } else {
-              // No more results or error, stop loading
-              break;
-            }
-          }
-          
-          // Store the last key if we didn't reach the target page count
-          if (currentLastEvaluatedKey && newLastEvaluatedKeys.length < 10 && currentPageNum <= currentPageCount) {
-            newLastEvaluatedKeys.push(currentLastEvaluatedKey);
-          }
-        }
-      }
-      
-      // Update state with all fetched results
-      setAllResults(currentResults);
-      
-      // Apply filters after fetching all pages (filters are maintained, not cleared)
-      let filtered = [...currentResults];
-      
-      // Filter by politicians
-      if (selectedFilters.politicians.length > 0) {
-        filtered = filtered.filter(trade => 
-          selectedFilters.politicians.includes(trade.politicianName || '')
-        );
-      }
-      
-      // Filter by parties
-      if (selectedFilters.parties.length > 0) {
-        filtered = filtered.filter(trade => 
-          selectedFilters.parties.includes(trade.party || '')
-        );
-      }
-      
-      // Filter by positions
-      if (selectedFilters.positions.length > 0) {
-        filtered = filtered.filter(trade => 
-          selectedFilters.positions.includes(trade.position || '')
-        );
-      }
-      
-      // Filter by securities
-      if (selectedFilters.securities.length > 0) {
-        filtered = filtered.filter(trade => 
-          selectedFilters.securities.includes(trade.security || '')
-        );
-      }
-      
-      // Filter by transaction types
-      if (selectedFilters.transactionTypes.length > 0) {
-        filtered = filtered.filter(trade => 
-          selectedFilters.transactionTypes.includes(trade.transactionType || '')
-        );
-      }
-      
-      setFilteredResults(filtered);
-      setCurrentResults(filtered);
-      
-      // Update pagination state
-      setHasMore(!!currentLastEvaluatedKey);
-      setLastEvaluatedKey(currentLastEvaluatedKey);
-      setLastEvaluatedKeys(newLastEvaluatedKeys);
-      setHasPerformedInitialSearch(true);
-      
-      // Persist pagination state
-      onSettingsChange(id, {
-        searchParams: currentSearchParams,
-        paginationState: {
-          totalResultsLoaded: currentResults.length,
-          lastEvaluatedKeys: newLastEvaluatedKeys,
-          hasMore: !!currentLastEvaluatedKey,
-        },
-      });
-      
-      // Update parent component
-      onUpdate(id, {
-        results: currentResults,
-        paginationState: {
-          totalResultsLoaded: currentResults.length,
-          lastEvaluatedKeys: newLastEvaluatedKeys,
-          hasMore: !!currentLastEvaluatedKey,
-        },
-        lastUpdated: Date.now(),
-      });
-      
-      console.log('✅ PoliticianTradesSearchTile: Refresh complete', {
-        pagesFetched: currentPageCount,
-        totalResults: currentResults.length,
-        filteredResults: filtered.length,
-        hasMore: !!currentLastEvaluatedKey,
-      });
-    } catch (err: any) {
-      console.error('❌ PoliticianTradesSearchTile: Refresh error:', err);
-      setError(err.message || 'An error occurred during refresh');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentSearchParams, lastEvaluatedKeys, allResults.length, displayOptions.maxResults, selectedFilters, id, onSettingsChange, onUpdate]);
+    // Simple refresh: just perform a fresh search with current search params
+    await performSearch(false); // false = don't clear filters
+  }, [performSearch]);
 
   // Client-side filtering function - operates on existing results, never triggers API calls
   const applyFilters = useCallback(() => {
@@ -1202,6 +903,15 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       );
     }
     
+    // Filter by files
+    if (selectedFilters.files.length > 0) {
+      filtered = filtered.filter(trade => {
+        const tradeFilename = trade.formS3Key || (trade as any).file;
+        if (!tradeFilename) return false;
+        return selectedFilters.files.includes(tradeFilename);
+      });
+    }
+    
     setFilteredResults(filtered);
     setCurrentResults(filtered);
   }, [allResults, selectedFilters]);
@@ -1211,84 +921,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     applyFilters();
   }, [applyFilters]);
 
-  // Persist filterSettings when selectedFilters change
-  // Use ref to track previous value and only persist when it actually changes
-  // Initialize from initialFilterSettings to prevent persisting empty filters on mount
-  const prevFilterSettingsRefInitialValue = {
-    politicians: initialFilterSettings?.politicians || [],
-    parties: initialFilterSettings?.parties || [],
-    positions: initialFilterSettings?.positions || [],
-    securities: initialFilterSettings?.securities || [],
-    transactionTypes: initialFilterSettings?.transactionTypes || [],
-  };
-  // Log only once on mount - use a ref to track if we've logged
-  const hasLoggedInitRef = useRef(false);
-  if (!hasLoggedInitRef.current) {
-    console.log('🔄 PoliticianTradesSearchTile: [PERSIST-INIT] prevFilterSettingsRef initialized', {
-      tileId: id,
-      refValue: prevFilterSettingsRefInitialValue,
-      refValueStr: JSON.stringify(prevFilterSettingsRefInitialValue),
-      initialFilterSettings,
-      initialFilterSettingsStr: JSON.stringify(initialFilterSettings),
-      timestamp: new Date().toISOString(),
-    });
-    hasLoggedInitRef.current = true;
-  }
-  const prevFilterSettingsRef = useRef(prevFilterSettingsRefInitialValue);
-  
-  useEffect(() => {
-    const filterSettings = {
-      politicians: [...selectedFilters.politicians],
-      parties: [...selectedFilters.parties],
-      positions: [...selectedFilters.positions],
-      securities: [...selectedFilters.securities],
-      transactionTypes: [...selectedFilters.transactionTypes],
-    };
-    // Only persist if filterSettings actually changed (deep comparison)
-    const prev = prevFilterSettingsRef.current;
-    const prevStr = JSON.stringify(prev);
-    const newStr = JSON.stringify(filterSettings);
-    const hasChanged = prevStr !== newStr;
-    
-    console.log('🔄 PoliticianTradesSearchTile: [PERSIST] Effect triggered', {
-      tileId: id,
-      selectedFilters,
-      selectedFiltersStr: JSON.stringify(selectedFilters),
-      filterSettings,
-      filterSettingsStr: JSON.stringify(filterSettings),
-      prevRefValue: prev,
-      prevRefValueStr: JSON.stringify(prev),
-      hasChanged,
-      prevStr,
-      newStr,
-      timestamp: new Date().toISOString(),
-    });
-    
-    if (hasChanged) {
-      console.log('🔄 PoliticianTradesSearchTile: [PERSIST] Persisting filterSettings (changed)', {
-        tileId: id,
-        previousRef: prev,
-        previousRefStr: JSON.stringify(prev),
-        newFilterSettings: filterSettings,
-        newFilterSettingsStr: JSON.stringify(filterSettings),
-        timestamp: new Date().toISOString(),
-      });
-      prevFilterSettingsRef.current = filterSettings;
-      onSettingsChange(id, { filterSettings });
-      console.log('🔄 PoliticianTradesSearchTile: [PERSIST] onSettingsChange called', {
-        tileId: id,
-        filterSettings,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      console.log('🔄 PoliticianTradesSearchTile: [PERSIST] Skipping persistence (unchanged)', {
-        tileId: id,
-        filterSettings,
-        prevRefValue: prev,
-        timestamp: new Date().toISOString(),
-      });
-    }
-  }, [selectedFilters, id, onSettingsChange]);
+  // Filters are client-side only - not persisted to dashboard
 
   // Sync visible columns with display options when display options change
   // Note: This preserves the Details column state since it's not tied to displayOptions
@@ -1319,6 +952,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     const positionMap = new Map<string, number>();
     const securityMap = new Map<string, number>();
     const transactionTypeMap = new Map<string, number>();
+    const fileMap = new Map<string, number>();
     
     allResults.forEach(trade => {
       if (trade.politicianName) {
@@ -1337,6 +971,11 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       if (trade.transactionType) {
         transactionTypeMap.set(trade.transactionType, (transactionTypeMap.get(trade.transactionType) || 0) + 1);
       }
+      // Extract file from formS3Key or file field
+      const tradeFilename = trade.formS3Key || (trade as any).file;
+      if (tradeFilename) {
+        fileMap.set(tradeFilename, (fileMap.get(tradeFilename) || 0) + 1);
+      }
     });
     
     return {
@@ -1354,6 +993,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         .sort((a, b) => b.count - a.count),
       transactionTypes: Array.from(transactionTypeMap.entries())
         .map(([transactionType, count]) => ({ transactionType, count }))
+        .sort((a, b) => b.count - a.count),
+      file_filters: Array.from(fileMap.entries())
+        .map(([file, count]: [string, number]) => ({ file, count }))
         .sort((a, b) => b.count - a.count),
     };
   }, [allResults]);
@@ -2097,6 +1739,23 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
             icon: <CloseIcon sx={{ fontSize: 18 }} />,
             disabled: isDeletingTiles,
           }}
+          preToggleElement={
+            currentResults.length > 0 ? (
+              <Tooltip
+                title="Search results are webscraped. For exact filings, view the files filter with the yellow triangle below."
+                arrow
+                placement="top"
+              >
+                <WarningIcon 
+                  sx={{ 
+                    color: '#fbbf24', 
+                    fontSize: '1rem',
+                    cursor: 'help',
+                  }} 
+                />
+              </Tooltip>
+            ) : undefined
+          }
           collapsibleActions={
             <>
               {/* Refresh Button - shown when expanded */}
@@ -2137,40 +1796,43 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               </Tooltip>
 
               <Tooltip title={
-                (selectedFilters.politicians.length > 0 || 
-                 selectedFilters.parties.length > 0 || 
-                 selectedFilters.positions.length > 0 || 
-                 selectedFilters.securities.length > 0 || 
-                 selectedFilters.transactionTypes.length > 0) 
-                  ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
-                  : "Filter Results"
-              }>
-                <Box sx={{ position: 'relative' }}>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setFilterDialogOpen(true);
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    sx={{ 
-                      color: (selectedFilters.politicians.length > 0 || 
-                              selectedFilters.parties.length > 0 || 
-                              selectedFilters.positions.length > 0 || 
-                              selectedFilters.securities.length > 0 || 
-                              selectedFilters.transactionTypes.length > 0) 
-                        ? '#3b82f6' 
-                        : '#9ca3af', 
-                      '&:hover': { color: '#3b82f6' } 
-                    }}
-                  >
-                    <FilterIcon fontSize="small" />
-                  </IconButton>
-                  {(selectedFilters.politicians.length > 0 || 
-                    selectedFilters.parties.length > 0 || 
-                    selectedFilters.positions.length > 0 || 
-                    selectedFilters.securities.length > 0 || 
-                    selectedFilters.transactionTypes.length > 0) && (
+                  (selectedFilters.politicians.length > 0 || 
+                   selectedFilters.parties.length > 0 || 
+                   selectedFilters.positions.length > 0 || 
+                   selectedFilters.securities.length > 0 || 
+                   selectedFilters.transactionTypes.length > 0 ||
+                   selectedFilters.files.length > 0) 
+                    ? `Filter Results (${Object.values(selectedFilters).flat().length} active)`
+                    : "Filter Results"
+                }>
+                  <Box sx={{ position: 'relative' }}>
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFilterDialogOpen(true);
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      sx={{ 
+                        color: (selectedFilters.politicians.length > 0 || 
+                                selectedFilters.parties.length > 0 || 
+                                selectedFilters.positions.length > 0 || 
+                                selectedFilters.securities.length > 0 || 
+                                selectedFilters.transactionTypes.length > 0 ||
+                                selectedFilters.files.length > 0) 
+                          ? '#3b82f6' 
+                          : '#9ca3af', 
+                        '&:hover': { color: '#3b82f6' } 
+                      }}
+                    >
+                      <FilterIcon fontSize="small" />
+                    </IconButton>
+                    {(selectedFilters.politicians.length > 0 || 
+                      selectedFilters.parties.length > 0 || 
+                      selectedFilters.positions.length > 0 || 
+                      selectedFilters.securities.length > 0 || 
+                      selectedFilters.transactionTypes.length > 0 ||
+                      selectedFilters.files.length > 0) && (
                     <Box
                       sx={{
                         position: 'absolute',
@@ -2183,9 +1845,9 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                         border: '1px solid #1e293b',
                       }}
                     />
-                  )}
-                </Box>
-              </Tooltip>
+                    )}
+                  </Box>
+                </Tooltip>
 
               <Tooltip title="Edit Search Criteria">
                 <IconButton
@@ -2206,11 +1868,11 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       </Box>
 
       {/* Loading state */}
-      {(isLoading || isRestoringPagination) && (
+      {isLoading && (
         <Box sx={{ textAlign: 'center', py: 2, flexShrink: 0 }}>
           <CircularProgress size={24} sx={{ color: '#3b82f6', mb: 1 }} />
           <Typography variant="body2" color="#9ca3af">
-            {isRestoringPagination ? 'Restoring previous results...' : 'Searching trades...'}
+            Searching trades...
           </Typography>
         </Box>
       )}
@@ -2223,7 +1885,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
       )}
 
       {/* Results Table */}
-      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && !isRestoringPagination && (
+      {localDisplayOptions.showResultsTable && currentResults.length > 0 && !isLoading && (
         <Box sx={{ 
           flex: 1, 
           display: 'flex', 
@@ -2657,12 +2319,79 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
         </Box>
       )}
 
-      {/* No Results */}
-      {!isLoading && !isRestoringPagination && currentResults.length === 0 && !error && (
-        <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
-          <Typography variant="body2" color="#9ca3af">
-            No trades match your criteria. Try adjusting your search parameters.
-          </Typography>
+      {/* No Results / No Search */}
+      {!isLoading && currentResults.length === 0 && !error && (
+        <Box 
+          sx={{ 
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            py: 6,
+            px: 3,
+            flexShrink: 0,
+            minHeight: '200px',
+          }}
+        >
+          {(() => {
+            // Check if there's any search criteria
+            const hasSearchCriteria = 
+              (currentSearchParams.politicianName && currentSearchParams.politicianName.length > 0) ||
+              (currentSearchParams.security && currentSearchParams.security.length > 0) ||
+              (currentSearchParams.party && currentSearchParams.party.length > 0) ||
+              (currentSearchParams.position && currentSearchParams.position.length > 0) ||
+              (currentSearchParams.transactionType && currentSearchParams.transactionType.length > 0);
+            
+            if (!hasPerformedInitialSearch && !hasSearchCriteria) {
+              return (
+                <>
+                  <IconButton
+                    onClick={() => setSearchDialogOpen(true)}
+                    sx={{
+                      color: '#3b82f6',
+                      mb: 2,
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        transform: 'scale(1.1)',
+                      },
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <SearchIcon sx={{ fontSize: '4rem' }} />
+                  </IconButton>
+                  <Typography variant="h6" color="#3b82f6" sx={{ fontWeight: 600, mb: 1 }}>
+                    Start Your Search
+                  </Typography>
+                  <Typography variant="body2" color="#9ca3af" sx={{ textAlign: 'center', maxWidth: '300px' }}>
+                    Click the magnifying glass above to configure your search parameters
+                  </Typography>
+                </>
+              );
+            } else {
+              return (
+                <>
+                  <Typography variant="body2" color="#9ca3af" sx={{ mb: 2 }}>
+                    No trades match your criteria
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<SearchIcon />}
+                    onClick={() => setSearchDialogOpen(true)}
+                    sx={{
+                      color: '#3b82f6',
+                      borderColor: '#3b82f6',
+                      '&:hover': {
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      },
+                    }}
+                  >
+                    Adjust Search Parameters
+                  </Button>
+                </>
+              );
+            }
+          })()}
         </Box>
       )}
 
@@ -3376,6 +3105,102 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                 </AccordionDetails>
               </Accordion>
             )}
+
+            {/* Files Filter */}
+            {availableFilters.file_filters && availableFilters.file_filters.length > 0 && (
+              <Accordion>
+                <AccordionSummary 
+                  expandIcon={<ExpandMoreIcon sx={{ color: '#ffffff' }} />}
+                  sx={{ cursor: 'pointer' }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <WarningIcon sx={{ color: '#fbbf24', fontSize: '1.2rem' }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#e2e8f0', fontSize: '0.95rem' }}>
+                      Files ({availableFilters.file_filters.length})
+                    </Typography>
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box 
+                    sx={{ 
+                      maxHeight: '200px', 
+                      overflowY: 'auto',
+                      '&::-webkit-scrollbar': {
+                        width: '6px',
+                      },
+                      '&::-webkit-scrollbar-track': {
+                        backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                      },
+                      '&::-webkit-scrollbar-thumb': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderRadius: '3px',
+                      },
+                      '&::-webkit-scrollbar-thumb:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                      },
+                    }}
+                  >
+                    {availableFilters.file_filters.map((filter, idx) => {
+                      const isSelected = selectedFilters.files.includes(filter.file);
+                      return (
+                        <Box
+                          key={idx}
+                          onClick={() => {
+                            const exists = selectedFilters.files.includes(filter.file);
+                            setSelectedFilters(prev => ({
+                              ...prev,
+                              files: exists
+                                ? prev.files.filter(f => f !== filter.file)
+                                : [...prev.files, filter.file],
+                            }));
+                          }}
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            p: 1,
+                            cursor: 'pointer',
+                            borderRadius: '4px',
+                            backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                            border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                            '&:hover': {
+                              backgroundColor: isSelected 
+                                ? 'rgba(59, 130, 246, 0.3)' 
+                                : 'rgba(59, 130, 246, 0.1)',
+                            },
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ 
+                            color: isSelected ? '#93c5fd' : '#ffffff', 
+                            fontSize: '0.875rem', 
+                            flex: 1,
+                            fontWeight: isSelected ? 600 : 400,
+                            fontFamily: 'monospace',
+                          }}>
+                            {filter.file}
+                          </Typography>
+                          <Chip
+                            label={filter.count}
+                            size="small"
+                            sx={{
+                              height: 20,
+                              fontSize: '0.7rem',
+                              backgroundColor: isSelected 
+                                ? 'rgba(59, 130, 246, 0.3)' 
+                                : 'rgba(107, 114, 128, 0.3)',
+                              color: isSelected ? '#93c5fd' : '#9ca3af',
+                              border: isSelected 
+                                ? '1px solid #3b82f6' 
+                                : '1px solid #6b7280',
+                            }}
+                          />
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            )}
           </Box>
           )}
         </DialogContent>
@@ -3388,6 +3213,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                 positions: [],
                 securities: [],
                 transactionTypes: [],
+                files: [],
               });
             }}
             disabled={
@@ -3395,7 +3221,8 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
               selectedFilters.parties.length === 0 && 
               selectedFilters.positions.length === 0 && 
               selectedFilters.securities.length === 0 && 
-              selectedFilters.transactionTypes.length === 0
+              selectedFilters.transactionTypes.length === 0 &&
+              selectedFilters.files.length === 0
             }
             sx={{ 
               color: '#94a3b8',

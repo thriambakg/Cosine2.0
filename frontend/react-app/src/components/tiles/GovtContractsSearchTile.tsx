@@ -227,11 +227,12 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   const [currentSearchParams, setCurrentSearchParams] = useState<GovtContractsSearchFilters>({
     ...searchParams,
   });
-  const [currentResults, setCurrentResults] = useState<GovtContractAward[]>(results);
+  const [currentResults, setCurrentResults] = useState<GovtContractAward[]>(results || []);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState<any>(null);
   const [lastEvaluatedKeys, setLastEvaluatedKeys] = useState<any[]>([]);
   const [isRestoringPagination, setIsRestoringPagination] = useState<boolean>(false);
   const [hasMore, setHasMore] = useState<boolean>(false);
+  const restoreAttemptedRef = useRef<boolean>(false); // Track if restore has been attempted to prevent multiple calls
   
   const defaultDisplayOptions = {
     showRecipient: true,
@@ -624,18 +625,17 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         }
       });
 
-      const searchRequest = {
+      const response = await govtContractsSearchAPI.search({
         filters,
         limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
-      };
+      });
       
-      const response = await govtContractsSearchAPI.search(searchRequest);
-      
-      if (response.success && response.results) {
-        console.log('🏛️ GovtContractsSearchTile: Retrieved', response.results.length, 'awards');
+      if (response.success) {
+        const results = response.results || [];
+        console.log('🏛️ GovtContractsSearchTile: Retrieved', results.length, 'awards');
         
         const newLastEvaluatedKey = response.last_evaluated_key || null;
-        setAllResults(response.results);
+        setAllResults(results);
         setFilteredResults(response.results);
         setCurrentResults(response.results);
         setHasPerformedInitialSearch(true);
@@ -655,7 +655,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         setLastEvaluatedKeys(newLastEvaluatedKeys);
         
         // Persist searchParams and pagination state (max 4 pages)
-        const pageCount = 1; // Initial page
+        const pageCount = 0; // Initial search doesn't count as a page (0 = no additional pages loaded yet)
         onSettingsChange(id, {
           searchParams: currentSearchParams,
           paginationState: {
@@ -718,7 +718,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     const MAX_PAGINATION_KEYS = TILE_MAX_PAGINATION_KEYS;
     
     // Check if we've reached the page limit
-    const currentPageCount = lastEvaluatedKeys.length + 1; // +1 for initial page
+    // pageCount represents number of additional pages loaded (0 = initial search only, 1-4 = additional pages)
+    const currentPageCount = lastEvaluatedKeys.length; // Number of additional pages loaded (not counting initial search)
     const hasReachedPageLimit = currentPageCount >= MAX_PAGES;
     
     if (!hasMore || !lastEvaluatedKey || isLoadingMore || !currentSearchParams || hasReachedPageLimit) {
@@ -754,18 +755,14 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         }
       });
 
-      const searchRequest = {
+      const response = await govtContractsSearchAPI.search({
         filters,
         limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
         last_evaluated_key: lastEvaluatedKey,
-      };
-      
-      const response = await govtContractsSearchAPI.search(searchRequest);
+      });
       
       if (response.success && response.results) {
-        // Deduplicate results by award_id to prevent duplicate keys
-        const existingIds = new Set(allResults.map(award => award.award_id));
-        const newResults = response.results.filter(award => !existingIds.has(award.award_id));
+        const newResults = response.results || [];
         const updatedResults = [...allResults, ...newResults];
         const newLastEvaluatedKey = response.last_evaluated_key || null;
         const newPageCount = currentPageCount + 1; // Increment page count
@@ -774,8 +771,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         const willReachPageLimit = newPageCount >= MAX_PAGES;
         
         setAllResults(updatedResults);
-        setFilteredResults(updatedResults);
-        setCurrentResults(updatedResults);
+        // Don't set filteredResults/currentResults here - let applyFilters handle it after allResults updates
+        // This ensures filters are properly applied and prevents duplicates
         
         // Only allow hasMore if backend says there's more AND we haven't reached the page limit
         setHasMore(response.has_more && !willReachPageLimit && newLastEvaluatedKey !== null);
@@ -840,21 +837,32 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
   // Restore pagination state on mount - limited to TILE_MAX_PAGES (4 pages = 100 total results)
   const restorePaginationState = useCallback(async () => {
+    // Prevent multiple restore attempts - check and set ref FIRST before any early returns
+    if (restoreAttemptedRef.current) {
+      console.log('🔄 GovtContractsSearchTile: Restore already attempted, skipping');
+      return;
+    }
+    
+    // Mark restore as attempted immediately to prevent duplicate calls (even if we return early)
+    restoreAttemptedRef.current = true;
+    
     const MAX_PAGES = TILE_MAX_PAGES;
     const MAX_PAGINATION_KEYS = TILE_MAX_PAGINATION_KEYS;
     
     if (!paginationState || !paginationState.lastEvaluatedKeys || paginationState.lastEvaluatedKeys.length === 0) {
+      console.log('🔄 GovtContractsSearchTile: No pagination state to restore');
       return;
     }
 
-    // If we already have results from a previous page, we're good
-    if (results && results.length > 0) {
+    // If we already have results, skip restore (they're already loaded)
+    if (allResults.length > 0 || (currentResults?.length || 0) > 0) {
+      console.log('🔄 GovtContractsSearchTile: Skipping restore - results already loaded');
       return;
     }
 
-    // Limit to MAX_PAGES
+    // Limit to MAX_PAGES - 1 (since maxPages = 4 means 4 total pages, so max 3 additional pages)
     const savedPageCount = paginationState.pageCount || 0;
-    const pageCountToRestore = Math.min(savedPageCount, MAX_PAGES);
+    const pageCountToRestore = Math.min(savedPageCount, MAX_PAGES - 1); // Cap at 3 additional pages = 4 total
     const keysToRestore = paginationState.lastEvaluatedKeys.slice(0, MAX_PAGINATION_KEYS);
 
     console.log('🔄 GovtContractsSearchTile: Restoring pagination state (page-based, max 4 pages)', {
@@ -866,13 +874,16 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     setIsRestoringPagination(true);
     setIsLoading(true);
     setError(null);
+    // Set hasPerformedInitialSearch immediately to prevent initial load useEffect from running
+    setHasPerformedInitialSearch(true);
 
     try {
       let currentResults: any[] = [];
       let currentPageCount = 0;
+      let response: any = null;
       
-      // Load the initial page first
-      if (currentSearchParams && pageCountToRestore > 0) {
+      // Make single API call with dynamic batch size (includes initial page + additional pages)
+      if (currentSearchParams && pageCountToRestore >= 0) {
         const filters: any = { ...currentSearchParams };
         
         // Remove legacy date fields (date_from, date_to) - use date_year instead
@@ -888,69 +899,49 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           }
         });
         
-        // Load the initial page (no pagination key)
-        const initialSearchRequest = {
-          filters,
-          limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
-        };
+        // Calculate total pages needed
+        // maxPages = 4 means 4 total pages (100 results), so max 3 additional pages after initial
+        // pageCountToRestore = number of additional pages loaded (0-3)
+        // Total pages = pageCountToRestore + 1 (initial page), capped at 4 total pages
+        const cappedPageCount = Math.min(pageCountToRestore, TILE_MAX_PAGES - 1); // Max 3 additional = 4 total pages
+        const totalPages = cappedPageCount + 1; // +1 for initial page (max 4 pages total = 100 results)
+        const dynamicBatchSize = TILE_BATCH_SIZE * totalPages;
         
-        const initialResponse = await govtContractsSearchAPI.search(initialSearchRequest);
-        
-        if (initialResponse.success && initialResponse.results) {
-          currentResults = [...initialResponse.results];
-          currentPageCount = 1;
-        }
-      }
-
-      // Load continuation pages up to the saved page count (max 4 pages)
-      for (const nextKey of keysToRestore) {
-        if (!currentSearchParams || currentPageCount >= MAX_PAGES) break;
-        
-        const filters: any = { ...currentSearchParams };
-        
-        // Remove legacy date fields
-        delete filters.date_from;
-        delete filters.date_to;
-        
-        Object.keys(filters).forEach((key) => {
-          const value = filters[key];
-          if (Array.isArray(value) && value.length === 0) {
-            delete filters[key];
-          } else if (value === '' || value === null || value === undefined) {
-            delete filters[key];
-          }
+        console.log('🔄 GovtContractsSearchTile: Restoring with single API call', {
+          pageCountToRestore,
+          totalPages,
+          dynamicBatchSize,
         });
         
-        const searchRequest = {
+        // Single API call with dynamic batch size
+        response = await govtContractsSearchAPI.search({
           filters,
-          limit: TILE_BATCH_SIZE, // Tile uses 25 per batch
-          last_evaluated_key: nextKey,
-        };
+          limit: dynamicBatchSize, // Fetch all results in one call
+        });
         
-        const response = await govtContractsSearchAPI.search(searchRequest);
-        
-        if (response.success && response.results && response.results.length > 0) {
-          // Deduplicate results by award_id to prevent duplicate keys
-          const existingIds = new Set(currentResults.map(award => award.award_id));
-          const newResults = response.results.filter(award => !existingIds.has(award.award_id));
-          currentResults = [...currentResults, ...newResults];
-          currentPageCount += 1;
-        } else {
-          // No more results, stop loading
-          break;
+        if (response.success && response.results) {
+          currentResults = [...response.results];
+          currentPageCount = pageCountToRestore; // Set to restored page count
         }
       }
       
+      // Get last_evaluated_key from response for pagination
+      const lastKey = response?.last_evaluated_key || keysToRestore[keysToRestore.length - 1] || null;
+      
       // Determine hasMore based on restored state and page limit
       const hasReachedPageLimit = currentPageCount >= MAX_PAGES;
-      const lastKey = keysToRestore[keysToRestore.length - 1] || null;
-      const restoredHasMore = paginationState.hasMore && !hasReachedPageLimit && lastKey !== null;
+      const restoredHasMore = (response?.has_more || paginationState.hasMore) && !hasReachedPageLimit && lastKey !== null;
+      
+      // Update lastEvaluatedKeys - keep existing keys if we have them, otherwise use response key
+      const updatedKeys = lastKey && !keysToRestore.includes(lastKey) 
+        ? [...keysToRestore, lastKey].slice(0, TILE_MAX_PAGINATION_KEYS)
+        : keysToRestore;
       
       // Update state with restored results
       setAllResults(currentResults);
       setFilteredResults(currentResults);
       setCurrentResults(currentResults);
-      setLastEvaluatedKeys(keysToRestore);
+      setLastEvaluatedKeys(updatedKeys);
       setLastEvaluatedKey(lastKey);
       setHasMore(restoredHasMore);
       setHasPerformedInitialSearch(true);
@@ -966,7 +957,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       onUpdate(id, {
         paginationState: {
           pageCount: currentPageCount,
-          lastEvaluatedKeys: keysToRestore,
+          lastEvaluatedKeys: updatedKeys,
           hasMore: restoredHasMore,
         },
         lastUpdated: Date.now(),
@@ -981,8 +972,22 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   }, [paginationState, results, currentSearchParams, id, onUpdate]);
 
   // Restore pagination state on mount if needed (max 4 pages)
+  // This should run BEFORE the initial load useEffect to prevent duplicate searches
   useEffect(() => {
-    if (paginationState && paginationState.pageCount !== undefined && paginationState.pageCount > 0 && paginationState.pageCount <= 4 && !isRestoringPagination && !isLoading) {
+    // Only restore if we have pagination state, no results yet, and not already restoring/loading
+    // Also check restoreAttemptedRef to prevent multiple calls (especially in React StrictMode)
+    if (!restoreAttemptedRef.current &&
+        paginationState && 
+        paginationState.pageCount !== undefined && 
+        paginationState.pageCount >= 0 &&  // Allow pageCount = 0 (just initial 25 results)
+        paginationState.pageCount <= TILE_MAX_PAGES && 
+        paginationState.lastEvaluatedKeys && 
+        paginationState.lastEvaluatedKeys.length > 0 &&
+        !isRestoringPagination && 
+        !isLoading && 
+        !hasPerformedInitialSearch &&
+        allResults.length === 0 &&
+        (currentResults?.length || 0) === 0) {
       restorePaginationState();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1086,8 +1091,13 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   }, [dashboardContext]); // Only run when dashboardContext changes (i.e., when opened in preview)
 
   // Initial load: Fetch fresh results if none exist
+  // Only run if restore was not attempted (to prevent duplicate calls)
   useEffect(() => {
-    if (!hasPerformedInitialSearch && currentResults.length === 0 && !isLoading && !isRestoringPagination) {
+    if (!restoreAttemptedRef.current && 
+        !hasPerformedInitialSearch && 
+        (currentResults?.length || 0) === 0 && 
+        !isLoading && 
+        !isRestoringPagination) {
       const hasSearchCriteria = 
         (currentSearchParams.awarding_agency_name && currentSearchParams.awarding_agency_name.length > 0) ||
         (currentSearchParams.funding_agency_name && currentSearchParams.funding_agency_name.length > 0) ||
@@ -1105,7 +1115,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         performSearch();
       }
     }
-  }, [hasPerformedInitialSearch, currentResults.length, isLoading, currentSearchParams, performSearch]);
+  }, [hasPerformedInitialSearch, currentResults?.length || 0, isLoading, isRestoringPagination, currentSearchParams, performSearch]);
 
   const handleRemove = () => {
     onRemove(id);
@@ -1310,10 +1320,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       );
     }
     
-    // Filter by month (extract month from period_start_date or period_end_date)
+    // Filter by month (extract month from period_of_performance_start_date or period_of_performance_current_end_date)
     if (selectedFilters.months.size > 0) {
       filtered = filtered.filter((award) => {
-        const dateStr = award.period_start_date || award.period_end_date;
+        const dateStr = award.period_of_performance_start_date || award.period_of_performance_current_end_date;
         if (!dateStr) return false;
         
         try {
@@ -1400,39 +1410,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     applyFilters();
   }, [applyFilters]);
 
-  // Persist filterSettings when selectedFilters change
-  // Use ref to track previous value and only persist when it actually changes
-  const prevFilterSettingsRef = useRef({
-    awardTypes: Array.from(selectedFilters.awardTypes),
-    agencies: Array.from(selectedFilters.agencies),
-    recipients: Array.from(selectedFilters.recipients),
-    states: Array.from(selectedFilters.states),
-    countries: Array.from(selectedFilters.countries),
-    naics: Array.from(selectedFilters.naics),
-    psc: Array.from(selectedFilters.psc),
-    cfda: Array.from(selectedFilters.cfda),
-    months: Array.from(selectedFilters.months),
-  });
-  useEffect(() => {
-    const filterSettings = {
-      awardTypes: Array.from(selectedFilters.awardTypes),
-      agencies: Array.from(selectedFilters.agencies),
-      recipients: Array.from(selectedFilters.recipients),
-      states: Array.from(selectedFilters.states),
-      countries: Array.from(selectedFilters.countries),
-      naics: Array.from(selectedFilters.naics),
-      psc: Array.from(selectedFilters.psc),
-      cfda: Array.from(selectedFilters.cfda),
-      months: Array.from(selectedFilters.months),
-    };
-    // Only persist if filterSettings actually changed (deep comparison)
-    const prev = prevFilterSettingsRef.current;
-    const hasChanged = JSON.stringify(prev) !== JSON.stringify(filterSettings);
-    if (hasChanged) {
-      prevFilterSettingsRef.current = filterSettings;
-      onSettingsChange(id, { filterSettings });
-    }
-  }, [selectedFilters, id, onSettingsChange]);
+  // Filters are client-side only - not persisted to dashboard
 
   // Persist searchParams when they change
   useEffect(() => {
@@ -1479,6 +1457,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     const naicsMap = new Map<string, number>();
     const pscMap = new Map<string, number>();
     const cfdaMap = new Map<string, number>();
+    const monthMap = new Map<number, number>();
     
     allResults.forEach(award => {
       if (award.award_type) {
@@ -1508,6 +1487,19 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       if (award.cfda_number) {
         cfdaMap.set(award.cfda_number, (cfdaMap.get(award.cfda_number) || 0) + 1);
       }
+      // Extract month from period_of_performance_start_date or period_of_performance_current_end_date
+      const dateStr = award.period_of_performance_start_date || award.period_of_performance_current_end_date;
+      if (dateStr) {
+        try {
+          const date = new Date(dateStr);
+          const month = date.getMonth() + 1; // getMonth() returns 0-11, we want 1-12
+          if (month >= 1 && month <= 12) {
+            monthMap.set(month, (monthMap.get(month) || 0) + 1);
+          }
+        } catch {
+          // Ignore invalid dates
+        }
+      }
     });
     
     return {
@@ -1535,6 +1527,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       cfda: Array.from(cfdaMap.entries())
         .map(([cfda, count]) => ({ cfda, count }))
         .sort((a, b) => b.count - a.count),
+      month_filters: Array.from(monthMap.entries())
+        .map(([month, count]) => ({ month, count }))
+        .sort((a, b) => a.month - b.month), // Sort by month number (1-12)
     };
   }, [allResults]);
 
@@ -1889,8 +1884,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                  selectedFilters.countries.size > 0 ||
                  selectedFilters.naics.size > 0 ||
                  selectedFilters.psc.size > 0 ||
-                 selectedFilters.cfda.size > 0) 
-                  ? `Filter Results (${selectedFilters.awardTypes.size + selectedFilters.agencies.size + selectedFilters.recipients.size + selectedFilters.states.size + selectedFilters.countries.size + selectedFilters.naics.size + selectedFilters.psc.size + selectedFilters.cfda.size} active)`
+                 selectedFilters.cfda.size > 0 ||
+                 selectedFilters.months.size > 0) 
+                  ? `Filter Results (${selectedFilters.awardTypes.size + selectedFilters.agencies.size + selectedFilters.recipients.size + selectedFilters.states.size + selectedFilters.countries.size + selectedFilters.naics.size + selectedFilters.psc.size + selectedFilters.cfda.size + selectedFilters.months.size} active)`
                   : "Filter Results"
               }>
                 <Box sx={{ position: 'relative' }}>
@@ -1909,7 +1905,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                               selectedFilters.countries.size > 0 ||
                               selectedFilters.naics.size > 0 ||
                               selectedFilters.psc.size > 0 ||
-                              selectedFilters.cfda.size > 0) 
+                              selectedFilters.cfda.size > 0 ||
+                              selectedFilters.months.size > 0) 
                         ? '#3b82f6' 
                         : '#9ca3af', 
                       '&:hover': { color: '#3b82f6' } 
@@ -1924,7 +1921,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     selectedFilters.countries.size > 0 ||
                     selectedFilters.naics.size > 0 ||
                     selectedFilters.psc.size > 0 ||
-                    selectedFilters.cfda.size > 0) && (
+                    selectedFilters.cfda.size > 0 ||
+                    selectedFilters.months.size > 0) && (
                     <Box
                       sx={{
                         position: 'absolute',
@@ -2077,7 +2075,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>PSC</TableCell>
                   )}
                   {visibleColumns.includes('last_updated') && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Last Updated</TableCell>
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Last Modified</TableCell>
                   )}
                 </TableRow>
               </TableHead>
@@ -2161,7 +2159,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     )}
                     {visibleColumns.includes('period_start_date') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                        {formatDate(award.period_start_date)}
+                        {formatDate(award.period_of_performance_start_date)}
                       </TableCell>
                     )}
                     {visibleColumns.includes('period_end_date') && (
@@ -2181,7 +2179,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     )}
                     {visibleColumns.includes('last_updated') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                        {formatLastUpdated(award.last_updated)}
+                        {formatLastUpdated(award.last_modified_date)}
                       </TableCell>
                     )}
                   </TableRow>
@@ -2215,10 +2213,83 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
       {/* Empty state */}
       {currentResults.length === 0 && !isLoading && !isRestoringPagination && (
-        <Box sx={{ textAlign: 'center', py: 4, flexShrink: 0 }}>
-          <Typography variant="body2" color="#9ca3af">
-            No results. Click the search icon to configure search parameters.
-          </Typography>
+        <Box 
+          sx={{ 
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            py: 6,
+            px: 3,
+            flexShrink: 0,
+            minHeight: '200px',
+          }}
+        >
+          {(() => {
+            // Check if there's any search criteria
+            const hasSearchCriteria = 
+              (currentSearchParams.keywords && currentSearchParams.keywords.length > 0) ||
+              (currentSearchParams.award_type && currentSearchParams.award_type.length > 0) ||
+              (currentSearchParams.awarding_agency_name && currentSearchParams.awarding_agency_name.length > 0) ||
+              (currentSearchParams.funding_agency_name && currentSearchParams.funding_agency_name.length > 0) ||
+              (currentSearchParams.recipient_name && currentSearchParams.recipient_name.length > 0) ||
+              (currentSearchParams.recipient_location_state && currentSearchParams.recipient_location_state.length > 0) ||
+              (currentSearchParams.recipient_location_country && currentSearchParams.recipient_location_country.length > 0) ||
+              (currentSearchParams.naics_code && currentSearchParams.naics_code.length > 0) ||
+              (currentSearchParams.psc_code && currentSearchParams.psc_code.length > 0) ||
+              (currentSearchParams.cfda_number && currentSearchParams.cfda_number.length > 0) ||
+              currentSearchParams.date_year;
+            
+            if (!hasPerformedInitialSearch && !hasSearchCriteria) {
+              return (
+                <>
+                  <IconButton
+                    onClick={() => setSearchDialogOpen(true)}
+                    sx={{
+                      color: '#3b82f6',
+                      mb: 2,
+                      '&:hover': {
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        transform: 'scale(1.1)',
+                      },
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <SearchIcon sx={{ fontSize: '4rem' }} />
+                  </IconButton>
+                  <Typography variant="h6" color="#3b82f6" sx={{ fontWeight: 600, mb: 1 }}>
+                    Start Your Search
+                  </Typography>
+                  <Typography variant="body2" color="#9ca3af" sx={{ textAlign: 'center', maxWidth: '300px' }}>
+                    Click the magnifying glass above to configure your search parameters
+                  </Typography>
+                </>
+              );
+            } else {
+              return (
+                <>
+                  <Typography variant="body2" color="#9ca3af" sx={{ mb: 2 }}>
+                    No results found
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<SearchIcon />}
+                    onClick={() => setSearchDialogOpen(true)}
+                    sx={{
+                      color: '#3b82f6',
+                      borderColor: '#3b82f6',
+                      '&:hover': {
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      },
+                    }}
+                  >
+                    Adjust Search Parameters
+                  </Button>
+                </>
+              );
+            }
+          })()}
         </Box>
       )}
 
@@ -2478,8 +2549,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             </Box>
             )}
 
-            {/* NAICS Code - Hidden in easy mode */}
-            {!isEasyMode && (
+            {/* NAICS Code - Hidden (no GSI available, may implement later) */}
+            {/* {!isEasyMode && (
             <MultiSelectField<string>
               label="NAICS Code"
               selectedItems={currentSearchParams.naics_code || []}
@@ -2492,10 +2563,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Enter NAICS codes..."
               disableAutocomplete={true}
             />
-            )}
+            )} */}
 
-            {/* PSC Code - Hidden in easy mode */}
-            {!isEasyMode && (
+            {/* PSC Code - Hidden (no GSI available, may implement later) */}
+            {/* {!isEasyMode && (
             <MultiSelectField<string>
               label="PSC Code"
               selectedItems={currentSearchParams.psc_code || []}
@@ -2508,10 +2579,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Enter PSC codes..."
               disableAutocomplete={true}
             />
-            )}
+            )} */}
 
-            {/* CFDA Number - Hidden in easy mode */}
-            {!isEasyMode && (
+            {/* CFDA Number - Hidden (no GSI available, may implement later) */}
+            {/* {!isEasyMode && (
             <MultiSelectField<string>
               label="CFDA Number"
               selectedItems={currentSearchParams.cfda_number || []}
@@ -2524,7 +2595,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
               placeholder="Enter CFDA numbers..."
               disableAutocomplete={true}
             />
-            )}
+            )} */}
           </Box>
         </DialogContent>
         <DialogActions sx={{ borderTop: '1px solid #334155', p: 3 }}>
@@ -2577,18 +2648,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       <Dialog
         open={filterDialogOpen}
         onClose={() => {
-          // Persist filter settings when dialog is closed
-          const filterSettings = {
-            awardTypes: Array.from(selectedFilters.awardTypes),
-            agencies: Array.from(selectedFilters.agencies),
-            recipients: Array.from(selectedFilters.recipients),
-            states: Array.from(selectedFilters.states),
-            countries: Array.from(selectedFilters.countries),
-            naics: Array.from(selectedFilters.naics),
-            psc: Array.from(selectedFilters.psc),
-            cfda: Array.from(selectedFilters.cfda),
-          };
-          onSettingsChange(id, { filterSettings });
+          // Filters are client-side only - just close the dialog
           setFilterDialogOpen(false);
         }}
         maxWidth="md"
@@ -2647,7 +2707,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             selectedFilters.countries.size > 0 ||
             selectedFilters.naics.size > 0 ||
             selectedFilters.psc.size > 0 ||
-            selectedFilters.cfda.size > 0) && (
+            selectedFilters.cfda.size > 0 ||
+            selectedFilters.months.size > 0) && (
             <Box sx={{ mb: 3, p: 2, backgroundColor: '#334155', borderRadius: '4px', border: '1px solid #475569' }}>
               <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 2, fontWeight: 600 }}>
                 Applied Filters:
@@ -2813,6 +2874,29 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     }}
                   />
                 ))}
+                {Array.from(selectedFilters.months).map(month => {
+                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  return (
+                    <Chip
+                      key={`month-${month}`}
+                      label={`Month: ${monthNames[month - 1]}`}
+                      onDelete={() => {
+                        setSelectedFilters(prev => {
+                          const newSet = new Set(prev.months);
+                          newSet.delete(month);
+                          return { ...prev, months: newSet };
+                        });
+                      }}
+                      size="small"
+                      sx={{
+                        backgroundColor: 'rgba(168, 85, 247, 0.2)',
+                        color: '#a855f7',
+                        border: '1px solid #a855f7',
+                        '& .MuiChip-deleteIcon': { color: '#a855f7' }
+                      }}
+                    />
+                  );
+                })}
               </Box>
             </Box>
           )}
@@ -3330,6 +3414,67 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                   </AccordionDetails>
                 </Accordion>
               )}
+
+              {/* Month Filter */}
+              {availableFilters.month_filters && availableFilters.month_filters.length > 0 && (
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#ffffff' }} />}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#e2e8f0', fontSize: '0.95rem' }}>
+                      Month ({availableFilters.month_filters.length})
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box sx={{ maxHeight: '200px', overflowY: 'auto' }}>
+                      {availableFilters.month_filters.map((filter) => {
+                        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                        const isSelected = selectedFilters.months.has(filter.month);
+                        return (
+                          <Box
+                            key={`month-${filter.month}`}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              p: 1.5,
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              backgroundColor: isSelected
+                                ? 'rgba(59, 130, 246, 0.15)'
+                                : 'transparent',
+                              '&:hover': { backgroundColor: 'rgba(71, 85, 105, 0.5)' },
+                            }}
+                            onClick={() => {
+                              const newSet = new Set(selectedFilters.months);
+                              if (newSet.has(filter.month)) {
+                                newSet.delete(filter.month);
+                              } else {
+                                newSet.add(filter.month);
+                              }
+                              setSelectedFilters(prev => ({ ...prev, months: newSet }));
+                            }}
+                          >
+                            <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, fontSize: '0.875rem' }}>
+                              {monthNames[filter.month - 1]}
+                            </Typography>
+                            <Chip
+                              label={filter.count}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#3b82f6',
+                                color: '#ffffff',
+                                minWidth: '28px',
+                                height: '22px',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                              }}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </AccordionDetails>
+                </Accordion>
+              )}
             </Box>
           )}
         </DialogContent>
@@ -3384,7 +3529,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             period_end_date: 'Period End Date',
             naics_code: 'NAICS Code',
             psc_code: 'PSC Code',
-            last_updated: 'Last Updated',
+            last_updated: 'Last Modified',
             actions: 'Actions',
           };
           const isVisible = visibleColumns.includes(column);

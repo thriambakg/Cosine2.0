@@ -224,7 +224,11 @@ function MultiSelectField<T = string>({
     if (!keyExists) {
       onItemsChange([...selectedItems, itemToAdd]);
     }
-    setInputValue('');
+    // Only clear input if we're not selecting from autocomplete (to keep search text visible)
+    // When selecting from autocomplete, isSelectingRef is set to true, so we keep the input
+    if (!isSelectingRef.current) {
+      setInputValue('');
+    }
   };
 
   const handleRemoveItem = (itemToRemove: T) => {

@@ -1282,33 +1282,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     applyFilters();
   }, [applyFilters]);
   
-  // Persist filterSettings when selectedFilters change
-  // Use ref to track previous value and only persist when it actually changes
-  const prevFilterSettingsRef = useRef({
-    industries: Array.from(selectedFilters.industries),
-    marketCapRanges: Array.from(selectedFilters.marketCapRanges),
-    volatilityRanges: Array.from(selectedFilters.volatilityRanges),
-    priceChangeRanges: Array.from(selectedFilters.priceChangeRanges),
-  });
-  useEffect(() => {
-    const filterSettings = {
-      industries: Array.from(selectedFilters.industries),
-      marketCapRanges: Array.from(selectedFilters.marketCapRanges),
-      volatilityRanges: Array.from(selectedFilters.volatilityRanges),
-      priceChangeRanges: Array.from(selectedFilters.priceChangeRanges),
-    };
-    // Only persist if filterSettings actually changed (deep comparison)
-    const prev = prevFilterSettingsRef.current;
-    const hasChanged = JSON.stringify(prev) !== JSON.stringify(filterSettings);
-    if (hasChanged) {
-      prevFilterSettingsRef.current = filterSettings;
-      console.log('💾 StockScreenerTile: Persisting filterSettings', {
-        tileId: id,
-        filterSettings,
-      });
-      onSettingsChange(id, { filterSettings });
-    }
-  }, [selectedFilters, id, onSettingsChange]);
+  // Filters are client-side only - not persisted to dashboard
 
   // Generate available filters from all results
   const availableFilters = useMemo(() => {
