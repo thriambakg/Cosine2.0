@@ -3719,6 +3719,7 @@ module "sec_search_progress_subscriber_lambda" {
   tags = var.common_tags
 }
 
+
 # SNS Subscription: Subscribe progress subscriber Lambda to SNS topic
 resource "aws_sns_topic_subscription" "sec_search_progress_subscription" {
   topic_arn = module.sec_search_progress_sns.topic_arn
