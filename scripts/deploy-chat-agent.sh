@@ -95,36 +95,6 @@ set_ecr_variables() {
     # log_info "  Latest URI: $ECR_IMAGE_URI_LATEST"
 }
 
-# Ensure ECR repository exists
-ensure_ecr_repository() {
-    log_info "Checking if ECR repository exists..."
-    
-    # Check if repository exists
-    aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region $AWS_REGION > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
-        log_success "ECR repository '$ECR_REPOSITORY' already exists"
-        return 0
-    fi
-    
-    log_info "ECR repository '$ECR_REPOSITORY' does not exist. Creating it..."
-    
-    # Create repository with basic settings
-    # Note: Terraform will update this with proper KMS encryption and lifecycle policies later
-    aws ecr create-repository \
-        --repository-name "$ECR_REPOSITORY" \
-        --image-scanning-configuration scanOnPush=true \
-        --region $AWS_REGION > /dev/null 2>&1
-    
-    if [ $? -eq 0 ]; then
-        log_success "ECR repository '$ECR_REPOSITORY' created successfully"
-        log_warning "Repository created with default settings. Terraform will update with KMS encryption and lifecycle policies."
-    else
-        log_error "Failed to create ECR repository '$ECR_REPOSITORY'"
-        log_error "Please check AWS credentials and permissions (ecr:CreateRepository)"
-        exit 1
-    fi
-}
-
 # Login to ECR
 login_to_ecr() {
     log_info "Logging in to ECR..."
@@ -364,19 +334,16 @@ main() {
     log_info "Step 2: Setting ECR variables..."
     set_ecr_variables
     
-    log_info "Step 3: Ensuring ECR repository exists..."
-    ensure_ecr_repository
-    
-    log_info "Step 4: Logging in to ECR..."
+    log_info "Step 3: Logging in to ECR..."
     login_to_ecr
     
-    log_info "Step 5: Building Docker image..."
+    log_info "Step 4: Building Docker image..."
     build_docker_image
     
-    log_info "Step 6: Pushing Docker image..."
+    log_info "Step 5: Pushing Docker image..."
     push_docker_image
     
-    log_info "Step 7: Verifying ECR image..."
+    log_info "Step 6: Verifying ECR image..."
     verify_ecr_image
     
     if [ "$CI_MODE" = "true" ]; then
@@ -385,11 +352,11 @@ main() {
         log_info "Built Image URI: $ECR_IMAGE_URI"
         log_info "Version: $IMAGE_TAG"
     else
-        log_info "Step 8: Deploying with Terraform..."
+        log_info "Step 7: Deploying with Terraform..."
         deploy_with_terraform
         
         # Verify Lambda is using the correct image
-        log_info "Step 9: Verifying Lambda function deployment..."
+        log_info "Step 8: Verifying Lambda function deployment..."
         verify_lambda_image
         
         log_success "Chat agent deployment completed successfully!"

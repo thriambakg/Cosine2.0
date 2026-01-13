@@ -78,17 +78,47 @@ jobs:
     if: ${{ !github.event.inputs.destroy }}
     outputs:
       ecr-image-uri: ${{ steps.build.outputs.ecr-image-uri }}
+      build-skipped: ${{ steps.check-ecr.outputs.skipped }}
     
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Check if ECR Repository Exists
+        id: check-ecr
+        run: |
+          export ENVIRONMENT=${{ needs.determine-environment.outputs.environment }}
+          export AWS_REGION=us-east-1
+          PROJECT_NAME="cosine"
+          ECR_REPOSITORY="${PROJECT_NAME}-chat-agent-${ENVIRONMENT}"
+          
+          echo "🔍 Checking if ECR repository exists: $ECR_REPOSITORY"
+          
+          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region $AWS_REGION > /dev/null 2>&1; then
+            echo "✅ ECR repository '$ECR_REPOSITORY' exists - proceeding with build"
+            echo "skipped=false" >> $GITHUB_OUTPUT
+          else
+            echo "⏭️ ECR repository '$ECR_REPOSITORY' does not exist - skipping build"
+            echo "💡 Terraform will create the repository during apply, then you can re-run the pipeline"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            echo "ecr-image-uri=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Python
+        if: steps.check-ecr.outputs.skipped != 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Validate Python Syntax (Recursive)
+        if: steps.check-ecr.outputs.skipped != 'true'
         run: |
           echo "🔍 Validating Python syntax for all files in backend_app/src..."
           
@@ -127,18 +157,13 @@ jobs:
           
           echo "✅ All $FILE_COUNT Python files passed syntax validation!"
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
       - name: Make deployment script executable
+        if: steps.check-ecr.outputs.skipped != 'true'
         run: chmod +x scripts/deploy-chat-agent.sh
 
       - name: Build and Push Chat Agent Container
         id: build
+        if: steps.check-ecr.outputs.skipped != 'true'
         run: |
           export ENVIRONMENT=${{ needs.determine-environment.outputs.environment }}
           export AWS_REGION=us-east-1
@@ -246,9 +271,17 @@ jobs:
       - name: Create Terraform Variables File
         run: |
           echo "🔧 Creating terraform variables file..."
-          cat > terraform/additional_vars.tfvars << EOF
+          
+          # Only include chat_agent_image_uri if build was not skipped
+          if [ "${{ needs.build-chat-agent-container.outputs.build-skipped }}" != "true" ] && [ -n "${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}" ]; then
+            cat > terraform/additional_vars.tfvars << EOF
           chat_agent_image_uri = "${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}"
           EOF
+          else
+            echo "⏭️ Build was skipped - creating empty additional_vars.tfvars"
+            echo "# Build was skipped - ECR repository will be created by terraform" > terraform/additional_vars.tfvars
+          fi
+          
           echo "✅ Created additional_vars.tfvars:"
           cat terraform/additional_vars.tfvars
 
