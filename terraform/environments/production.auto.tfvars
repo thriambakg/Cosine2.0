@@ -52,6 +52,10 @@ production_subdomain = ""
 # Use dynamic versioned tags from build process for production deployments
 # chat_agent_image_tag = "v1.0.0"  # Commented out - will use dynamic tag from build process
 
+# Lambda Concurrency Configuration (production - keep provisioned concurrency for performance)
+lambda_provisioned_concurrency_default = 2 # Keep 2 provisioned containers warm to reduce cold starts
+# Note: Reserved concurrency is not set (uses account shared pool)
+
 # Note: When enabling custom domain in production:
 # 1. Purchase and register your domain (investcosine.com) ✅ DONE
 # 2. After terraform apply, update your domain's nameservers to Route53
