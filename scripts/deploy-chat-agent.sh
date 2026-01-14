@@ -111,7 +111,7 @@ login_to_ecr() {
     if [ $? -eq 0 ]; then
         log_success "Successfully logged in to ECR"
     else
-        log_error "Failed to login to ECR. Please check Docker is running and ECR repository exists."
+        log_error "Failed to login to ECR. Please check Docker is running."
         exit 1
     fi
 }
