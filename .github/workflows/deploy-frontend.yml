@@ -429,12 +429,8 @@ jobs:
             echo "📝 Setting logging disabled for production environment"
           fi
           
-          # Generate logging.json
-          cat > public/logging.json << EOF
-{
-  "enabled": ${LOGGING_ENABLED}
-}
-EOF
+          # Generate logging.json using printf to avoid YAML heredoc issues
+          printf '{\n  "enabled": %s\n}\n' "$LOGGING_ENABLED" > public/logging.json
           
           echo "✅ Logging configuration generated successfully"
           echo "🔍 Generated logging.json content:"
