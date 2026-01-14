@@ -1443,7 +1443,7 @@ module "stock_volatility_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -1491,7 +1491,7 @@ module "crypto_stats_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -1549,7 +1549,7 @@ module "user_dashboard_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20 # Higher concurrency for dashboard operations
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Higher concurrency for dashboard operations
 
   tags = var.common_tags
 }
@@ -1597,7 +1597,7 @@ module "stock_alerts_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -1645,7 +1645,7 @@ module "stock_alert_trigger_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 5
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2202,7 +2202,7 @@ module "websocket_connection_lambda" {
   ]
 
   # Reserved concurrency to prevent overwhelming the connection manager
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2429,7 +2429,7 @@ module "stock_screener_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent stock screening operations
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent stock screening operations
 
   tags = var.common_tags
 }
@@ -2480,7 +2480,7 @@ module "stock_data_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2529,7 +2529,7 @@ module "stock_statistics_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2579,7 +2579,7 @@ module "volatility_fetch_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2631,7 +2631,7 @@ module "robinhood_integration_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2682,7 +2682,7 @@ module "session_management_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2719,7 +2719,7 @@ module "filesystem_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn
   ]
 
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2768,7 +2768,7 @@ module "file_return_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn        # Add secrets manager access for encryption secret
   ]
 
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2892,7 +2892,7 @@ module "billing_spending_lambda" {
     aws_iam_policy.billing_spending_policy.arn
   ]
 
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 5
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2928,7 +2928,7 @@ module "billing_payment_lambda" {
     aws_iam_policy.billing_payment_policy.arn
   ]
 
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2976,7 +2976,7 @@ module "news_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent news searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent news searches
 
   tags = var.common_tags
 }
@@ -3068,7 +3068,7 @@ module "sec_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent SEC search operations
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent SEC search operations
 
   tags = var.common_tags
 }
@@ -3124,7 +3124,7 @@ module "politician_trades_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent politician trades searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent politician trades searches
 
   tags = var.common_tags
 }
@@ -3177,7 +3177,7 @@ module "usaspending_autocomplete_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20 # Autocomplete is fast, allow more concurrency
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Autocomplete is fast, allow more concurrency
 
   tags = var.common_tags
 }
@@ -3286,7 +3286,7 @@ module "usaspending_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent searches
 
   tags = var.common_tags
 }
@@ -3394,7 +3394,7 @@ module "congress_bills_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent congress bills searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent congress bills searches
 
   tags = var.common_tags
 }
@@ -3448,7 +3448,7 @@ module "lda_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent LDA searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent LDA searches
 
   tags = var.common_tags
 }
@@ -3503,7 +3503,7 @@ module "lda_autocomplete_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 20 # Autocomplete is fast, allow more concurrency
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Autocomplete is fast, allow more concurrency
 
   tags = var.common_tags
 }
@@ -3669,7 +3669,7 @@ module "usaspending_enrichment_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10 # Limit concurrent enrichments
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent enrichments
 
   tags = var.common_tags
 }
@@ -3717,7 +3717,7 @@ module "sec_search_progress_subscriber_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = var.lambda_reserved_concurrency_default != null ? var.lambda_reserved_concurrency_default : 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
