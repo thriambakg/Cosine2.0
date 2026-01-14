@@ -412,6 +412,34 @@ jobs:
           echo "🔍 Generated config.js content:"
           cat public/config.js | head -20
 
+      - name: Generate logging configuration
+        working-directory: ./frontend/react-app
+        run: |
+          echo "🔧 Generating logging configuration based on environment..."
+          
+          ENVIRONMENT="${{ needs.setup.outputs.environment }}"
+          
+          # Set logging enabled based on environment
+          # Staging: enabled=true, Production: enabled=false
+          if [ "$ENVIRONMENT" = "staging" ]; then
+            LOGGING_ENABLED="true"
+            echo "📝 Setting logging enabled for staging environment"
+          else
+            LOGGING_ENABLED="false"
+            echo "📝 Setting logging disabled for production environment"
+          fi
+          
+          # Generate logging.json
+          cat > public/logging.json << EOF
+{
+  "enabled": ${LOGGING_ENABLED}
+}
+EOF
+          
+          echo "✅ Logging configuration generated successfully"
+          echo "🔍 Generated logging.json content:"
+          cat public/logging.json
+
       - name: Build React.js (Vite) application
         working-directory: ./frontend/react-app
         env:
