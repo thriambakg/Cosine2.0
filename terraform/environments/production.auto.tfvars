@@ -53,8 +53,8 @@ production_subdomain = ""
 # chat_agent_image_tag = "v1.0.0"  # Commented out - will use dynamic tag from build process
 
 # Lambda Concurrency Configuration (production)
-lambda_provisioned_concurrency_default = 2 # Provisioned concurrency for chat agent to reduce cold starts
-# lambda_reserved_concurrency_default = null # Uses function-specific defaults if not set
+lambda_provisioned_concurrency_default = 2    # Provisioned concurrency for chat agent to reduce cold starts
+lambda_reserved_concurrency_default    = null # Unlimited concurrency in production (no throttling)
 
 # Note: When enabling custom domain in production:
 # 1. Purchase and register your domain (investcosine.com) ✅ DONE
