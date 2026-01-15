@@ -71,7 +71,7 @@ const configureAmplify = () => {
             oauth: {
               domain: validatedCognitoDomain,
               scopes: ['email', 'openid', 'profile', 'aws.cognito.signin.user.admin'],
-              redirectSignIn: ['http://localhost:3000/auth/callback', 'https://investcosine.com/auth/callback', 'https://investcosine.com/dashboard'],
+              redirectSignIn: ['http://localhost:3000/auth/callback', 'https://investcosine.com/auth/callback'],
               redirectSignOut: ['http://localhost:3000', 'https://investcosine.com'],
               responseType: 'code',
               providers: ['Google']
