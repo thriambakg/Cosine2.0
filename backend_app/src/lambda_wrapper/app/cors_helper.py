@@ -67,4 +67,3 @@ def validate_origin(origin: str) -> bool:
             return True
     
     return False
-
