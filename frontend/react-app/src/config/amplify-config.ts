@@ -17,19 +17,6 @@ const isLocalhost = typeof window !== 'undefined' &&
 // Configure Amplify with Cognito credentials from runtime config
 const configureAmplify = () => {
   try {
-<<<<<<< HEAD
-    const currentUrl = typeof window !== 'undefined' ? window.location.href : 'unknown';
-    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'unknown';
-    
-    console.log('🔧 Amplify Config Debug:');
-    console.log('  Current URL:', currentUrl);
-    console.log('  Current Origin:', currentOrigin);
-    console.log('  Configured redirectSignIn:', ['http://localhost:3000/auth/callback', 'https://investcosine.com/auth/callback']);
-    console.log('  Configured redirectSignOut:', ['http://localhost:3000', 'https://investcosine.com']);
-    console.log('  Cognito Domain:', 'cosine-production.auth.us-east-1.amazoncognito.com');
-    
-    // Use the same hardcoded configuration that was working in the old project
-=======
     // For localhost, always use production Cognito (where dev credentials exist)
     // For deployed environments (staging/production), use config from config.js
     let cognitoUserPoolId: string;
@@ -75,7 +62,6 @@ const configureAmplify = () => {
       redirectSignOut
     ].filter((url, index, self) => self.indexOf(url) === index); // Remove duplicates
 
->>>>>>> 020662d088bf1ba677fb8f7cbda18652606f2792
     Amplify.configure({
       Auth: {
         Cognito: {
@@ -85,13 +71,8 @@ const configureAmplify = () => {
             oauth: {
               domain: validatedCognitoDomain,
               scopes: ['email', 'openid', 'profile', 'aws.cognito.signin.user.admin'],
-<<<<<<< HEAD
               redirectSignIn: ['http://localhost:3000/auth/callback', 'https://investcosine.com/auth/callback', 'https://investcosine.com/dashboard'],
               redirectSignOut: ['http://localhost:3000', 'https://investcosine.com'],
-=======
-              redirectSignIn: redirectSignInUrls,
-              redirectSignOut: redirectSignOutUrls,
->>>>>>> 020662d088bf1ba677fb8f7cbda18652606f2792
               responseType: 'code',
               providers: ['Google']
             },
