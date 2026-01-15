@@ -4,20 +4,20 @@
 
 window.COSINE_CONFIG = {
   // API Configuration
-  apiGatewayUrl: 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production', // Production API Gateway URL
+  apiGatewayUrl: 'https://6f6mnphum8.execute-api.us-east-1.amazonaws.com/staging', // Staging API Gateway URL
   awsRegion: 'us-east-1',
   
   // Environment
-  environment: 'production',
+  environment: 'staging',
   
   // Cognito Configuration (if using auth)
-  cognitoUserPoolId: 'us-east-1_dACC5MBr3',
-  cognitoClientId: '57opgf3bjct1v7vos2anppjepp',
-  cognitoDomain: 'cosine-production.auth.us-east-1.amazoncognito.com',
+  cognitoUserPoolId: 'us-east-1_wmV3MAgOR',
+  cognitoClientId: '6259a5o1q73e1k90evtri45e98',
+  cognitoDomain: 'cosine-auth-staging.auth.us-east-1.amazoncognito.com',
   
   // Redirect URLs
-  redirectSignIn: 'https://investcosine.com/dashboard',
-  redirectSignOut: 'https://investcosine.com/',
+  redirectSignIn: 'https://d5b4qcbiesv5t.cloudfront.net/dashboard',
+  redirectSignOut: 'https://d5b4qcbiesv5t.cloudfront.net/',
   
   // Build timestamp for cache busting
   buildTimestamp: '2025-08-17T16:45:00Z',
