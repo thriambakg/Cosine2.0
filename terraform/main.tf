@@ -1224,6 +1224,7 @@ resource "aws_iam_policy" "session_management_dynamodb_policy" {
     ]
   })
 
+
   tags = var.common_tags
 }
 
