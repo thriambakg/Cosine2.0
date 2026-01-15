@@ -165,9 +165,12 @@ resource "aws_api_gateway_integration_response" "this" {
   status_code = aws_api_gateway_method_response.this[each.key].status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "method.response.header.Access-Control-Allow-Origin"      = "method.request.header.Origin" # Dynamically return the requesting origin (works for both MOCK and AWS_PROXY)
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+    # Note: Integration response parameters don't support dynamic header mapping
+    # For AWS_PROXY, Lambda functions must return CORS headers in their response
+    # This is just a placeholder - actual CORS headers come from Lambda
+    "method.response.header.Access-Control-Allow-Origin"      = "'*'"
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
 
@@ -287,10 +290,14 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
   status_code = aws_api_gateway_method_response.options_method_responses[each.key].status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "method.response.header.Access-Control-Allow-Origin"      = "method.request.header.Origin" # Dynamically return the requesting origin
-    "method.response.header.Access-Control-Allow-Credentials" = "'true'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+    # Note: Integration response parameters don't support dynamic header mapping
+    # Using '*' for preflight - browsers accept this for OPTIONS requests
+    # Actual API responses will need CORS headers from Lambda functions
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+    # Cannot use credentials with '*' - browsers reject it
+    # Credentials will work for actual API responses if Lambda returns proper CORS headers
   }
 
   response_templates = {
