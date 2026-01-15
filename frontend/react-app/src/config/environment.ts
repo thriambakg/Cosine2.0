@@ -13,6 +13,8 @@ export interface EnvironmentConfig {
   cognitoUserPoolId?: string;
   cognitoClientId?: string;
   cognitoDomain?: string;
+  redirectSignIn?: string;
+  redirectSignOut?: string;
   projectName: string;
 }
 
@@ -35,6 +37,8 @@ const getRuntimeConfig = () => {
       cognitoUserPoolId: window.COSINE_CONFIG.cognitoUserPoolId,
       cognitoClientId: window.COSINE_CONFIG.cognitoClientId,
       cognitoDomain: window.COSINE_CONFIG.cognitoDomain,
+      redirectSignIn: window.COSINE_CONFIG.redirectSignIn,
+      redirectSignOut: window.COSINE_CONFIG.redirectSignOut,
     };
   }
   console.log('🔧 No runtime config found, window.COSINE_CONFIG:', typeof window !== 'undefined' ? window.COSINE_CONFIG : 'window not available');
@@ -162,6 +166,7 @@ const getCognitoConfig = () => {
 export const getEnvironmentConfig = (): EnvironmentConfig => {
   const environment = getCurrentEnvironment();
   const cognitoConfig = getCognitoConfig();
+  const runtimeConfig = getRuntimeConfig();
   
   return {
     environment: environment as 'development' | 'staging' | 'production',
@@ -171,6 +176,8 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
     cognitoUserPoolId: cognitoConfig.userPoolId,
     cognitoClientId: cognitoConfig.clientId,
     cognitoDomain: cognitoConfig.domain,
+    redirectSignIn: runtimeConfig?.redirectSignIn,
+    redirectSignOut: runtimeConfig?.redirectSignOut,
     projectName: ENVIRONMENT_CONFIGS[environment]?.projectName || 'cosine'
   };
 };
