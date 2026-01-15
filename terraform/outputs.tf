@@ -363,8 +363,8 @@ output "build_environment_variables" {
     # OAuth redirect URLs (construct from CloudFront domain or custom domain)
     NEXT_PUBLIC_REDIRECT_SIGN_IN = var.use_cloudfront_deployment ? (
       length(var.cloudfront_aliases) > 0 ?
-      "https://${var.cloudfront_aliases[0]}/dashboard" :
-      "https://${module.cloudfront[0].distribution_domain_name}/dashboard"
+      "https://${var.cloudfront_aliases[0]}/auth/callback" :
+      "https://${module.cloudfront[0].distribution_domain_name}/auth/callback"
     ) : null
 
     NEXT_PUBLIC_REDIRECT_SIGN_OUT = var.use_cloudfront_deployment ? (
