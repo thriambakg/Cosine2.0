@@ -31,6 +31,7 @@ import {
 } from '@mui/icons-material';
 import TutorialHelpIcon from './TutorialHelpIcon';
 import { fileReturnAPI } from '@/services/api';
+import { API_CONFIG } from '@/config/api';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
 import ItemDetailsDialog, { ItemType } from './ItemDetailsDialog';
