@@ -73,8 +73,23 @@ const getCurrentEnvironment = (): string => {
   return 'development';
 };
 
+// Check if we're running on localhost
+const isLocalhostEnv = typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || 
+   window.location.hostname === '127.0.0.1' ||
+   window.location.hostname === '');
+
 // Get API Gateway URL from runtime config or environment variables
 const getApiGatewayUrl = (): string => {
+  // For localhost, use production API Gateway (to match production Cognito)
+  if (isLocalhostEnv) {
+    const productionUrl = ENVIRONMENT_CONFIGS.production?.apiGatewayUrl;
+    if (productionUrl && !productionUrl.includes('your-')) {
+      console.log('🏠 Localhost detected: Using production API Gateway URL for local development:', productionUrl);
+      return productionUrl;
+    }
+  }
+  
   // Check runtime config first (highest priority)
   const runtimeConfig = getRuntimeConfig();
   if (runtimeConfig?.apiGatewayUrl && !runtimeConfig.apiGatewayUrl.includes('{{')) {

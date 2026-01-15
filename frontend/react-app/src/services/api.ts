@@ -40,6 +40,15 @@ export const apiRequest = async <T>(
       const idToken = session.tokens?.idToken;
       const accessToken = session.tokens?.accessToken;
       
+      // Log token info for debugging
+      console.log('🔍 Token debug info:', {
+        hasIdToken: !!idToken,
+        hasAccessToken: !!accessToken,
+        idTokenType: idToken ? typeof idToken : 'none',
+        accessTokenType: accessToken ? typeof accessToken : 'none',
+        apiUrl: API_BASE_URL
+      });
+      
       // Check if tokens are expired
       if (idToken || accessToken) {
         // Get the token that exists (prefer idToken)
@@ -105,7 +114,35 @@ export const apiRequest = async <T>(
           console.warn('Could not verify token expiration:', tokenCheckError);
         }
         
-        const bearer = token ? token.toString() : '';
+        // Extract JWT token string from Amplify token object
+        // In Amplify v6, tokens are objects with a toString() method that returns the JWT string
+        let bearer = '';
+        if (token) {
+          // Try toString() first (Amplify v6 pattern)
+          if (typeof token.toString === 'function') {
+            bearer = token.toString();
+          } 
+          // Fallback: check if token has a direct string property
+          else if (typeof token === 'string') {
+            bearer = token;
+          }
+          // Fallback: check for common token string properties
+          else if (token && typeof token === 'object') {
+            bearer = (token as any).tokenString || (token as any).toString?.() || String(token);
+          }
+          
+          // Log token info for debugging (without exposing the full token)
+          if (bearer) {
+            console.log('🔒 Using token for Authorization header:', {
+              tokenLength: bearer.length,
+              tokenPrefix: bearer.substring(0, 20) + '...',
+              tokenType: idToken ? 'idToken' : 'accessToken'
+            });
+          } else {
+            console.warn('🔒 Could not extract token string from token object:', token);
+          }
+        }
+        
         if (bearer) {
           authHeader = { Authorization: `Bearer ${bearer}` };
         }
@@ -126,9 +163,25 @@ export const apiRequest = async <T>(
     // Merge custom headers with default headers and auth header
     const headers = { ...getHeaders(options.userId), ...authHeader, ...options.headers } as any;
     
+    // Log auth header info (without exposing full token)
+    if (authHeader.Authorization) {
+      const authValue = authHeader.Authorization;
+      const tokenPart = authValue.replace('Bearer ', '');
+      console.log(`🔒 Authorization header present:`, {
+        hasToken: !!tokenPart,
+        tokenLength: tokenPart.length,
+        tokenPrefix: tokenPart.substring(0, 30) + '...',
+        fullHeaderPrefix: authValue.substring(0, 50) + '...'
+      });
+    } else {
+      console.warn('⚠️ No Authorization header in request - request will likely fail with 401');
+    }
+    
     console.log(`📡 Request config:`, {
       method: options.method || 'GET',
-      headers: headers,
+      url,
+      hasAuthHeader: !!authHeader.Authorization,
+      headers: { ...headers, Authorization: authHeader.Authorization ? '[REDACTED]' : undefined },
       body: options.body,
     });
 
