@@ -363,17 +363,20 @@ resource "aws_api_gateway_usage_plan_key" "internal" {
   usage_plan_id = aws_api_gateway_usage_plan.protected.id
 }
 
-# Gateway Response for CORS - handles CORS headers for all responses (including AWS_PROXY)
-# This ensures CORS headers are added even when Lambda doesn't return them
+# Gateway Response for CORS - handles CORS headers for error responses (including AWS_PROXY)
+# Note: Gateway Response response_parameters don't support Velocity expressions for request headers,
+# so we use '*' for origin. This is acceptable for error responses since preflight (OPTIONS) 
+# already handles dynamic origin correctly.
 resource "aws_api_gateway_gateway_response" "cors_4xx" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   response_type = "DEFAULT_4XX"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
-    "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+    # Note: Cannot use credentials with '*' origin - browsers will reject it
+    # Preflight OPTIONS requests handle credentials correctly via integration responses
   }
 
   response_templates = {
@@ -386,10 +389,9 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
   response_type = "DEFAULT_5XX"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
-    "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
   }
 
   response_templates = {
@@ -403,10 +405,9 @@ resource "aws_api_gateway_gateway_response" "cors_401" {
   response_type = "UNAUTHORIZED"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
-    "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
   }
 
   response_templates = {
@@ -420,10 +421,9 @@ resource "aws_api_gateway_gateway_response" "cors_403" {
   response_type = "ACCESS_DENIED"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
-    "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
   }
 
   response_templates = {
