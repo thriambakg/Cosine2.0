@@ -3,6 +3,8 @@
  * Provides file compression, validation, and upload functionality for both ChatPage and Sidebar
  */
 
+import { API_CONFIG } from '../config/api';
+
 export interface UploadedFile {
   id: number;
   name: string;
@@ -233,7 +235,7 @@ export class FileUploadService {
   static async sendFilesToFileHandler(
     files: UploadedFile[], 
     options: FileUploadOptions,
-    apiGatewayUrl: string = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'
+    apiGatewayUrl: string = API_CONFIG.BASE_URL
   ): Promise<any> {
     try {
       const filesData = files.map(file => ({

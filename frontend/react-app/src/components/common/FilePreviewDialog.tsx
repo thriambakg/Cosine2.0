@@ -1478,8 +1478,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                                     return;
                                   }
                                   
-                                  const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                  const response = await fetch(`${apiUrl}/file-download`, {
+                                  const response = await fetch(`${API_CONFIG.BASE_URL}/file-download`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
@@ -1586,8 +1585,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                                     return;
                                   }
                                   
-                                  const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                                  const response = await fetch(`${apiUrl}/file-download`, {
+                                  const response = await fetch(`${API_CONFIG.BASE_URL}/file-download`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({

@@ -5,6 +5,7 @@
  */
 
 import { sessionManagementAPI } from './api';
+import { API_CONFIG } from '../config/api';
 
 export interface SharedMessage {
   id: string;
@@ -864,7 +865,7 @@ class UnifiedMessageHandlerService {
           model: messageData.model || 'claude-sonnet-4'
         };
 
-        const url = `${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`;
+        const url = `${API_CONFIG.BASE_URL}/files`;
         const requestBody = JSON.stringify(fileUploadRequest);
         
         // Get authorization token
