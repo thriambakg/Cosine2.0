@@ -43,7 +43,11 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_method.options_methods,
     aws_api_gateway_integration.options_integrations,
     aws_api_gateway_method_response.options_method_responses,
-    aws_api_gateway_integration_response.options_integration_responses
+    aws_api_gateway_integration_response.options_integration_responses,
+    aws_api_gateway_gateway_response.cors_4xx,
+    aws_api_gateway_gateway_response.cors_5xx,
+    aws_api_gateway_gateway_response.cors_401,
+    aws_api_gateway_gateway_response.cors_403
   ]
 
   lifecycle {
@@ -366,7 +370,7 @@ resource "aws_api_gateway_gateway_response" "cors_4xx" {
   response_type = "DEFAULT_4XX"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "'$input.params().header.get('Origin')'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
     "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
     "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
@@ -382,7 +386,7 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
   response_type = "DEFAULT_5XX"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "'$input.params().header.get('Origin')'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
     "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
     "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
@@ -399,7 +403,7 @@ resource "aws_api_gateway_gateway_response" "cors_401" {
   response_type = "UNAUTHORIZED"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "'$input.params().header.get('Origin')'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
     "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
     "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
@@ -416,7 +420,7 @@ resource "aws_api_gateway_gateway_response" "cors_403" {
   response_type = "ACCESS_DENIED"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin"      = "'$input.params().header.get('Origin')'"
+    "gatewayresponse.header.Access-Control-Allow-Origin"      = "$input.params().header.get('Origin')"
     "gatewayresponse.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
     "gatewayresponse.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
     "gatewayresponse.header.Access-Control-Allow-Credentials" = "'true'"
