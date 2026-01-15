@@ -12,10 +12,12 @@ import re
 # - https://www.investcosine.com
 # - https://api.investcosine.com
 # - http://localhost:3000
+# - https://*.cloudfront.net (for CloudFront distributions)
 ALLOWED_ORIGIN_PATTERNS = [
     r'^https?://.*\.?investcosine\.com(:\d+)?$',  # Any subdomain of investcosine.com
     r'^https?://investcosine\.com(:\d+)?$',       # investcosine.com itself
     r'^http://localhost:3000(:\d+)?$',            # localhost:3000 for development
+    r'^https://.*\.cloudfront\.net$',             # CloudFront distributions (for staging/production)
 ]
 
 

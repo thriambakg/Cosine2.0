@@ -261,10 +261,11 @@ resource "aws_api_gateway_method_response" "options_method_responses" {
   status_code = "200"
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers"     = true
-    "method.response.header.Access-Control-Allow-Methods"     = true
-    "method.response.header.Access-Control-Allow-Origin"      = true
-    "method.response.header.Access-Control-Allow-Credentials" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    # Removed Access-Control-Allow-Credentials - cannot use with '*' origin in integration response
+    # Lambda functions will return proper CORS headers with credentials for actual requests
   }
 
   response_models = {
