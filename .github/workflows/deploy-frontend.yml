@@ -324,6 +324,10 @@ jobs:
           NEXT_PUBLIC_REDIRECT_SIGN_IN=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_REDIRECT_SIGN_IN // "https://investcosine.com/auth/callback"')
           NEXT_PUBLIC_REDIRECT_SIGN_OUT=$(echo $BUILD_ENV | jq -r '.NEXT_PUBLIC_REDIRECT_SIGN_OUT // "https://investcosine.com"')
           
+          # Get WebSocket URL from terraform output
+          WEBSOCKET_API=$(terraform output -json websocket_api 2>/dev/null || echo "{}")
+          NEXT_PUBLIC_WEBSOCKET_URL=$(echo $WEBSOCKET_API | jq -r '.stage_url // ""')
+          
           cd ..
           
           # Validate required values
@@ -351,6 +355,7 @@ jobs:
           echo "next_public_cognito_user_pool_client_id=${NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID}" >> $GITHUB_OUTPUT
           echo "next_public_cognito_domain=${NEXT_PUBLIC_COGNITO_DOMAIN}" >> $GITHUB_OUTPUT
           echo "next_public_api_gateway_url=${NEXT_PUBLIC_API_GATEWAY_URL}" >> $GITHUB_OUTPUT
+          echo "next_public_websocket_url=${NEXT_PUBLIC_WEBSOCKET_URL}" >> $GITHUB_OUTPUT
           echo "next_public_redirect_sign_in=${NEXT_PUBLIC_REDIRECT_SIGN_IN}" >> $GITHUB_OUTPUT
           echo "next_public_redirect_sign_out=${NEXT_PUBLIC_REDIRECT_SIGN_OUT}" >> $GITHUB_OUTPUT
           
@@ -361,6 +366,7 @@ jobs:
           echo "  - Domain: ${NEXT_PUBLIC_COGNITO_DOMAIN}"
           echo "  - Sign In Redirect: ${NEXT_PUBLIC_REDIRECT_SIGN_IN}"
           echo "  - Sign Out Redirect: ${NEXT_PUBLIC_REDIRECT_SIGN_OUT}"
+          echo "  - WebSocket URL: ${NEXT_PUBLIC_WEBSOCKET_URL}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -380,6 +386,7 @@ jobs:
           
           # Get values from Terraform outputs (already retrieved in previous step)
           API_GATEWAY_URL="${{ steps.get-build-env.outputs.next_public_api_gateway_url }}"
+          WEBSOCKET_URL="${{ steps.get-build-env.outputs.next_public_websocket_url }}"
           AWS_REGION="${{ steps.get-build-env.outputs.next_public_aws_region }}"
           ENVIRONMENT="${{ needs.setup.outputs.environment }}"
           COGNITO_USER_POOL_ID="${{ steps.get-build-env.outputs.next_public_cognito_user_pool_id }}"
@@ -390,6 +397,7 @@ jobs:
           
           echo "🔍 Configuration values:"
           echo "  - API Gateway URL: $API_GATEWAY_URL"
+          echo "  - WebSocket URL: $WEBSOCKET_URL"
           echo "  - AWS Region: $AWS_REGION"
           echo "  - Environment: $ENVIRONMENT"
           echo "  - Cognito User Pool ID: $COGNITO_USER_POOL_ID"
@@ -399,6 +407,7 @@ jobs:
           # Generate the runtime configuration file
           node scripts/generate-config.js \
             --api-gateway-url "$API_GATEWAY_URL" \
+            --websocket-url "$WEBSOCKET_URL" \
             --aws-region "$AWS_REGION" \
             --environment "$ENVIRONMENT" \
             --cognito-user-pool-id "$COGNITO_USER_POOL_ID" \

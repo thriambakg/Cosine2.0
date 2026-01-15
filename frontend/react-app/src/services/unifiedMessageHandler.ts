@@ -5,6 +5,8 @@
  */
 
 import { sessionManagementAPI } from './api';
+import { API_CONFIG } from '../config/api';
+import { ENV_CONFIG } from '../config/environment';
 
 export interface SharedMessage {
   id: string;
@@ -562,7 +564,7 @@ class UnifiedMessageHandlerService {
     
     try {
       // Create WebSocket connection
-      const wsUrl = `${process.env.REACT_APP_WEBSOCKET_URL || 'wss://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production'}?userId=${userId}`;
+      const wsUrl = `${ENV_CONFIG.websocketUrl || process.env.REACT_APP_WEBSOCKET_URL || 'wss://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production'}?userId=${userId}`;
       console.log('🔌 UnifiedMessageHandler: WebSocket URL:', wsUrl);
       
       const ws = new WebSocket(wsUrl);
@@ -864,7 +866,7 @@ class UnifiedMessageHandlerService {
           model: messageData.model || 'claude-sonnet-4'
         };
 
-        const url = `${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`;
+        const url = `${API_CONFIG.BASE_URL}/files`;
         const requestBody = JSON.stringify(fileUploadRequest);
         
         // Get authorization token

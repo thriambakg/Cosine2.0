@@ -1445,7 +1445,26 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES, SEC FILINGS, POLITICIAN TRADES):
    - Read the contextual metadata described in the SEC section below (filingId, form, documentUrls, etc.).
    - Pull the document URLs / S3 keys from the context item, prefer XML/lightweight docs, check if ".xml" files are actually HTML before parsing, and fall back to HTML/TXT only when necessary.
    - Mention in your reasoning which context documents you used and why.
-8. **FOR POLITICIAN TRADE CONTEXT ITEMS**:
+8. **FOR LDA FILING CONTEXT ITEMS**:
+   - When LDA filings are already in context (from the LDA Search UI or previous steps), they include an s3_key field in data.s3_key that points to the full filing document.
+   - LDA filing context items have structure:
+     {
+       "type": "lda_filing",
+       "title": "3rd Quarter - Report - CASSIDY & ASSOCIATES, INC.",
+       "subtitle": "Posted: Oct 16, 2025 • 3rd Quarter (July 1 - Sep 30) • Year: 2025 • Amount: $80,000",
+       "data": {
+         "s3_key": "filings/Q3/0a1dfd26-af61-473c-bd47-89f48762689d.html",
+         "registrant_name": "...",
+         "client_name": "...",
+         "filing_type_display": "...",
+         "amount_reported": 80000,
+         // ... other metadata
+       }
+     }
+   - To read the full filing document, use read_s3_file_tool(data.s3_key) where s3_key is from data.s3_key
+   - The s3_key will start with "filings/" and points to an HTML file containing the full filing document
+   - The context item metadata includes key information, but use read_s3_file_tool to get complete details when needed
+9. **FOR POLITICIAN TRADE CONTEXT ITEMS**:
    - When politician trades are already in context (from the Politician Trades Search UI or previous steps), analyze the provided trade object directly.
    - Politician trade objects include comprehensive transaction data:
      - politicianName: Name of the politician who made the trade

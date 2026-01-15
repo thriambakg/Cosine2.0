@@ -890,7 +890,7 @@ module "api_gateway" {
   tags                 = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "83" # Updated for billing payment GET method and logging
+  deployment_trigger = "85" # Updated for CORS fixes (dynamic origin headers)
 }
 
 

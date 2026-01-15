@@ -45,6 +45,9 @@ def build_context_prompt(user_message: str, context_items: List[Dict[str, Any]])
         elif item_type == 'file':
             # Handle uploaded files
             prompt_parts.append(format_file_context(i, item.get('data', {})))
+        elif item_type == 'lda_filing':
+            # Handle LDA filing context items
+            prompt_parts.append(format_lda_filing_context(i, item))
         else:
             prompt_parts.append(f"[Context Item {i}: Unknown Type]")
     

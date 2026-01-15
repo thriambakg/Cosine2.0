@@ -46,6 +46,7 @@ import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext } from '../tiles/common/contextManager';
 import ContextItemRow from '../context/ContextItemRow';
 import { sessionManagementAPI, fileReturnAPI } from '../../services/api';
+import { API_CONFIG } from '../../config/api';
 // COMMENTED OUT: useMessagingService (replaced with unified architecture)
 // import { useMessagingService } from '../../hooks/useMessagingService';
 // NEW: Import unified messaging system
@@ -2161,7 +2162,7 @@ const GlobalChatSidebar: React.FC = () => {
         data: file.compressedData // Already base64 encoded from compression
       }));
 
-      const response = await fetch(`${process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production'}/files`, {
+      const response = await fetch(`${API_CONFIG.BASE_URL}/files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3662,8 +3663,7 @@ const GlobalChatSidebar: React.FC = () => {
                       <IconButton size="small" className="remove-file-btn" onClick={async () => {
                         if (!activeSessionId || !user?.id) return;
                         try {
-                          const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                          const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key }) });
+                          const response = await fetch(`${API_CONFIG.BASE_URL}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key }) });
                           if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
                           const { download_url } = await response.json();
                           const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);

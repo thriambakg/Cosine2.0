@@ -13,6 +13,8 @@ export interface EnvironmentConfig {
   cognitoUserPoolId?: string;
   cognitoClientId?: string;
   cognitoDomain?: string;
+  redirectSignIn?: string;
+  redirectSignOut?: string;
   projectName: string;
 }
 
@@ -35,6 +37,8 @@ const getRuntimeConfig = () => {
       cognitoUserPoolId: window.COSINE_CONFIG.cognitoUserPoolId,
       cognitoClientId: window.COSINE_CONFIG.cognitoClientId,
       cognitoDomain: window.COSINE_CONFIG.cognitoDomain,
+      redirectSignIn: window.COSINE_CONFIG.redirectSignIn,
+      redirectSignOut: window.COSINE_CONFIG.redirectSignOut,
     };
   }
   console.log('🔧 No runtime config found, window.COSINE_CONFIG:', typeof window !== 'undefined' ? window.COSINE_CONFIG : 'window not available');
@@ -69,8 +73,23 @@ const getCurrentEnvironment = (): string => {
   return 'development';
 };
 
+// Check if we're running on localhost
+const isLocalhostEnv = typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || 
+   window.location.hostname === '127.0.0.1' ||
+   window.location.hostname === '');
+
 // Get API Gateway URL from runtime config or environment variables
 const getApiGatewayUrl = (): string => {
+  // For localhost, use production API Gateway (to match production Cognito)
+  if (isLocalhostEnv) {
+    const productionUrl = ENVIRONMENT_CONFIGS.production?.apiGatewayUrl;
+    if (productionUrl && !productionUrl.includes('your-')) {
+      console.log('🏠 Localhost detected: Using production API Gateway URL for local development:', productionUrl);
+      return productionUrl;
+    }
+  }
+  
   // Check runtime config first (highest priority)
   const runtimeConfig = getRuntimeConfig();
   if (runtimeConfig?.apiGatewayUrl && !runtimeConfig.apiGatewayUrl.includes('{{')) {
@@ -162,6 +181,7 @@ const getCognitoConfig = () => {
 export const getEnvironmentConfig = (): EnvironmentConfig => {
   const environment = getCurrentEnvironment();
   const cognitoConfig = getCognitoConfig();
+  const runtimeConfig = getRuntimeConfig();
   
   return {
     environment: environment as 'development' | 'staging' | 'production',
@@ -171,6 +191,8 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
     cognitoUserPoolId: cognitoConfig.userPoolId,
     cognitoClientId: cognitoConfig.clientId,
     cognitoDomain: cognitoConfig.domain,
+    redirectSignIn: runtimeConfig?.redirectSignIn,
+    redirectSignOut: runtimeConfig?.redirectSignOut,
     projectName: ENVIRONMENT_CONFIGS[environment]?.projectName || 'cosine'
   };
 };

@@ -79,6 +79,19 @@ class S3FileReader:
             logger.info(f"Using constructed congress bills data bucket name: {bucket_name}")
             return bucket_name
         
+        # If s3_key starts with filings/, use LDA disclosures bucket
+        if s3_key and s3_key.startswith('filings/'):
+            bucket_name = os.environ.get('LDA_DISCLOSURES_S3_BUCKET_NAME')
+            if bucket_name:
+                logger.info(f"Using LDA disclosures bucket for filings/ file: {bucket_name}")
+                return bucket_name
+            # Fallback: try to construct bucket name if env var not set
+            project_name = os.environ.get('PROJECT_NAME', 'cosine')
+            environment = os.environ.get('ENVIRONMENT', 'production')
+            bucket_name = f"{project_name}-lda-disclosures-{environment}"
+            logger.info(f"Using constructed LDA disclosures bucket name: {bucket_name}")
+            return bucket_name
+        
         # Default to chat files bucket
         if self.bucket_name is None:
             self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')

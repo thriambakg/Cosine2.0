@@ -1054,33 +1054,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                     
                     setDownloadLoading(true);
                     try {
-                      const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                      const response = await fetch(`${apiUrl}/file-download`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          user_id: user_id || '',
-                          session_id: '', // Optional for Congress bills
-                          s3_key: itemData.bill_text_html_s3_key,
-                          filename: itemData.bill_text_html_s3_key.split('/').pop() || 'bill.html',
-                          bucket: 'CONGRESS_BILLS',
-                        }),
-                      });
-                      
-                      if (!response.ok) {
-                        throw new Error(`Download request failed: ${response.status}`);
-                      }
-                      
-                      const { download_url } = await response.json();
-                      
-                      // Create download link and trigger download
-                      const link = document.createElement('a');
-                      link.href = download_url;
-                      link.download = itemData.bill_text_html_s3_key.split('/').pop() || 'bill.html';
-                      link.target = '_blank';
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
+                      await handleDownloadFile(
+                        itemData.bill_text_html_s3_key,
+                        itemData.bill_text_html_s3_key.split('/').pop() || 'bill.html',
+                        'CONGRESS_BILLS'
+                      );
                     } catch (error) {
                       console.error('❌ Download failed:', error);
                       alert('Failed to download file. Please try again.');
@@ -1415,33 +1393,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       
                       setDownloadLoading(true);
                       try {
-                        const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                        const response = await fetch(`${apiUrl}/file-download`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            user_id: user_id || '',
-                            session_id: '', // Optional for LDA filings
-                            s3_key: itemData.s3_key,
-                            filename: itemData.s3_key.split('/').pop() || 'filing',
-                            bucket: 'LDA_DISCLOSURES',
-                          }),
-                        });
-                        
-                        if (!response.ok) {
-                          throw new Error(`Download request failed: ${response.status}`);
-                        }
-                        
-                        const { download_url } = await response.json();
-                        
-                        // Create download link and trigger download
-                        const link = document.createElement('a');
-                        link.href = download_url;
-                        link.download = itemData.s3_key.split('/').pop() || 'filing';
-                        link.target = '_blank';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                        await handleDownloadFile(
+                          itemData.s3_key,
+                          itemData.s3_key.split('/').pop() || 'filing',
+                          'LDA_DISCLOSURES'
+                        );
                       } catch (error) {
                         console.error('❌ Download failed:', error);
                         alert('Failed to download file. Please try again.');
