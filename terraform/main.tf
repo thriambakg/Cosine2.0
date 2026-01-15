@@ -890,7 +890,7 @@ module "api_gateway" {
   tags                 = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "83" # Updated for billing payment GET method and logging
+  deployment_trigger = "85" # Updated for CORS fixes (dynamic origin headers)
 }
 
 
@@ -1443,7 +1443,7 @@ module "stock_volatility_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -1491,7 +1491,7 @@ module "crypto_stats_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -1549,7 +1549,7 @@ module "user_dashboard_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 20 # Higher concurrency for dashboard operations
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Higher concurrency for dashboard operations
 
   tags = var.common_tags
 }
@@ -1597,7 +1597,7 @@ module "stock_alerts_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -1645,7 +1645,7 @@ module "stock_alert_trigger_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2150,12 +2150,15 @@ resource "aws_lambda_alias" "chat_agent_alias" {
 }
 
 # Provisioned Concurrency for Chat Agent Lambda (Performance Optimization)
-# Keeps 8 containers warm to eliminate cold starts for first 8 concurrent requests
+# Keeps containers warm to eliminate cold starts for concurrent requests
 # Cost: ~$0.015/hour per unit = ~$88/month for 8 units
+# Only create resource if variable is not explicitly 0 (disabled in staging, enabled in prod)
 resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
+  count = var.lambda_provisioned_concurrency_default != null && var.lambda_provisioned_concurrency_default == 0 ? 0 : 1
+
   function_name                     = aws_lambda_function.chat_agent.function_name
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
-  provisioned_concurrent_executions = 2 # Increased from 2 to 8 for better cold start handling
+  provisioned_concurrent_executions = 2
 
   depends_on = [aws_lambda_alias.chat_agent_alias]
 }
@@ -2199,7 +2202,7 @@ module "websocket_connection_lambda" {
   ]
 
   # Reserved concurrency to prevent overwhelming the connection manager
-  reserved_concurrent_executions = 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2426,7 +2429,7 @@ module "stock_screener_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent stock screening operations
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent stock screening operations
 
   tags = var.common_tags
 }
@@ -2477,7 +2480,7 @@ module "stock_data_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2526,7 +2529,7 @@ module "stock_statistics_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2576,7 +2579,7 @@ module "volatility_fetch_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2628,7 +2631,7 @@ module "robinhood_integration_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2679,7 +2682,7 @@ module "session_management_lambda" {
   ]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2716,7 +2719,7 @@ module "filesystem_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn
   ]
 
-  reserved_concurrent_executions = 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2765,7 +2768,7 @@ module "file_return_lambda" {
     aws_iam_policy.lambda_secrets_policy.arn        # Add secrets manager access for encryption secret
   ]
 
-  reserved_concurrent_executions = 20
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2889,7 +2892,7 @@ module "billing_spending_lambda" {
     aws_iam_policy.billing_spending_policy.arn
   ]
 
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2925,7 +2928,7 @@ module "billing_payment_lambda" {
     aws_iam_policy.billing_payment_policy.arn
   ]
 
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
@@ -2973,7 +2976,7 @@ module "news_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent news searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent news searches
 
   tags = var.common_tags
 }
@@ -3065,7 +3068,7 @@ module "sec_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent SEC search operations
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent SEC search operations
 
   tags = var.common_tags
 }
@@ -3121,7 +3124,7 @@ module "politician_trades_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent politician trades searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent politician trades searches
 
   tags = var.common_tags
 }
@@ -3174,7 +3177,7 @@ module "usaspending_autocomplete_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 20 # Autocomplete is fast, allow more concurrency
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Autocomplete is fast, allow more concurrency
 
   tags = var.common_tags
 }
@@ -3283,7 +3286,7 @@ module "usaspending_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent searches
 
   tags = var.common_tags
 }
@@ -3391,7 +3394,7 @@ module "congress_bills_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent congress bills searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent congress bills searches
 
   tags = var.common_tags
 }
@@ -3445,7 +3448,7 @@ module "lda_search_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent LDA searches
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent LDA searches
 
   tags = var.common_tags
 }
@@ -3500,7 +3503,7 @@ module "lda_autocomplete_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 20 # Autocomplete is fast, allow more concurrency
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Autocomplete is fast, allow more concurrency
 
   tags = var.common_tags
 }
@@ -3666,7 +3669,7 @@ module "usaspending_enrichment_lambda" {
   # SQS configuration
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10 # Limit concurrent enrichments
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default # Limit concurrent enrichments
 
   tags = var.common_tags
 }
@@ -3714,10 +3717,11 @@ module "sec_search_progress_subscriber_lambda" {
   wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
-  reserved_concurrent_executions = 10
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
+
 
 # SNS Subscription: Subscribe progress subscriber Lambda to SNS topic
 resource "aws_sns_topic_subscription" "sec_search_progress_subscription" {

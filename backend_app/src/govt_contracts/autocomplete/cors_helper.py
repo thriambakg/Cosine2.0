@@ -12,10 +12,12 @@ import re
 # - https://www.investcosine.com
 # - https://api.investcosine.com
 # - http://localhost:3000
+# - https://*.cloudfront.net (for CloudFront distributions)
 ALLOWED_ORIGIN_PATTERNS = [
     r'^https?://.*\.?investcosine\.com(:\d+)?$',  # Any subdomain of investcosine.com
     r'^https?://investcosine\.com(:\d+)?$',       # investcosine.com itself
     r'^http://localhost:3000(:\d+)?$',            # localhost:3000 for development
+    r'^https://.*\.cloudfront\.net$',             # CloudFront distributions (for staging/production)
 ]
 
 
@@ -38,6 +40,9 @@ def get_cors_headers(origin: str = None) -> dict:
     
     # Only set Allow-Origin if the origin matches whitelisted patterns
     if origin and validate_origin(origin):
+        cors_headers['Access-Control-Allow-Origin'] = origin
+    elif origin and 'cloudfront.net' in origin.lower():
+        # Temporary: Always allow CloudFront origins (for staging/production)
         cors_headers['Access-Control-Allow-Origin'] = origin
     else:
         # If origin is not whitelisted or missing, don't include Allow-Origin header
@@ -65,4 +70,3 @@ def validate_origin(origin: str) -> bool:
             return True
     
     return False
-

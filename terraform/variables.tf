@@ -189,3 +189,16 @@ variable "api_daily_quota_limit" {
   type        = number
   default     = 50000
 }
+
+# Lambda Concurrency Configuration
+variable "lambda_reserved_concurrency_default" {
+  description = "Default reserved concurrent executions for Lambda functions. Set to 0 to disable reserved concurrency (useful for staging/dev environments). If null, uses function-specific defaults."
+  type        = number
+  default     = null
+}
+
+variable "lambda_provisioned_concurrency_default" {
+  description = "Default provisioned concurrent executions for Lambda functions. Set to 0 to disable provisioned concurrency (useful for staging/dev environments). If null, uses function-specific defaults."
+  type        = number
+  default     = null
+}

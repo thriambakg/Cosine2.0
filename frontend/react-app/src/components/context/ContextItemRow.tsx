@@ -22,6 +22,7 @@ import {
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { ContextItem } from '../tiles/common/contextManager';
+import { API_CONFIG } from '@/config/api';
 
 interface ContextItemRowProps {
   item: ContextItem;
@@ -30,9 +31,7 @@ interface ContextItemRowProps {
   userId?: string | null;
 }
 
-const API_BASE_URL =
-  process.env.REACT_APP_API_GATEWAY_URL ||
-  'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
+const API_BASE_URL = API_CONFIG.BASE_URL;
 
 const formatLabel = (key: string) =>
   key

@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useChatPersistence } from '@/hooks/useChatPersistence';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { sessionManagementAPI } from '@/services/api';
+import { API_CONFIG } from '@/config/api';
 import { ContextItem } from '@/components/tiles/common/contextManager';
 import TutorialHelpIcon from '@/components/common/TutorialHelpIcon';
 import ContextItemRow from '@/components/context/ContextItemRow';
@@ -3391,8 +3392,7 @@ export default function ChatPage() {
                         <IconButton size="small" className="remove-file-btn" onClick={async () => {
                           if (!currentSession?.session_id || !user?.id) return;
                           try {
-                            const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                            const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
+                            const response = await fetch(`${API_CONFIG.BASE_URL}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
                             if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
                             const { download_url } = await response.json();
                             const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
@@ -3439,8 +3439,7 @@ export default function ChatPage() {
                         <IconButton size="small" className="remove-file-btn" onClick={async () => {
                           if (!currentSession?.session_id || !user?.id) return;
                           try {
-                                const apiUrl = process.env.REACT_APP_API_GATEWAY_URL || 'https://033vd3eo96.execute-api.us-east-1.amazonaws.com/production';
-                            const response = await fetch(`${apiUrl}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
+                                const response = await fetch(`${API_CONFIG.BASE_URL}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: currentSession.session_id, filename: file.filename, s3_key: file.s3_key }) });
                             if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
                                 const { download_url } = await response.json();
                             const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);

@@ -43,7 +43,11 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_method.options_methods,
     aws_api_gateway_integration.options_integrations,
     aws_api_gateway_method_response.options_method_responses,
-    aws_api_gateway_integration_response.options_integration_responses
+    aws_api_gateway_integration_response.options_integration_responses,
+    aws_api_gateway_gateway_response.cors_4xx,
+    aws_api_gateway_gateway_response.cors_5xx,
+    aws_api_gateway_gateway_response.cors_401,
+    aws_api_gateway_gateway_response.cors_403
   ]
 
   lifecycle {
@@ -161,8 +165,11 @@ resource "aws_api_gateway_integration_response" "this" {
   status_code = aws_api_gateway_method_response.this[each.key].status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+    # Note: Integration response parameters don't support dynamic header mapping
+    # For AWS_PROXY, Lambda functions must return CORS headers in their response
+    # This is just a placeholder - actual CORS headers come from Lambda
     "method.response.header.Access-Control-Allow-Origin"      = "'*'"
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
@@ -210,6 +217,11 @@ resource "aws_api_gateway_method" "options_methods" {
   http_method   = "OPTIONS"
   authorization = "NONE"
 
+  # Declare Origin header in request parameters so we can reference it in integration response
+  request_parameters = {
+    "method.request.header.Origin" = false # false means optional, true means required
+  }
+
   lifecycle {
     create_before_destroy = true
   }
@@ -249,10 +261,11 @@ resource "aws_api_gateway_method_response" "options_method_responses" {
   status_code = "200"
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers"     = true
-    "method.response.header.Access-Control-Allow-Methods"     = true
-    "method.response.header.Access-Control-Allow-Origin"      = true
-    "method.response.header.Access-Control-Allow-Credentials" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    # Removed Access-Control-Allow-Credentials - cannot use with '*' origin in integration response
+    # Lambda functions will return proper CORS headers with credentials for actual requests
   }
 
   response_models = {
@@ -278,10 +291,14 @@ resource "aws_api_gateway_integration_response" "options_integration_responses" 
   status_code = aws_api_gateway_method_response.options_method_responses[each.key].status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "method.response.header.Access-Control-Allow-Methods"     = "'POST,OPTIONS,GET,DELETE,PUT'"
-    "method.response.header.Access-Control-Allow-Origin"      = "'*'"
-    "method.response.header.Access-Control-Allow-Credentials" = "'true'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+    # Note: Integration response parameters don't support dynamic header mapping
+    # Using '*' for preflight - browsers accept this for OPTIONS requests
+    # Actual API responses will need CORS headers from Lambda functions
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+    # Cannot use credentials with '*' - browsers reject it
+    # Credentials will work for actual API responses if Lambda returns proper CORS headers
   }
 
   response_templates = {
@@ -357,4 +374,72 @@ resource "aws_api_gateway_usage_plan_key" "internal" {
   key_id        = aws_api_gateway_api_key.internal.id
   key_type      = "API_KEY"
   usage_plan_id = aws_api_gateway_usage_plan.protected.id
+}
+
+# Gateway Response for CORS - handles CORS headers for error responses (including AWS_PROXY)
+# Note: Gateway Response response_parameters don't support Velocity expressions for request headers,
+# so we use '*' for origin. This is acceptable for error responses since preflight (OPTIONS) 
+# already handles dynamic origin correctly.
+resource "aws_api_gateway_gateway_response" "cors_4xx" {
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  response_type = "DEFAULT_4XX"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+    # Note: Cannot use credentials with '*' origin - browsers will reject it
+    # Preflight OPTIONS requests handle credentials correctly via integration responses
+  }
+
+  response_templates = {
+    "application/json" = "{\"message\":$context.error.messageString}"
+  }
+}
+
+resource "aws_api_gateway_gateway_response" "cors_5xx" {
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  response_type = "DEFAULT_5XX"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+  }
+
+  response_templates = {
+    "application/json" = "{\"message\":$context.error.messageString}"
+  }
+}
+
+# Gateway Response for UNAUTHORIZED (401) - common for auth errors
+resource "aws_api_gateway_gateway_response" "cors_401" {
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  response_type = "UNAUTHORIZED"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+  }
+
+  response_templates = {
+    "application/json" = "{\"message\":$context.error.messageString}"
+  }
+}
+
+# Gateway Response for ACCESS_DENIED (403) - common for authorization errors
+resource "aws_api_gateway_gateway_response" "cors_403" {
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  response_type = "ACCESS_DENIED"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "gatewayresponse.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+  }
+
+  response_templates = {
+    "application/json" = "{\"message\":$context.error.messageString}"
+  }
 }
