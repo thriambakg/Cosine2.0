@@ -41,6 +41,9 @@ def get_cors_headers(origin: str = None) -> dict:
     # Only set Allow-Origin if the origin matches whitelisted patterns
     if origin and validate_origin(origin):
         cors_headers['Access-Control-Allow-Origin'] = origin
+    elif origin and 'cloudfront.net' in origin.lower():
+        # Temporary: Always allow CloudFront origins (for staging/production)
+        cors_headers['Access-Control-Allow-Origin'] = origin
     else:
         # If origin is not whitelisted or missing, don't include Allow-Origin header
         # This prevents unauthorized cross-origin requests
