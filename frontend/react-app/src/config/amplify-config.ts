@@ -16,6 +16,13 @@ const configureAmplify = () => {
       throw new Error('Cognito User Pool ID and Client ID are required. Please ensure config.js is loaded.');
     }
 
+    if (!cognitoDomain) {
+      throw new Error('Cognito Domain is required. Please ensure config.js is loaded.');
+    }
+
+    // TypeScript now knows cognitoDomain is a string after the validation check
+    const validatedCognitoDomain: string = cognitoDomain;
+
     // Build redirect URLs array - include localhost for development and the configured URL
     const redirectSignInUrls = [
       'http://localhost:3000/auth/callback',
@@ -34,7 +41,7 @@ const configureAmplify = () => {
           userPoolClientId: cognitoClientId,
           loginWith: {
             oauth: {
-              domain: cognitoDomain,
+              domain: validatedCognitoDomain,
               scopes: ['email', 'openid', 'profile', 'aws.cognito.signin.user.admin'],
               redirectSignIn: redirectSignInUrls,
               redirectSignOut: redirectSignOutUrls,
@@ -50,7 +57,7 @@ const configureAmplify = () => {
     console.log('✅ AWS Amplify configured with Cognito credentials from runtime config:', {
       userPoolId: cognitoUserPoolId,
       clientId: cognitoClientId,
-      domain: cognitoDomain,
+      domain: validatedCognitoDomain,
       redirectSignIn: redirectSignInUrls,
       redirectSignOut: redirectSignOutUrls,
       region: awsRegion
