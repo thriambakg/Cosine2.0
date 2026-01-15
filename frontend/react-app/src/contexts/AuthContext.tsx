@@ -503,13 +503,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       
-      // Debug: Log what Amplify will use for OAuth
-      console.log('🔐 Google OAuth Debug:');
-      console.log('  Provider:', provider);
-      console.log('  Current origin:', window.location.origin);
-      console.log('  Current href:', window.location.href);
-      console.log('  Expected Cognito callback:', 'https://cosine-production.auth.us-east-1.amazoncognito.com/oauth2/idpresponse');
-      
       // Map provider names to AWS Amplify provider constants
       const providerMap = {
         'Google': 'Google'
