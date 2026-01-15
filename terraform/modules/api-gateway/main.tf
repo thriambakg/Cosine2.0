@@ -214,6 +214,11 @@ resource "aws_api_gateway_method" "options_methods" {
   http_method   = "OPTIONS"
   authorization = "NONE"
 
+  # Declare Origin header in request parameters so we can reference it in integration response
+  request_parameters = {
+    "method.request.header.Origin" = false # false means optional, true means required
+  }
+
   lifecycle {
     create_before_destroy = true
   }
