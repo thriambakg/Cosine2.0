@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useRef, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { ENV_CONFIG } from '../config/environment';
 
 interface WebSocketContextType {
   websocket: WebSocket | null;
@@ -77,7 +78,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }
         websocketRef.current = null;
       }
 
-      const wsUrl = `wss://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production?userId=${user.id}&sessionId=${sessionId}`;
+      const wsUrl = `${ENV_CONFIG.websocketUrl || 'wss://xem3y35uzd.execute-api.us-east-1.amazonaws.com/production'}?userId=${user.id}&sessionId=${sessionId}`;
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

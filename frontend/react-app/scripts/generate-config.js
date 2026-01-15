@@ -21,6 +21,7 @@ const CONFIG_TEMPLATE = `// Runtime Configuration
 window.COSINE_CONFIG = {
   // API Configuration
   apiGatewayUrl: '{{API_GATEWAY_URL}}',
+  websocketUrl: '{{WEBSOCKET_URL}}',
   awsRegion: '{{AWS_REGION}}',
   
   // Environment
@@ -59,6 +60,7 @@ console.log('🔧 Runtime configuration loaded:', window.COSINE_CONFIG);
 function generateConfig(options = {}) {
   const {
     apiGatewayUrl = '',
+    websocketUrl = '',
     awsRegion = 'us-east-1',
     environment = 'development',
     cognitoUserPoolId = '',
@@ -74,6 +76,7 @@ function generateConfig(options = {}) {
   // Replace placeholders with real values
   let config = CONFIG_TEMPLATE
     .replace(/{{API_GATEWAY_URL}}/g, apiGatewayUrl)
+    .replace(/{{WEBSOCKET_URL}}/g, websocketUrl)
     .replace(/{{AWS_REGION}}/g, awsRegion)
     .replace(/{{ENVIRONMENT}}/g, environment)
     .replace(/{{COGNITO_USER_POOL_ID}}/g, cognitoUserPoolId)
@@ -139,6 +142,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const value = args[i + 1];
     
     if (key === '--api-gateway-url') options.apiGatewayUrl = value;
+    else if (key === '--websocket-url') options.websocketUrl = value;
     else if (key === '--aws-region') options.awsRegion = value;
     else if (key === '--environment') options.environment = value;
     else if (key === '--cognito-user-pool-id') options.cognitoUserPoolId = value;
