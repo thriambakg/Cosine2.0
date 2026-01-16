@@ -615,13 +615,13 @@ def fetch_full_items(filing_ids: List[str]) -> List[Dict[str, Any]]:
 def search_filings(filters: Dict[str, Any], limit: int = 125,
                    last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
-    Search filings using union/intersection logic
+    Search filings using union logic
     
     Strategy:
-    1. UNION queries within same field (category)
-    2. INTERSECT results across different fields
+    1. UNION queries within same field (category) - multiple terms in same field are OR'd
+    2. UNION results across different fields - multiple fields are OR'd (e.g., registrant OR client)
     3. Fetch full items
-    4. Apply Python-side filters
+    4. Apply Python-side filters (amount ranges, state, etc.)
     5. Sort and paginate
     """
     if not filings_table:
@@ -721,22 +721,20 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
         field_result_sets[category] = field_ids
         logger.info(f"Field '{category}' UNION complete: {len(field_ids)} unique filing IDs")
     
-    # Step 2: Use smallest set as source, apply other filters in Python
-    # For efficiency and to avoid missing results when one set is very large,
-    # use the smallest set as source and apply other filters in Python
+    # Step 2: UNION across different fields (OR logic)
+    # When multiple text search fields are specified (e.g., registrant AND client),
+    # we want results that match ANY of those fields (OR logic), not ALL (AND logic)
     if field_result_sets:
-        # Sort by size and use smallest as source
-        sorted_fields = sorted(field_result_sets.items(), key=lambda x: len(x[1]))
-        smallest_category, smallest_ids = sorted_fields[0]
-        all_filing_ids = smallest_ids.copy()
-        logger.info(f"Using smallest field '{smallest_category}' as source: {len(all_filing_ids)} filing IDs")
+        # Union all field result sets together
+        all_filing_ids = set()
+        for category, field_ids in field_result_sets.items():
+            all_filing_ids.update(field_ids)
+            logger.info(f"Field '{category}' added to union: {len(field_ids)} IDs, total so far: {len(all_filing_ids)}")
+        
+        logger.info(f"UNION complete across {len(field_result_sets)} field(s): {len(all_filing_ids)} total unique filing IDs")
         if len(all_filing_ids) > 0:
             sample_ids = list(all_filing_ids)[:3]
-            logger.info(f"Sample IDs from '{smallest_category}': {sample_ids}")
-        
-        # Store which filters to apply in Python (all fields except the smallest one)
-        # The state filter will be applied in Python via apply_python_filters
-        logger.info(f"Will apply {len(sorted_fields) - 1} other field filter(s) in Python")
+            logger.info(f"Sample IDs from union: {sample_ids}")
     else:
         all_filing_ids = set()
     
