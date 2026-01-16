@@ -23,6 +23,7 @@ export interface PresignedUploadResult {
   s3_key: string;
   expires_in: number;
   filename: string;
+  content_type?: string; // The exact content_type used in presigned URL generation
 }
 
 export interface FileUploadOptions {
@@ -418,24 +419,40 @@ export class FileUploadService {
   private static async uploadToS3(
     file: File,
     presignedUrl: string,
+    contentType?: string, // Optional: exact content_type from presigned URL response
     maxRetries: number = 3
   ): Promise<void> {
     let lastError: Error | null = null;
     
+    // Use the content_type from presigned URL response if provided, otherwise use file.type
+    // This ensures we match exactly what was specified in the presigned URL generation
+    const uploadContentType = contentType || file.type || 'application/octet-stream';
+    
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`📤 Uploading ${file.name} to S3 (attempt ${attempt}/${maxRetries})...`);
+        console.log(`📋 Using Content-Type: ${uploadContentType}`);
         
         const response = await fetch(presignedUrl, {
           method: 'PUT',
           body: file,
           headers: {
-            'Content-Type': file.type
+            'Content-Type': uploadContentType
           }
         });
         
         if (!response.ok) {
-          throw new Error(`S3 upload failed: ${response.status} ${response.statusText}`);
+          // Try to get error details from S3 response
+          let errorDetails = `${response.status} ${response.statusText}`;
+          try {
+            const errorText = await response.text();
+            if (errorText) {
+              errorDetails += ` - ${errorText}`;
+            }
+          } catch (e) {
+            // Ignore if we can't read the error text
+          }
+          throw new Error(`S3 upload failed: ${errorDetails}`);
         }
         
         console.log(`✅ Successfully uploaded ${file.name} to S3`);
@@ -546,7 +563,12 @@ export class FileUploadService {
           onProgress(file.name, 0);
         }
         
-        await this.uploadToS3(file.file, presignedResult.presigned_url);
+        // Use the exact content_type from presigned URL response to ensure match
+        await this.uploadToS3(
+          file.file, 
+          presignedResult.presigned_url,
+          presignedResult.content_type // Pass the exact content_type used in presigned URL
+        );
         
         if (onProgress) {
           onProgress(file.name, 100);

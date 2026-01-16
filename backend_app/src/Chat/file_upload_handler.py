@@ -456,7 +456,10 @@ class FileUploadHandler:
             body_user_id = body.get('user_id')
             session_id = body.get('session_id')
             filename = body.get('filename')
-            content_type = body.get('content_type', 'application/octet-stream')
+            # Normalize content_type - ensure it's never empty (S3 requires exact match for presigned URLs)
+            content_type = body.get('content_type') or 'application/octet-stream'
+            if not content_type or content_type.strip() == '':
+                content_type = 'application/octet-stream'
             file_size = body.get('file_size', 0)
             
             # SECURITY: Use authenticated user_id if available
@@ -573,7 +576,8 @@ class FileUploadHandler:
                     'file_id': file_id,
                     's3_key': s3_key,
                     'expires_in': expiration,
-                    'filename': safe_filename
+                    'filename': safe_filename,
+                    'content_type': content_type  # Return the exact content_type used in presigned URL
                 })
             }
             
