@@ -835,15 +835,11 @@ class UnifiedMessageHandlerService {
   }
 
   /**
-   * Send file message: upload files via REST API, then send message via WebSocket
+   * Send file message: upload files via presigned URLs, then send message via WebSocket
    */
   private async sendFileMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
-    const ws = this.webSocketConnections.get(sessionId);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      throw new Error(`No WebSocket connection for session: ${sessionId}`);
-    }
-
-    // For file messages, we need to upload files using presigned URLs first
+    // For file messages, upload files first (before WebSocket connection check)
+    // This allows file uploads to proceed even if WebSocket connection isn't ready yet
     if (messageData.files && messageData.files.length > 0) {
       try {
         // Step 1: Upload files using presigned URLs (direct S3 upload)
@@ -914,12 +910,20 @@ class UnifiedMessageHandlerService {
           console.log('✅ UnifiedMessageHandler: Dispatched session variables update from file upload response');
         }
 
-        // Step 2: Send message via WebSocket with file attachment flag
+        // Step 2: Ensure WebSocket connection is established before sending message
+        await this.ensureWebSocketConnection(sessionId, messageData.userId);
+        
+        const ws = this.webSocketConnections.get(sessionId);
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error(`WebSocket connection not available for session: ${sessionId} after file upload`);
+        }
+        
+        // Step 3: Send message via WebSocket with file attachment flag
         // Include file metadata for frontend display
         const uploadedFilesMetadata = messageData.files.map(file => ({
-          name: file.name,
-          size: file.size,
-          type: file.type
+          name: (file as any).name || file.name,
+          size: (file as any).size || file.size,
+          type: (file as any).type || file.type
         }));
 
         const websocketMessage = {
