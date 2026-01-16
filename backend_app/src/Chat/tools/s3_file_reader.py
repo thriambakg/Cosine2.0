@@ -144,6 +144,20 @@ class S3FileReader:
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()  # This is bytes, not string
             
+            # Extract user_id for indexing (needed after .cosine handling)
+            user_id = None
+            try:
+                from utils.auth_helper import get_secure_user_id
+                user_id = get_secure_user_id({}, fallback_to_env=True)
+            except ImportError:
+                user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+            
+            # If user_id not found yet, try to extract from S3 key
+            if not user_id:
+                s3_key_parts = s3_key.split('/')
+                if len(s3_key_parts) >= 2 and s3_key_parts[0] == 'users':
+                    user_id = s3_key_parts[1]
+            
             # Handle .cosine encrypted files (context items from filesystem)
             # Check this FIRST before other file type logic
             s3_key_lower = s3_key.lower()
@@ -250,28 +264,176 @@ class S3FileReader:
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
                     return f"Error decrypting .cosine file: {str(e)}"
             
-            # Decode based on content type
+            # Document Detection and Routing (NEW)
+            # Detect document type and route to specialized parser if applicable
+            try:
+                # Import with fallback for path resolution
+                try:
+                    from document_detector import DocumentDetector
+                    from document_router import DocumentRouter
+                    from document_indexer import DocumentIndexer
+                except ImportError:
+                    # Try absolute import
+                    tools_dir = os.path.dirname(__file__)
+                    if tools_dir not in sys.path:
+                        sys.path.insert(0, tools_dir)
+                    from document_detector import DocumentDetector
+                    from document_router import DocumentRouter
+                    from document_indexer import DocumentIndexer
+                
+                # Extract filename from S3 key
+                filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
+                
+                # Get content preview for detection (first 2KB)
+                content_preview = content[:2048]
+                
+                # Detect document type
+                detector = DocumentDetector()
+                doc_info = detector.detect_document_type(s3_key, content_preview, filename)
+                
+                # If document type detected with confidence > 0.5, route to parser
+                if doc_info.get("type") != "unknown" and doc_info.get("confidence", 0) > 0.5:
+                    logger.info(f"🔍 Detected document type: {doc_info.get('type')} (confidence: {doc_info.get('confidence')}) for {s3_key}")
+                    
+                    try:
+                        # Route to appropriate parser
+                        router = DocumentRouter()
+                        parser_result = router.route_document(
+                            doc_info.get("type"),
+                            s3_key,
+                            content,
+                            doc_info.get("metadata")
+                        )
+                        
+                        # Index the extracted data if parsing was successful
+                        if parser_result.get("success") and user_id:
+                            try:
+                                indexer = DocumentIndexer()
+                                index_id = indexer.index_document(
+                                    user_id,
+                                    s3_key,
+                                    doc_info,
+                                    parser_result
+                                )
+                                
+                                if index_id:
+                                    logger.info(f"✅ Indexed document {s3_key} as {index_id}")
+                            except Exception as index_err:
+                                logger.warning(f"⚠️ Failed to index document {s3_key}: {index_err}")
+                                # Continue even if indexing fails
+                        
+                        # Format enhanced response with raw content + extracted data
+                        content_type = response.get('ContentType', '')
+                        
+                        # Decode raw content for LLM context
+                        raw_content = self._decode_content_for_type(content, content_type, file_type, s3_key)
+                        
+                        # Format response with both raw content and extracted data
+                        response_parts = [
+                            f"📄 Document Type: {doc_info.get('type').value if hasattr(doc_info.get('type'), 'value') else doc_info.get('type')}",
+                            f"📊 Confidence: {doc_info.get('confidence', 0):.0%}",
+                        ]
+                        
+                        # Add metadata if available
+                        metadata = doc_info.get("metadata", {})
+                        if metadata.get("company_name"):
+                            response_parts.append(f"🏢 Company: {metadata['company_name']}")
+                        if metadata.get("form_type"):
+                            response_parts.append(f"📋 Form Type: {metadata['form_type']}")
+                        if metadata.get("filing_date"):
+                            response_parts.append(f"📅 Filing Date: {metadata['filing_date']}")
+                        
+                        # Add extracted financial data summary
+                        if parser_result.get("success"):
+                            extracted = parser_result.get("extracted_data") or parser_result
+                            
+                            # Income Statement summary
+                            income = extracted.get("income_statement", {})
+                            if income.get("revenue"):
+                                rev_val = income["revenue"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"\n💰 Revenue: ${rev_val:.2f}B")
+                            if income.get("net_income"):
+                                ni_val = income["net_income"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"💵 Net Income: ${ni_val:.2f}B")
+                            
+                            # Balance Sheet summary
+                            balance = extracted.get("balance_sheet", {})
+                            if balance.get("total_assets"):
+                                assets_val = balance["total_assets"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"📊 Total Assets: ${assets_val:.2f}B")
+                            if balance.get("equity"):
+                                equity_val = balance["equity"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"💼 Equity: ${equity_val:.2f}B")
+                            
+                            # Metrics summary
+                            metrics = extracted.get("metrics", {})
+                            if metrics.get("gross_margin"):
+                                response_parts.append(f"📈 Gross Margin: {metrics['gross_margin']:.1%}")
+                            if metrics.get("net_margin"):
+                                response_parts.append(f"📉 Net Margin: {metrics['net_margin']:.1%}")
+                            
+                            # Add note about full structured data
+                            response_parts.append(f"\n📋 Full structured financial data has been extracted and indexed for querying.")
+                            if index_id:
+                                response_parts.append(f"🔍 Index ID: {index_id}")
+                        
+                        response_parts.append(f"\n📄 Raw Content Preview (first 2000 chars):\n{raw_content[:2000]}")
+                        
+                        return "\n".join(response_parts)
+                        
+                    except Exception as parse_err:
+                        logger.error(f"Error routing/parsing document {s3_key}: {parse_err}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        # Fall through to regular file reading
+                
+            except ImportError as import_err:
+                logger.warning(f"⚠️ Document detection/routing not available: {import_err}")
+                # Fall through to regular file reading
+            except Exception as detect_err:
+                logger.warning(f"⚠️ Error in document detection: {detect_err}")
+                # Fall through to regular file reading
+            
+            # Decode based on content type (existing logic - fallback for non-detected documents)
             content_type = response.get('ContentType', '')
-            if 'json' in content_type or file_type == 'json' or s3_key.endswith('.json'):
-                # JSON file
-                try:
-                    json_data = json.loads(content.decode('utf-8'))
-                    return json.dumps(json_data, indent=2)
-                except json.JSONDecodeError as e:
-                    return f"Error parsing JSON: {str(e)}\nRaw content: {content.decode('utf-8')}"
-            elif 'csv' in content_type or file_type == 'csv' or s3_key.endswith('.csv'):
-                # CSV file
+            return self._decode_content_for_type(content, content_type, file_type, s3_key)
+    
+    def _decode_content_for_type(self, content: bytes, content_type: str, file_type: str, s3_key: str) -> str:
+        """
+        Decode content based on file type (helper method)
+        
+        Args:
+            content: File content bytes
+            content_type: Content type from S3
+            file_type: Explicit file type parameter
+            s3_key: S3 key (for extension detection)
+            
+        Returns:
+            Decoded content string
+        """
+        if 'json' in content_type or file_type == 'json' or s3_key.endswith('.json'):
+            # JSON file
+            try:
+                json_data = json.loads(content.decode('utf-8'))
+                return json.dumps(json_data, indent=2)
+            except json.JSONDecodeError as e:
+                return f"Error parsing JSON: {str(e)}\nRaw content: {content.decode('utf-8')}"
+        elif 'csv' in content_type or file_type == 'csv' or s3_key.endswith('.csv'):
+            # CSV file
+            return content.decode('utf-8')
+        elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
+            # Text file
+            return content.decode('utf-8')
+        elif 'html' in content_type or s3_key.endswith('.html'):
+            # HTML file
+            return content.decode('utf-8')
+        else:
+            # Try to decode as UTF-8, fallback to base64 if it fails
+            try:
                 return content.decode('utf-8')
-            elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
-                # Text file
-                return content.decode('utf-8')
-            else:
-                # Try to decode as UTF-8, fallback to base64 if it fails
-                try:
-                    return content.decode('utf-8')
-                except UnicodeDecodeError:
-                    import base64
-                    return f"Binary file content (base64): {base64.b64encode(content).decode('utf-8')}"
+            except UnicodeDecodeError:
+                import base64
+                return f"Binary file content (base64): {base64.b64encode(content).decode('utf-8')}"
                     
         except ClientError as e:
             error_code = e.response['Error']['Code']

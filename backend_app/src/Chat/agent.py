@@ -170,6 +170,7 @@ from tools.lda_autocomplete_tool import lda_autocomplete
 from tools.lda_search_tool import lda_search
 from tools.search_autocomplete_tool import search_autocomplete
 from tools.datetime_tool import get_current_datetime, calculate_date_range
+from tools.document_index_tool import get_document_index_tool, get_document_by_id_tool
 
 # Financial Analysis Tools
 class FinancialTools:
@@ -904,7 +905,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 5. calculate_stock_correlation(tickers, period) - LIVE correlation matrix between stocks using yfinance data
 6. python_financial_calculator(calculation) - Advanced calculations (Fama-French, VaR, Sharpe ratios)
 7. http_request - Web requests for additional context
-8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3. Automatically decrypts .cosine encrypted context items from the filesystem.
+8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3. Automatically decrypts .cosine encrypted context items from the filesystem. **AUTOMATICALLY detects document types (SEC filings, financial statements) and extracts structured financial data (revenue, margins, cash flow, debt). Extracted data is automatically indexed for fast retrieval.**
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
 11. get_chat_history_tool(session_id, user_id, limit, include_recent) - Get chat history on-demand with smart pagination
@@ -1189,8 +1190,17 @@ FOR UPLOADED FILE QUESTIONS:
 1. get_session_files_tool(session_id, user_id, file_type) → Get all uploaded files for a session
 2. get_session_context_tool(session_id, user_id) → Get complete session context including files
 3. read_s3_file_tool(s3_key, file_type) → Read and analyze specific uploaded files
-4. Use file content for analysis, calculations, or context
-5. Provide insights based on file data combined with market data
+   - **AUTOMATIC INDEXING**: SEC filings and financial documents are automatically detected and indexed
+   - Structured financial data (revenue, margins, cash flow, debt) is extracted automatically
+4. get_document_index_tool(user_id, document_type, company_name) → Query indexed financial data across documents
+5. get_document_by_id_tool(document_id) → Get specific indexed document with full financial data
+6. Use file content for analysis, calculations, or context
+7. Provide insights based on file data combined with market data
+
+**Example Workflow:**
+- User uploads SEC 10-K filing → read_s3_file_tool() automatically extracts all financials
+- Query: "What are all the 10-K filings I've uploaded?" → get_document_index_tool(user_id, "sec_10k")
+- Query: "Compare revenue across my Walmart filings" → get_document_index_tool(user_id, company_name="Walmart")
 
 🔐 .COSINE FILE DECRYPTION:
 - .cosine files are encrypted context items stored in the user's filesystem (users/{user_id}/filesys/*)
@@ -1494,6 +1504,21 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES, SEC FILINGS, POLITICIAN TRADES):
    - When analyzing multiple trades, group by politician, security, transaction type, or date ranges as relevant.
 
 FOR SEC FILINGS AND REGULATORY DOCUMENTS:
+🔹 AUTOMATIC DOCUMENT INDEXING (NEW):
+When you read SEC filings or financial documents using read_s3_file_tool:
+- Documents are AUTOMATICALLY detected by type (SEC 10-K, 10-Q, 8-K, XBRL, etc.)
+- Financial data is AUTOMATICALLY extracted (Income Statement, Balance Sheet, Cash Flow, metrics)
+- Extracted data is AUTOMATICALLY indexed in DynamoDB for fast retrieval
+- Use get_document_index_tool() to query indexed financial data across multiple documents
+- Use get_document_by_id_tool() to retrieve specific indexed documents
+- This enables fast comparison, analysis, and querying without re-parsing documents
+
+**Workflow:**
+1. User uploads SEC filing → read_s3_file_tool() detects and extracts financial data automatically
+2. Use get_document_index_tool(user_id, document_type="sec_10k") to find all 10-K filings
+3. Use get_document_index_tool(user_id, company_name="Walmart") to find all filings for a company
+4. Compare financial metrics across documents without re-reading files
+
 🔹 CONTEXT-DELIVERED FILINGS (DEFAULT PATH):
 1. SEC filing objects include rich metadata:
    - filingId (or accession/adsh): unique identifier; always dedupe/reference using this (NOT the title)
