@@ -42,8 +42,9 @@ resource "aws_api_gateway_deployment" "this" {
     aws_api_gateway_integration_response.this,
     aws_api_gateway_method.options_methods,
     aws_api_gateway_integration.options_integrations,
-    aws_api_gateway_method_response.options_method_responses,
-    aws_api_gateway_integration_response.options_integration_responses,
+    # Temporarily commented out to fix state mismatch - will recreate after apply
+    # aws_api_gateway_method_response.options_method_responses,
+    # aws_api_gateway_integration_response.options_integration_responses,
     aws_api_gateway_gateway_response.cors_4xx,
     aws_api_gateway_gateway_response.cors_5xx,
     aws_api_gateway_gateway_response.cors_401,
@@ -252,68 +253,70 @@ resource "aws_api_gateway_integration" "options_integrations" {
 }
 
 # OPTIONS method responses
-resource "aws_api_gateway_method_response" "options_method_responses" {
-  for_each = var.resources
-
-  rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.key].id
-  http_method = aws_api_gateway_method.options_methods[each.key].http_method
-  status_code = "200"
-
-  response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers" = true
-    "method.response.header.Access-Control-Allow-Methods" = true
-    "method.response.header.Access-Control-Allow-Origin"  = true
-    # Removed Access-Control-Allow-Credentials - cannot use with '*' origin in integration response
-    # Lambda functions will return proper CORS headers with credentials for actual requests
-  }
-
-  response_models = {
-    "application/json" = "Empty"
-  }
-
-  depends_on = [
-    aws_api_gateway_method.options_methods
-  ]
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
+# TEMPORARILY COMMENTED OUT - Remove from state first, then uncomment to recreate
+# resource "aws_api_gateway_method_response" "options_method_responses" {
+#   for_each = var.resources
+#
+#   rest_api_id = aws_api_gateway_rest_api.this.id
+#   resource_id = aws_api_gateway_resource.this[each.key].id
+#   http_method = aws_api_gateway_method.options_methods[each.key].http_method
+#   status_code = "200"
+#
+#   response_parameters = {
+#     "method.response.header.Access-Control-Allow-Headers" = true
+#     "method.response.header.Access-Control-Allow-Methods" = true
+#     "method.response.header.Access-Control-Allow-Origin"  = true
+#     # Removed Access-Control-Allow-Credentials - cannot use with '*' origin in integration response
+#     # Lambda functions will return proper CORS headers with credentials for actual requests
+#   }
+#
+#   response_models = {
+#     "application/json" = "Empty"
+#   }
+#
+#   depends_on = [
+#     aws_api_gateway_method.options_methods
+#   ]
+#
+#   lifecycle {
+#     create_before_destroy = true
+#   }
+# }
 
 # OPTIONS integration responses
-resource "aws_api_gateway_integration_response" "options_integration_responses" {
-  for_each = var.resources
-
-  rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.key].id
-  http_method = aws_api_gateway_method.options_methods[each.key].http_method
-  status_code = aws_api_gateway_method_response.options_method_responses[each.key].status_code
-
-  response_parameters = {
-    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
-    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
-    # Note: Integration response parameters don't support dynamic header mapping
-    # Using '*' for preflight - browsers accept this for OPTIONS requests
-    # Actual API responses will need CORS headers from Lambda functions
-    "method.response.header.Access-Control-Allow-Origin" = "'*'"
-    # Cannot use credentials with '*' - browsers reject it
-    # Credentials will work for actual API responses if Lambda returns proper CORS headers
-  }
-
-  response_templates = {
-    "application/json" = "{\"statusCode\": 200}"
-  }
-
-  depends_on = [
-    aws_api_gateway_integration.options_integrations,
-    aws_api_gateway_method_response.options_method_responses
-  ]
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
+# TEMPORARILY COMMENTED OUT - Remove from state first, then uncomment to recreate
+# resource "aws_api_gateway_integration_response" "options_integration_responses" {
+#   for_each = var.resources
+#
+#   rest_api_id = aws_api_gateway_rest_api.this.id
+#   resource_id = aws_api_gateway_resource.this[each.key].id
+#   http_method = aws_api_gateway_method.options_methods[each.key].http_method
+#   status_code = "200"  # Changed from method_response reference since it's commented out
+#
+#   response_parameters = {
+#     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+#     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+#     # Note: Integration response parameters don't support dynamic header mapping
+#     # Using '*' for preflight - browsers accept this for OPTIONS requests
+#     # Actual API responses will need CORS headers from Lambda functions
+#     "method.response.header.Access-Control-Allow-Origin" = "'*'"
+#     # Cannot use credentials with '*' - browsers reject it
+#     # Credentials will work for actual API responses if Lambda returns proper CORS headers
+#   }
+#
+#   response_templates = {
+#     "application/json" = "{\"statusCode\": 200}"
+#   }
+#
+#   depends_on = [
+#     aws_api_gateway_integration.options_integrations
+#     # Removed method_response dependency since it's commented out
+#   ]
+#
+#   lifecycle {
+#     create_before_destroy = true
+#   }
+# }
 
 # API Gateway method throttling settings
 resource "aws_api_gateway_method_settings" "protected_endpoints" {
