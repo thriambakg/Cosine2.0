@@ -775,7 +775,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'body': json.dumps({'message': 'CORS preflight successful'})
                 }
             
-            # Check if this is a /files endpoint (file upload)
+            # Check if this is the /files endpoint (file upload)
             # Check multiple possible path formats
             path = event.get('path', '')
             resource = event.get('resource', '')
@@ -792,34 +792,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
             
             if is_files_endpoint:
-                from file_upload_handler import FileUploadHandler
-                file_handler = FileUploadHandler()
-                
-                # Route to specific handler based on path
-                is_presigned_endpoint = (
-                    '/files/presigned' in path or
-                    resource.endswith('/files/presigned') or
-                    path.endswith('/files/presigned')
-                )
-                
-                is_complete_endpoint = (
-                    '/files/complete' in path or
-                    resource.endswith('/files/complete') or
-                    path.endswith('/files/complete')
-                )
-                
+                logger.info(f"Processing file upload request - path: {path}, resource: {resource}")
+                logger.debug(f"Event body type: {type(event.get('body'))}, body length: {len(str(event.get('body', '')))}")
                 try:
-                    if is_presigned_endpoint:
-                        logger.info(f"Processing presigned URL request - path: {path}, resource: {resource}")
-                        result = file_handler.generate_presigned_upload_url(event)
-                    elif is_complete_endpoint:
-                        logger.info(f"Processing file upload completion - path: {path}, resource: {resource}")
-                        result = file_handler.complete_file_upload(event)
-                    else:
-                        # Legacy /files endpoint (backward compatibility)
-                        logger.info(f"Processing legacy file upload request - path: {path}, resource: {resource}")
-                        logger.debug(f"Event body type: {type(event.get('body'))}, body length: {len(str(event.get('body', '')))}")
-                        result = file_handler.handle_file_upload(event)
+                    from file_upload_handler import FileUploadHandler
+                    file_handler = FileUploadHandler()
+                    result = file_handler.handle_file_upload(event)
                     
                     # Ensure result is a valid dict
                     if not isinstance(result, dict):
