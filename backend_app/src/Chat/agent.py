@@ -1520,6 +1520,57 @@ FOR SEC FILINGS AND REGULATORY DOCUMENTS:
 10. SEC filings include: 10-K (annual reports), 10-Q (quarterly reports), 8-K (current reports), proxy statements, etc.
 11. You can download and analyze entire SEC documents including financial statements, risk factors, and management discussions
 
+🔹 DYNAMIC DATE AWARENESS FOR SEC FILINGS (CRITICAL):
+**ALWAYS GET CURRENT DATE FIRST** when users ask about "recent", "latest", or "new" filings:
+1. **MANDATORY FIRST STEP**: When users ask for "recent filings", "latest filings", "new filings", or any time-based filing request:
+   - IMMEDIATELY call get_current_datetime() to get today's date
+   - Use this date to calculate what "recent" means relative to the actual current date
+   - NEVER assume a date or use hardcoded dates - always get the real current date first
+
+2. **DEFAULT DATE RANGES FOR "RECENT" REQUESTS**:
+   - When users say "recent" or "latest" without specifying dates, default to:
+     - **Past 30-60 days** for 8-K forms (current reports - most timely)
+     - **Past 90 days** for 10-Q forms (quarterly reports)
+     - **Past 365 days** for 10-K forms (annual reports)
+   - Use calculate_date_range() to compute start_date based on current date
+   - Example: If today is 2026-01-16 and user asks for "recent 8-K filings":
+     - Get current date: get_current_datetime() → "2026-01-16"
+     - Calculate range: calculate_date_range("60d") → start_date="2025-11-17", end_date="2026-01-16"
+     - Search: search_sec_filings(company_name, "8-K", "2025-11-17", "2026-01-16", limit)
+
+3. **FILING TYPE PRIORITIZATION FOR RECENT DEVELOPMENTS**:
+   - **8-K Forms (Current Reports) - HIGHEST PRIORITY for recent material events**:
+     - Filed when material events occur (earnings, acquisitions, executive changes, etc.)
+     - More timely than quarterly reports
+     - Best for: Recent material developments, current events, breaking news
+     - When user asks for "recent" or "latest" without specifying form type, prioritize 8-K first
+   - **Form 4 (Insider Trading Reports) - Valuable for recent activity**:
+     - Recent executive trading activity
+     - Insider sentiment indicators
+     - Potential signals about company outlook
+   - **10-Q vs 8-K Priority**:
+     - **8-K**: Better for recent material events and current developments (use for "recent" requests)
+     - **10-Q**: Better for comprehensive quarterly financial analysis (use when user wants financial analysis)
+   - **Ideal approach**: Use 8-K for recent developments, then 10-Q for deeper financial context
+
+4. **WORKFLOW EXAMPLE FOR "RECENT FILINGS"**:
+   User: "What are Walmart's recent filings?"
+   Agent:
+   1. get_current_datetime() → "2026-01-16"
+   2. calculate_date_range("60d") → start_date="2025-11-17", end_date="2026-01-16"
+   3. get_company_cik("WMT") → Get CIK
+   4. search_sec_filings("Walmart", "8-K", "2025-11-17", "2026-01-16", limit=10) → Get recent 8-Ks first
+   5. If user wants financial analysis: get_company_filings(cik, "10-Q", limit=4) → Get recent 10-Qs
+   6. Present 8-Ks as most recent developments, then offer 10-Q analysis if needed
+
+5. **CONTEXTUAL RELEVANCE**:
+   - Always compare filing dates to current date to determine if filings are truly "recent"
+   - If a filing is from months ago and more recent filings exist, mention this to the user
+   - Prevent showing users stale data from months ago when more recent filings are available
+   - Example: If today is 2026-01-16 and you see a 10-Q from 2025-10-15, note that it's from 3 months ago and check for more recent filings
+
+**CRITICAL RULE**: NEVER assume what "recent" means - always get the current date first, then calculate the appropriate date range!
+
 FOR SESSION VARIABLES AND TILES QUESTIONS:
 1. ALWAYS use get_session_context_tool(session_id, user_id) when users ask about:
    - "session_variables"
