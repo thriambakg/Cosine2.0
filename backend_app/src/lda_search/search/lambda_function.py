@@ -342,7 +342,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                             'query_func': query_gsi,
                             'date_from': date_from,
                             'date_to': date_to,
-                            'category': 'registrant'
+                            'category': 'registrant',
+                            'search_source': 'general_search'  # Mark as general search
                         })
         
         # Client
@@ -360,7 +361,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                             'query_func': query_gsi,
                             'date_from': date_from,
                             'date_to': date_to,
-                            'category': 'client'
+                            'category': 'client',
+                            'search_source': 'general_search'  # Mark as general search
                         })
         
         # Lobbyist (uses search index)
@@ -377,7 +379,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                             'query_func': query_search_index,
                             'date_from': date_from,
                             'date_to': date_to,
-                            'category': 'lobbyist'
+                            'category': 'lobbyist',
+                            'search_source': 'general_search'  # Mark as general search
                         })
         
         # PAC (uses search index)
@@ -394,7 +397,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                             'query_func': query_search_index,
                             'date_from': date_from,
                             'date_to': date_to,
-                            'category': 'pac'
+                            'category': 'pac',
+                            'search_source': 'general_search'  # Mark as general search
                         })
         
         # Foreign entity (uses search index)
@@ -411,7 +415,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                             'query_func': query_search_index,
                             'date_from': date_from,
                             'date_to': date_to,
-                            'category': 'foreign'
+                            'category': 'foreign',
+                            'search_source': 'general_search'  # Mark as general search
                         })
     
     # Advanced search fields
@@ -428,7 +433,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'query_func': query_gsi,
                     'date_from': date_from,
                     'date_to': date_to,
-                    'category': 'registrant_name'
+                    'category': 'registrant_name',
+                    'search_source': 'advanced_search'  # Mark as advanced search
                 })
     
     if filters.get('client_name'):
@@ -444,7 +450,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'query_func': query_gsi,
                     'date_from': date_from,
                     'date_to': date_to,
-                    'category': 'client_name'
+                    'category': 'client_name',
+                    'search_source': 'advanced_search'  # Mark as advanced search
                 })
     
     if filters.get('lobbyist_name'):
@@ -459,7 +466,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'query_func': query_search_index,
                     'date_from': date_from,
                     'date_to': date_to,
-                    'category': 'lobbyist_name'
+                    'category': 'lobbyist_name',
+                    'search_source': 'advanced_search'  # Mark as advanced search
                 })
     
     # Foreign entity name filter (uses search index)
@@ -475,7 +483,8 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                     'query_func': query_search_index,
                     'date_from': date_from,
                     'date_to': date_to,
-                    'category': 'foreign_entity_name'
+                    'category': 'foreign_entity_name',
+                    'search_source': 'advanced_search'  # Mark as advanced search
                 })
     
     # State filter
@@ -615,14 +624,18 @@ def fetch_full_items(filing_ids: List[str]) -> List[Dict[str, Any]]:
 def search_filings(filters: Dict[str, Any], limit: int = 125,
                    last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
-    Search filings using union logic
+    Search filings using union/intersection logic based on search source
     
     Strategy:
     1. UNION queries within same field (category) - multiple terms in same field are OR'd
-    2. UNION results across different fields - multiple fields are OR'd (e.g., registrant OR client)
-    3. Fetch full items
-    4. Apply Python-side filters (amount ranges, state, etc.)
-    5. Sort and paginate
+    2. GENERAL SEARCH (general_text_search_fields): UNION across different fields (OR logic)
+       - e.g., registrant=["TESLA"] OR client=["TESLA"] → returns filings matching either
+    3. ADVANCED SEARCH (registrant_name, client_name, etc.): INTERSECT across different fields (AND logic)
+       - e.g., registrant_name=["TESLA"] AND client_name=["TESLA"] → returns filings matching both
+    4. If both general_search and advanced_search exist: INTERSECT them (AND logic)
+    5. Fetch full items
+    6. Apply Python-side filters (amount ranges, state, etc.)
+    7. Sort and paginate
     """
     if not filings_table:
         raise Exception("DynamoDB filings table not initialized")
@@ -651,15 +664,22 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
         else:
             non_amount_queries.append(query)
     
-    # Group non-amount queries by category for UNION within field
-    queries_by_field = defaultdict(list)
-    for query in non_amount_queries:
-        category = query.get('category', query.get('filter_type'))
-        queries_by_field[category].append(query)
+    # Separate queries by search source: general_search (UNION) vs advanced_search (INTERSECT)
+    general_search_queries = []
+    advanced_search_queries = []
+    other_queries = []  # Filters like state, item_type, etc.
     
-    # Step 1: UNION within each non-amount field
-    field_result_sets = {}
-    for category, field_queries in queries_by_field.items():
+    for query in non_amount_queries:
+        search_source = query.get('search_source')
+        if search_source == 'general_search':
+            general_search_queries.append(query)
+        elif search_source == 'advanced_search':
+            advanced_search_queries.append(query)
+        else:
+            other_queries.append(query)
+    
+    # Helper function to execute queries and get filing IDs for a category
+    def execute_queries_for_category(field_queries):
         field_ids = set()
         for query in field_queries:
             query_func = query['query_func']
@@ -717,28 +737,120 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
                 field_ids.update(filing_ids)
                 if field_queries[0].get('hash_key') == 'client_name':
                     logger.info(f"Sample client PKs: {pks[:3] if len(pks) >= 3 else pks}, converted to IDs: {filing_ids[:3] if len(filing_ids) >= 3 else filing_ids}")
-        
-        field_result_sets[category] = field_ids
-        logger.info(f"Field '{category}' UNION complete: {len(field_ids)} unique filing IDs")
+        return field_ids
     
-    # Step 2: UNION across different fields (OR logic)
-    # When multiple text search fields are specified (e.g., registrant AND client),
-    # we want results that match ANY of those fields (OR logic), not ALL (AND logic)
-    if field_result_sets:
-        # Union all field result sets together
-        all_filing_ids = set()
-        for category, field_ids in field_result_sets.items():
-            all_filing_ids.update(field_ids)
-            logger.info(f"Field '{category}' added to union: {len(field_ids)} IDs, total so far: {len(all_filing_ids)}")
+    # Step 1: Process GENERAL SEARCH queries - UNION within each category, then UNION across categories
+    general_search_result = None
+    if general_search_queries:
+        # Group by category for UNION within field
+        general_queries_by_field = defaultdict(list)
+        for query in general_search_queries:
+            category = query.get('category', query.get('filter_type'))
+            general_queries_by_field[category].append(query)
         
-        logger.info(f"UNION complete across {len(field_result_sets)} field(s): {len(all_filing_ids)} total unique filing IDs")
-        if len(all_filing_ids) > 0:
-            sample_ids = list(all_filing_ids)[:3]
-            logger.info(f"Sample IDs from union: {sample_ids}")
+        # UNION within each category
+        general_field_results = {}
+        for category, field_queries in general_queries_by_field.items():
+            field_ids = execute_queries_for_category(field_queries)
+            general_field_results[category] = field_ids
+            logger.info(f"General search field '{category}' UNION complete: {len(field_ids)} unique filing IDs")
+        
+        # UNION across all general search categories
+        general_search_result = set()
+        for category, field_ids in general_field_results.items():
+            general_search_result.update(field_ids)
+            logger.info(f"General search field '{category}' added to union: {len(field_ids)} IDs, total so far: {len(general_search_result)}")
+        
+        logger.info(f"General search UNION complete: {len(general_search_result)} total unique filing IDs")
+    
+    # Step 2: Process ADVANCED SEARCH queries - UNION within each category, then INTERSECT across categories
+    advanced_search_result = None
+    if advanced_search_queries:
+        # Group by category for UNION within field
+        advanced_queries_by_field = defaultdict(list)
+        for query in advanced_search_queries:
+            category = query.get('category', query.get('filter_type'))
+            advanced_queries_by_field[category].append(query)
+        
+        # UNION within each category
+        advanced_field_results = {}
+        for category, field_queries in advanced_queries_by_field.items():
+            field_ids = execute_queries_for_category(field_queries)
+            advanced_field_results[category] = field_ids
+            logger.info(f"Advanced search field '{category}' UNION complete: {len(field_ids)} unique filing IDs")
+        
+        # INTERSECT across all advanced search categories (AND logic)
+        if advanced_field_results:
+            # Start with the first field's results
+            sorted_fields = sorted(advanced_field_results.items(), key=lambda x: len(x[1]))
+            smallest_category, smallest_ids = sorted_fields[0]
+            advanced_search_result = smallest_ids.copy()
+            logger.info(f"Advanced search: Using smallest field '{smallest_category}' as source: {len(advanced_search_result)} filing IDs")
+            
+            # Intersect with remaining fields
+            for category, field_ids in sorted_fields[1:]:
+                before_size = len(advanced_search_result)
+                advanced_search_result = advanced_search_result.intersection(field_ids)
+                after_size = len(advanced_search_result)
+                logger.info(f"Advanced search: Intersected with '{category}' ({len(field_ids)} IDs): {before_size} -> {after_size} filing IDs")
+            
+            logger.info(f"Advanced search INTERSECT complete: {len(advanced_search_result)} total unique filing IDs")
+    
+    # Step 3: Combine general_search and advanced_search results
+    # If both exist, INTERSECT them (AND logic: must match general_search AND advanced_search)
+    # If only one exists, use it directly
+    if general_search_result is not None and advanced_search_result is not None:
+        # Both exist - INTERSECT them
+        before_size = len(general_search_result)
+        all_filing_ids = general_search_result.intersection(advanced_search_result)
+        logger.info(f"Combined general_search ({before_size} IDs) AND advanced_search ({len(advanced_search_result)} IDs): {len(all_filing_ids)} total unique filing IDs")
+    elif general_search_result is not None:
+        all_filing_ids = general_search_result
+    elif advanced_search_result is not None:
+        all_filing_ids = advanced_search_result
     else:
         all_filing_ids = set()
     
-    # Step 3: Handle amount filters
+    # Step 4: Handle other filters (item_type, is_foreign, pac, state, etc.)
+    # Execute GSI-based filters (item_type, is_foreign, pac) and intersect with results
+    # State filter will be applied via Python filters later
+    if other_queries:
+        other_gsi_queries = [q for q in other_queries if q.get('filter_type') in ['item_type', 'is_foreign', 'pac']]
+        other_python_filters = [q for q in other_queries if q.get('filter_type') not in ['item_type', 'is_foreign', 'pac']]
+        
+        if other_gsi_queries:
+            logger.info(f"Found {len(other_gsi_queries)} GSI-based other filter(s) - will intersect with search results")
+            for query in other_gsi_queries:
+                query_func = query['query_func']
+                pks = list(get_all_from_gsi(
+                    query_func,
+                    index_name=query['index_name'],
+                    hash_key_name=query['hash_key'],
+                    hash_key_value=query['hash_value'],
+                    date_from=query.get('date_from'),
+                    date_to=query.get('date_to'),
+                    max_items=50000
+                ))
+                # Convert PKs to filing IDs
+                filing_ids = []
+                for pk in pks:
+                    if pk:
+                        pk_str = str(pk) if not isinstance(pk, str) else pk
+                        if pk_str.startswith('FILING#'):
+                            filing_ids.append(pk_str.replace('FILING#', ''))
+                        elif pk_str.startswith('CONTRIBUTION#'):
+                            filing_ids.append(pk_str.replace('CONTRIBUTION#', ''))
+                
+                filter_ids = set(filing_ids)
+                before_size = len(all_filing_ids)
+                all_filing_ids = all_filing_ids.intersection(filter_ids)
+                after_size = len(all_filing_ids)
+                logger.info(f"Intersected with {query.get('filter_type')} filter ({len(filter_ids)} IDs): {before_size} -> {after_size} filing IDs")
+        
+        if other_python_filters:
+            logger.info(f"Found {len(other_python_filters)} Python-based other filter(s) - will be applied in Python filtering step")
+    
+    # Step 5: Handle amount filters
     # If amount filters are combined with other filters, use non-amount filters as source
     # (amount filters will be applied in Python since buckets are ranges)
     # If only amount filters, use amount filters as source
