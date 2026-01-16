@@ -123,7 +123,7 @@ export class FileUploadService {
           // Base64 encoding adds ~33% overhead, so max uncompressed file is ~4.5MB
           // For files >4.5MB, we MUST compress or they will fail at API Gateway
           // Even an 8MB file compressed to 1-2MB will fit (with base64 overhead)
-          const API_GATEWAY_LIMIT = 6 * 1024 * 1024; // 6MB
+          // Note: This compression logic is deprecated in favor of presigned URLs
           const MAX_UNCOMPRESSED_SIZE = 4.5 * 1024 * 1024; // ~4.5MB (accounts for base64 overhead)
           const isLargeFile = file.size > MAX_UNCOMPRESSED_SIZE;
           
