@@ -714,6 +714,7 @@ const GlobalChatSidebar: React.FC = () => {
   // File upload state
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Animation state for context and files indicators
@@ -1493,6 +1494,27 @@ const GlobalChatSidebar: React.FC = () => {
 
   const handleFileUpload = async (files: FileList) => {
     console.log(`📁 Sidebar: User selected ${files.length} file(s) for upload`);
+    
+    // Validate file sizes before processing
+    const fileArray = Array.from(files);
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 10MB
+    const oversizedFiles = fileArray.filter(file => file.size > MAX_FILE_SIZE);
+    
+    if (oversizedFiles.length > 0) {
+      const maxSizeMB = (MAX_FILE_SIZE / 1024 / 1024).toFixed(0);
+      const errorMessage = oversizedFiles.map(file => 
+        `File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(2)} MB). Maximum size is ${maxSizeMB}MB to ensure quick compression.`
+      ).join('\n');
+      setFileUploadError(errorMessage);
+      // Clear error after 5 seconds
+      setTimeout(() => setFileUploadError(null), 5000);
+      // Don't process if any files are too large
+      return;
+    }
+    
+    // Clear any previous errors when starting new upload
+    setFileUploadError(null);
+    
     setIsProcessingFiles(true);
     
     try {
@@ -3146,6 +3168,27 @@ const GlobalChatSidebar: React.FC = () => {
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
             }}
           >
+        {/* Show file upload error */}
+        {fileUploadError && (
+          <Box sx={{ mb: 1, p: 1, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 1, border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+              <Typography variant="caption" sx={{ color: '#ef4444', fontWeight: 600, flex: 1, whiteSpace: 'pre-line' }}>
+                {fileUploadError}
+              </Typography>
+              <IconButton
+                size="small"
+                onClick={() => setFileUploadError(null)}
+                sx={{ 
+                  color: '#ef4444', 
+                  padding: '2px',
+                  '&:hover': { backgroundColor: 'rgba(239, 68, 68, 0.1)' }
+                }}
+              >
+                <CloseIcon sx={{ fontSize: '0.75rem' }} />
+              </IconButton>
+            </Box>
+          </Box>
+        )}
         {/* Show file processing indicator */}
         {isProcessingFiles && (
           <Box sx={{ mb: 1, p: 1, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderRadius: 1, border: '1px solid rgba(59, 130, 246, 0.3)' }}>

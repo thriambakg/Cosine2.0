@@ -27,7 +27,10 @@ export interface FileUploadOptions {
 }
 
 export class FileUploadService {
-  private static readonly MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit
+  // File size limit based on compression performance (5 second timeout)
+  // Text files compress well (~70-90% reduction), so 5MB limit ensures quick compression
+  // Binary files compress less, so this limit ensures compression completes within timeout
+  private static readonly MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for quick compression
   private static readonly ALLOWED_TYPES = [
     // Images
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
@@ -184,8 +187,9 @@ export class FileUploadService {
       
       // Validate file size
       if (file.size > this.MAX_FILE_SIZE) {
-        console.error(`❌ File ${file.name} is too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max: 50 MB)`);
-        alert(`File ${file.name} is too large. Maximum size is 50MB.`);
+        const maxSizeMB = (this.MAX_FILE_SIZE / 1024 / 1024).toFixed(0);
+        console.error(`❌ File ${file.name} is too large: ${(file.size / 1024 / 1024).toFixed(2)} MB (max: ${maxSizeMB} MB)`);
+        alert(`File ${file.name} is too large. Maximum size is ${maxSizeMB}MB to ensure quick compression.`);
         continue;
       }
       
