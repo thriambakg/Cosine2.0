@@ -518,6 +518,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   };
+  
 
   const register = async (userData: RegisterData) => {
     try {
