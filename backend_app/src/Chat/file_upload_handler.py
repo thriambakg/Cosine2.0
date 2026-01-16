@@ -22,7 +22,10 @@ from utils.auth_helper import extract_user_id_from_event
 logger = logging.getLogger(__name__)
 
 # Initialize AWS clients
-s3_client = boto3.client('s3')
+# Use Signature Version 4 for KMS-encrypted S3 buckets (required for presigned URLs)
+from botocore.config import Config
+s3_config = Config(signature_version='s3v4')
+s3_client = boto3.client('s3', config=s3_config)
 dynamodb = boto3.resource('dynamodb')
 
 def convert_floats_to_decimal(obj):

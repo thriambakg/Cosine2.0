@@ -1595,7 +1595,7 @@ resource "aws_iam_policy" "news_search_dynamodb_policy" {
 # IAM Policy for Lambda functions to access KMS keys
 resource "aws_iam_policy" "lambda_kms_policy" {
   name        = "${var.project_name}-lambda-kms-policy-${var.environment}"
-  description = "Policy for Lambda functions to access KMS keys for DynamoDB encryption"
+  description = "Policy for Lambda functions to access KMS keys for DynamoDB and S3 encryption"
 
   policy = jsonencode({
     Version = "2012-10-17"
