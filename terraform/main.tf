@@ -1274,6 +1274,7 @@ resource "aws_iam_policy" "news_search_dynamodb_policy" {
     ]
   })
 
+
   tags = var.common_tags
 }
 
