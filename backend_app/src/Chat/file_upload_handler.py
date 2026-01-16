@@ -25,7 +25,19 @@ logger = logging.getLogger(__name__)
 # Use Signature Version 4 for KMS-encrypted S3 buckets (required for presigned URLs)
 from botocore.config import Config
 s3_config = Config(signature_version='s3v4')
-s3_client = boto3.client('s3', config=s3_config)
+
+# Check if S3 Transfer Acceleration is enabled (default: true)
+# When enabled, use accelerate endpoint: {bucket}.s3-accelerate.amazonaws.com
+use_acceleration = os.environ.get('S3_USE_ACCELERATION', 'true').lower() == 'true'
+if use_acceleration:
+    # S3 Transfer Acceleration uses a different endpoint format
+    # The bucket name is used as-is in the accelerate endpoint
+    s3_client = boto3.client('s3', config=s3_config, use_accelerate_endpoint=True)
+    logger.info("✅ S3 client configured with Transfer Acceleration enabled")
+else:
+    s3_client = boto3.client('s3', config=s3_config)
+    logger.info("ℹ️ S3 client configured without Transfer Acceleration")
+
 dynamodb = boto3.resource('dynamodb')
 
 def convert_floats_to_decimal(obj):
@@ -933,4 +945,507 @@ class FileUploadHandler:
         except Exception as e:
             logger.error(f"❌ Failed to update session_variables: {str(e)}")
             return False
+    
+    def initiate_multipart_upload(self, event: dict) -> dict:
+        """
+        Initiate a multipart upload session for large files.
+        
+        Creates a multipart upload in S3 and returns the upload_id and file metadata.
+        This allows files to be uploaded in parallel chunks for better performance.
+        
+        Expected event structure:
+        {
+            "user_id": "string",
+            "session_id": "string",
+            "filename": "string",
+            "content_type": "string",
+            "file_size": number,
+            "total_parts": number  # Number of parts the file will be split into
+        }
+        
+        Args:
+            event: API Gateway event containing headers and body
+            
+        Returns:
+            Response with upload_id, file_id, s3_key, and part information
+        """
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
+        
+        # SECURITY: Extract and validate user_id from bearer token
+        authenticated_user_id = None
+        try:
+            authenticated_user_id = extract_user_id_from_event(event)
+            if authenticated_user_id:
+                logger.info(f"🔐 Multipart init: Authenticated user_id from bearer token: {authenticated_user_id}")
+            else:
+                logger.warning("⚠️ Multipart init: No user_id found in bearer token or authorizer")
+        except Exception as e:
+            logger.error(f"❌ Multipart init: Error extracting user_id from bearer token: {str(e)}")
+        
+        try:
+            # Parse request body
+            if isinstance(event.get('body'), str):
+                try:
+                    body = json.loads(event['body'])
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON body: {str(e)}")
+                    return {
+                        'statusCode': 400,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            **get_cors_headers(origin),
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                        },
+                        'body': json.dumps({
+                            'error': 'Invalid JSON in request body',
+                            'details': str(e)
+                        })
+                    }
+            else:
+                body = event.get('body', {})
+            
+            # Get user_id and validate
+            body_user_id = body.get('user_id')
+            session_id = body.get('session_id')
+            filename = body.get('filename')
+            content_type = body.get('content_type') or 'application/octet-stream'
+            file_size = body.get('file_size', 0)
+            total_parts = body.get('total_parts', 1)
+            
+            # SECURITY: Use authenticated user_id if available
+            if authenticated_user_id:
+                user_id = authenticated_user_id
+                if body_user_id and body_user_id != authenticated_user_id:
+                    logger.error(f"❌ Multipart init: user_id mismatch! Body: {body_user_id}, Authenticated: {authenticated_user_id}")
+                    return {
+                        'statusCode': 403,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            **get_cors_headers(origin),
+                            'Access-Control-Allow-Headers': 'Content-Type',
+                            'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                        },
+                        'body': json.dumps({
+                            'error': 'Forbidden: user_id in request body does not match authenticated user',
+                            'message': 'Authentication failed'
+                        })
+                    }
+            else:
+                user_id = body_user_id
+                logger.warning(f"⚠️ Multipart init: Using user_id from request body (not authenticated): {user_id}")
+            
+            # Validate required fields
+            if not user_id or not session_id or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'error': 'Missing required fields: user_id, session_id, and filename are required'
+                    })
+                }
+            
+            # Validate file size (50MB limit)
+            MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+            if file_size > MAX_FILE_SIZE:
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'error': f'File too large: {file_size} bytes (max: {MAX_FILE_SIZE} bytes)'
+                    })
+                }
+            
+            # Generate unique file ID
+            file_id = str(uuid.uuid4())
+            
+            # Create S3 key - validate to prevent path traversal
+            safe_filename = os.path.basename(filename)  # Remove any path components
+            s3_key = f"users/{user_id}/sessions/{session_id}/files/{file_id}_{safe_filename}"
+            
+            # Validate S3 key matches expected pattern (security check)
+            expected_prefix = f"users/{user_id}/"
+            if not s3_key.startswith(expected_prefix):
+                logger.error(f"❌ Multipart init: Invalid S3 key pattern - potential path traversal attack")
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'error': 'Invalid filename'
+                    })
+                }
+            
+            # Initiate multipart upload in S3
+            multipart_response = s3_client.create_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                ContentType=content_type,
+                Metadata={
+                    'user_id': user_id,
+                    'session_id': session_id,
+                    'file_id': file_id,
+                    'filename': safe_filename,
+                    'content_type': content_type,
+                    'file_type': 'chat_upload',
+                    'upload_timestamp': str(int(datetime.utcnow().timestamp())),
+                    'total_parts': str(total_parts)
+                }
+            )
+            
+            upload_id = multipart_response['UploadId']
+            
+            logger.info(f"✅ Initiated multipart upload: {safe_filename} (file_id: {file_id}, upload_id: {upload_id}, parts: {total_parts})")
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    **get_cors_headers(origin),
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                },
+                'body': json.dumps({
+                    'upload_id': upload_id,
+                    'file_id': file_id,
+                    's3_key': s3_key,
+                    'filename': safe_filename,
+                    'content_type': content_type,
+                    'total_parts': total_parts
+                })
+            }
+            
+        except Exception as e:
+            logger.error(f"Error initiating multipart upload: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    **get_cors_headers(origin),
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                },
+                'body': json.dumps({
+                    'error': f'Internal server error: {str(e)}'
+                })
+            }
+    
+    def generate_multipart_presigned_urls(self, event: dict) -> dict:
+        """
+        Generate presigned URLs for each part of a multipart upload.
+        
+        Expected event structure:
+        {
+            "user_id": "string",
+            "session_id": "string",
+            "upload_id": "string",  # From initiate_multipart_upload
+            "file_id": "string",    # From initiate_multipart_upload
+            "s3_key": "string",      # From initiate_multipart_upload
+            "part_numbers": [1, 2, 3, ...]  # Array of part numbers (1-indexed)
+        }
+        
+        Args:
+            event: API Gateway event containing headers and body
+            
+        Returns:
+            Response with presigned URLs for each part
+        """
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
+        
+        # SECURITY: Extract and validate user_id from bearer token
+        authenticated_user_id = None
+        try:
+            authenticated_user_id = extract_user_id_from_event(event)
+            if authenticated_user_id:
+                logger.info(f"🔐 Multipart presigned: Authenticated user_id from bearer token: {authenticated_user_id}")
+        except Exception as e:
+            logger.error(f"❌ Multipart presigned: Error extracting user_id: {str(e)}")
+        
+        try:
+            # Parse request body
+            if isinstance(event.get('body'), str):
+                body = json.loads(event['body'])
+            else:
+                body = event.get('body', {})
+            
+            user_id = authenticated_user_id or body.get('user_id')
+            session_id = body.get('session_id')
+            upload_id = body.get('upload_id')
+            file_id = body.get('file_id')
+            s3_key = body.get('s3_key')
+            part_numbers = body.get('part_numbers', [])
+            
+            # Validate required fields
+            if not user_id or not session_id or not upload_id or not s3_key or not part_numbers:
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                    },
+                    'body': json.dumps({
+                        'error': 'Missing required fields: user_id, session_id, upload_id, s3_key, and part_numbers are required'
+                    })
+                }
+            
+            # Validate S3 key matches expected pattern (security check)
+            expected_prefix = f"users/{user_id}/"
+            if not s3_key.startswith(expected_prefix):
+                logger.error(f"❌ Multipart presigned: Invalid S3 key pattern")
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                    },
+                    'body': json.dumps({
+                        'error': 'Invalid s3_key'
+                    })
+                }
+            
+            # Generate presigned URLs for each part
+            expiration = 900  # 15 minutes
+            presigned_urls = []
+            
+            for part_number in part_numbers:
+                # Generate presigned URL for upload_part operation
+                presigned_url = s3_client.generate_presigned_url(
+                    'upload_part',
+                    Params={
+                        'Bucket': self.bucket_name,
+                        'Key': s3_key,
+                        'UploadId': upload_id,
+                        'PartNumber': part_number
+                    },
+                    ExpiresIn=expiration
+                )
+                
+                presigned_urls.append({
+                    'part_number': part_number,
+                    'presigned_url': presigned_url
+                })
+            
+            logger.info(f"✅ Generated {len(presigned_urls)} presigned URLs for multipart upload: {upload_id}")
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    **get_cors_headers(origin),
+                },
+                'body': json.dumps({
+                    'presigned_urls': presigned_urls,
+                    'expires_in': expiration
+                })
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating multipart presigned URLs: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    **get_cors_headers(origin),
+                },
+                'body': json.dumps({
+                    'error': f'Internal server error: {str(e)}'
+                })
+            }
+    
+    def complete_multipart_upload(self, event: dict) -> dict:
+        """
+        Complete a multipart upload after all parts have been uploaded.
+        
+        Expected event structure:
+        {
+            "user_id": "string",
+            "session_id": "string",
+            "upload_id": "string",      # From initiate_multipart_upload
+            "file_id": "string",        # From initiate_multipart_upload
+            "s3_key": "string",         # From initiate_multipart_upload
+            "parts": [                  # Array of completed parts with ETags
+                {
+                    "part_number": 1,
+                    "etag": "string"    # ETag from S3 upload_part response
+                },
+                ...
+            ],
+            "message": {
+                "id": "string",
+                "text": "string",
+                "timestamp": "number"
+            },
+            "context_items": []
+        }
+        
+        Args:
+            event: API Gateway event containing headers and body
+            
+        Returns:
+            Response with completed file metadata and updated session variables
+        """
+        headers = event.get('headers', {}) if isinstance(event, dict) else {}
+        origin = headers.get('Origin') or headers.get('origin')
+        
+        # SECURITY: Extract and validate user_id from bearer token
+        authenticated_user_id = None
+        try:
+            authenticated_user_id = extract_user_id_from_event(event)
+            if authenticated_user_id:
+                logger.info(f"🔐 Multipart complete: Authenticated user_id from bearer token: {authenticated_user_id}")
+        except Exception as e:
+            logger.error(f"❌ Multipart complete: Error extracting user_id: {str(e)}")
+        
+        try:
+            # Parse request body
+            if isinstance(event.get('body'), str):
+                body = json.loads(event['body'])
+            else:
+                body = event.get('body', {})
+            
+            user_id = authenticated_user_id or body.get('user_id')
+            session_id = body.get('session_id')
+            upload_id = body.get('upload_id')
+            file_id = body.get('file_id')
+            s3_key = body.get('s3_key')
+            parts = body.get('parts', [])  # Array of {part_number, etag}
+            message = body.get('message', {})
+            context_items = body.get('context_items', [])
+            
+            # Validate required fields
+            if not user_id or not session_id or not upload_id or not s3_key or not parts:
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                    },
+                    'body': json.dumps({
+                        'error': 'Missing required fields: user_id, session_id, upload_id, s3_key, and parts are required'
+                    })
+                }
+            
+            # Validate S3 key matches expected pattern (security check)
+            expected_prefix = f"users/{user_id}/"
+            if not s3_key.startswith(expected_prefix):
+                logger.error(f"❌ Multipart complete: Invalid S3 key pattern")
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                    },
+                    'body': json.dumps({
+                        'error': 'Invalid s3_key'
+                    })
+                }
+            
+            # Prepare parts for complete_multipart_upload (must be sorted by part number)
+            sorted_parts = sorted(parts, key=lambda x: x['part_number'])
+            multipart_parts = [
+                {
+                    'ETag': part['etag'],
+                    'PartNumber': part['part_number']
+                }
+                for part in sorted_parts
+            ]
+            
+            # Complete multipart upload in S3
+            complete_response = s3_client.complete_multipart_upload(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                UploadId=upload_id,
+                MultipartUpload={'Parts': multipart_parts}
+            )
+            
+            # Get file metadata from S3
+            head_response = s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+            
+            file_size = head_response.get('ContentLength', 0)
+            s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
+            
+            # Extract filename from s3_key
+            filename = s3_key.split('/')[-1].replace(f"{file_id}_", "", 1) if file_id in s3_key else s3_key.split('/')[-1]
+            
+            uploaded_file = {
+                'file_id': file_id,
+                'filename': filename,
+                's3_key': s3_key,
+                's3_url': s3_url,
+                'content_type': head_response.get('ContentType', 'application/octet-stream'),
+                'file_size': file_size,
+                'upload_timestamp': str(int(datetime.utcnow().timestamp()))
+            }
+            
+            logger.info(f"✅ Completed multipart upload: {filename} (file_id: {file_id}, size: {file_size} bytes)")
+            
+            # Update session variables (same as single-part upload)
+            uploaded_files = [uploaded_file]
+            self._update_session_variables(user_id, session_id, uploaded_files, context_items)
+            
+            # Get updated session variables for response
+            response = self.chat_sessions_table.get_item(
+                Key={
+                    'user_id': user_id,
+                    'session_id': session_id
+                }
+            )
+            session_variables = {}
+            if 'Item' in response:
+                session_variables = response.get('Item', {}).get('session_variables', {})
+            
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    **get_cors_headers(origin),
+                },
+                'body': json.dumps({
+                    'file_id': file_id,
+                    'filename': filename,
+                    's3_key': s3_key,
+                    's3_url': s3_url,
+                    'file_size': file_size,
+                    'uploaded_file': uploaded_file,
+                    'session_variables': session_variables
+                })
+            }
+            
+        except Exception as e:
+            logger.error(f"Error completing multipart upload: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    **get_cors_headers(origin),
+                },
+                'body': json.dumps({
+                    'error': f'Internal server error: {str(e)}'
+                })
+            }
 

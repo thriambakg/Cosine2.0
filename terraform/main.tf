@@ -1192,6 +1192,442 @@ resource "aws_api_gateway_integration_response" "files_complete_options" {
   }
 }
 
+# Multipart upload resources (files/multipart/*)
+resource "aws_api_gateway_resource" "files_multipart" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = module.api_gateway.resource_ids["files"]
+  path_part   = "multipart"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_resource" "files_multipart_init" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.files_multipart.id
+  path_part   = "init"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_resource" "files_multipart_parts" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.files_multipart.id
+  path_part   = "parts"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_resource" "files_multipart_complete" {
+  rest_api_id = module.api_gateway.rest_api_id
+  parent_id   = aws_api_gateway_resource.files_multipart.id
+  path_part   = "complete"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Methods for multipart endpoints
+resource "aws_api_gateway_method" "files_multipart_init_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.files_multipart_init.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api_gateway.authorizer_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method" "files_multipart_parts_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.files_multipart_parts.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api_gateway.authorizer_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method" "files_multipart_complete_post" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.files_multipart_complete.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api_gateway.authorizer_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Integrations for multipart endpoints
+resource "aws_api_gateway_integration" "files_multipart_init_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_init.id
+  http_method = aws_api_gateway_method.files_multipart_init_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.chat_agent.invoke_arn
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration" "files_multipart_parts_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_parts.id
+  http_method = aws_api_gateway_method.files_multipart_parts_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.chat_agent.invoke_arn
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration" "files_multipart_complete_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_complete.id
+  http_method = aws_api_gateway_method.files_multipart_complete_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.chat_agent.invoke_arn
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Method responses for multipart endpoints
+resource "aws_api_gateway_method_response" "files_multipart_init_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_init.id
+  http_method = aws_api_gateway_method.files_multipart_init_post.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "files_multipart_parts_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_parts.id
+  http_method = aws_api_gateway_method.files_multipart_parts_post.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "files_multipart_complete_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_complete.id
+  http_method = aws_api_gateway_method.files_multipart_complete_post.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Integration responses for multipart endpoints
+resource "aws_api_gateway_integration_response" "files_multipart_init_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_init.id
+  http_method = aws_api_gateway_method.files_multipart_init_post.http_method
+  status_code = aws_api_gateway_method_response.files_multipart_init_post.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_integration.files_multipart_init_post]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "files_multipart_parts_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_parts.id
+  http_method = aws_api_gateway_method.files_multipart_parts_post.http_method
+  status_code = aws_api_gateway_method_response.files_multipart_parts_post.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_integration.files_multipart_parts_post]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "files_multipart_complete_post" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_complete.id
+  http_method = aws_api_gateway_method.files_multipart_complete_post.http_method
+  status_code = aws_api_gateway_method_response.files_multipart_complete_post.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin" = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_integration.files_multipart_complete_post]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# OPTIONS methods for multipart endpoints (CORS preflight)
+resource "aws_api_gateway_method" "files_multipart_init_options" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.files_multipart_init.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.header.Origin" = false
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method" "files_multipart_parts_options" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.files_multipart_parts.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.header.Origin" = false
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method" "files_multipart_complete_options" {
+  rest_api_id   = module.api_gateway.rest_api_id
+  resource_id   = aws_api_gateway_resource.files_multipart_complete.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.header.Origin" = false
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# OPTIONS integrations for multipart endpoints
+resource "aws_api_gateway_integration" "files_multipart_init_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_init.id
+  http_method = aws_api_gateway_method.files_multipart_init_options.http_method
+
+  type = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration" "files_multipart_parts_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_parts.id
+  http_method = aws_api_gateway_method.files_multipart_parts_options.http_method
+
+  type = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration" "files_multipart_complete_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_complete.id
+  http_method = aws_api_gateway_method.files_multipart_complete_options.http_method
+
+  type = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# OPTIONS method responses for multipart endpoints
+resource "aws_api_gateway_method_response" "files_multipart_init_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_init.id
+  http_method = aws_api_gateway_method.files_multipart_init_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "files_multipart_parts_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_parts.id
+  http_method = aws_api_gateway_method.files_multipart_parts_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "files_multipart_complete_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_complete.id
+  http_method = aws_api_gateway_method.files_multipart_complete_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# OPTIONS integration responses for multipart endpoints
+resource "aws_api_gateway_integration_response" "files_multipart_init_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_init.id
+  http_method = aws_api_gateway_method.files_multipart_init_options.http_method
+  status_code = aws_api_gateway_method_response.files_multipart_init_options.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+  }
+
+  response_templates = {
+    "application/json" = "{}"
+  }
+
+  depends_on = [aws_api_gateway_integration.files_multipart_init_options]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "files_multipart_parts_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_parts.id
+  http_method = aws_api_gateway_method.files_multipart_parts_options.http_method
+  status_code = aws_api_gateway_method_response.files_multipart_parts_options.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+  }
+
+  response_templates = {
+    "application/json" = "{}"
+  }
+
+  depends_on = [aws_api_gateway_integration.files_multipart_parts_options]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "files_multipart_complete_options" {
+  rest_api_id = module.api_gateway.rest_api_id
+  resource_id = aws_api_gateway_resource.files_multipart_complete.id
+  http_method = aws_api_gateway_method.files_multipart_complete_options.http_method
+  status_code = aws_api_gateway_method_response.files_multipart_complete_options.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS,GET,DELETE,PUT'"
+  }
+
+  response_templates = {
+    "application/json" = "{}"
+  }
+
+  depends_on = [aws_api_gateway_integration.files_multipart_complete_options]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # Lambda permissions for new endpoints
 resource "aws_lambda_permission" "files_presigned_post" {
   statement_id  = "AllowExecutionFromAPIGateway_files_presigned_post"

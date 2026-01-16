@@ -39,6 +39,9 @@ export interface FileUploadOptions {
 
 export class FileUploadService {
   private static readonly MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit
+  private static readonly CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks (S3 minimum part size)
+  private static readonly MAX_CONCURRENT_UPLOADS = 10; // Maximum concurrent part uploads
+  private static readonly COMPRESSION_THRESHOLD = 20 * 1024 * 1024; // 20MB - compress files larger than this
   private static readonly ALLOWED_TYPES = [
     // Images
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
@@ -528,6 +531,7 @@ export class FileUploadService {
   
   /**
    * Upload files using presigned URLs (new method - bypasses API Gateway limit)
+   * Uses multipart upload for all files for better performance and reliability
    */
   static async uploadFilesWithPresignedUrls(
     files: UploadedFile[],
@@ -536,25 +540,10 @@ export class FileUploadService {
     onProgress?: (file: string, progress: number) => void
   ): Promise<any> {
     try {
-      console.log(`📤 Starting presigned URL upload for ${files.length} file(s)`);
+      console.log(`📤 Starting multipart upload for ${files.length} file(s)`);
       
-      // Step 1: Request presigned URLs for all files
-      console.log('📋 Step 1: Requesting presigned URLs...');
-      const presignedResults = await this.requestPresignedUrls(
-        files,
-        options.userId,
-        options.sessionId,
-        apiGatewayUrl
-      );
-      
-      if (presignedResults.length !== files.length) {
-        throw new Error(`Failed to get presigned URLs for all files. Expected ${files.length}, got ${presignedResults.length}`);
-      }
-      
-      // Step 2: Upload files directly to S3
-      console.log('📤 Step 2: Uploading files to S3...');
-      const uploadPromises = files.map(async (file, index) => {
-        const presignedResult = presignedResults[index];
+      // Use multipart upload for all files (always use multipart as per plan)
+      const uploadPromises = files.map(async (file) => {
         if (!file.file) {
           throw new Error(`File ${file.name} missing File object`);
         }
@@ -563,40 +552,294 @@ export class FileUploadService {
           onProgress(file.name, 0);
         }
         
-        // Use the exact content_type from presigned URL response to ensure match
-        await this.uploadToS3(
-          file.file, 
-          presignedResult.presigned_url,
-          presignedResult.content_type // Pass the exact content_type used in presigned URL
+        const result = await this.uploadFileMultipart(
+          file.file,
+          options.userId,
+          options.sessionId,
+          options.message,
+          options.contextItems || [],
+          apiGatewayUrl
         );
         
         if (onProgress) {
           onProgress(file.name, 100);
         }
         
-        return presignedResult.file_id;
+        return result;
       });
       
-      const fileIds = await Promise.all(uploadPromises);
-      console.log(`✅ All ${fileIds.length} file(s) uploaded to S3`);
+      // Wait for all files to upload
+      const results = await Promise.all(uploadPromises);
+      console.log(`✅ All ${files.length} file(s) uploaded successfully using multipart upload`);
       
-      // Step 3: Complete upload (verify files, update session variables)
-      console.log('✅ Step 3: Completing file upload...');
-      const result = await this.completeFileUpload(
-        fileIds,
-        options.userId,
-        options.sessionId,
-        options.message,
-        options.contextItems || [],
-        apiGatewayUrl
-      );
-      
-      console.log('✅ Presigned URL upload completed successfully');
-      return result;
+      // Return the last result (contains session_variables from the last file)
+      return results[results.length - 1];
     } catch (error) {
-      console.error('❌ Error in presigned URL upload:', error);
+      console.error('❌ Error in multipart upload:', error);
       throw error;
     }
+  }
+  
+  /**
+   * Upload file using multipart upload for better performance and reliability
+   * Splits file into chunks and uploads them in parallel
+   */
+  private static async uploadFileMultipart(
+    file: File,
+    userId: string,
+    sessionId: string,
+    message: { id: string; text: string; timestamp: number },
+    contextItems: any[],
+    apiGatewayUrl: string = API_CONFIG.BASE_URL
+  ): Promise<any> {
+    console.log(`🔄 Starting multipart upload for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    
+    // Determine if compression is needed (for files >20MB)
+    const shouldCompress = file.size > this.COMPRESSION_THRESHOLD;
+    
+    // Calculate chunk count
+    const totalParts = Math.ceil(file.size / this.CHUNK_SIZE);
+    console.log(`📦 File will be split into ${totalParts} parts (${(this.CHUNK_SIZE / 1024 / 1024).toFixed(1)} MB each)`);
+    
+    // Get auth token
+    let authHeader: Record<string, string> = {};
+    try {
+      const { fetchAuthSession } = await import('aws-amplify/auth');
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken;
+      const accessToken = session.tokens?.accessToken;
+      const token = idToken || accessToken;
+      
+      if (token) {
+        authHeader = { Authorization: `Bearer ${token.toString()}` };
+      }
+    } catch (authErr) {
+      console.warn('⚠️ Failed to get auth token:', authErr);
+    }
+    
+    // Step 1: Initiate multipart upload
+    const initResponse = await fetch(`${apiGatewayUrl}/files/multipart/init`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        session_id: sessionId,
+        filename: file.name,
+        content_type: file.type || 'application/octet-stream',
+        file_size: file.size,
+        total_parts: totalParts
+      })
+    });
+    
+    if (!initResponse.ok) {
+      const errorText = await initResponse.text();
+      throw new Error(`Failed to initiate multipart upload: ${initResponse.status} - ${errorText}`);
+    }
+    
+    const initResult = await initResponse.json();
+    const { upload_id, file_id, s3_key, content_type } = initResult;
+    console.log(`✅ Multipart upload initiated: upload_id=${upload_id}, file_id=${file_id}`);
+    
+    // Step 2: Use Web Worker to chunk the file
+    const chunks = await this.chunkFileWithWorker(file, shouldCompress);
+    console.log(`✅ File chunked into ${chunks.length} parts`);
+    
+    // Step 3: Request presigned URLs for all parts
+    const partNumbers = chunks.map(chunk => chunk.partNumber);
+    const partsResponse = await fetch(`${apiGatewayUrl}/files/multipart/parts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        session_id: sessionId,
+        upload_id: upload_id,
+        file_id: file_id,
+        s3_key: s3_key,
+        part_numbers: partNumbers
+      })
+    });
+    
+    if (!partsResponse.ok) {
+      const errorText = await partsResponse.text();
+      throw new Error(`Failed to get presigned URLs for parts: ${partsResponse.status} - ${errorText}`);
+    }
+    
+    const partsResult = await partsResponse.json();
+    const presignedUrls = partsResult.presigned_urls;
+    console.log(`✅ Got ${presignedUrls.length} presigned URLs for parts`);
+    
+    // Step 4: Upload all parts in parallel (with concurrency limit)
+    const uploadedParts: Array<{ part_number: number; etag: string }> = [];
+    const uploadQueue: Array<{ chunk: any; presignedUrl: string; partNumber: number }> = [];
+    
+    // Create upload queue
+    for (const presignedUrlData of presignedUrls) {
+      const chunk = chunks.find(c => c.partNumber === presignedUrlData.part_number);
+      if (chunk) {
+        uploadQueue.push({
+          chunk,
+          presignedUrl: presignedUrlData.presigned_url,
+          partNumber: presignedUrlData.part_number
+        });
+      }
+    }
+    
+    // Upload with concurrency limit using Promise.allSettled
+    const uploadPart = async (item: { chunk: any; presignedUrl: string; partNumber: number }): Promise<{ part_number: number; etag: string }> => {
+      console.log(`📤 Uploading part ${item.partNumber}/${totalParts}...`);
+      
+      const response = await fetch(item.presignedUrl, {
+        method: 'PUT',
+        body: item.chunk.blob,
+        headers: {
+          'Content-Type': shouldCompress ? 'application/gzip' : (file.type || 'application/octet-stream')
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`S3 upload failed for part ${item.partNumber}: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+      
+      // Get ETag from response headers
+      const etag = response.headers.get('ETag')?.replace(/"/g, '') || '';
+      if (!etag) {
+        throw new Error(`Missing ETag in response for part ${item.partNumber}`);
+      }
+      
+      console.log(`✅ Part ${item.partNumber}/${totalParts} uploaded successfully`);
+      return {
+        part_number: item.partNumber,
+        etag: etag
+      };
+    };
+    
+    // Process uploads with concurrency limit
+    const uploadPromises: Promise<{ part_number: number; etag: string }>[] = [];
+    let activeUploads = 0;
+    let queueIndex = 0;
+    
+    // Process queue with concurrency control
+    while (queueIndex < uploadQueue.length) {
+      // Start new uploads up to the concurrency limit
+      while (activeUploads < this.MAX_CONCURRENT_UPLOADS && queueIndex < uploadQueue.length) {
+        const item = uploadQueue[queueIndex++];
+        const promise = uploadPart(item)
+          .then(result => {
+            activeUploads--;
+            return result;
+          })
+          .catch(error => {
+            activeUploads--;
+            throw error;
+          });
+        uploadPromises.push(promise);
+        activeUploads++;
+      }
+      
+      // Wait for at least one upload to complete before starting more
+      if (activeUploads >= this.MAX_CONCURRENT_UPLOADS) {
+        await Promise.race(uploadPromises);
+      }
+    }
+    
+    // Wait for all remaining uploads to complete
+    const results = await Promise.allSettled(uploadPromises);
+    
+    // Process results and collect successful uploads
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        uploadedParts.push(result.value);
+      } else {
+        console.error(`❌ Error uploading part:`, result.reason);
+        throw result.reason;
+      }
+    }
+    
+    // Sort uploaded parts by part number (required for multipart completion)
+    uploadedParts.sort((a, b) => a.part_number - b.part_number);
+    
+    console.log(`✅ All ${uploadedParts.length} parts uploaded successfully`);
+    
+    // Step 5: Complete multipart upload
+    const completeResponse = await fetch(`${apiGatewayUrl}/files/multipart/complete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        session_id: sessionId,
+        upload_id: upload_id,
+        file_id: file_id,
+        s3_key: s3_key,
+        parts: uploadedParts,
+        message: message,
+        context_items: contextItems || []
+      })
+    });
+    
+    if (!completeResponse.ok) {
+      const errorText = await completeResponse.text();
+      throw new Error(`Failed to complete multipart upload: ${completeResponse.status} - ${errorText}`);
+    }
+    
+    const completeResult = await completeResponse.json();
+    console.log(`✅ Multipart upload completed: ${file.name}`);
+    return completeResult;
+  }
+  
+  /**
+   * Chunk file using Web Worker for non-blocking processing
+   */
+  private static async chunkFileWithWorker(
+    file: File,
+    compress: boolean = false
+  ): Promise<Array<{ partNumber: number; blob: Blob; metadata: any }>> {
+    return new Promise((resolve, reject) => {
+      // Create Web Worker
+      const worker = new Worker(
+        new URL('../workers/fileChunker.worker.ts', import.meta.url),
+        { type: 'module' }
+      );
+      
+      const chunks: Array<{ partNumber: number; blob: Blob; metadata: any }> = [];
+      
+      worker.onmessage = (event: MessageEvent) => {
+        const { type, ...data } = event.data;
+        
+        if (type === 'progress') {
+          console.log(`📊 Chunking progress: ${data.progress.toFixed(1)}% (part ${data.partNumber}/${data.totalParts})`);
+        } else if (type === 'chunked') {
+          // File has been chunked
+          resolve(data.chunks);
+          worker.terminate();
+        } else if (type === 'error') {
+          reject(new Error(data.error));
+          worker.terminate();
+        }
+      };
+      
+      worker.onerror = (error) => {
+        reject(error);
+        worker.terminate();
+      };
+      
+      // Send chunking request to worker
+      worker.postMessage({
+        type: 'chunk',
+        file: file,
+        chunkSize: this.CHUNK_SIZE,
+        compress: compress
+      });
+    });
   }
   
   /**

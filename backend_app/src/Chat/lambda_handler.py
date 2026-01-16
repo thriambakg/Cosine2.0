@@ -808,8 +808,36 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     path.endswith('/files/complete')
                 )
                 
+                # Multipart upload endpoints
+                is_multipart_init = (
+                    '/files/multipart/init' in path or
+                    resource.endswith('/files/multipart/init') or
+                    path.endswith('/files/multipart/init')
+                )
+                
+                is_multipart_parts = (
+                    '/files/multipart/parts' in path or
+                    resource.endswith('/files/multipart/parts') or
+                    path.endswith('/files/multipart/parts')
+                )
+                
+                is_multipart_complete = (
+                    '/files/multipart/complete' in path or
+                    resource.endswith('/files/multipart/complete') or
+                    path.endswith('/files/multipart/complete')
+                )
+                
                 try:
-                    if is_presigned_endpoint:
+                    if is_multipart_init:
+                        logger.info(f"Processing multipart upload initiation - path: {path}, resource: {resource}")
+                        result = file_handler.initiate_multipart_upload(event)
+                    elif is_multipart_parts:
+                        logger.info(f"Processing multipart presigned URLs request - path: {path}, resource: {resource}")
+                        result = file_handler.generate_multipart_presigned_urls(event)
+                    elif is_multipart_complete:
+                        logger.info(f"Processing multipart upload completion - path: {path}, resource: {resource}")
+                        result = file_handler.complete_multipart_upload(event)
+                    elif is_presigned_endpoint:
                         logger.info(f"Processing presigned URL request - path: {path}, resource: {resource}")
                         result = file_handler.generate_presigned_upload_url(event)
                     elif is_complete_endpoint:
