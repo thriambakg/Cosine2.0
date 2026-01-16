@@ -1299,7 +1299,6 @@ resource "aws_iam_policy" "lambda_kms_policy" {
       }
     ]
   })
-
   tags = var.common_tags
 }
 
