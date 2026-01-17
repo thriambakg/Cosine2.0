@@ -629,8 +629,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Ignore individual removal errors
           }
         });
+
+        // Clear search page states on logout
+        sessionStorage.removeItem('govt-contracts-search-page-state');
+        sessionStorage.removeItem('sec-search-page-state'); // Clear SEC search state too if it exists
         
-        // Dispatch event to notify DialogManagerProvider to clear state
+        // Dispatch event to notify DialogManagerProvider and other components to clear state
         window.dispatchEvent(new CustomEvent('user-logout', { detail: { clearDialogs: true } }));
       } catch (e) {
         console.warn('Failed to clear dialogs on logout:', e);
