@@ -1036,26 +1036,28 @@ EXAMPLES OF QUESTIONS THAT REQUIRE get_session_files_tool():
 - process_chat_session_context_tool(session_id, user_id, context_items) - For chat sessions added from history sidebar
 - analyze_chat_session_context_tool(session_id, user_id, context_items, analysis_type) - For analyzing multiple chat sessions
 
-🏛️ GOVERNMENT CONTRACT TRANSACTIONS - AUTOMATIC S3 READING:
+🏛️ GOVERNMENT CONTRACT TRANSACTIONS - AUTOMATIC FETCHING:
 When government contract awards (govt_contract_award type) are present in session context:
 1. AUTOMATICALLY get session context using get_session_context_tool(session_id, user_id) to find all contract awards
 2. For EACH contract award in context:
-   - Check if it has 'oversize_s3_key' or 'award_details_s3_key' field in the data
-   - If S3 key exists: AUTOMATICALLY read the S3 file using read_s3_file_tool(s3_key)
-   - The S3 file is gzipped JSON - read_s3_file_tool will automatically decompress it
-   - Extract the 'transactions' array from the parsed JSON (format: { "transactions": [...], "subawards": [...] })
-3. DO NOT ASK - automatically read S3 files for all contracts in context when analyzing them
-4. Present transaction data along with contract summary (transaction IDs, dates, amounts, descriptions)
+   - Extract the 'award_id' from the contract's data field
+   - AUTOMATICALLY query the full award details using search_govt_contracts(filters={"award_id": [award_id]}, limit=1)
+   - The full award record from DynamoDB contains the 'transactions' field with all transaction data
+   - If the award has 'oversize_s3_key' or 'award_details_s3_key' field, ALSO read the S3 file using read_s3_file_tool(s3_key) for complete transaction details
+3. DO NOT ASK - automatically fetch full award details from DynamoDB for all contracts in context when analyzing them
+4. Extract and parse the 'transactions' field (may be DynamoDB JSON format or regular JSON array)
+5. Present transaction data along with contract summary (transaction IDs, dates, amounts, descriptions)
 
 **Example Workflow:**
 - User: "Explain this contract" (contract is in context)
 - Agent: 
   1. get_session_context_tool(session_id, user_id) → Get context with contract
-  2. Extract contract from context_items → Find 'oversize_s3_key' or 'award_details_s3_key'
-  3. read_s3_file_tool(s3_key) → Automatically decompresses gzipped JSON and returns transactions
-  4. Extract transactions array from JSON → Present transaction details
+  2. Extract contract from context_items → Get 'award_id' from data (e.g., "ASST_NON_693JJ22030000ZS50IARR01208_069")
+  3. search_govt_contracts(filters={"award_id": ["ASST_NON_693JJ22030000ZS50IARR01208_069"]}, limit=1) → Get full award record with transactions
+  4. Parse 'transactions' field from award result → Present transaction details (action_date, federal_action_obligation, transaction_description, etc.)
+  5. If award has S3 key: read_s3_file_tool(s3_key) → Get additional transaction details if needed
 
-**Critical:** When users ask about contracts in context, you MUST automatically fetch transactions from S3 - don't say "I can only see high-level award details". Read the S3 file!
+**Critical:** When users ask about contracts in context, you MUST automatically fetch full award details from DynamoDB using search_govt_contracts - don't say "I can only see high-level award details". Query DynamoDB with the award_id to get transactions!
 
 🔍 TRIGGER EXAMPLES:
 - "can you see this context item?" → get_session_context_tool()
