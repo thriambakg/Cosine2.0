@@ -22,6 +22,7 @@ class SECFilingParser(BaseParser):
     def parse(self, s3_key: str, content: bytes, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Parse SEC filing and extract comprehensive financial data
+        Handles large HTML/TXT files with chunking support
         
         Args:
             s3_key: S3 key of the filing
@@ -32,15 +33,53 @@ class SECFilingParser(BaseParser):
             Dict with extracted financial data
         """
         try:
+            content_size = len(content)
+            logger.info(f"📄 [SEC_PARSER] Parsing SEC filing: {s3_key}, size: {content_size:,} bytes")
+            
+            # Decode content (handles UTF-8, Latin-1, etc.)
             text_content = self.decode_content(content)
+            logger.info(f"📄 [SEC_PARSER] Decoded content: {len(text_content):,} characters")
             
-            # Determine if XML or HTML
+            # Determine if XML or HTML/TXT
             is_xml = '<SEC-DOCUMENT>' in text_content[:1000] or text_content.strip().startswith('<?xml')
+            is_html = '<html' in text_content[:1000].lower() or '<body' in text_content[:1000].lower()
             
-            if is_xml:
-                cleaned_content = self.extract_xml_content(text_content)
+            logger.info(f"📄 [SEC_PARSER] File type detection - XML: {is_xml}, HTML: {is_html}")
+            
+            # For large files, use chunked extraction
+            # Threshold: 100KB for chunking (SEC filings can be 10MB+)
+            use_chunking = len(text_content) > 100000
+            chunks_processed = 1  # Default to 1 for non-chunked processing
+            
+            if use_chunking:
+                logger.info(f"📄 [SEC_PARSER] Large file detected ({len(text_content):,} chars), using chunked extraction")
+                if is_xml:
+                    # XML files - process in chunks but maintain structure
+                    chunks = self.chunk_content(text_content, chunk_size=50000)
+                    chunks_processed = len(chunks)
+                    logger.info(f"📄 [SEC_PARSER] Processing {chunks_processed} XML chunks")
+                    chunk_texts = []
+                    for i, chunk in enumerate(chunks):
+                        logger.info(f"📄 [SEC_PARSER] Processing XML chunk {i+1}/{chunks_processed}")
+                        chunk_texts.append(self.extract_xml_content(chunk))
+                    cleaned_content = '\n\n'.join(chunk_texts)
+                elif is_html:
+                    # HTML files - use chunked HTML extraction
+                    cleaned_content = self.extract_html_content_chunked(text_content, chunk_size=50000)
+                    # Count chunks from the method
+                    chunks_processed = (len(text_content) // 50000) + 1
+                else:
+                    # Plain text (TXT files) - chunk it
+                    chunks = self.chunk_content(text_content, chunk_size=50000)
+                    chunks_processed = len(chunks)
+                    logger.info(f"📄 [SEC_PARSER] Processing {chunks_processed} text chunks")
+                    cleaned_content = '\n\n'.join(chunks)
             else:
-                cleaned_content = self.extract_html_content(text_content)
+                # Small file - process normally
+                if is_xml:
+                    cleaned_content = self.extract_xml_content(text_content)
+                else:
+                    cleaned_content = self.extract_html_content(text_content)
             
             # Extract metadata
             extracted_metadata = self._extract_metadata(text_content, metadata)
@@ -53,7 +92,7 @@ class SECFilingParser(BaseParser):
             # Calculate metrics
             metrics = self._calculate_metrics(income_statement, balance_sheet, cash_flow)
             
-            return {
+            result = {
                 "success": True,
                 "document_type": "sec_filing",
                 "metadata": extracted_metadata,
@@ -61,8 +100,20 @@ class SECFilingParser(BaseParser):
                 "balance_sheet": balance_sheet,
                 "cash_flow": cash_flow,
                 "metrics": metrics,
-                "raw_content_length": len(text_content)
+                "raw_content_length": len(text_content),
+                "processing_info": {
+                    "file_size_bytes": len(content),
+                    "text_length_chars": len(text_content),
+                    "chunked": use_chunking,
+                    "chunks_processed": chunks_processed if use_chunking else 1,
+                    "file_type": "xml" if is_xml else ("html" if is_html else "txt")
+                }
             }
+            
+            if use_chunking:
+                logger.info(f"✅ [SEC_PARSER] Successfully parsed large file using {chunks_processed} chunks")
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error parsing SEC filing {s3_key}: {e}")

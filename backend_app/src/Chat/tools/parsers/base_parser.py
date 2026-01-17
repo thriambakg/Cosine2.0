@@ -53,6 +53,79 @@ class BaseParser(ABC):
                 self.logger.warning(f"Error decoding content: {e}")
                 return content.decode('utf-8', errors='replace')
     
+    def chunk_content(self, content: str, chunk_size: int = 50000, overlap: int = 1000) -> List[str]:
+        """
+        Chunk large content into smaller pieces for processing
+        
+        Args:
+            content: Full content string
+            chunk_size: Maximum size of each chunk (characters)
+            overlap: Number of characters to overlap between chunks
+            
+        Returns:
+            List of content chunks
+        """
+        if len(content) <= chunk_size:
+            return [content]
+        
+        chunks = []
+        start = 0
+        
+        while start < len(content):
+            end = start + chunk_size
+            
+            # Try to break at a sentence or paragraph boundary
+            if end < len(content):
+                # Look for sentence endings
+                for i in range(end, max(start + chunk_size - 500, start), -1):
+                    if content[i] in ['.', '!', '?', '\n']:
+                        end = i + 1
+                        break
+                # If no sentence boundary found, look for paragraph break
+                if end == start + chunk_size:
+                    for i in range(end, max(start + chunk_size - 200, start), -1):
+                        if content[i] == '\n' and (i == 0 or content[i-1] == '\n'):
+                            end = i + 1
+                            break
+            
+            chunk = content[start:end]
+            chunks.append(chunk)
+            
+            # Move start position with overlap
+            start = end - overlap if end < len(content) else len(content)
+        
+        return chunks
+    
+    def extract_html_content_chunked(self, html_content: str, chunk_size: int = 50000) -> str:
+        """
+        Extract text content from HTML in chunks for large files
+        
+        Args:
+            html_content: HTML string
+            chunk_size: Maximum chunk size for processing
+            
+        Returns:
+            Cleaned text content
+        """
+        try:
+            # For very large HTML files, process in chunks
+            if len(html_content) > chunk_size * 2:
+                self.logger.info(f"📄 [PARSER] Large HTML file detected ({len(html_content)} chars), processing in chunks")
+                chunks = self.chunk_content(html_content, chunk_size)
+                text_parts = []
+                
+                for i, chunk in enumerate(chunks):
+                    self.logger.info(f"📄 [PARSER] Processing HTML chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+                    chunk_text = self.extract_html_content(chunk)
+                    text_parts.append(chunk_text)
+                
+                return '\n\n'.join(text_parts)
+            else:
+                return self.extract_html_content(html_content)
+        except Exception as e:
+            self.logger.warning(f"Error in chunked HTML extraction: {e}, falling back to regular extraction")
+            return self.extract_html_content(html_content)
+    
     def extract_html_content(self, html_content: str) -> str:
         """
         Extract text content from HTML

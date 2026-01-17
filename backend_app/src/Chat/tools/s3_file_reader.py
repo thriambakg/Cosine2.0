@@ -298,7 +298,15 @@ class S3FileReader:
                 # Get content preview for detection (first 2KB)
                 content_preview = content[:2048]
                 content_size = len(content)
-                logger.info(f"📊 [DOCUMENT_PROCESSING] Content size: {content_size} bytes, preview: {len(content_preview)} bytes")
+                logger.info(f"📊 [DOCUMENT_PROCESSING] Content size: {content_size:,} bytes, preview: {len(content_preview)} bytes")
+                
+                # Check if file is large and needs chunking (for HTML/TXT SEC filings)
+                is_large_file = content_size > 5 * 1024 * 1024  # 5MB threshold
+                file_extension = filename.lower().split('.')[-1] if '.' in filename else ''
+                is_html_or_txt = file_extension in ['htm', 'html', 'txt', 'xml']
+                
+                if is_large_file and is_html_or_txt:
+                    logger.info(f"📄 [DOCUMENT_PROCESSING] Large HTML/TXT file detected ({content_size:,} bytes) - will use chunked processing")
                 
                 # Detect document type
                 logger.info(f"🔍 [DOCUMENT_PROCESSING] Starting document type detection...")
@@ -362,10 +370,20 @@ class S3FileReader:
                         raw_content = self._decode_content_for_type(content, content_type, file_type, s3_key)
                         
                         # Format response with both raw content and extracted data
+                        processing_info = parser_result.get("processing_info", {})
+                        was_chunked = processing_info.get("chunked", False)
+                        chunks_count = processing_info.get("chunks_processed", 1)
+                        file_type = processing_info.get("file_type", "unknown")
+                        
                         response_parts = [
                             f"📄 Document Type: {doc_info.get('type').value if hasattr(doc_info.get('type'), 'value') else doc_info.get('type')}",
                             f"📊 Confidence: {doc_info.get('confidence', 0):.0%}",
                         ]
+                        
+                        # Add chunking info if file was chunked
+                        if was_chunked:
+                            response_parts.append(f"📦 Processing: Large file processed in {chunks_count} chunks (file type: {file_type})")
+                            response_parts.append(f"📏 File Size: {processing_info.get('file_size_bytes', 0):,} bytes ({processing_info.get('text_length_chars', 0):,} characters)")
                         
                         # Add metadata if available
                         metadata = doc_info.get("metadata", {})
