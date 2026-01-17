@@ -266,47 +266,72 @@ class S3FileReader:
             
             # Document Detection and Routing (NEW)
             # Detect document type and route to specialized parser if applicable
+            logger.info(f"📄 [DOCUMENT_PROCESSING] Starting document processing for file: {s3_key}")
             try:
                 # Import with fallback for path resolution
+                logger.info(f"📦 [DOCUMENT_PROCESSING] Attempting to import document processing modules...")
                 try:
                     from document_detector import DocumentDetector
                     from document_router import DocumentRouter
                     from document_indexer import DocumentIndexer
-                except ImportError:
+                    logger.info(f"✅ [DOCUMENT_PROCESSING] Successfully imported document processing modules (direct import)")
+                except ImportError as import_err:
+                    logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Direct import failed: {import_err}, trying absolute import...")
                     # Try absolute import
                     tools_dir = os.path.dirname(__file__)
                     if tools_dir not in sys.path:
                         sys.path.insert(0, tools_dir)
-                    from document_detector import DocumentDetector
-                    from document_router import DocumentRouter
-                    from document_indexer import DocumentIndexer
+                        logger.info(f"📁 [DOCUMENT_PROCESSING] Added tools directory to sys.path: {tools_dir}")
+                    try:
+                        from document_detector import DocumentDetector
+                        from document_router import DocumentRouter
+                        from document_indexer import DocumentIndexer
+                        logger.info(f"✅ [DOCUMENT_PROCESSING] Successfully imported document processing modules (absolute import)")
+                    except ImportError as abs_import_err:
+                        logger.error(f"❌ [DOCUMENT_PROCESSING] Failed to import document processing modules: {abs_import_err}")
+                        raise
                 
                 # Extract filename from S3 key
                 filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
+                logger.info(f"📝 [DOCUMENT_PROCESSING] Extracted filename: {filename} from S3 key: {s3_key}")
                 
                 # Get content preview for detection (first 2KB)
                 content_preview = content[:2048]
+                content_size = len(content)
+                logger.info(f"📊 [DOCUMENT_PROCESSING] Content size: {content_size} bytes, preview: {len(content_preview)} bytes")
                 
                 # Detect document type
+                logger.info(f"🔍 [DOCUMENT_PROCESSING] Starting document type detection...")
                 detector = DocumentDetector()
                 doc_info = detector.detect_document_type(s3_key, content_preview, filename)
+                doc_type = doc_info.get("type")
+                confidence = doc_info.get("confidence", 0)
+                logger.info(f"🔍 [DOCUMENT_PROCESSING] Detection result - Type: {doc_type}, Confidence: {confidence:.2%}, Metadata: {doc_info.get('metadata', {})}")
                 
                 # If document type detected with confidence > 0.5, route to parser
-                if doc_info.get("type") != "unknown" and doc_info.get("confidence", 0) > 0.5:
-                    logger.info(f"🔍 Detected document type: {doc_info.get('type')} (confidence: {doc_info.get('confidence')}) for {s3_key}")
+                if doc_type != "unknown" and confidence > 0.5:
+                    logger.info(f"✅ [DOCUMENT_PROCESSING] Document type detected: {doc_type} (confidence: {confidence:.2%}) for {s3_key} - proceeding to routing")
                     
                     try:
                         # Route to appropriate parser
+                        logger.info(f"🔄 [DOCUMENT_PROCESSING] Routing document to parser (type: {doc_type})...")
                         router = DocumentRouter()
                         parser_result = router.route_document(
-                            doc_info.get("type"),
+                            doc_type,
                             s3_key,
                             content,
                             doc_info.get("metadata")
                         )
                         
+                        parser_success = parser_result.get("success", False)
+                        logger.info(f"{'✅' if parser_success else '❌'} [DOCUMENT_PROCESSING] Parser routing complete - Success: {parser_success}")
+                        if parser_success:
+                            extracted_data = parser_result.get("extracted_data", {})
+                            logger.info(f"📊 [DOCUMENT_PROCESSING] Extracted data keys: {list(extracted_data.keys()) if isinstance(extracted_data, dict) else 'N/A'}")
+                        
                         # Index the extracted data if parsing was successful
-                        if parser_result.get("success") and user_id:
+                        if parser_success and user_id:
+                            logger.info(f"💾 [DOCUMENT_PROCESSING] Starting document indexing for user: {user_id}...")
                             try:
                                 indexer = DocumentIndexer()
                                 index_id = indexer.index_document(
@@ -317,10 +342,18 @@ class S3FileReader:
                                 )
                                 
                                 if index_id:
-                                    logger.info(f"✅ Indexed document {s3_key} as {index_id}")
+                                    logger.info(f"✅ [DOCUMENT_PROCESSING] Successfully indexed document {s3_key} with index_id: {index_id}")
+                                else:
+                                    logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Indexing returned no index_id for {s3_key}")
                             except Exception as index_err:
-                                logger.warning(f"⚠️ Failed to index document {s3_key}: {index_err}")
+                                logger.error(f"❌ [DOCUMENT_PROCESSING] Failed to index document {s3_key}: {index_err}")
+                                import traceback
+                                logger.error(f"❌ [DOCUMENT_PROCESSING] Indexing traceback: {traceback.format_exc()}")
                                 # Continue even if indexing fails
+                        elif not parser_success:
+                            logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Skipping indexing - parser did not succeed")
+                        elif not user_id:
+                            logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Skipping indexing - user_id not available")
                         
                         # Format enhanced response with raw content + extracted data
                         content_type = response.get('ContentType', '')
@@ -382,16 +415,22 @@ class S3FileReader:
                         return "\n".join(response_parts)
                         
                     except Exception as parse_err:
-                        logger.error(f"Error routing/parsing document {s3_key}: {parse_err}")
+                        logger.error(f"❌ [DOCUMENT_PROCESSING] Error routing/parsing document {s3_key}: {parse_err}")
                         import traceback
-                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        logger.error(f"❌ [DOCUMENT_PROCESSING] Parse error traceback: {traceback.format_exc()}")
                         # Fall through to regular file reading
+                else:
+                    logger.info(f"ℹ️ [DOCUMENT_PROCESSING] Document type '{doc_type}' has low confidence ({confidence:.2%}) or is unknown - skipping specialized processing")
                 
             except ImportError as import_err:
-                logger.warning(f"⚠️ Document detection/routing not available: {import_err}")
+                logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Document detection/routing not available: {import_err}")
+                import traceback
+                logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Import error traceback: {traceback.format_exc()}")
                 # Fall through to regular file reading
             except Exception as detect_err:
-                logger.warning(f"⚠️ Error in document detection: {detect_err}")
+                logger.error(f"❌ [DOCUMENT_PROCESSING] Error in document detection: {detect_err}")
+                import traceback
+                logger.error(f"❌ [DOCUMENT_PROCESSING] Detection error traceback: {traceback.format_exc()}")
                 # Fall through to regular file reading
             
             # Decode based on content type (existing logic - fallback for non-detected documents)

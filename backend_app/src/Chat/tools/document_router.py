@@ -148,38 +148,52 @@ class DocumentRouter:
         Returns:
             Dict with extracted data from parser
         """
+        logger.info(f"🔄 [DOCUMENT_ROUTER] Starting routing for document: {s3_key}, type: {doc_type}, content_size: {len(content)} bytes")
+        logger.info(f"📋 [DOCUMENT_ROUTER] Metadata: {metadata}")
+        
         try:
+            logger.info(f"🔍 [DOCUMENT_ROUTER] Getting parser for document type: {doc_type}")
             parser = self._get_parser(doc_type)
             
             if parser is None:
-                logger.warning(f"No parser available for document type: {doc_type}")
+                logger.warning(f"⚠️ [DOCUMENT_ROUTER] No parser available for document type: {doc_type}")
                 return {
                     "success": False,
                     "error": f"No parser available for document type: {doc_type}",
                     "document_type": doc_type.value if isinstance(doc_type, DocumentType) else str(doc_type)
                 }
             
-            logger.info(f"Routing document {s3_key} (type: {doc_type}) to {parser.__class__.__name__}")
+            parser_class_name = parser.__class__.__name__
+            logger.info(f"✅ [DOCUMENT_ROUTER] Selected parser: {parser_class_name} for document {s3_key} (type: {doc_type})")
             
             # Call parser with metadata if available
+            logger.info(f"📊 [DOCUMENT_ROUTER] Calling parser.parse() with metadata: {metadata is not None}")
             if metadata:
                 result = parser.parse(s3_key, content, metadata=metadata)
             else:
                 result = parser.parse(s3_key, content)
             
+            success = result.get("success", False) if isinstance(result, dict) else False
+            logger.info(f"{'✅' if success else '❌'} [DOCUMENT_ROUTER] Parser completed - Success: {success}")
+            if success:
+                extracted_keys = list(result.get("extracted_data", {}).keys()) if isinstance(result, dict) and isinstance(result.get("extracted_data"), dict) else "N/A"
+                logger.info(f"📊 [DOCUMENT_ROUTER] Extracted data keys: {extracted_keys}")
+            
             return result
             
         except ImportError as e:
-            logger.error(f"Error importing parser for {doc_type}: {e}")
+            logger.error(f"❌ [DOCUMENT_ROUTER] Error importing parser for {doc_type}: {e}")
+            import traceback
+            logger.error(f"❌ [DOCUMENT_ROUTER] Import error traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "error": f"Parser not available: {str(e)}",
                 "document_type": doc_type.value if isinstance(doc_type, DocumentType) else str(doc_type)
             }
         except Exception as e:
-            logger.error(f"Error routing document {s3_key}: {e}")
+            logger.error(f"❌ [DOCUMENT_ROUTER] Error routing document {s3_key}: {e}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"❌ [DOCUMENT_ROUTER] Routing error traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "error": f"Error parsing document: {str(e)}",

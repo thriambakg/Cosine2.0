@@ -47,14 +47,18 @@ class DocumentIndexer:
         Returns:
             Document ID (index key) or None if indexing failed
         """
+        logger.info(f"💾 [DOCUMENT_INDEXER] Starting indexing for user: {user_id}, s3_key: {s3_key}")
+        logger.info(f"📊 [DOCUMENT_INDEXER] Document type: {doc_info.get('type')}, confidence: {doc_info.get('confidence')}")
+        
         try:
             # Generate document ID
             s3_key_hash = hashlib.sha256(s3_key.encode()).hexdigest()[:16]
             document_id = f"{user_id}#{s3_key_hash}"
+            logger.info(f"🔑 [DOCUMENT_INDEXER] Generated document_id: {document_id}")
             
             # Check if already indexed
             if self._is_already_indexed(document_id):
-                logger.info(f"Document {s3_key} already indexed, skipping")
+                logger.info(f"ℹ️ [DOCUMENT_INDEXER] Document {s3_key} already indexed with ID: {document_id}, skipping")
                 return document_id
             
             # Prepare index item
@@ -77,19 +81,23 @@ class DocumentIndexer:
                 index_item["company_name"] = metadata["company_name"]
             
             # Store in DynamoDB
+            logger.info(f"💾 [DOCUMENT_INDEXER] Storing index item in table: {self.table_name}")
+            logger.info(f"📋 [DOCUMENT_INDEXER] Index item keys: {list(index_item.keys())}")
             table = self.dynamodb.Table(self.table_name)
             table.put_item(Item=index_item)
             
-            logger.info(f"✅ Indexed document {s3_key} as {document_id}")
+            logger.info(f"✅ [DOCUMENT_INDEXER] Successfully indexed document {s3_key} as {document_id}")
             return document_id
             
         except ClientError as e:
-            logger.error(f"Error indexing document {s3_key}: {e}")
+            logger.error(f"❌ [DOCUMENT_INDEXER] DynamoDB error indexing document {s3_key}: {e}")
+            import traceback
+            logger.error(f"❌ [DOCUMENT_INDEXER] ClientError traceback: {traceback.format_exc()}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error indexing document {s3_key}: {e}")
+            logger.error(f"❌ [DOCUMENT_INDEXER] Unexpected error indexing document {s3_key}: {e}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"❌ [DOCUMENT_INDEXER] Error traceback: {traceback.format_exc()}")
             return None
     
     def _is_already_indexed(self, document_id: str) -> bool:

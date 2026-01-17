@@ -95,14 +95,18 @@ class DocumentDetector:
                 - markers_found: List of markers that matched
                 - metadata: Additional detected metadata (form_type, cik, etc.)
         """
+        logger.info(f"🔍 [DOCUMENT_DETECTOR] Starting detection for s3_key: {s3_key}, filename: {filename}")
+        
         if filename is None:
             filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
+            logger.info(f"📝 [DOCUMENT_DETECTOR] Extracted filename: {filename}")
 
         # Convert content preview to string for pattern matching
         try:
             content_str = content_preview.decode('utf-8', errors='ignore')[:2048]  # First 2KB
+            logger.info(f"📄 [DOCUMENT_DETECTOR] Decoded content preview: {len(content_str)} characters")
         except Exception as e:
-            logger.warning(f"Error decoding content preview: {e}")
+            logger.warning(f"⚠️ [DOCUMENT_DETECTOR] Error decoding content preview: {e}")
             content_str = ""
 
         # Check filename pattern first (highest confidence)
@@ -114,7 +118,7 @@ class DocumentDetector:
             
             # Form type codes: 10-K = 10, 10-Q = 10 (Q), 8-K = 8
             # We'll use content markers to determine exact form type
-            logger.info(f"SEC filing pattern detected: CIK={cik}, Accession={accession}")
+            logger.info(f"✅ [DOCUMENT_DETECTOR] SEC filing pattern detected: CIK={cik}, Accession={accession}, FormCode={form_type_code}")
             
             # Still check content to determine exact form type
             form_type = self._detect_sec_form_type(content_str)
