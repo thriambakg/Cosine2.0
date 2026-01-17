@@ -158,8 +158,12 @@ const GovtContractsSearchPage: React.FC = () => {
   
   // Don't restore allSearchResults from saved state to avoid quota issues
   // Results will be re-fetched if needed based on searchParams and lastEvaluatedKey
-  const [allSearchResults, setAllSearchResults] = useState<GovtContractAward[]>([]);
-  const [currentResults, setCurrentResults] = useState<GovtContractAward[]>([]);
+  const [allSearchResults, setAllSearchResults] = useState<GovtContractAward[]>(() => {
+    return savedState?.allSearchResults || [];
+  });
+  const [currentResults, setCurrentResults] = useState<GovtContractAward[]>(() => {
+    return savedState?.currentResults || [];
+  });
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -218,6 +222,52 @@ const GovtContractsSearchPage: React.FC = () => {
     }
   );
   
+  // Helper to convert Sets to arrays for serialization
+  const convertSetsToArrays = (filters: {
+    award_types: Set<string>;
+    agencies: Set<string>;
+    recipients: Set<string>;
+    states: Set<string>;
+    countries: Set<string>;
+    naics: Set<string>;
+    psc: Set<string>;
+    cfda: Set<string>;
+    months: Set<number>;
+  }) => ({
+    award_types: Array.from(filters.award_types),
+    agencies: Array.from(filters.agencies),
+    recipients: Array.from(filters.recipients),
+    states: Array.from(filters.states),
+    countries: Array.from(filters.countries),
+    naics: Array.from(filters.naics),
+    psc: Array.from(filters.psc),
+    cfda: Array.from(filters.cfda),
+    months: Array.from(filters.months),
+  });
+
+  // Helper to convert arrays back to Sets for deserialization
+  const convertArraysToSets = (filters: {
+    award_types?: string[];
+    agencies?: string[];
+    recipients?: string[];
+    states?: string[];
+    countries?: string[];
+    naics?: string[];
+    psc?: string[];
+    cfda?: string[];
+    months?: number[];
+  }) => ({
+    award_types: new Set(filters.award_types || []),
+    agencies: new Set(filters.agencies || []),
+    recipients: new Set(filters.recipients || []),
+    states: new Set(filters.states || []),
+    countries: new Set(filters.countries || []),
+    naics: new Set(filters.naics || []),
+    psc: new Set(filters.psc || []),
+    cfda: new Set(filters.cfda || []),
+    months: new Set(filters.months || []),
+  });
+
   const [selectedFilters, setSelectedFilters] = useState<{
     award_types: Set<string>;
     agencies: Set<string>;
@@ -228,16 +278,22 @@ const GovtContractsSearchPage: React.FC = () => {
     psc: Set<string>;
     cfda: Set<string>;
     months: Set<number>;
-  }>({
-    award_types: new Set(),
-    agencies: new Set(),
-    recipients: new Set(),
-    states: new Set(),
-    countries: new Set(),
-    naics: new Set(),
-    psc: new Set(),
-    cfda: new Set(),
-    months: new Set(),
+  }>(() => {
+    const saved = savedState?.selectedFilters;
+    if (saved) {
+      return convertArraysToSets(saved);
+    }
+    return {
+      award_types: new Set(),
+      agencies: new Set(),
+      recipients: new Set(),
+      states: new Set(),
+      countries: new Set(),
+      naics: new Set(),
+      psc: new Set(),
+      cfda: new Set(),
+      months: new Set(),
+    };
   });
   
   const [isFiltered, setIsFiltered] = useState<boolean>(false);
@@ -806,12 +862,12 @@ const GovtContractsSearchPage: React.FC = () => {
   // Save state to sessionStorage
   useEffect(() => {
     try {
-      // Don't save allSearchResults to avoid quota exceeded errors
-      // Only save essential state - results will be re-fetched on page load if needed
+      // Save all state including results (compressed storage handles memory efficiently)
       const stateToSave = {
         searchParams,
-        // Only save result count, not full results
-        resultCount: allSearchResults.length,
+        allSearchResults, // Save actual results
+        currentResults, // Save filtered results
+        resultCount: allSearchResults.length, // Keep count for compatibility
         lastEvaluatedKey,
         hasMore,
         currentPage,
@@ -820,6 +876,7 @@ const GovtContractsSearchPage: React.FC = () => {
         visibleColumns,
         expandedFilters,
         searchSidebarVisible,
+        selectedFilters: convertSetsToArrays(selectedFilters), // Convert Sets to arrays for serialization
       };
       
       // Use compressed storage (automatically compresses if beneficial)
@@ -829,25 +886,42 @@ const GovtContractsSearchPage: React.FC = () => {
       if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
         console.warn('SessionStorage quota exceeded, saving minimal state only');
         try {
-          // Save only essential state (compressed)
+          // Save only essential state (compressed) - still try to save results if possible
           const minimalState = {
             searchParams,
+            allSearchResults, // Still try to save results even in minimal state
+            currentResults, // Still try to save filtered results
             resultCount: allSearchResults.length,
             lastEvaluatedKey,
             hasMore,
             currentPage,
             pageSize,
             visibleColumns,
+            selectedFilters: convertSetsToArrays(selectedFilters),
           };
           compressedSessionStorage.setItem(SESSION_STORAGE_KEY, minimalState);
         } catch (minimalError) {
           console.error('Failed to save even minimal state:', minimalError);
+          // Last resort: save only search params and pagination (no results)
+          try {
+            const fallbackState = {
+              searchParams,
+              lastEvaluatedKey,
+              hasMore,
+              currentPage,
+              pageSize,
+              visibleColumns,
+            };
+            compressedSessionStorage.setItem(SESSION_STORAGE_KEY, fallbackState);
+          } catch (fallbackError) {
+            console.error('Failed to save fallback state:', fallbackError);
+          }
         }
       } else {
         console.error('Error saving state to sessionStorage:', error);
       }
     }
-  }, [searchParams, allSearchResults.length, lastEvaluatedKey, hasMore, currentPage, pageSize, advancedSearchExpanded, visibleColumns, expandedFilters, searchSidebarVisible]);
+  }, [searchParams, allSearchResults, currentResults, lastEvaluatedKey, hasMore, currentPage, pageSize, advancedSearchExpanded, visibleColumns, expandedFilters, searchSidebarVisible, selectedFilters]);
 
   // Apply filters when they change
   useEffect(() => {
@@ -860,6 +934,42 @@ const GovtContractsSearchPage: React.FC = () => {
       computeFiltersFromResults(allSearchResults);
     }
   }, [allSearchResults, computeFiltersFromResults]);
+
+  // Clear state on logout
+  useEffect(() => {
+    const handleLogout = () => {
+      try {
+        compressedSessionStorage.removeItem(SESSION_STORAGE_KEY);
+        // Also try uncompressed fallback
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      } catch (error) {
+        console.error('Error clearing state on logout:', error);
+      }
+    };
+
+    // Listen for logout event from AuthContext
+    window.addEventListener('user-logout', handleLogout);
+
+    return () => {
+      window.removeEventListener('user-logout', handleLogout);
+    };
+  }, []);
+
+  // Clear state on tab close (beforeunload)
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Note: We don't clear state on tab close - we want state to persist across tab refreshes
+      // State is only cleared on logout or when explicitly cleared by the user
+      // If you want to clear on tab close, uncomment the line below:
+      // compressedSessionStorage.removeItem(SESSION_STORAGE_KEY);
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
 
   // Format currency (not rounded)
   const formatCurrency = (amount?: number) => {
