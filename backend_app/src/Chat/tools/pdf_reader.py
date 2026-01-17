@@ -55,24 +55,79 @@ class PDFReader:
     
     def read_pdf_from_s3(self, s3_key: str, page_number: Optional[int] = None) -> Dict[str, Any]:
         """
-        Read PDF file from S3 and extract text content
+        Read PDF, HTML, or TXT file from S3 and extract text content
+        Handles PDF files with PyPDF2, HTML/TXT files with text extraction
         
         Args:
-            s3_key: S3 key of the PDF file
-            page_number: Optional page number to read (1-indexed). If None, reads all pages.
+            s3_key: S3 key of the file
+            page_number: Optional page number to read (1-indexed, PDF only). If None, reads all pages.
             
         Returns:
             Dictionary with extracted text and metadata
         """
         try:
-            # Download PDF from S3
+            # Download file from S3
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
-            pdf_content = response['Body'].read()
+            file_content = response['Body'].read()
             
-            # If page_number is specified, extract only that page
+            # Detect file type from extension
+            filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
+            file_ext = filename.lower().split('.')[-1] if '.' in filename else ''
+            is_pdf = file_ext == 'pdf'
+            is_html = file_ext in ['htm', 'html']
+            is_txt = file_ext == 'txt' or file_ext == 'xml'
+            
+            logger.info(f"📄 [PDF_READER] Reading file: {filename}, type: {file_ext}, size: {len(file_content):,} bytes")
+            
+            # Handle HTML/TXT files (not PDFs)
+            if is_html or is_txt:
+                logger.info(f"📄 [PDF_READER] Detected HTML/TXT file, using text extraction instead of PDF parsing")
+                try:
+                    # Decode HTML/TXT content
+                    text_content = file_content.decode('utf-8', errors='ignore')
+                    
+                    # Extract text from HTML if needed
+                    if is_html:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(text_content, 'html.parser')
+                        # Remove script and style elements
+                        for script in soup(["script", "style"]):
+                            script.decompose()
+                        text_content = soup.get_text()
+                        # Clean up whitespace
+                        lines = (line.strip() for line in text_content.splitlines())
+                        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                        text_content = ' '.join(chunk for chunk in chunks if chunk)
+                    
+                    # Analyze the content
+                    analysis = self._analyze_pdf_content(text_content)
+                    
+                    return {
+                        "success": True,
+                        "s3_key": s3_key,
+                        "text_content": text_content,
+                        "analysis": analysis,
+                        "file_size": len(file_content),
+                        "text_length": len(text_content),
+                        "file_type": file_ext,
+                        "is_partial": False
+                    }
+                except Exception as html_err:
+                    logger.error(f"Error extracting text from HTML/TXT: {html_err}")
+                    return {
+                        "success": False,
+                        "error": f"Failed to extract text from HTML/TXT file: {str(html_err)}",
+                        "s3_key": s3_key
+                    }
+            
+            # Handle PDF files
+            if not is_pdf:
+                logger.warning(f"📄 [PDF_READER] Unknown file type ({file_ext}), attempting PDF parsing anyway")
+            
+            # If page_number is specified, extract only that page (PDF only)
             if page_number is not None:
-                text_content = self._extract_text_from_pdf_page(pdf_content, page_number)
-                total_pages = self._get_pdf_page_count(pdf_content)
+                text_content = self._extract_text_from_pdf_page(file_content, page_number)
+                total_pages = self._get_pdf_page_count(file_content)
                 
                 return {
                     "success": True,
@@ -80,13 +135,13 @@ class PDFReader:
                     "text_content": text_content,
                     "page_number": page_number,
                     "total_pages": total_pages,
-                    "file_size": len(pdf_content),
+                    "file_size": len(file_content),
                     "text_length": len(text_content),
                     "is_partial": True
                 }
             
             # For full document reading, use PyPDF2 only (Textract removed)
-            text_content = self._extract_text_from_pdf(pdf_content)
+            text_content = self._extract_text_from_pdf(file_content)
             
             # Analyze the content
             analysis = self._analyze_pdf_content(text_content)
@@ -96,16 +151,18 @@ class PDFReader:
                 "s3_key": s3_key,
                 "text_content": text_content,
                 "analysis": analysis,
-                "file_size": len(pdf_content),
+                "file_size": len(file_content),
                 "text_length": len(text_content),
                 "is_partial": False
             }
             
         except Exception as e:
-            logger.error(f"Error reading PDF from S3: {str(e)}")
+            logger.error(f"Error reading file from S3: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {
                 "success": False,
-                "error": f"Failed to read PDF: {str(e)}",
+                "error": f"Failed to read file: {str(e)}",
                 "s3_key": s3_key
             }
     
@@ -349,15 +406,16 @@ pdf_reader = PDFReader()
 @tool
 def read_pdf_tool(s3_key: str, page_number: Optional[int] = None) -> str:
     """
-    Tool function to read and analyze PDF files from S3
+    Tool function to read and analyze PDF, HTML, or TXT files from S3
+    Handles PDF files with PyPDF2, HTML/TXT files with text extraction
     
     Args:
-        s3_key: S3 key of the PDF file to read (e.g., 'users/user_id/filesys/file_id.pdf')
-        page_number: Optional page number to read (1-indexed). If None, reads all pages.
+        s3_key: S3 key of the file to read (PDF, HTML, or TXT)
+        page_number: Optional page number to read (1-indexed, PDF only). If None, reads all pages.
                     Use page_number for large PDFs to manage memory and avoid token limits.
         
     Returns:
-        String with PDF content and analysis
+        String with file content and analysis
     """
     try:
         if not s3_key:
@@ -382,8 +440,9 @@ def read_pdf_tool(s3_key: str, page_number: Optional[int] = None) -> str:
             return "\n".join(response_parts)
         
         # Format response for AI (full document)
+        file_type = result.get('file_type', 'pdf').upper()
         response_parts = [
-            f"PDF Analysis for: {result['s3_key']}",
+            f"{file_type} Analysis for: {result['s3_key']}",
             f"File Size: {result['file_size']:,} bytes",
             f"Text Length: {result['text_length']:,} characters",
             "",
@@ -423,10 +482,11 @@ def read_pdf_tool(s3_key: str, page_number: Optional[int] = None) -> str:
 @tool
 def analyze_pdf_content_tool(s3_key: str, analysis_type: str = "summary") -> str:
     """
-    Tool function to perform specific analysis on PDF content
+    Tool function to perform specific analysis on PDF, HTML, or TXT content
+    Handles PDF files with PyPDF2, HTML/TXT files with text extraction
     
     Args:
-        s3_key: S3 key of the PDF file to analyze
+        s3_key: S3 key of the file to analyze (PDF, HTML, or TXT)
         analysis_type: Type of analysis ('summary', 'financial', 'legal', 'technical')
         
     Returns:
@@ -436,11 +496,11 @@ def analyze_pdf_content_tool(s3_key: str, analysis_type: str = "summary") -> str
         if not s3_key:
             return "Error: s3_key parameter is required"
         
-        # Read PDF from S3
+        # Read file from S3 (handles PDF, HTML, TXT)
         result = pdf_reader.read_pdf_from_s3(s3_key)
         
         if not result["success"]:
-            return f"Error reading PDF: {result['error']}"
+            return f"Error reading file: {result['error']}"
         
         text_content = result["text_content"]
         
@@ -461,7 +521,7 @@ def analyze_pdf_content_tool(s3_key: str, analysis_type: str = "summary") -> str
 @tool
 def analyze_pdf_forms_tool(s3_key: str) -> str:
     """
-    Tool function to analyze PDF forms using Amazon Textract
+    Tool function to analyze PDF forms using PyPDF2 (Textract removed)
     
     Args:
         s3_key: S3 key of the PDF file to analyze
@@ -473,29 +533,27 @@ def analyze_pdf_forms_tool(s3_key: str) -> str:
         if not s3_key:
             return "Error: s3_key parameter is required"
         
-        # Use Textract for form analysis
-        result = pdf_reader._analyze_forms_with_textract(s3_key)
+        # Use PyPDF2 for form analysis (Textract removed)
+        result = pdf_reader._analyze_forms_with_pypdf(s3_key)
         
         if not result["success"]:
             return f"Error analyzing forms: {result['error']}"
         
-        # Format response for AI
+        # Format response for AI (PyPDF2 method returns: form_count, forms, text_length, method)
         response_parts = [
             f"Form Analysis for: {s3_key}",
-            f"Forms detected: {result['form_count']}",
-            f"Tables detected: {result['table_count']}",
-            f"Key-value pairs: {result['key_value_pairs']}"
+            f"Forms detected: {result.get('form_count', 0)}",
+            f"Method: {result.get('method', 'pypdf2')}",
+            f"Text length: {result.get('text_length', 0):,} characters"
         ]
         
         if result.get('forms'):
             response_parts.append("\nForm Fields Found:")
             for form in result['forms'][:10]:  # Limit to first 10 forms
-                response_parts.append(f"- {form['key']}: {form['value']}")
+                if isinstance(form, dict) and 'key' in form and 'value' in form:
+                    response_parts.append(f"- {form['key']}: {form['value']}")
         
-        if result.get('tables'):
-            response_parts.append(f"\nTables Found: {len(result['tables'])}")
-            for i, table in enumerate(result['tables'][:3]):  # Limit to first 3 tables
-                response_parts.append(f"Table {i+1}: {table['rows']} rows, {table['columns']} columns")
+        # Note: Table detection not available with PyPDF2-only method
         
         return "\n".join(response_parts)
         
