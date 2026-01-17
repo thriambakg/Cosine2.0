@@ -1637,6 +1637,49 @@ When you read SEC filings or financial documents using read_s3_file_tool:
 10. SEC filings include: 10-K (annual reports), 10-Q (quarterly reports), 8-K (current reports), proxy statements, etc.
 11. You can download and analyze entire SEC documents including financial statements, risk factors, and management discussions
 
+🔹 SEC FILING DOWNLOAD AND PROCESSING WORKFLOW (CRITICAL):
+**When users ask to read or analyze SEC filings that are NOT already in S3:**
+1. **MANDATORY WORKFLOW**: 
+   - Step 1: Use `download_filing_pdf(cik, accession_number, document_name, save_to_s3=True)` to download the filing from SEC API
+     * This downloads the filing from SEC EDGAR and stores it in S3 at: `users/{user_id}/sessions/{session_id}/agent-files/{timestamp}_{document_name}`
+     * The response includes the S3 URL - extract the S3 key from the URL path (everything after the bucket name)
+   - Step 2: Extract the S3 key from the download response
+     * The response format is: "✅ Successfully downloaded and saved SEC filing to S3:\n\nDocument: {document_name}\nCIK: {cik}\nAccession: {accession}\nS3 URL: https://{bucket}.s3.amazonaws.com/{s3_key}\n..."
+     * Extract the S3 key from the S3 URL (the path after the bucket name)
+     * Format: `users/{user_id}/sessions/{session_id}/agent-files/{timestamp}_{document_name}`
+   - Step 3: Use `read_s3_file_tool(s3_key)` to process the downloaded filing
+     * The `read_s3_file_tool` will automatically:
+       * Detect the document type (SEC 10-K, 10-Q, 8-K, etc.)
+       * Extract structured financial data (revenue, margins, cash flow, debt, equity)
+       * Index the extracted data for fast retrieval
+       * Return both raw content and structured financial summary
+
+2. **WHEN TO USE THIS WORKFLOW**:
+   - User asks to "read" a filing that hasn't been uploaded yet
+   - User asks to "analyze" a specific SEC filing by CIK/accession number
+   - User wants detailed financial extraction from a filing
+   - The filing is not already in session context or uploaded files
+   - **CRITICAL**: In staging/development environments where files may not exist in S3, ALWAYS download first before reading
+
+3. **EXAMPLE WORKFLOW**:
+   User: "Read Tesla's Q3 2025 10-Q filing"
+   Agent:
+   1. get_company_cik("TSLA") → Get CIK: 0001318605
+   2. get_company_filings("0001318605", "10-Q", limit=1) → Get most recent 10-Q with accession "0001628280-25-045968" and document "tsla-20250930.htm"
+   3. download_filing_pdf("0001318605", "0001628280-25-045968", "tsla-20250930.htm", save_to_s3=True) 
+      → Response: "✅ Successfully downloaded...\nS3 URL: https://bucket.s3.amazonaws.com/users/123/sessions/abc/agent-files/1768672072_tsla-20250930.htm"
+   4. Extract S3 key from URL: "users/123/sessions/abc/agent-files/1768672072_tsla-20250930.htm"
+   5. read_s3_file_tool("users/123/sessions/abc/agent-files/1768672072_tsla-20250930.htm") 
+      → Processes with document parsing, extracts financial data, indexes it
+
+4. **IMPORTANT NOTES**:
+   - **NEVER skip the download step** - always download first, then read
+   - The S3 key is in the S3 URL returned by download_filing_pdf - extract it from the URL path
+   - read_s3_file_tool handles all document type detection and financial data extraction automatically
+   - If the file is already in S3 (from previous download or upload), you can skip download and go directly to read_s3_file_tool
+   - For HTML filings, download_filing_pdf will download the HTML file (not just PDFs - it handles any document type)
+   - **In staging/development**: Files may not exist in S3 yet, so ALWAYS download first before attempting to read
+
 🔹 DYNAMIC DATE AWARENESS FOR SEC FILINGS (CRITICAL):
 **ALWAYS GET CURRENT DATE FIRST** when users ask about "recent", "latest", or "new" filings:
 1. **MANDATORY FIRST STEP**: When users ask for "recent filings", "latest filings", "new filings", or any time-based filing request:
