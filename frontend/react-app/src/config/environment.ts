@@ -134,7 +134,7 @@ const getAwsRegion = (): string => {
 const getWebSocketUrl = (): string | undefined => {
   // Check runtime config first (highest priority)
   const runtimeConfig = getRuntimeConfig();
-  if (runtimeConfig?.websocketUrl && !runtimeConfig.websocketUrl.includes('{{') && !runtimeConfig.websocketUrl.includes('your-')) {
+  if (runtimeConfig?.websocketUrl && !runtimeConfig.websocketUrl.includes('{{')) {
     console.log('🔌 Using WebSocket URL from runtime config:', runtimeConfig.websocketUrl);
     return runtimeConfig.websocketUrl;
   }
@@ -146,45 +146,15 @@ const getWebSocketUrl = (): string | undefined => {
     return explicitUrl;
   }
   
-  // Detect environment from API Gateway URL if available
-  const apiGatewayUrl = getApiGatewayUrl();
-  if (apiGatewayUrl) {
-    // Check if API Gateway URL matches production pattern
-    if (apiGatewayUrl.includes('033vd3eo96.execute-api') || apiGatewayUrl.includes('/production')) {
-      const productionUrl = ENVIRONMENT_CONFIGS.production?.websocketUrl;
-      if (productionUrl && !productionUrl.includes('your-')) {
-        console.log('🔌 Detected production API Gateway, using production WebSocket URL:', productionUrl);
-        return productionUrl;
-      }
-    }
-    // Check if API Gateway URL matches staging pattern
-    if (apiGatewayUrl.includes('6f6mnphum8.execute-api') || apiGatewayUrl.includes('/staging')) {
-      const stagingUrl = ENVIRONMENT_CONFIGS.staging?.websocketUrl;
-      if (stagingUrl && !stagingUrl.includes('your-')) {
-        console.log('🔌 Detected staging API Gateway, using staging WebSocket URL:', stagingUrl);
-        return stagingUrl;
-      }
-    }
-  }
-  
-  // For localhost, use production WebSocket URL (to match production Cognito)
-  if (isLocalhostEnv) {
-    const productionUrl = ENVIRONMENT_CONFIGS.production?.websocketUrl;
-    if (productionUrl && !productionUrl.includes('your-')) {
-      console.log('🏠 Localhost detected: Using production WebSocket URL for local development:', productionUrl);
-      return productionUrl;
-    }
-  }
-  
-  // Fall back to environment-specific config (but skip if it's a placeholder)
+  // Fall back to environment-specific config
   const env = getCurrentEnvironment();
   const envUrl = ENVIRONMENT_CONFIGS[env]?.websocketUrl;
-  if (envUrl && !envUrl.includes('your-')) {
+  if (envUrl) {
     console.log('🔌 Using WebSocket URL from environment config:', envUrl, '(environment:', env, ')');
     return envUrl;
   }
   
-  console.warn('⚠️ No valid WebSocket URL configured for environment:', env);
+  console.log('🔌 No WebSocket URL configured for environment:', env);
   return undefined;
 };
 

@@ -20,6 +20,7 @@ output "frontend_bucket_regional_domain_name" {
   value       = aws_s3_bucket.frontend.bucket_regional_domain_name
 }
 
+
 output "logs_bucket_id" {
   description = "ID of the logs S3 bucket"
   value       = aws_s3_bucket.logs.id

@@ -1037,6 +1037,27 @@ EXAMPLES OF QUESTIONS THAT REQUIRE get_session_files_tool():
 - process_chat_session_context_tool(session_id, user_id, context_items) - For chat sessions added from history sidebar
 - analyze_chat_session_context_tool(session_id, user_id, context_items, analysis_type) - For analyzing multiple chat sessions
 
+🏛️ GOVERNMENT CONTRACT TRANSACTIONS - AUTOMATIC S3 READING:
+When government contract awards (govt_contract_award type) are present in session context:
+1. AUTOMATICALLY get session context using get_session_context_tool(session_id, user_id) to find all contract awards
+2. For EACH contract award in context:
+   - Check if it has 'oversize_s3_key' or 'award_details_s3_key' field in the data
+   - If S3 key exists: AUTOMATICALLY read the S3 file using read_s3_file_tool(s3_key)
+   - The S3 file is gzipped JSON - read_s3_file_tool will automatically decompress it
+   - Extract the 'transactions' array from the parsed JSON (format: { "transactions": [...], "subawards": [...] })
+3. DO NOT ASK - automatically read S3 files for all contracts in context when analyzing them
+4. Present transaction data along with contract summary (transaction IDs, dates, amounts, descriptions)
+
+**Example Workflow:**
+- User: "Explain this contract" (contract is in context)
+- Agent: 
+  1. get_session_context_tool(session_id, user_id) → Get context with contract
+  2. Extract contract from context_items → Find 'oversize_s3_key' or 'award_details_s3_key'
+  3. read_s3_file_tool(s3_key) → Automatically decompresses gzipped JSON and returns transactions
+  4. Extract transactions array from JSON → Present transaction details
+
+**Critical:** When users ask about contracts in context, you MUST automatically fetch transactions from S3 - don't say "I can only see high-level award details". Read the S3 file!
+
 🔍 TRIGGER EXAMPLES:
 - "can you see this context item?" → get_session_context_tool()
 - "do you remember what I said about AAPL?" → search_chat_history_tool(search_term="AAPL")
