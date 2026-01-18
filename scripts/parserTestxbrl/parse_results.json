@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "company_name": "Tesla, Inc.",
+    "cik": "0001318605",
+    "form_type": "10-Q",
+    "period_end": "2025-09-30",
+    "accession": "0001628280-25-045968"
+  },
+  "financials": {
+    "revenue": 20359.0,
+    "cost_of_revenue": 17365.0,
+    "gross_profit": 5054.0,
+    "operating_income": 1624.0,
+    "net_income": 16.0,
+    "operating_cash_flow": 10934.0,
+    "investing_cash_flow": 8950.0,
+    "financing_cash_flow": 429.0,
+    "cash": 18289.0,
+    "total_assets": 64653.0,
+    "current_debt": 1.0,
+    "long_term_debt": 2.0,
+    "total_debt": 3.0
+  },
+  "metrics": {
+    "gross_margin": 0.24824401984380373,
+    "net_margin": 0.0007858932167591729,
+    "operating_margin": 0.07976816150105605
+  },
+  "facts_count": 1017,
+  "tags_count": 203
+}

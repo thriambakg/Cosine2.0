@@ -1,0 +1,99 @@
+{
+  "financials": {
+    "revenue": 71983.0,
+    "revenue_tag": "us-gaap:Revenues",
+    "cost_of_revenue": 58712.0,
+    "net_income": 1373.0,
+    "operating_cash_flow": 10934.0,
+    "investing_cash_flow": 8950.0,
+    "long_term_debt": 5609.0,
+    "cash": 18289.0,
+    "gross_profit": 13271.0,
+    "gross_margin": 0.18436297459122292,
+    "net_margin": 0.01907394801550366
+  },
+  "facts_count": 1017,
+  "tags_count": 203,
+  "top_tags": [
+    {
+      "tag": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+      "count": 60
+    },
+    {
+      "tag": "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+      "count": 59
+    },
+    {
+      "tag": "us-gaap:AvailableForSaleSecuritiesDebtSecurities",
+      "count": 54
+    },
+    {
+      "tag": "us-gaap:CostOfRevenue",
+      "count": 32
+    },
+    {
+      "tag": "us-gaap:Revenues",
+      "count": 24
+    },
+    {
+      "tag": "us-gaap:DebtInstrumentInterestRateStatedPercentage",
+      "count": 20
+    },
+    {
+      "tag": "us-gaap:AllocatedShareBasedCompensationExpense",
+      "count": 18
+    },
+    {
+      "tag": "tsla:NetIncomeLossIncludingPortionAttributableToRedeemableNonControllingInterestAndNonControllingInterestInSubsidiaries",
+      "count": 16
+    },
+    {
+      "tag": "us-gaap:PropertyPlantAndEquipmentGross",
+      "count": 16
+    },
+    {
+      "tag": "us-gaap:LongTermDebt",
+      "count": 16
+    },
+    {
+      "tag": "us-gaap:DebtInstrumentCarryingAmount",
+      "count": 16
+    },
+    {
+      "tag": "us-gaap:NetIncomeLoss",
+      "count": 14
+    },
+    {
+      "tag": "us-gaap:AvailableForSaleDebtSecuritiesAmortizedCostBasis",
+      "count": 14
+    },
+    {
+      "tag": "us-gaap:DebtCurrent",
+      "count": 14
+    },
+    {
+      "tag": "us-gaap:GrossProfit",
+      "count": 12
+    },
+    {
+      "tag": "tsla:StockIssuedDuringPeriodValueEquityIncentiveAwards",
+      "count": 12
+    },
+    {
+      "tag": "us-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue",
+      "count": 12
+    },
+    {
+      "tag": "us-gaap:OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent",
+      "count": 12
+    },
+    {
+      "tag": "us-gaap:InventoryNet",
+      "count": 10
+    },
+    {
+      "tag": "us-gaap:OtherNonoperatingIncomeExpense",
+      "count": 10
+    }
+  ]
+}

@@ -1,12 +1,19 @@
 """
 SEC Filing Parser for extracting comprehensive financial data from SEC filings
 Supports 10-K (annual), 10-Q (quarterly), 8-K (current), and Form 4 (insider trading)
+
+Uses deterministic iXBRL extraction for inline XBRL documents:
+- Extracts facts from ix:nonFraction tags using BeautifulSoup + lxml
+- Indexes facts by tag name
+- Pulls key financials using tag pattern matching
+- Falls back to regex pattern matching for non-iXBRL documents
 """
 
 import re
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from collections import defaultdict
 from bs4 import BeautifulSoup
 from base_parser import BaseParser
 
@@ -22,7 +29,8 @@ class SECFilingParser(BaseParser):
     def parse(self, s3_key: str, content: bytes, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Parse SEC filing and extract comprehensive financial data
-        Handles large HTML/TXT files with chunking support
+        Uses deterministic iXBRL extraction for inline XBRL documents
+        Falls back to regex pattern matching for non-iXBRL documents
         
         Args:
             s3_key: S3 key of the filing
@@ -40,80 +48,20 @@ class SECFilingParser(BaseParser):
             text_content = self.decode_content(content)
             logger.info(f"📄 [SEC_PARSER] Decoded content: {len(text_content):,} characters")
             
-            # Determine if XML or HTML/TXT
-            is_xml = '<SEC-DOCUMENT>' in text_content[:1000] or text_content.strip().startswith('<?xml')
-            is_html = '<html' in text_content[:1000].lower() or '<body' in text_content[:1000].lower()
-            
-            logger.info(f"📄 [SEC_PARSER] File type detection - XML: {is_xml}, HTML: {is_html}")
-            
-            # For large files, use chunked extraction
-            # Threshold: 100KB for chunking (SEC filings can be 10MB+)
-            use_chunking = len(text_content) > 100000
-            chunks_processed = 1  # Default to 1 for non-chunked processing
-            
-            if use_chunking:
-                logger.info(f"📄 [SEC_PARSER] Large file detected ({len(text_content):,} chars), using chunked extraction")
-                if is_xml:
-                    # XML files - process in chunks but maintain structure
-                    chunks = self.chunk_content(text_content, chunk_size=50000)
-                    chunks_processed = len(chunks)
-                    logger.info(f"📄 [SEC_PARSER] Processing {chunks_processed} XML chunks")
-                    chunk_texts = []
-                    for i, chunk in enumerate(chunks):
-                        logger.info(f"📄 [SEC_PARSER] Processing XML chunk {i+1}/{chunks_processed}")
-                        chunk_texts.append(self.extract_xml_content(chunk))
-                    cleaned_content = '\n\n'.join(chunk_texts)
-                elif is_html:
-                    # HTML files - use chunked HTML extraction
-                    cleaned_content = self.extract_html_content_chunked(text_content, chunk_size=50000)
-                    # Count chunks from the method
-                    chunks_processed = (len(text_content) // 50000) + 1
-                else:
-                    # Plain text (TXT files) - chunk it
-                    chunks = self.chunk_content(text_content, chunk_size=50000)
-                    chunks_processed = len(chunks)
-                    logger.info(f"📄 [SEC_PARSER] Processing {chunks_processed} text chunks")
-                    cleaned_content = '\n\n'.join(chunks)
-            else:
-                # Small file - process normally
-                if is_xml:
-                    cleaned_content = self.extract_xml_content(text_content)
-                else:
-                    cleaned_content = self.extract_html_content(text_content)
-            
-            # Extract metadata
+            # Extract metadata first
             extracted_metadata = self._extract_metadata(text_content, metadata)
             
-            # Extract financial statements
-            income_statement = self._extract_income_statement(text_content, cleaned_content)
-            balance_sheet = self._extract_balance_sheet(text_content, cleaned_content)
-            cash_flow = self._extract_cash_flow(text_content, cleaned_content)
+            # Check if document contains iXBRL tags (deterministic extraction)
+            has_ixbrl = 'ix:nonFraction' in text_content or 'ix:nonfraction' in text_content.lower()
             
-            # Calculate metrics
-            metrics = self._calculate_metrics(income_statement, balance_sheet, cash_flow)
-            
-            result = {
-                "success": True,
-                "document_type": "sec_filing",
-                "metadata": extracted_metadata,
-                "income_statement": income_statement,
-                "balance_sheet": balance_sheet,
-                "cash_flow": cash_flow,
-                "metrics": metrics,
-                "raw_content_length": len(text_content),
-                "processing_info": {
-                    "file_size_bytes": len(content),
-                    "text_length_chars": len(text_content),
-                    "chunked": use_chunking,
-                    "chunks_processed": chunks_processed if use_chunking else 1,
-                    "file_type": "xml" if is_xml else ("html" if is_html else "txt")
-                }
-            }
-            
-            if use_chunking:
-                logger.info(f"✅ [SEC_PARSER] Successfully parsed large file using {chunks_processed} chunks")
-            
-            return result
+            if has_ixbrl:
+                logger.info(f"📄 [SEC_PARSER] iXBRL tags detected - using deterministic extraction")
+                # Use deterministic iXBRL extraction
+                return self._parse_ixbrl_deterministic(s3_key, content, text_content, extracted_metadata)
+            else:
+                logger.info(f"📄 [SEC_PARSER] No iXBRL tags detected - using regex pattern matching")
+                # Fall back to regex-based extraction
+                return self._parse_regex_based(s3_key, content, text_content, extracted_metadata)
             
         except Exception as e:
             logger.error(f"Error parsing SEC filing {s3_key}: {e}")
@@ -124,6 +72,244 @@ class SECFilingParser(BaseParser):
                 "error": str(e),
                 "document_type": "sec_filing"
             }
+    
+    def _parse_ixbrl_deterministic(self, s3_key: str, content: bytes, text_content: str, 
+                                    metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Deterministic extraction from iXBRL documents
+        Extracts facts from ix:nonFraction tags using BeautifulSoup + lxml
+        """
+        try:
+            # Parse with BeautifulSoup using lxml parser
+            soup = BeautifulSoup(text_content, 'lxml')
+            
+            # Extract all numeric XBRL facts from ix:nonFraction tags
+            facts = []
+            for tag in soup.find_all("ix:nonfraction"):
+                name = tag.get("name")
+                context = tag.get("contextref") or tag.get("contextRef", "")
+                unit = tag.get("unitref") or tag.get("unitRef", "")
+                value_str = tag.text.strip().replace(",", "")
+                
+                try:
+                    value = float(value_str)
+                    facts.append({
+                        "tag": name,
+                        "context": context,
+                        "unit": unit,
+                        "value": value
+                    })
+                except (ValueError, AttributeError):
+                    continue
+            
+            logger.info(f"📄 [SEC_PARSER] Extracted {len(facts):,} numeric facts from iXBRL tags")
+            
+            # Index facts by tag name
+            by_tag = defaultdict(list)
+            for fact in facts:
+                by_tag[fact["tag"]].append(fact)
+            
+            logger.info(f"📄 [SEC_PARSER] Indexed {len(by_tag)} unique XBRL tags")
+            
+            # Helper to get latest fact by tag pattern
+            def latest(tag_pattern):
+                """Get the latest (first) fact matching tag pattern"""
+                for tag in by_tag:
+                    if tag_pattern.lower() in tag.lower():
+                        # Return the first fact's value (usually latest period)
+                        return by_tag[tag][0]["value"]
+                return None
+            
+            # Extract income statement
+            income_statement = {}
+            revenue = (
+                latest("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax") or
+                latest("us-gaap:Revenues") or
+                latest("Revenue")
+            )
+            if revenue:
+                income_statement["revenue"] = {"value": revenue, "unit": "USD"}
+            
+            cost_of_revenue = latest("us-gaap:CostOfRevenue") or latest("CostOfRevenue")
+            if cost_of_revenue:
+                income_statement["cost_of_goods_sold"] = {"value": cost_of_revenue, "unit": "USD"}
+            
+            gross_profit = latest("us-gaap:GrossProfit") or latest("GrossProfit")
+            if gross_profit:
+                income_statement["gross_profit"] = {"value": gross_profit, "unit": "USD"}
+            elif revenue and cost_of_revenue:
+                income_statement["gross_profit"] = {"value": revenue - cost_of_revenue, "unit": "USD", "calculated": True}
+            
+            operating_income = latest("us-gaap:OperatingIncomeLoss") or latest("OperatingIncome")
+            if operating_income:
+                income_statement["operating_income"] = {"value": operating_income, "unit": "USD"}
+            
+            net_income = (
+                latest("us-gaap:NetIncomeLoss") or
+                latest("us-gaap:ProfitLoss") or
+                latest("NetIncome")
+            )
+            if net_income:
+                income_statement["net_income"] = {"value": net_income, "unit": "USD"}
+            
+            # Extract balance sheet
+            balance_sheet = {}
+            cash = (
+                latest("us-gaap:CashAndCashEquivalentsAtCarryingValue") or
+                latest("us-gaap:Cash") or
+                latest("CashAndCashEquivalents")
+            )
+            if cash:
+                balance_sheet["cash"] = {"value": cash, "unit": "USD"}
+            
+            total_assets = (
+                latest("us-gaap:Assets") or
+                latest("us-gaap:AssetsTotal") or
+                latest("TotalAssets")
+            )
+            if total_assets:
+                balance_sheet["total_assets"] = {"value": total_assets, "unit": "USD"}
+            
+            current_debt = latest("us-gaap:DebtCurrent") or latest("CurrentDebt")
+            if current_debt:
+                balance_sheet["current_debt"] = {"value": current_debt, "unit": "USD"}
+            
+            long_term_debt = (
+                latest("us-gaap:LongTermDebtNoncurrent") or
+                latest("us-gaap:LongTermDebt") or
+                latest("LongTermDebt")
+            )
+            if long_term_debt:
+                balance_sheet["total_debt"] = {"value": long_term_debt, "unit": "USD"}
+                if current_debt:
+                    balance_sheet["total_debt"]["value"] = current_debt + long_term_debt
+            
+            # Extract cash flow
+            cash_flow = {}
+            operating_cf = (
+                latest("us-gaap:NetCashProvidedByUsedInOperatingActivities") or
+                latest("OperatingCashFlow")
+            )
+            if operating_cf:
+                cash_flow["operating_cash_flow"] = {"value": operating_cf, "unit": "USD"}
+            
+            investing_cf = (
+                latest("us-gaap:NetCashProvidedByUsedInInvestingActivities") or
+                latest("InvestingCashFlow")
+            )
+            if investing_cf:
+                cash_flow["investing_cash_flow"] = {"value": investing_cf, "unit": "USD"}
+            
+            financing_cf = (
+                latest("us-gaap:NetCashProvidedByUsedInFinancingActivities") or
+                latest("FinancingCashFlow")
+            )
+            if financing_cf:
+                cash_flow["financing_cash_flow"] = {"value": financing_cf, "unit": "USD"}
+            
+            # Calculate metrics
+            metrics = self._calculate_metrics(income_statement, balance_sheet, cash_flow)
+            
+            result = {
+                "success": True,
+                "document_type": "sec_filing",
+                "metadata": metadata,
+                "income_statement": income_statement,
+                "balance_sheet": balance_sheet,
+                "cash_flow": cash_flow,
+                "metrics": metrics,
+                "raw_content_length": len(text_content),
+                "processing_info": {
+                    "file_size_bytes": len(content),
+                    "text_length_chars": len(text_content),
+                    "extraction_method": "ixbrl_deterministic",
+                    "facts_count": len(facts),
+                    "tags_count": len(by_tag)
+                }
+            }
+            
+            logger.info(f"✅ [SEC_PARSER] Successfully extracted financials using iXBRL deterministic method")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in iXBRL deterministic extraction: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Fall back to regex-based extraction
+            return self._parse_regex_based(s3_key, content, text_content, metadata)
+    
+    def _parse_regex_based(self, s3_key: str, content: bytes, text_content: str,
+                           metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Regex-based extraction for non-iXBRL documents (fallback method)
+        Original regex pattern matching approach
+        """
+        # Determine if XML or HTML/TXT
+        is_xml = '<SEC-DOCUMENT>' in text_content[:1000] or text_content.strip().startswith('<?xml')
+        is_html = '<html' in text_content[:1000].lower() or '<body' in text_content[:1000].lower()
+        
+        logger.info(f"📄 [SEC_PARSER] File type detection - XML: {is_xml}, HTML: {is_html}")
+        
+        # For large files, use chunked extraction
+        use_chunking = len(text_content) > 100000
+        chunks_processed = 1
+        
+        if use_chunking:
+            logger.info(f"📄 [SEC_PARSER] Large file detected ({len(text_content):,} chars), using chunked extraction")
+            if is_xml:
+                chunks = self.chunk_content(text_content, chunk_size=50000)
+                chunks_processed = len(chunks)
+                logger.info(f"📄 [SEC_PARSER] Processing {chunks_processed} XML chunks")
+                chunk_texts = []
+                for i, chunk in enumerate(chunks):
+                    logger.info(f"📄 [SEC_PARSER] Processing XML chunk {i+1}/{chunks_processed}")
+                    chunk_texts.append(self.extract_xml_content(chunk))
+                cleaned_content = '\n\n'.join(chunk_texts)
+            elif is_html:
+                cleaned_content = self.extract_html_content_chunked(text_content, chunk_size=50000)
+                chunks_processed = (len(text_content) // 50000) + 1
+            else:
+                chunks = self.chunk_content(text_content, chunk_size=50000)
+                chunks_processed = len(chunks)
+                logger.info(f"📄 [SEC_PARSER] Processing {chunks_processed} text chunks")
+                cleaned_content = '\n\n'.join(chunks)
+        else:
+            if is_xml:
+                cleaned_content = self.extract_xml_content(text_content)
+            else:
+                cleaned_content = self.extract_html_content(text_content)
+        
+        # Extract financial statements using regex
+        income_statement = self._extract_income_statement(text_content, cleaned_content)
+        balance_sheet = self._extract_balance_sheet(text_content, cleaned_content)
+        cash_flow = self._extract_cash_flow(text_content, cleaned_content)
+        
+        # Calculate metrics
+        metrics = self._calculate_metrics(income_statement, balance_sheet, cash_flow)
+        
+        result = {
+            "success": True,
+            "document_type": "sec_filing",
+            "metadata": metadata,
+            "income_statement": income_statement,
+            "balance_sheet": balance_sheet,
+            "cash_flow": cash_flow,
+            "metrics": metrics,
+            "raw_content_length": len(text_content),
+            "processing_info": {
+                "file_size_bytes": len(content),
+                "text_length_chars": len(text_content),
+                "chunked": use_chunking,
+                "chunks_processed": chunks_processed if use_chunking else 1,
+                "file_type": "xml" if is_xml else ("html" if is_html else "txt"),
+                "extraction_method": "regex_pattern_matching"
+            }
+        }
+        
+        if use_chunking:
+            logger.info(f"✅ [SEC_PARSER] Successfully parsed large file using {chunks_processed} chunks")
+        
+        return result
     
     def _extract_metadata(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Extract metadata from SEC filing"""
