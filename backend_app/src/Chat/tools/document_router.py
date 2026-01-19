@@ -135,20 +135,21 @@ class DocumentRouter:
                 self._parsers['basic'] = BasicTextExtractor()
             return self._parsers['basic']
 
-    def route_document(self, doc_type: DocumentType, s3_key: str, content: bytes, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def route_document(self, doc_type: DocumentType, s3_key: str, content: Optional[bytes], metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Route document to appropriate parser and extract structured data
         
         Args:
             doc_type: Detected document type
             s3_key: S3 key of the document
-            content: Full document content (bytes)
+            content: Full document content (bytes) or None if parser should read from S3
             metadata: Optional metadata from detection (CIK, accession number, etc.)
             
         Returns:
             Dict with extracted data from parser
         """
-        logger.info(f"🔄 [DOCUMENT_ROUTER] Starting routing for document: {s3_key}, type: {doc_type}, content_size: {len(content)} bytes")
+        content_size = len(content) if content else 0
+        logger.info(f"🔄 [DOCUMENT_ROUTER] Starting routing for document: {s3_key}, type: {doc_type}, content_size: {content_size} bytes (content provided: {content is not None})")
         logger.info(f"📋 [DOCUMENT_ROUTER] Metadata: {metadata}")
         
         try:
@@ -166,8 +167,33 @@ class DocumentRouter:
             parser_class_name = parser.__class__.__name__
             logger.info(f"✅ [DOCUMENT_ROUTER] Selected parser: {parser_class_name} for document {s3_key} (type: {doc_type})")
             
+            # If content is None, parser should read from S3 using s3_key
+            # Otherwise, pass the content directly
+            if content is None:
+                logger.info(f"📦 [DOCUMENT_ROUTER] Content is None - parser will read from S3 using s3_key: {s3_key}")
+                # Read content from S3 for the parser
+                try:
+                    import boto3
+                    import os
+                    s3_client = boto3.client('s3')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+                    if not bucket_name:
+                        raise ValueError("CHAT_FILES_BUCKET_NAME environment variable not set")
+                    
+                    logger.info(f"📥 [DOCUMENT_ROUTER] Reading file from S3: {bucket_name}/{s3_key}")
+                    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                    content = response['Body'].read()
+                    logger.info(f"✅ [DOCUMENT_ROUTER] Successfully read {len(content):,} bytes from S3")
+                except Exception as s3_err:
+                    logger.error(f"❌ [DOCUMENT_ROUTER] Failed to read from S3: {s3_err}")
+                    return {
+                        "success": False,
+                        "error": f"Failed to read file from S3: {str(s3_err)}",
+                        "document_type": doc_type.value if isinstance(doc_type, DocumentType) else str(doc_type)
+                    }
+            
             # Call parser with metadata if available
-            logger.info(f"📊 [DOCUMENT_ROUTER] Calling parser.parse() with metadata: {metadata is not None}")
+            logger.info(f"📊 [DOCUMENT_ROUTER] Calling parser.parse() with content_size: {len(content):,} bytes, metadata: {metadata is not None}")
             if metadata:
                 result = parser.parse(s3_key, content, metadata=metadata)
             else:

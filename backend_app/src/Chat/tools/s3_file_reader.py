@@ -324,10 +324,19 @@ class S3FileReader:
                         # Route to appropriate parser
                         logger.info(f"🔄 [DOCUMENT_PROCESSING] Routing document to parser (type: {doc_type})...")
                         router = DocumentRouter()
+                        
+                        # For large files, pass None for content and let parser read from S3 using s3_key
+                        # This prevents context window overflow and memory issues
+                        content_to_pass = None if is_large_file else content
+                        if is_large_file:
+                            logger.info(f"📦 [DOCUMENT_PROCESSING] Large file detected ({content_size:,} bytes) - passing s3_key only, parser will read from S3")
+                        else:
+                            logger.info(f"📦 [DOCUMENT_PROCESSING] Passing full content ({content_size:,} bytes) to parser")
+                        
                         parser_result = router.route_document(
                             doc_type,
                             s3_key,
-                            content,
+                            content_to_pass,  # Pass None for large files, full content for small files
                             doc_info.get("metadata")
                         )
                         
