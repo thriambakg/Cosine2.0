@@ -26,7 +26,12 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
 
 # Initialize AWS clients
-s3_client = boto3.client('s3')
+# Use signature version 4 for KMS-encrypted buckets
+from botocore.config import Config
+s3_config = Config(
+    signature_version='s3v4'
+)
+s3_client = boto3.client('s3', config=s3_config)
 
 # Environment variables
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME')
@@ -1391,6 +1396,75 @@ def update_item(user_id: str, folder_path: str, item_id: str, content_data: Dict
         logger.error(f"Error updating item: {str(e)}")
         raise
 
+def get_upload_url(user_id: str, folder_path: str, filename: str, file_size: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Generate a pre-signed S3 POST URL for direct file upload
+    Use this for files larger than ~4MB to bypass API Gateway payload limits
+    
+    Args:
+        user_id: User ID
+        folder_path: Target folder path
+        filename: Original filename
+        file_size: Expected file size in bytes (optional, for validation)
+        
+    Returns:
+        Dict with pre-signed POST URL and form fields for direct S3 upload
+    """
+    try:
+        logger.info(f"📤 [FILESYSTEM] Generating pre-signed POST URL: user_id={user_id}, filename={filename}, file_size={file_size}")
+        
+        # Generate file ID and S3 key
+        file_id = str(uuid.uuid4())
+        file_extension = os.path.splitext(filename)[1] or ''
+        s3_key = f"users/{user_id}/filesys/{folder_path}/{file_id}{file_extension}" if folder_path else f"users/{user_id}/filesys/{file_id}{file_extension}"
+        
+        logger.info(f"📤 [FILESYSTEM] Generated S3 key: {s3_key}")
+        
+        # Generate pre-signed POST URL (valid for 1 hour)
+        # This allows direct upload to S3, bypassing API Gateway payload limits
+        conditions = []
+        if file_size:
+            conditions.append(['content-length-range', 1, file_size])
+        
+        logger.info(f"📤 [FILESYSTEM] Generating pre-signed POST with conditions: {conditions}")
+        
+        # Generate pre-signed POST
+        # Note: Don't set Content-Type in Fields or Conditions
+        # This allows the browser to set Content-Type automatically via FormData
+        # The policy will accept any Content-Type (or none)
+        post_data = s3_client.generate_presigned_post(
+            Bucket=CHAT_FILES_BUCKET_NAME,
+            Key=s3_key,
+            Fields={},  # Empty Fields - no pre-set values
+            Conditions=conditions,  # Only content-length-range, no Content-Type restriction
+            ExpiresIn=3600  # 1 hour
+        )
+        
+        # Log the policy for debugging (decode base64 policy)
+        if 'fields' in post_data and 'policy' in post_data['fields']:
+            import base64
+            try:
+                policy_json = base64.b64decode(post_data['fields']['policy']).decode('utf-8')
+                logger.debug(f"📤 [FILESYSTEM] POST policy: {policy_json}")
+            except Exception:
+                pass
+        
+        logger.info(f"✅ [FILESYSTEM] Pre-signed POST generated successfully: url={post_data['url']}, fields_count={len(post_data['fields'])}")
+        logger.debug(f"📤 [FILESYSTEM] POST fields: {list(post_data['fields'].keys())}")
+        
+        return {
+            'upload_url': post_data['url'],
+            'fields': post_data['fields'],
+            's3_key': s3_key,
+            'file_id': file_id,
+            'filename': filename
+        }
+    except Exception as e:
+        logger.error(f"❌ [FILESYSTEM] Error generating upload URL: {str(e)}")
+        import traceback
+        logger.error(f"❌ [FILESYSTEM] Traceback: {traceback.format_exc()}")
+        raise
+
 def get_item(user_id: str, folder_path: str, item_id: str) -> Dict[str, Any]:
     """Get item metadata and optionally content"""
     try:
@@ -1609,177 +1683,78 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             dest_folder_path = body.get('dest_folder_path', '')
             result = copy_bulk_items(user_id, items, dest_folder_path)
             
-        else:
-            return {
-                'statusCode': 400,
-                'headers': build_cors_headers(origin),
-                'body': json.dumps({'error': f'Unknown operation: {operation}'})
-            }
-        
-        return {
-            'statusCode': 200,
-            'headers': build_cors_headers(origin),
-            'body': json.dumps({
-                'success': True,
-                'result': result
-            }, default=str)
-        }
-        
-    except Exception as e:
-        logger.error(f"Lambda handler error: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        return {
-            'statusCode': 500,
-            'headers': build_cors_headers(origin),
-            'body': json.dumps({'error': str(e)})
-        }
-
-
-
-        # Route to appropriate operation
-        result = None
-        if operation == 'add_file':
-            # Handle file upload (multipart/form-data or base64)
+        elif operation == 'get_upload_url':
+            # Generate pre-signed S3 POST URL for large file uploads
+            # Use this for files > 4MB to bypass API Gateway 10MB payload limit
+            logger.info(f"📤 [FILESYSTEM] get_upload_url requested: user_id={user_id}, filename={body.get('filename')}, file_size={body.get('file_size')}")
             folder_path = body.get('folder_path', '')
-            file_content = body.get('file_content')  # Base64 encoded or bytes
+            filename = body.get('filename', 'untitled')
+            file_size = body.get('file_size')  # Optional: expected file size
+            result = get_upload_url(user_id, folder_path, filename, file_size)
+            logger.info(f"✅ [FILESYSTEM] Upload URL generated: s3_key={result.get('s3_key')}, upload_url={result.get('upload_url')[:50]}...")
+            
+        elif operation == 'confirm_upload':
+            # Confirm and register a file that was uploaded directly to S3 via pre-signed URL
+            logger.info(f"📥 [FILESYSTEM] confirm_upload requested: user_id={user_id}, s3_key={body.get('s3_key')}")
+            folder_path = body.get('folder_path', '')
+            s3_key = body.get('s3_key')
             filename = body.get('filename', 'untitled')
             title = body.get('title')
             description = body.get('description')
             
-            # Decode base64 if provided
-            if isinstance(file_content, str):
-                import base64
-                file_content = base64.b64decode(file_content)
-            
-            result = add_file_upload(user_id, folder_path, file_content, filename, title, description)
-            
-        elif operation == 'add_context_item':
-            context_data = body.get('context_data', {})
-            title = body.get('title', 'Untitled')
-            item_type = body.get('item_type', 'context_item')
-            folder_path = body.get('folder_path', '')
-            result = add_context_item(user_id, folder_path, context_data, title, item_type)
-            
-        elif operation == 'add_bulk_context_items':
-            items = body.get('items', [])
-            folder_path = body.get('folder_path', '')
-            if not items or not isinstance(items, list):
+            # Validate S3 key belongs to user
+            if not validate_s3_key(user_id, s3_key):
+                logger.error(f"❌ [FILESYSTEM] Invalid S3 key validation: user_id={user_id}, s3_key={s3_key}")
                 return {
                     'statusCode': 400,
                     'headers': build_cors_headers(origin),
-                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                    'body': json.dumps({'error': 'Invalid S3 key'})
                 }
-            result = add_bulk_context_items(user_id, folder_path, items)
             
-        elif operation == 'create_folder':
-            folder_name = body.get('folder_name')
-            parent_path = body.get('parent_path')
-            result = create_folder(user_id, folder_name, parent_path)
-            
-        elif operation == 'delete_item':
-            folder_path = body.get('folder_path', '')
-            item_id = body.get('item_id')
-            result = delete_item(user_id, folder_path, item_id)
-            
-        elif operation == 'delete_bulk_items':
-            items = body.get('items', [])
-            if not items or not isinstance(items, list):
+            # Get file size from S3
+            try:
+                logger.info(f"📥 [FILESYSTEM] Checking file exists in S3: {s3_key}")
+                response = s3_client.head_object(Bucket=CHAT_FILES_BUCKET_NAME, Key=s3_key)
+                file_size = response.get('ContentLength', 0)
+                content_type = response.get('ContentType', 'application/octet-stream')
+                logger.info(f"✅ [FILESYSTEM] File found in S3: size={file_size} bytes, content_type={content_type}")
+            except ClientError as e:
+                logger.error(f"❌ [FILESYSTEM] File not found in S3: {s3_key}, error={str(e)}")
                 return {
-                    'statusCode': 400,
+                    'statusCode': 404,
                     'headers': build_cors_headers(origin),
-                    'body': json.dumps({'error': 'items must be a non-empty array'})
+                    'body': json.dumps({'error': 'File not found in S3'})
                 }
-            result = delete_bulk_items(user_id, items)
             
-        elif operation == 'delete_folder':
-            folder_path = body.get('folder_path', '')
-            folder_id = body.get('folder_id')
+            # Get folder manifest
+            manifest = get_folder_manifest(user_id, folder_path)
             
-            # If folder_path looks like a UUID (folder_id), try to find the actual path
-            if folder_path and len(folder_path) == 36 and folder_path.count('-') == 4:
-                # Likely a UUID, try to find the actual folder path
-                logger.info(f"folder_path looks like a UUID, searching for actual path...")
-                actual_path = find_folder_by_id(user_id, folder_path, '')
-                if actual_path:
-                    folder_path = actual_path
-                    logger.info(f"Found folder path: {folder_path}")
-                else:
-                    logger.warning(f"Could not find folder path for folder_id: {folder_path}")
-            elif folder_id:
-                # If folder_id is provided separately, use it to find the path
-                logger.info(f"folder_id provided, searching for actual path...")
-                actual_path = find_folder_by_id(user_id, folder_id, '')
-                if actual_path:
-                    folder_path = actual_path
-                    logger.info(f"Found folder path: {folder_path}")
-                else:
-                    logger.warning(f"Could not find folder path for folder_id: {folder_id}")
+            # Extract file_id from s3_key
+            file_id = os.path.splitext(os.path.basename(s3_key))[0]
             
-            result = delete_folder(user_id, folder_path)
+            # Add to manifest
+            display_name = title or filename
+            item_data = {
+                'id': file_id,
+                'name': display_name,
+                'type': 'uploaded_file',
+                's3_key': s3_key,
+                'filename': filename,
+                'metadata': {
+                    'file_size': file_size,
+                    'content_type': content_type,
+                    'description': description,
+                    'original_filename': filename,
+                },
+                'created_at': int(datetime.now().timestamp()),
+                'updated_at': int(datetime.now().timestamp())
+            }
             
-        elif operation == 'move_item':
-            item_id = body.get('item_id')
-            source_folder_path = body.get('source_folder_path', '')
-            dest_folder_path = body.get('dest_folder_path', '')
-            result = move_item(user_id, item_id, source_folder_path, dest_folder_path)
+            manifest['items'][file_id] = item_data
+            save_folder_manifest(user_id, folder_path, manifest)
             
-        elif operation == 'move_bulk_items':
-            items = body.get('items', [])
-            dest_folder_path = body.get('dest_folder_path', '')
-            if not items or not isinstance(items, list):
-                return {
-                    'statusCode': 400,
-                    'headers': build_cors_headers(origin),
-                    'body': json.dumps({'error': 'items must be a non-empty array'})
-                }
-            result = move_bulk_items(user_id, items, dest_folder_path)
-            
-        elif operation == 'update_item':
-            folder_path = body.get('folder_path', '')
-            item_id = body.get('item_id')
-            content_data = body.get('content_data', {})
-            result = update_item(user_id, folder_path, item_id, content_data)
-            
-        elif operation == 'rename_item':
-            folder_path = body.get('folder_path', '')
-            item_id = body.get('item_id')
-            new_name = body.get('new_name')
-            result = rename_item(user_id, folder_path, item_id, new_name)
-            
-        elif operation == 'list_folder':
-            folder_path = body.get('folder_path', '')
-            result = list_folder(user_id, folder_path)
-            
-        elif operation == 'get_item':
-            folder_path = body.get('folder_path', '')
-            item_id = body.get('item_id')
-            result = get_item(user_id, folder_path, item_id)
-            
-        elif operation == 'copy_item':
-            folder_path = body.get('folder_path', '')
-            item_id = body.get('item_id')
-            result = copy_item(user_id, folder_path, item_id)
-            
-        elif operation == 'copy_folder':
-            folder_path = body.get('folder_path', '')
-            result = copy_folder(user_id, folder_path)
-            
-        elif operation == 'paste_item':
-            dest_folder_path = body.get('dest_folder_path', '')
-            clipboard_data = body.get('clipboard_data', {})
-            result = paste_item(user_id, dest_folder_path, clipboard_data)
-            
-        elif operation == 'paste_items_by_ids':
-            dest_folder_path = body.get('dest_folder_path', '')
-            item_data = body.get('item_data', [])  # List of {item_id, source_folder_path, is_folder}
-            result = paste_items_by_ids(user_id, dest_folder_path, item_data)
-            
-        elif operation == 'copy_bulk_items':
-            items = body.get('items', [])  # List of {item_id, source_folder_path}
-            dest_folder_path = body.get('dest_folder_path', '')
-            result = copy_bulk_items(user_id, items, dest_folder_path)
+            logger.info(f"✅ [FILESYSTEM] File confirmed and registered: file_id={file_id}, name={display_name}")
+            result = item_data
             
         else:
             return {

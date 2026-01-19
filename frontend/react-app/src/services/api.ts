@@ -1910,10 +1910,12 @@ export const fileReturnAPI = {
 export interface FilesystemAddFileRequest {
   user_id: string;
   folder_path?: string;
-  file_content: string; // Base64 encoded
+  file_content: string; // Base64 encoded (for small files)
   filename: string;
   title?: string;
   description?: string;
+  file_size?: number; // File size in bytes (for large file detection)
+  use_presigned_url?: boolean; // Force use of pre-signed URL
 }
 
 export interface FilesystemAddContextItemRequest {
@@ -2046,28 +2048,141 @@ export const filesystemAPI = {
     window.dispatchEvent(loadingEvent);
     
     try {
-      const response = await apiRequest<FilesystemResponse>('/filesystem', {
-        method: 'POST',
-        body: JSON.stringify({
-          operation: 'add_file',
-          ...params,
-        }),
-      });
+      // Check file size - base64 increases size by ~33%, so 4MB raw = ~5.3MB encoded
+      // API Gateway has 10MB limit, so we use 4MB threshold for safety
+      const fileSize = params.file_size;
+      const usePresigned = params.use_presigned_url || (fileSize && fileSize > 4 * 1024 * 1024);
       
-      // Dispatch success notification
-      if (response.success && response.result) {
-        const successEvent = new CustomEvent('filesystem-success', {
-          detail: { 
-            itemCount: 1,
-            itemName: response.result.name || params.filename || 'File'
-          }
+      if (usePresigned && fileSize) {
+        // For large files (>4MB), use pre-signed S3 POST URL
+        // Step 1: Get pre-signed upload URL
+        const uploadUrlResponse = await apiRequest<FilesystemResponse>('/filesystem', {
+          method: 'POST',
+          body: JSON.stringify({
+            operation: 'get_upload_url',
+            user_id: params.user_id,
+            folder_path: params.folder_path,
+            filename: params.filename,
+            file_size: fileSize,
+          }),
         });
-        window.dispatchEvent(successEvent);
+        
+        if (!uploadUrlResponse.success || !uploadUrlResponse.result) {
+          throw new Error(uploadUrlResponse.error || 'Failed to get upload URL');
+        }
+        
+        const { upload_url, fields, s3_key } = uploadUrlResponse.result;
+        
+        // Step 2: Upload file directly to S3 using FormData
+        // IMPORTANT: For S3 POST, the file field MUST be the last field
+        const formData = new FormData();
+        
+        // Add all fields from pre-signed POST FIRST (including signature, policy, etc.)
+        // These must come before the file field
+        console.log('📦 [FILESYSTEM] Pre-signed POST fields:', Object.keys(fields));
+        Object.entries(fields).forEach(([key, value]) => {
+          formData.append(key, value as string);
+        });
+        
+        // Decode base64 and add file as Blob LAST (S3 POST requirement)
+        const binaryString = atob(params.file_content);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        // Don't set Content-Type on Blob - let FormData/browser handle it automatically
+        // Setting it explicitly can cause policy mismatches
+        const fileBlob = new Blob([bytes]);
+        
+        // For S3 POST, the file field should just be 'file' (no filename parameter)
+        // The filename is already in the 'key' field from the presigned POST
+        formData.append('file', fileBlob);
+        
+        console.log('📦 [FILESYSTEM] FormData prepared, file size:', fileBlob.size, 'bytes');
+        
+        // Upload to S3
+        const uploadResponse = await fetch(upload_url, {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!uploadResponse.ok) {
+          // Try to get error details from S3 response
+          let errorDetails = '';
+          try {
+            const errorText = await uploadResponse.text();
+            errorDetails = ` - Response: ${errorText.substring(0, 200)}`;
+          } catch (e) {
+            // Ignore if can't read response
+          }
+          throw new Error(`S3 upload failed: ${uploadResponse.status} ${uploadResponse.statusText}${errorDetails}`);
+        }
+        
+        // Step 3: Confirm upload and register in filesystem
+        const confirmResponse = await apiRequest<FilesystemResponse>('/filesystem', {
+          method: 'POST',
+          body: JSON.stringify({
+            operation: 'confirm_upload',
+            user_id: params.user_id,
+            folder_path: params.folder_path,
+            s3_key: s3_key,
+            filename: params.filename,
+            title: params.title,
+            description: params.description,
+          }),
+        });
+        
+        // Dispatch success notification
+        if (confirmResponse.success && confirmResponse.result) {
+          const successEvent = new CustomEvent('filesystem-success', {
+            detail: { 
+              itemCount: 1,
+              itemName: confirmResponse.result.name || params.filename || 'File'
+            }
+          });
+          window.dispatchEvent(successEvent);
+        }
+        
+        return confirmResponse;
+      } else {
+        // For small files, use existing base64 upload flow
+        const smallFileResponse = await apiRequest<FilesystemResponse>('/filesystem', {
+          method: 'POST',
+          body: JSON.stringify({
+            operation: 'add_file',
+            ...params,
+          }),
+        });
+        
+        // Dispatch success notification
+        if (smallFileResponse.success && smallFileResponse.result) {
+          const successEvent = new CustomEvent('filesystem-success', {
+            detail: { 
+              itemCount: 1,
+              itemName: smallFileResponse.result.name || params.filename || 'File'
+            }
+          });
+          window.dispatchEvent(successEvent);
+        }
+        
+        return smallFileResponse;
       }
-      
-      return response;
     } catch (error: any) {
       console.error('❌ Filesystem add file error:', error);
+      
+      // Handle 413 Content Too Large
+      if (error.response?.status === 413 || error.message?.includes('413')) {
+        const errorEvent = new CustomEvent('filesystem-error', {
+          detail: { 
+            error: 'File is too large. Please use a file smaller than 10MB, or the system will automatically use direct S3 upload for large files.'
+          }
+        });
+        window.dispatchEvent(errorEvent);
+        return {
+          success: false,
+          error: 'File is too large. Maximum size is 10MB.',
+        };
+      }
       
       // Handle 504 Gateway Timeout
       if (error.response?.status === 504 || error.code === 'ECONNABORTED') {

@@ -405,6 +405,7 @@ const FilesPage: React.FC = () => {
             filename: selectedFile.name,
             title: fileTitle.trim() || undefined,
             description: fileDescription.trim() || undefined,
+            file_size: selectedFile.size, // Pass file size for automatic pre-signed URL detection
           });
           
           if (response.success && response.result) {
