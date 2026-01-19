@@ -267,6 +267,7 @@ class S3FileReader:
             # Document Detection and Routing (NEW)
             # Detect document type and route to specialized parser if applicable
             logger.info(f"📄 [DOCUMENT_PROCESSING] Starting document processing for file: {s3_key}")
+            logger.info(f"📊 [DOCUMENT_PROCESSING] File size: {len(content):,} bytes")
             try:
                 # Import with fallback for path resolution
                 logger.info(f"📦 [DOCUMENT_PROCESSING] Attempting to import document processing modules...")
@@ -300,13 +301,14 @@ class S3FileReader:
                 content_size = len(content)
                 logger.info(f"📊 [DOCUMENT_PROCESSING] Content size: {content_size:,} bytes, preview: {len(content_preview)} bytes")
                 
-                # Check if file is large and needs chunking (for HTML/TXT SEC filings)
+                # Check if file is large and needs special handling (for HTML/TXT SEC filings)
                 is_large_file = content_size > 5 * 1024 * 1024  # 5MB threshold
                 file_extension = filename.lower().split('.')[-1] if '.' in filename else ''
                 is_html_or_txt = file_extension in ['htm', 'html', 'txt', 'xml']
                 
-                if is_large_file and is_html_or_txt:
-                    logger.info(f"📄 [DOCUMENT_PROCESSING] Large HTML/TXT file detected ({content_size:,} bytes) - will use chunked processing")
+                if is_large_file:
+                    logger.info(f"📦 [DOCUMENT_PROCESSING] Large file detected ({content_size:,} bytes, extension: {file_extension}) - will pass s3_key only to parser")
+                    logger.info(f"📦 [DOCUMENT_PROCESSING] Parser will read from S3 and process in chunks to avoid memory issues")
                 
                 # Detect document type
                 logger.info(f"🔍 [DOCUMENT_PROCESSING] Starting document type detection...")
@@ -372,17 +374,15 @@ class S3FileReader:
                         elif not user_id:
                             logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Skipping indexing - user_id not available")
                         
-                        # Format enhanced response with raw content + extracted data
-                        content_type = response.get('ContentType', '')
-                        
-                        # Decode raw content for LLM context
-                        raw_content = self._decode_content_for_type(content, content_type, file_type, s3_key)
-                        
-                        # Format response with both raw content and extracted data
+                        # Format response with structured data summary (NO raw content for large files)
                         processing_info = parser_result.get("processing_info", {})
                         was_chunked = processing_info.get("chunked", False)
                         chunks_count = processing_info.get("chunks_processed", 1)
-                        file_type = processing_info.get("file_type", "unknown")
+                        file_type_info = processing_info.get("file_type", "unknown")
+                        file_size_bytes = processing_info.get("file_size_bytes", content_size)
+                        text_length_chars = processing_info.get("text_length_chars", 0)
+                        
+                        logger.info(f"📊 [DOCUMENT_PROCESSING] Formatting response - Large file: {is_large_file}, Chunked: {was_chunked}, Size: {file_size_bytes:,} bytes")
                         
                         response_parts = [
                             f"📄 Document Type: {doc_info.get('type').value if hasattr(doc_info.get('type'), 'value') else doc_info.get('type')}",
@@ -390,9 +390,10 @@ class S3FileReader:
                         ]
                         
                         # Add chunking info if file was chunked
-                        if was_chunked:
-                            response_parts.append(f"📦 Processing: Large file processed in {chunks_count} chunks (file type: {file_type})")
-                            response_parts.append(f"📏 File Size: {processing_info.get('file_size_bytes', 0):,} bytes ({processing_info.get('text_length_chars', 0):,} characters)")
+                        if was_chunked or is_large_file:
+                            response_parts.append(f"📦 Processing: Large file processed in {chunks_count} chunks (file type: {file_type_info})")
+                            response_parts.append(f"📏 File Size: {file_size_bytes:,} bytes ({text_length_chars:,} characters)")
+                            response_parts.append(f"ℹ️ Note: Raw content not included due to file size. Structured data extracted below.")
                         
                         # Add metadata if available
                         metadata = doc_info.get("metadata", {})
@@ -406,6 +407,8 @@ class S3FileReader:
                         # Add extracted financial data summary
                         if parser_result.get("success"):
                             extracted = parser_result.get("extracted_data") or parser_result
+                            
+                            logger.info(f"✅ [DOCUMENT_PROCESSING] Parser succeeded - extracted keys: {list(extracted.keys()) if isinstance(extracted, dict) else 'N/A'}")
                             
                             # Income Statement summary
                             income = extracted.get("income_statement", {})
@@ -432,14 +435,38 @@ class S3FileReader:
                             if metrics.get("net_margin"):
                                 response_parts.append(f"📉 Net Margin: {metrics['net_margin']:.1%}")
                             
-                            # Add note about full structured data
-                            response_parts.append(f"\n📋 Full structured financial data has been extracted and indexed for querying.")
+                            # Add structured data JSON for agent to parse
+                            response_parts.append(f"\n📋 Structured Financial Data (JSON):")
+                            structured_data_json = json.dumps({
+                                "document_type": doc_info.get('type').value if hasattr(doc_info.get('type'), 'value') else str(doc_info.get('type')),
+                                "metadata": metadata,
+                                "income_statement": income,
+                                "balance_sheet": balance,
+                                "cash_flow": extracted.get("cash_flow", {}),
+                                "metrics": metrics
+                            }, indent=2, default=str)
+                            response_parts.append(structured_data_json)
+                            
+                            # Add note about indexing
+                            response_parts.append(f"\n💾 Full structured financial data has been extracted and indexed for querying.")
                             if index_id:
                                 response_parts.append(f"🔍 Index ID: {index_id}")
+                        else:
+                            logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Parser did not succeed - result: {parser_result}")
+                            response_parts.append(f"\n⚠️ Parsing completed but no structured data extracted.")
                         
-                        response_parts.append(f"\n📄 Raw Content Preview (first 2000 chars):\n{raw_content[:2000]}")
+                        # For large files, DO NOT include raw content preview (causes context window overflow)
+                        if not is_large_file:
+                            content_type = response.get('ContentType', '')
+                            raw_content = self._decode_content_for_type(content, content_type, file_type, s3_key)
+                            response_parts.append(f"\n📄 Raw Content Preview (first 2000 chars):\n{raw_content[:2000]}")
+                        else:
+                            logger.info(f"📦 [DOCUMENT_PROCESSING] Skipping raw content preview for large file ({file_size_bytes:,} bytes)")
+                            response_parts.append(f"\n📄 Raw content available in S3 at: {s3_key} (not included due to size)")
                         
-                        return "\n".join(response_parts)
+                        final_response = "\n".join(response_parts)
+                        logger.info(f"✅ [DOCUMENT_PROCESSING] Response formatted - length: {len(final_response):,} characters")
+                        return final_response
                         
                     except Exception as parse_err:
                         logger.error(f"❌ [DOCUMENT_PROCESSING] Error routing/parsing document {s3_key}: {parse_err}")

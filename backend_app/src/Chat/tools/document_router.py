@@ -167,37 +167,21 @@ class DocumentRouter:
             parser_class_name = parser.__class__.__name__
             logger.info(f"✅ [DOCUMENT_ROUTER] Selected parser: {parser_class_name} for document {s3_key} (type: {doc_type})")
             
-            # If content is None, parser should read from S3 using s3_key
-            # Otherwise, pass the content directly
+            # If content is None, parser will read from S3 using s3_key internally
+            # This allows the parser to handle large files by reading in chunks
             if content is None:
-                logger.info(f"📦 [DOCUMENT_ROUTER] Content is None - parser will read from S3 using s3_key: {s3_key}")
-                # Read content from S3 for the parser
-                try:
-                    import boto3
-                    import os
-                    s3_client = boto3.client('s3')
-                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
-                    if not bucket_name:
-                        raise ValueError("CHAT_FILES_BUCKET_NAME environment variable not set")
-                    
-                    logger.info(f"📥 [DOCUMENT_ROUTER] Reading file from S3: {bucket_name}/{s3_key}")
-                    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
-                    content = response['Body'].read()
-                    logger.info(f"✅ [DOCUMENT_ROUTER] Successfully read {len(content):,} bytes from S3")
-                except Exception as s3_err:
-                    logger.error(f"❌ [DOCUMENT_ROUTER] Failed to read from S3: {s3_err}")
-                    return {
-                        "success": False,
-                        "error": f"Failed to read file from S3: {str(s3_err)}",
-                        "document_type": doc_type.value if isinstance(doc_type, DocumentType) else str(doc_type)
-                    }
+                logger.info(f"📦 [DOCUMENT_ROUTER] Content is None - passing s3_key to parser for S3 reading: {s3_key}")
+                logger.info(f"📦 [DOCUMENT_ROUTER] Parser will read from S3 internally and process in chunks if needed")
             
             # Call parser with metadata if available
-            logger.info(f"📊 [DOCUMENT_ROUTER] Calling parser.parse() with content_size: {len(content):,} bytes, metadata: {metadata is not None}")
+            content_size_str = f"{len(content):,} bytes" if content else "None (will read from S3)"
+            logger.info(f"📊 [DOCUMENT_ROUTER] Calling parser.parse() with s3_key: {s3_key}, content_size: {content_size_str}, metadata: {metadata is not None}")
             if metadata:
                 result = parser.parse(s3_key, content, metadata=metadata)
             else:
                 result = parser.parse(s3_key, content)
+            
+            logger.info(f"📊 [DOCUMENT_ROUTER] Parser returned - success: {result.get('success', False) if isinstance(result, dict) else False}")
             
             success = result.get("success", False) if isinstance(result, dict) else False
             logger.info(f"{'✅' if success else '❌'} [DOCUMENT_ROUTER] Parser completed - Success: {success}")

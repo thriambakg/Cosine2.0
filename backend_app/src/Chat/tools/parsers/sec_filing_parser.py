@@ -26,7 +26,7 @@ class SECFilingParser(BaseParser):
     Extracts comprehensive financial statements and metrics
     """
     
-    def parse(self, s3_key: str, content: bytes, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def parse(self, s3_key: str, content: Optional[bytes], metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Parse SEC filing and extract comprehensive financial data
         Uses deterministic iXBRL extraction for inline XBRL documents
@@ -34,13 +34,57 @@ class SECFilingParser(BaseParser):
         
         Args:
             s3_key: S3 key of the filing
-            content: Filing content (bytes)
+            content: Filing content (bytes) or None if should read from S3
             metadata: Optional metadata (CIK, accession number, etc.)
             
         Returns:
             Dict with extracted financial data
         """
         try:
+            # If content is None, read from S3
+            if content is None:
+                logger.info(f"📦 [SEC_PARSER] Content is None - reading from S3: {s3_key}")
+                try:
+                    import boto3
+                    import os
+                    s3_client = boto3.client('s3')
+                    bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
+                    if not bucket_name:
+                        raise ValueError("CHAT_FILES_BUCKET_NAME environment variable not set")
+                    
+                    logger.info(f"📥 [SEC_PARSER] Reading file from S3: {bucket_name}/{s3_key}")
+                    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+                    
+                    # Get file size first to determine if we need chunked processing
+                    file_size = response.get('ContentLength', 0)
+                    logger.info(f"📊 [SEC_PARSER] File size from S3: {file_size:,} bytes")
+                    
+                    # For large files (>5MB), read in chunks to avoid memory issues
+                    if file_size > 5 * 1024 * 1024:
+                        logger.info(f"📦 [SEC_PARSER] Large file detected ({file_size:,} bytes) - reading in chunks")
+                        content_chunks = []
+                        chunk_size = 10 * 1024 * 1024  # 10MB chunks
+                        body = response['Body']
+                        while True:
+                            chunk = body.read(chunk_size)
+                            if not chunk:
+                                break
+                            content_chunks.append(chunk)
+                        content = b''.join(content_chunks)
+                        logger.info(f"✅ [SEC_PARSER] Successfully read {len(content):,} bytes from S3 in {len(content_chunks)} chunks")
+                    else:
+                        content = response['Body'].read()
+                        logger.info(f"✅ [SEC_PARSER] Successfully read {len(content):,} bytes from S3")
+                except Exception as s3_err:
+                    logger.error(f"❌ [SEC_PARSER] Failed to read from S3: {s3_err}")
+                    import traceback
+                    logger.error(f"❌ [SEC_PARSER] S3 read error traceback: {traceback.format_exc()}")
+                    return {
+                        "success": False,
+                        "error": f"Failed to read file from S3: {str(s3_err)}",
+                        "document_type": "sec_filing"
+                    }
+            
             content_size = len(content)
             logger.info(f"📄 [SEC_PARSER] Parsing SEC filing: {s3_key}, size: {content_size:,} bytes")
             
