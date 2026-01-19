@@ -1699,25 +1699,44 @@ resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
 # Chat agent is completely denied access to filesys folder - no read, no write, nothing
 resource "aws_iam_policy" "chat_agent_s3_restricted_policy" {
   name        = "${var.project_name}-chat-agent-s3-restricted-${var.environment}"
-  description = "Allows Chat Agent full access to chat files, but completely denies ALL access to filesys folder"
+  description = "Allows Chat Agent full access to chat files, but only GetObject access to filesys folder (read-only)"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # Explicitly deny ALL operations on filesys folder (must come first - Deny takes precedence)
-      # This completely prevents the agent from accessing filesystem items
+      # Allow GetObject on filesys folder (read-only access)
+      # This allows the agent to read files from the filesystem
       {
-        Effect = "Deny"
+        Effect = "Allow"
         Action = [
-          "s3:*"
+          "s3:GetObject"
         ]
         Resource = [
           "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/users/*/filesys/*"
         ]
       },
-      # Also deny ListBucket operations on filesys prefix
+      # Deny all other operations on filesys folder (write, delete, etc.)
+      # This prevents the agent from modifying or deleting filesystem items
       {
         Effect = "Deny"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          "s3:DeleteObject",
+          "s3:DeleteObjectVersion",
+          "s3:RestoreObject",
+          "s3:GetObjectAcl",
+          "s3:PutObjectTagging",
+          "s3:GetObjectTagging",
+          "s3:DeleteObjectTagging"
+        ]
+        Resource = [
+          "${data.terraform_remote_state.base_infra.outputs.chat_files_bucket_arn}/users/*/filesys/*"
+        ]
+      },
+      # Allow ListBucket on filesys prefix (so agent can see what files are available)
+      {
+        Effect = "Allow"
         Action = [
           "s3:ListBucket"
         ]
