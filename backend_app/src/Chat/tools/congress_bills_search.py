@@ -251,26 +251,75 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Identify which filters can use GSIs and return query configurations"""
     query_configs = []
     
+    # Normalize politician_role - handle both string and list formats
+    politician_role_raw = filters.get('politician_role', 'both')
+    if isinstance(politician_role_raw, list):
+        politician_role_raw = next((str(r).strip() for r in politician_role_raw if r and str(r).strip()), 'both')
+    elif politician_role_raw:
+        politician_role_raw = str(politician_role_raw).strip()
+    else:
+        politician_role_raw = 'both'
+    
+    politician_role = politician_role_raw if politician_role_raw in ['sponsor', 'cosponsor', 'both'] else 'both'
+    
     # SponsorNameDateIndex: hash_key=sponsor_full_name, range_key=introduced_date
-    if filters.get('sponsor_name'):
-        sponsor_names = filters['sponsor_name'] if isinstance(filters['sponsor_name'], list) else [filters['sponsor_name']]
-        sponsor_names = [n for n in sponsor_names if n and str(n).strip()]
-        if sponsor_names:
-            # Use first sponsor name for hash key (exact match - should come from autocomplete)
-            sponsor_name = sponsor_names[0].strip()
+    # Also check for politician_name (alias for sponsor_name)
+    politician_names = filters.get('politician_name') or filters.get('sponsor_name')
+    if politician_names:
+        if not isinstance(politician_names, list):
+            politician_names = [politician_names]
+        
+        politician_names = [n for n in politician_names if n and str(n).strip()]
+        if politician_names:
+            # Use first politician name
+            politician_name = politician_names[0].strip()
             introduced_date = None
-            if filters.get('introduced_date_from'):
-                introduced_date = filters['introduced_date_from']
+            date_from = filters.get('introduced_date_from')
+            date_to = filters.get('introduced_date_to')
             
-            query_configs.append({
-                'filter_key': 'sponsor_name',
-                'index_name': 'SponsorNameDateIndex',
-                'hash_key': 'sponsor_full_name',
-                'hash_value': sponsor_name,
-                'range_key': 'introduced_date' if introduced_date else None,
-                'range_value': introduced_date,
-                'range_condition': 'gte' if introduced_date else None
-            })
+            if date_from:
+                introduced_date = date_from
+            
+            # Sponsor GSI query (if politician_role is 'sponsor' or 'both')
+            if politician_role in ['sponsor', 'both']:
+                query_configs.append({
+                    'filter_key': 'sponsor_name',
+                    'index_name': 'SponsorNameDateIndex',
+                    'hash_key': 'sponsor_full_name',
+                    'hash_value': politician_name,
+                    'range_key': 'introduced_date' if introduced_date else None,
+                    'range_value': introduced_date,
+                    'range_condition': 'gte' if introduced_date else None,
+                    'query_type': 'gsi',
+                    'role': 'sponsor'
+                })
+            
+            # Cosponsor search index query (if politician_role is 'cosponsor' or 'both')
+            if politician_role in ['cosponsor', 'both']:
+                query_configs.append({
+                    'filter_key': 'cosponsor_name',
+                    'query_type': 'cosponsor_search',
+                    'cosponsor_name': politician_name,
+                    'date_from': date_from,
+                    'date_to': date_to,
+                    'role': 'cosponsor'
+                })
+    
+    # Cosponsor name (separate from politician_name)
+    if filters.get('cosponsor_name'):
+        cosponsor_names = filters.get('cosponsor_name') if isinstance(filters.get('cosponsor_name'), list) else [filters.get('cosponsor_name')]
+        for cosponsor_name in cosponsor_names:
+            if cosponsor_name and str(cosponsor_name).strip():
+                date_from = filters.get('introduced_date_from')
+                date_to = filters.get('introduced_date_to')
+                query_configs.append({
+                    'filter_key': 'cosponsor_name',
+                    'query_type': 'cosponsor_search',
+                    'cosponsor_name': str(cosponsor_name).strip(),
+                    'date_from': date_from,
+                    'date_to': date_to,
+                    'role': 'cosponsor'
+                })
     
     # SponsorPartyDateIndex: hash_key=sponsor_party, range_key=introduced_date
     if filters.get('sponsor_party'):
@@ -389,6 +438,81 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return query_configs
 
 
+def query_cosponsor_search_index(cosponsor_name: str, date_from: Optional[str] = None,
+                                  date_to: Optional[str] = None, limit: int = 1000,
+                                  exclusive_start_key: Optional[Dict] = None) -> tuple[List[str], Optional[Dict]]:
+    """
+    Query cosponsor search index (SEARCH#COSPONSOR# pattern)
+    
+    Structure:
+    - bill_id = SEARCH#COSPONSOR#<name> (hash key)
+    - search_index_sk = INTRODUCED_DATE#<date>#<bill_id> (range key)
+    """
+    if not cosponsor_name:
+        return [], None
+    
+    normalized_name = str(cosponsor_name).strip()
+    search_bill_id = f"SEARCH#COSPONSOR#{normalized_name}"
+    
+    try:
+        # Build key condition
+        key_condition = Key('bill_id').eq(search_bill_id)
+        
+        # Build range key condition for date filtering
+        if date_from or date_to:
+            if date_from and date_to:
+                # Extract date part
+                date_from_str = date_from.split('T')[0].split(' ')[0][:10] if 'T' in date_from or ' ' in date_from else date_from[:10]
+                date_to_str = date_to.split('T')[0].split(' ')[0][:10] if 'T' in date_to or ' ' in date_to else date_to[:10]
+                # Use begins_with for date range (query each date in range)
+                sk_prefix = f"INTRODUCED_DATE#{date_from_str}#"
+                key_condition = key_condition & Key('search_index_sk').begins_with(sk_prefix)
+            elif date_from:
+                date_from_str = date_from.split('T')[0].split(' ')[0][:10] if 'T' in date_from or ' ' in date_from else date_from[:10]
+                sk_prefix = f"INTRODUCED_DATE#{date_from_str}#"
+                key_condition = key_condition & Key('search_index_sk').gte(sk_prefix)
+            else:
+                date_to_str = date_to.split('T')[0].split(' ')[0][:10] if 'T' in date_to or ' ' in date_to else date_to[:10]
+                sk_prefix = f"INTRODUCED_DATE#{date_to_str}#"
+                key_condition = key_condition & Key('search_index_sk').lte(sk_prefix + '~')  # Use tilde for lexicographic comparison
+        else:
+            # No date filter - query all dates
+            key_condition = key_condition & Key('search_index_sk').begins_with('INTRODUCED_DATE#')
+        
+        params = {
+            'KeyConditionExpression': key_condition,
+            'ProjectionExpression': 'entity_bill_id, search_index_sk',
+            'Limit': limit
+        }
+        
+        if exclusive_start_key:
+            params['ExclusiveStartKey'] = exclusive_start_key
+        
+        response = bills_table.query(**params)
+        items = response.get('Items', [])
+        bill_ids = []
+        seen = set()
+        
+        for item in items:
+            entity_bill_id = item.get('entity_bill_id')
+            if entity_bill_id and entity_bill_id not in seen:
+                bill_ids.append(entity_bill_id)
+                seen.add(entity_bill_id)
+            else:
+                # Fallback: extract from search_index_sk
+                sk = item.get('search_index_sk', '')
+                if sk and '#' in sk:
+                    parts = sk.split('#')
+                    if len(parts) >= 3 and parts[2] not in seen:
+                        bill_ids.append(parts[2])
+                        seen.add(parts[2])
+        
+        return bill_ids[:limit], response.get('LastEvaluatedKey')
+    except Exception as e:
+        logger.error(f"Error querying cosponsor search index: {e}", exc_info=True)
+        return [], None
+
+
 def query_gsi_for_bill_ids(index_name: str, hash_key_name: str, hash_key_value: Any,
                            range_key_name: Optional[str] = None, range_key_value: Any = None,
                            range_key_condition: Optional[str] = None, limit: int = 1000,
@@ -461,46 +585,162 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
     # Identify which filters can use GSIs
     query_configs = identify_queryable_filters(filters)
     
-    # If we have multiple queryable filters, use intersection approach
-    if len(query_configs) > 1:
-        logger.info(f"Using multi-GSI intersection approach with {len(query_configs)} GSIs")
+    # Group queries by filter_key for UNION within field, INTERSECT across fields
+    # Special handling: sponsor_name + cosponsor_name should UNION (same politician)
+    queries_by_field = {}
+    politician_name_queries = []  # Track politician name queries (sponsor + cosponsor)
+    
+    for config in query_configs:
+        filter_key = config.get('filter_key')
+        query_type = config.get('query_type', 'gsi')
         
-        # Query each GSI to get initial batch of bill_ids (to determine shortest list)
-        gsi_results = {}
-        for config in query_configs:
-            logger.info(f"Querying {config['index_name']} for {config['filter_key']}={config['hash_value']}")
-            # Get first batch to determine which is shortest
-            bill_ids, _ = query_gsi_for_bill_ids(
-                index_name=config['index_name'],
-                hash_key_name=config['hash_key'],
-                hash_key_value=config['hash_value'],
-                range_key_name=config.get('range_key'),
-                range_key_value=config.get('range_value'),
-                range_key_condition=config.get('range_condition'),
-                limit=1000,  # Get first batch
-                get_all=False
-            )
-            gsi_results[config['filter_key']] = {
-                'bill_ids': set(bill_ids),
-                'config': config,
-                'total_count': len(bill_ids),
-                'last_eval_key': None
-            }
-            logger.info(f"Found {len(bill_ids)} bill_ids from {config['index_name']} (first batch)")
+        # Group politician name queries (sponsor_name and cosponsor_name for same politician)
+        if filter_key in ['sponsor_name', 'cosponsor_name']:
+            politician_name = config.get('hash_value') or config.get('cosponsor_name')
+            if politician_name:
+                # Find existing politician name group or create new one
+                found_group = False
+                for group in politician_name_queries:
+                    if group.get('politician_name') == politician_name:
+                        group['queries'].append(config)
+                        found_group = True
+                        break
+                if not found_group:
+                    politician_name_queries.append({
+                        'politician_name': politician_name,
+                        'filter_key': 'politician_name',  # Unified filter key
+                        'queries': [config]
+                    })
+        else:
+            # Group other queries by filter_key
+            if filter_key not in queries_by_field:
+                queries_by_field[filter_key] = []
+            queries_by_field[filter_key].append(config)
+    
+    # Convert politician_name_queries to field groups
+    if politician_name_queries:
+        # For each politician name, union sponsor + cosponsor results
+        for pol_group in politician_name_queries:
+            queries_by_field['politician_name'] = queries_by_field.get('politician_name', [])
+            queries_by_field['politician_name'].append(pol_group)
+    
+    # Count total unique filter types (not total queries)
+    unique_filter_types = len(queries_by_field)
+    
+    # If we have multiple queryable filter types, use intersection approach
+    if unique_filter_types > 1:
+        logger.info(f"Using multi-query intersection approach with {unique_filter_types} filter types")
         
-        # Find the shortest list (most restrictive filter) - this is our source of truth
-        shortest_key = min(gsi_results.keys(), key=lambda k: len(gsi_results[k]['bill_ids']))
-        source_bill_ids = list(gsi_results[shortest_key]['bill_ids'])
-        source_config = gsi_results[shortest_key]['config']
+        # Query each filter type to get initial batch of bill_ids (to determine shortest list)
+        field_results = {}
+        for filter_key, field_queries in queries_by_field.items():
+            field_bill_ids = set()
+            
+            for query_config in field_queries:
+                if isinstance(query_config, dict) and 'queries' in query_config:
+                    # Politician name group (union sponsor + cosponsor)
+                    for sub_query in query_config['queries']:
+                        query_type = sub_query.get('query_type', 'gsi')
+                        if query_type == 'cosponsor_search':
+                            bill_ids, _ = query_cosponsor_search_index(
+                                cosponsor_name=sub_query['cosponsor_name'],
+                                date_from=sub_query.get('date_from'),
+                                date_to=sub_query.get('date_to'),
+                                limit=1000
+                            )
+                            logger.info(f"  Cosponsor query returned {len(bill_ids)} bill_ids")
+                        else:
+                            bill_ids, _ = query_gsi_for_bill_ids(
+                                index_name=sub_query['index_name'],
+                                hash_key_name=sub_query['hash_key'],
+                                hash_key_value=sub_query['hash_value'],
+                                range_key_name=sub_query.get('range_key'),
+                                range_key_value=sub_query.get('range_value'),
+                                range_key_condition=sub_query.get('range_condition'),
+                                limit=1000,
+                                get_all=False
+                            )
+                            logger.info(f"  Sponsor query returned {len(bill_ids)} bill_ids")
+                        field_bill_ids.update(bill_ids)  # UNION sponsor + cosponsor
+                    
+                    field_results[filter_key] = {
+                        'bill_ids': field_bill_ids,
+                        'queries': query_config['queries'],
+                        'total_count': len(field_bill_ids),
+                        'last_eval_key': None
+                    }
+                    logger.info(f"Field '{filter_key}' UNION complete: {len(field_bill_ids)} bill_ids")
+                else:
+                    # Regular query config
+                    query_type = query_config.get('query_type', 'gsi')
+                    if query_type == 'cosponsor_search':
+                        bill_ids, _ = query_cosponsor_search_index(
+                            cosponsor_name=query_config['cosponsor_name'],
+                            date_from=query_config.get('date_from'),
+                            date_to=query_config.get('date_to'),
+                            limit=1000
+                        )
+                        logger.info(f"Querying cosponsor search index for {filter_key}={query_config['cosponsor_name']}")
+                    else:
+                        bill_ids, _ = query_gsi_for_bill_ids(
+                            index_name=query_config['index_name'],
+                            hash_key_name=query_config['hash_key'],
+                            hash_key_value=query_config['hash_value'],
+                            range_key_name=query_config.get('range_key'),
+                            range_key_value=query_config.get('range_value'),
+                            range_key_condition=query_config.get('range_condition'),
+                            limit=1000,
+                            get_all=False
+                        )
+                        logger.info(f"Querying {query_config.get('index_name', 'GSI')} for {filter_key}={query_config.get('hash_value')}")
+                    field_bill_ids.update(bill_ids)
+            
+            if filter_key not in field_results:
+                field_results[filter_key] = {
+                    'bill_ids': field_bill_ids,
+                    'queries': field_queries if filter_key != 'politician_name' else field_queries,
+                    'total_count': len(field_bill_ids),
+                    'last_eval_key': None
+                }
+                logger.info(f"Found {len(field_bill_ids)} bill_ids from {filter_key} (first batch)")
         
-        logger.info(f"Using {shortest_key} as source of truth ({len(source_bill_ids)} bill_ids)")
+        # INTERSECT results across different filter types
+        all_bill_ids = None
+        for filter_key, field_result in field_results.items():
+            if all_bill_ids is None:
+                all_bill_ids = field_result['bill_ids'].copy()
+                logger.info(f"Starting with field '{filter_key}': {len(all_bill_ids)} bill_ids")
+            else:
+                before_count = len(all_bill_ids)
+                all_bill_ids &= field_result['bill_ids']  # INTERSECT
+                logger.info(f"INTERSECT with field '{filter_key}': {before_count} -> {len(all_bill_ids)} bill_ids")
         
-        # Remove the source filter from filters (we've already applied it via GSI)
+        if all_bill_ids is None:
+            all_bill_ids = set()
+        
+        logger.info(f"Total unique bill_ids after intersection: {len(all_bill_ids)}")
+        
+        # Find the shortest field list (most restrictive filter) - this is our source of truth for pagination
+        shortest_key = min(field_results.keys(), key=lambda k: len(field_results[k]['bill_ids']))
+        source_field_result = field_results[shortest_key]
+        source_bill_ids = list(all_bill_ids)
+        
+        logger.info(f"Using {shortest_key} as source of truth for pagination ({len(source_bill_ids)} bill_ids after intersection)")
+        
+        # Remove the source filter from filters (we've already applied it via query)
         remaining_filters = filters.copy()
-        if shortest_key in remaining_filters:
-            # For list filters, we need to handle the first value being used in GSI
+        if shortest_key == 'politician_name':
+            # Remove both sponsor_name and cosponsor_name if they were used
+            for key_to_remove in ['sponsor_name', 'politician_name', 'cosponsor_name']:
+                if key_to_remove in remaining_filters:
+                    if isinstance(remaining_filters[key_to_remove], list):
+                        remaining_filters[key_to_remove] = remaining_filters[key_to_remove][1:]
+                        if not remaining_filters[key_to_remove]:
+                            del remaining_filters[key_to_remove]
+                    else:
+                        del remaining_filters[key_to_remove]
+        elif shortest_key in remaining_filters:
             if isinstance(remaining_filters[shortest_key], list):
-                # Remove the first value that was used in GSI, keep others for Python filtering
                 remaining_filters[shortest_key] = remaining_filters[shortest_key][1:]
                 if not remaining_filters[shortest_key]:
                     del remaining_filters[shortest_key]
@@ -509,100 +749,57 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
         
         logger.info(f"Remaining filters to apply in Python: {list(remaining_filters.keys())}")
         
-        # Paginate through source GSI until we have enough results or it runs out
-        # CRITICAL: For agent use, fetch incrementally (10 items at a time) and stop early
-        # Don't fetch all items at once - let the agent check results and paginate if needed
+        # Use the intersected bill_ids directly for pagination (no need to query again)
+        # Paginate through the intersected results
         all_matching_items = []
-        source_last_eval_key = None
-        max_pagination_rounds = 5  # Reduced from 50 - only fetch a few batches initially
-        pagination_round = 0
+        bill_ids_list = sorted(list(all_bill_ids))[:limit * 10]  # Get enough for pagination
         
-        while len(all_matching_items) < limit and pagination_round < max_pagination_rounds:
-            pagination_round += 1
+        logger.info(f"Using intersected bill_ids for pagination: {len(bill_ids_list)} bill_ids")
+        
+        # Fetch full items for paginated batch using BatchGetItem
+        batch_size = min(limit * 2, 100)  # Cap at 100 for DynamoDB BatchGetItem limit
+        bill_ids_to_fetch = bill_ids_list[:batch_size]  # Fetch enough for filtering
+        
+        items_batch = []
+        if bill_ids_to_fetch:
+            # Deduplicate to avoid ValidationException
+            batch_ids = list(dict.fromkeys(bill_ids_to_fetch))
             
-            # Query source GSI with pagination
-            # CRITICAL: Only fetch enough bill_ids to meet the limit (don't fetch all 1000)
-            # For agent use, fetch limit * 2 to account for filtering, but cap at reasonable amount
-            query_limit = min(limit * 2, 50)  # Fetch 2x limit or max 50, whichever is smaller
-            source_bill_ids_batch, new_last_eval_key = query_gsi_for_bill_ids(
-                index_name=source_config['index_name'],
-                hash_key_name=source_config['hash_key'],
-                hash_key_value=source_config['hash_value'],
-                range_key_name=source_config.get('range_key'),
-                range_key_value=source_config.get('range_value'),
-                range_key_condition=source_config.get('range_condition'),
-                limit=query_limit,  # Use smaller limit for agent use
-                exclusive_start_key=source_last_eval_key,
-                get_all=False
-            )
-            source_last_eval_key = new_last_eval_key
-            
-            if not source_bill_ids_batch:
-                logger.info(f"Source GSI {source_config['index_name']} ran out of items")
-                break
-            
-            logger.info(f"Pagination round {pagination_round}: Got {len(source_bill_ids_batch)} bill_ids from source GSI (query_limit={query_limit})")
-            
-            # Fetch full items for this batch using BatchGetItem
-            # CRITICAL: Only fetch enough items to meet the limit (default 10 for agent use)
-            # Don't fetch all items at once - fetch incrementally and stop early
-            items_batch = []
-            if source_bill_ids_batch:
-                # Use limit as batch size to fetch incrementally (default 10 for agent)
-                # This prevents fetching all 94 items when we only need 10
-                batch_size = min(limit, 100)  # Cap at 100 for DynamoDB BatchGetItem limit
-                # Only fetch enough bill_ids to potentially meet the limit
-                # Since we filter in Python, we might need more, but don't fetch all at once
-                bill_ids_to_fetch = source_bill_ids_batch[:min(len(source_bill_ids_batch), limit * 2)]
-                
-                for i in range(0, len(bill_ids_to_fetch), batch_size):
-                    batch_ids = bill_ids_to_fetch[i:i + batch_size]
-                    # Deduplicate to avoid ValidationException
-                    batch_ids = list(dict.fromkeys(batch_ids))
-                    
-                    # CRITICAL: Include both bill_id (hash key) and search_index_sk (range key)
-                    # For regular bill items, search_index_sk = bill_id
-                    request_items = {
-                        BILLS_TABLE_NAME: {
-                            'Keys': [
-                                {
-                                    'bill_id': {'S': str(bid)},
-                                    'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
-                                }
-                                for bid in batch_ids
-                            ]
+            # CRITICAL: Include both bill_id (hash key) and search_index_sk (range key)
+            # For regular bill items, search_index_sk = bill_id
+            request_items = {
+                BILLS_TABLE_NAME: {
+                    'Keys': [
+                        {
+                            'bill_id': {'S': str(bid)},
+                            'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
                         }
-                    }
-                    batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-                    batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
-                    deserializer = TypeDeserializer()
-                    for item in batch_items:
-                        converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                        # Filter out search index items (they have different search_index_sk patterns)
-                        if not is_search_index_item(converted_item):
-                            items_batch.append(converted_item)
-                    
-                    # Stop fetching if we have enough items to potentially meet the limit
-                    if len(items_batch) >= limit * 2:
-                        break
-            
-            # Apply remaining filters in Python (including substring matching for bill_title)
-            for item in items_batch:
-                if apply_python_filter(item, remaining_filters):
-                    all_matching_items.append(item)
-            
-            logger.info(f"Pagination round {pagination_round}: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
-            
-            # Stop if source GSI ran out or we have enough results
-            if not source_last_eval_key or len(all_matching_items) >= limit:
-                break
+                        for bid in batch_ids
+                    ]
+                }
+            }
+            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+            batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+            deserializer = TypeDeserializer()
+            for item in batch_items:
+                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                # Filter out search index items (they have different search_index_sk patterns)
+                if not is_search_index_item(converted_item):
+                    items_batch.append(converted_item)
+        
+        # Apply remaining filters in Python
+        for item in items_batch:
+            if apply_python_filter(item, remaining_filters):
+                all_matching_items.append(item)
+        
+        logger.info(f"Multi-query intersection complete: {len(all_matching_items)} items matched all filters (out of {len(items_batch)} fetched)")
         
         # Use the collected items directly
         items = all_matching_items[:limit]
         
-        logger.info(f"Multi-GSI intersection complete: {len(items)} items matching all filters")
-        method = 'multi_gsi_intersection'
-        index_name = f"{len(query_configs)}_GSIs"
+        logger.info(f"Multi-query intersection complete: {len(items)} items matching all filters")
+        method = 'multi_query_intersection'
+        index_name = f"{unique_filter_types}_filter_types"
         
         # Convert Decimal to float for JSON serialization
         results = [convert_decimal_to_float(item) for item in items]
@@ -618,19 +815,25 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
             enriched_results.append(bill)
         
         # Convert last_evaluated_key to JSON-serializable format
+        # For multi-query intersection, use offset-based pagination
+        has_more = len(bill_ids_list) > len(bill_ids_to_fetch)
         serializable_last_key = None
-        if source_last_eval_key:
+        if has_more:
             try:
-                serializable_last_key = convert_decimal_to_float(source_last_eval_key)
+                serializable_last_key = {
+                    'offset': len(bill_ids_to_fetch),
+                    'total_items': len(all_bill_ids),
+                    'method': 'multi_query_intersection'
+                }
             except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key: {e}")
+                logger.warning(f"Error creating last_evaluated_key: {e}")
                 serializable_last_key = None
         
         return {
             'success': True,
             'results': enriched_results,
             'count': len(enriched_results),
-            'has_more': source_last_eval_key is not None,
+            'has_more': has_more,
             'last_evaluated_key': serializable_last_key,
             'method': method,
             'index_used': index_name
@@ -650,22 +853,38 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
             'index_used': None
         }
     
-    # Use first query config for single GSI query
+    # Use first query config for single query (GSI or cosponsor search)
+    # NOTE: If politician_role is 'both', we'll have 2 configs (sponsor + cosponsor) and go to multi-query path
+    # So single query path only handles one config at a time
     config = query_configs[0]
-    logger.info(f"Using single GSI query: {config['index_name']}")
+    query_type = config.get('query_type', 'gsi')
     
-    # Query GSI with pagination support
-    bill_ids, last_eval_key = query_gsi_for_bill_ids(
-        index_name=config['index_name'],
-        hash_key_name=config['hash_key'],
-        hash_key_value=config['hash_value'],
-        range_key_name=config.get('range_key'),
-        range_key_value=config.get('range_value'),
-        range_key_condition=config.get('range_condition'),
-        limit=limit * 5,  # Fetch more to account for filtering
-        exclusive_start_key=last_evaluated_key,
-        get_all=False
-    )
+    bill_ids = []
+    last_eval_key = None
+    
+    if query_type == 'cosponsor_search':
+        logger.info(f"Using single cosponsor search query for {config['cosponsor_name']}")
+        bill_ids, last_eval_key = query_cosponsor_search_index(
+            cosponsor_name=config['cosponsor_name'],
+            date_from=config.get('date_from'),
+            date_to=config.get('date_to'),
+            limit=limit * 5,  # Fetch more to account for filtering
+            exclusive_start_key=last_evaluated_key
+        )
+    else:
+        logger.info(f"Using single GSI query: {config.get('index_name', 'GSI')}")
+        # Query GSI with pagination support
+        bill_ids, last_eval_key = query_gsi_for_bill_ids(
+            index_name=config['index_name'],
+            hash_key_name=config['hash_key'],
+            hash_key_value=config['hash_value'],
+            range_key_name=config.get('range_key'),
+            range_key_value=config.get('range_value'),
+            range_key_condition=config.get('range_condition'),
+            limit=limit * 5,  # Fetch more to account for filtering
+            exclusive_start_key=last_evaluated_key,
+            get_all=False
+        )
     
     # If GSI returned no results for bill_title (which requires exact match),
     # return empty results (user should use autocomplete to find exact titles)
@@ -688,9 +907,20 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
         batch_size = 100
         for i in range(0, len(bill_ids), batch_size):
             batch_ids = bill_ids[i:i + batch_size]
+            # Deduplicate to avoid ValidationException
+            batch_ids = list(dict.fromkeys(batch_ids))
+            
+            # CRITICAL: Include both bill_id (hash key) and search_index_sk (range key)
+            # For regular bill items, search_index_sk = bill_id
             request_items = {
                 BILLS_TABLE_NAME: {
-                    'Keys': [{'bill_id': {'S': str(bid)}} for bid in batch_ids]
+                    'Keys': [
+                        {
+                            'bill_id': {'S': str(bid)},
+                            'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk = bill_id
+                        }
+                        for bid in batch_ids
+                    ]
                 }
             }
             batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
@@ -698,7 +928,9 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
             deserializer = TypeDeserializer()
             for item in batch_items:
                 converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                items.append(converted_item)
+                # Filter out search index items (they have different search_index_sk patterns)
+                if not is_search_index_item(converted_item):
+                    items.append(converted_item)
     
     # Apply remaining filters (exact matching for queryable filters, substring for non-queryable)
     # IMPORTANT: Queryable filters (sponsor_name, bill_title, policy_area, etc.) require exact match from autocomplete
@@ -743,6 +975,10 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
             logger.warning(f"Error converting last_evaluated_key: {e}")
             serializable_last_key = None
     
+    index_used = config.get('index_name')
+    if not index_used and query_type == 'cosponsor_search':
+        index_used = 'cosponsor_search_index'
+    
     return {
         'success': True,
         'results': enriched_results,
@@ -750,7 +986,7 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
         'has_more': last_eval_key is not None,
         'last_evaluated_key': serializable_last_key,
         'method': 'query',
-        'index_used': config['index_name']
+        'index_used': index_used or 'gsi'
     }
 
 
@@ -859,10 +1095,16 @@ def search_congress_bills(
     Search for congressional bills in DynamoDB using various filters.
     
     **IMPORTANT: Use autocomplete before searching:**
-    For sponsor_name and policy_area searches, use search_autocomplete to find exact values.
+    For sponsor_name, cosponsor_name, and policy_area searches, use search_autocomplete to find exact values.
     - For sponsor_name: Use search_autocomplete(query, "congress_legislator", limit=10)
+    - For cosponsor_name: Use search_autocomplete(query, "congress_legislator", limit=10)
     - For policy_area: Use search_autocomplete(query, "policy_area", limit=10)
     If multiple matches, ask user to clarify OR if very similar, run searches for all matches.
+    
+    **Politician Role Filter:**
+    - Use politician_role filter with sponsor_name to search both sponsor and cosponsor roles
+    - politician_role can be: "sponsor", "cosponsor", or "both" (default: "both")
+    - When politician_role is "both", searches both SponsorNameDateIndex (sponsor) and cosponsor search index, then unions results
     
     **Pagination:**
     - Default limit is 5 results to conserve compute
@@ -872,12 +1114,15 @@ def search_congress_bills(
     
     Args:
         filters: JSON string containing filter fields. Supported filters:
-            - sponsor_name: List or string of sponsor names (case-insensitive substring match)
-            - bill_title: List or string of bill titles (case-insensitive substring match)
+            - sponsor_name: List or string of sponsor names (use autocomplete first for exact match)
+            - politician_name: Alias for sponsor_name (use autocomplete first)
+            - cosponsor_name: List or string of cosponsor names (use autocomplete first for exact match)
+            - politician_role: "sponsor", "cosponsor", or "both" (default: "both") - used with sponsor_name/politician_name
+            - bill_title: List or string of bill titles (exact match required via BillTitleDateIndex GSI)
             - bill_type: List or string of bill types (e.g., "HR", "S", "HJR", "SJR")
             - sponsor_party: List or string of sponsor parties (e.g., "R", "D", "I")
-            - sponsor_state: List or string of sponsor states (2-letter codes)
-            - policy_area: List or string of policy areas (case-insensitive substring match)
+            - sponsor_state: List or string of sponsor states (2-letter codes) - non-queryable, filtered in Python
+            - policy_area: List or string of policy areas (use autocomplete first for exact match)
             - bipartisan: Integer (1 for bipartisan, 0 for non-bipartisan)
             - bill_number: Exact bill number
             - congress: Congress number (e.g., 118, 119)
