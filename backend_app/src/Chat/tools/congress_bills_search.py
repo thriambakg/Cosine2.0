@@ -251,6 +251,48 @@ def identify_queryable_filters(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Identify which filters can use GSIs and return query configurations"""
     query_configs = []
     
+    # SponsorNameDateIndex: hash_key=sponsor_full_name, range_key=introduced_date
+    if filters.get('sponsor_name'):
+        sponsor_names = filters['sponsor_name'] if isinstance(filters['sponsor_name'], list) else [filters['sponsor_name']]
+        sponsor_names = [n for n in sponsor_names if n and str(n).strip()]
+        if sponsor_names:
+            # Use first sponsor name for hash key (exact match - should come from autocomplete)
+            sponsor_name = sponsor_names[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'sponsor_name',
+                'index_name': 'SponsorNameDateIndex',
+                'hash_key': 'sponsor_full_name',
+                'hash_value': sponsor_name,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
+    # SponsorPartyDateIndex: hash_key=sponsor_party, range_key=introduced_date
+    if filters.get('sponsor_party'):
+        parties = filters['sponsor_party'] if isinstance(filters['sponsor_party'], list) else [filters['sponsor_party']]
+        parties = [p for p in parties if p and str(p).strip()]
+        if parties:
+            # Use first party for hash key (exact match)
+            sponsor_party = parties[0].strip()
+            introduced_date = None
+            if filters.get('introduced_date_from'):
+                introduced_date = filters['introduced_date_from']
+            
+            query_configs.append({
+                'filter_key': 'sponsor_party',
+                'index_name': 'SponsorPartyDateIndex',
+                'hash_key': 'sponsor_party',
+                'hash_value': sponsor_party,
+                'range_key': 'introduced_date' if introduced_date else None,
+                'range_value': introduced_date,
+                'range_condition': 'gte' if introduced_date else None
+            })
+    
     # BillTitleDateIndex: hash_key=bill_title, range_key=introduced_date
     if filters.get('bill_title'):
         bill_titles = filters['bill_title'] if isinstance(filters['bill_title'], list) else [filters['bill_title']]
@@ -594,58 +636,17 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
             'index_used': index_name
         }
     
-    # Fall back to single GSI query or scan
-    # If no queryable filters, use table scan
+    # If no queryable filters, return error (should use autocomplete first)
     if not query_configs:
-        logger.info("No queryable filters found, using table scan")
-        
-        scan_limit = max(limit * 10, 1000)  # Scan more items to account for potential filtering
-        params = {
-            'Limit': scan_limit
-        }
-        
-        if last_evaluated_key:
-            params['ExclusiveStartKey'] = last_evaluated_key
-        
-        logger.info(f"Scanning bills table with Limit={scan_limit} (result limit={limit})")
-        response = bills_table.scan(**params)
-        
-        scanned_items = response.get('Items', [])
-        last_eval_key = response.get('LastEvaluatedKey')
-        
-        logger.info(f"Scan found {len(scanned_items)} items")
-        
-        # Apply any filters in Python (including substring matching)
-        filtered_items = [item for item in scanned_items if apply_python_filter(item, filters)]
-        filtered_items = filtered_items[:limit]
-        
-        # Convert and enrich
-        results = [convert_decimal_to_float(item) for item in filtered_items]
-        enriched_results = []
-        for bill in results:
-            oversize_s3_key = bill.get('oversize_s3_key')
-            if oversize_s3_key:
-                full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
-                if full_bill:
-                    bill = convert_decimal_to_float(full_bill)
-            enriched_results.append(bill)
-        
-        # Convert last_evaluated_key
-        serializable_last_key = None
-        if last_eval_key:
-            try:
-                serializable_last_key = convert_decimal_to_float(last_eval_key)
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key: {e}")
-                serializable_last_key = None
-        
+        logger.warning("No queryable filters found - scan is not allowed. Please use search_autocomplete first.")
         return {
-            'success': True,
-            'results': enriched_results,
-            'count': len(enriched_results),
-            'has_more': last_eval_key is not None,
-            'last_evaluated_key': serializable_last_key,
-            'method': 'scan',
+            'success': False,
+            'error': 'No queryable filters found. Please use search_autocomplete to find exact values for sponsor_name, policy_area, etc., then provide at least one queryable filter (sponsor_name, policy_area, congress, bill_type, bill_title, bipartisan, bill_number, or introduced_date_from).',
+            'results': [],
+            'count': 0,
+            'has_more': False,
+            'last_evaluated_key': None,
+            'method': 'error',
             'index_used': None
         }
     
@@ -666,57 +667,19 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
         get_all=False
     )
     
-    # If GSI returned no results and we're searching by bill_title (which requires exact match),
-    # fall back to scan for substring matching
+    # If GSI returned no results for bill_title (which requires exact match),
+    # return empty results (user should use autocomplete to find exact titles)
     if not bill_ids and config['filter_key'] == 'bill_title':
-        logger.info(f"GSI query returned 0 results for exact bill_title match. Falling back to scan for substring matching.")
-        
-        scan_limit = max(limit * 20, 5000)  # Scan more items for substring matching
-        params = {
-            'Limit': scan_limit
-        }
-        
-        if last_evaluated_key:
-            params['ExclusiveStartKey'] = last_evaluated_key
-        
-        response = bills_table.scan(**params)
-        scanned_items = response.get('Items', [])
-        last_eval_key = response.get('LastEvaluatedKey')
-        
-        logger.info(f"Scan found {len(scanned_items)} items, applying filters (including substring matching)")
-        
-        # Apply all filters in Python (including substring matching for bill_title)
-        filtered_items = [item for item in scanned_items if apply_python_filter(item, filters)]
-        filtered_items = filtered_items[:limit]
-        
-        # Convert and enrich
-        results = [convert_decimal_to_float(item) for item in filtered_items]
-        enriched_results = []
-        for bill in results:
-            oversize_s3_key = bill.get('oversize_s3_key')
-            if oversize_s3_key:
-                full_bill = fetch_oversized_bill_from_s3(oversize_s3_key)
-                if full_bill:
-                    bill = convert_decimal_to_float(full_bill)
-            enriched_results.append(bill)
-        
-        # Convert last_evaluated_key
-        serializable_last_key = None
-        if last_eval_key:
-            try:
-                serializable_last_key = convert_decimal_to_float(last_eval_key)
-            except Exception as e:
-                logger.warning(f"Error converting last_evaluated_key: {e}")
-                serializable_last_key = None
-        
+        logger.info(f"GSI query returned 0 results for exact bill_title match. BillTitleDateIndex requires exact title match.")
         return {
             'success': True,
-            'results': enriched_results,
-            'count': len(enriched_results),
-            'has_more': last_eval_key is not None,
-            'last_evaluated_key': serializable_last_key,
-            'method': 'scan_fallback',
-            'index_used': f"{config['index_name']}_fallback"
+            'results': [],
+            'count': 0,
+            'has_more': False,
+            'last_evaluated_key': None,
+            'method': 'query',
+            'index_used': config['index_name'],
+            'message': 'No results found for exact bill_title match. BillTitleDateIndex requires exact title match. Consider using other queryable filters (congress, bill_type, sponsor_name, policy_area, etc.) or use search_autocomplete to find exact bill titles.'
         }
     
     # Fetch full items using BatchGetItem
@@ -737,28 +700,24 @@ def search_bills_direct(filters: Dict[str, Any], limit: int = 100, last_evaluate
                 converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                 items.append(converted_item)
     
-    # Apply remaining filters (including substring matching for bill_title)
-    # IMPORTANT: For bill_title, the GSI only matches exact titles, but we need substring matching
-    # So we keep bill_title in remaining_filters to apply substring matching in Python
+    # Apply remaining filters (exact matching for queryable filters, substring for non-queryable)
+    # IMPORTANT: Queryable filters (sponsor_name, bill_title, policy_area, etc.) require exact match from autocomplete
+    # For sponsor_name, remove the first value that was used in GSI (exact match), keep others for Python filtering
     remaining_filters = filters.copy()
     if config['filter_key'] in remaining_filters:
         if isinstance(remaining_filters[config['filter_key']], list):
             # For lists, remove the first value that was used in GSI, keep others for Python filtering
             remaining_filters[config['filter_key']] = remaining_filters[config['filter_key']][1:]
             if not remaining_filters[config['filter_key']]:
-                # If list is empty, but it's bill_title, we still want substring matching on the original value
-                # So we restore it from the original filters
-                if config['filter_key'] == 'bill_title' and filters.get('bill_title'):
-                    remaining_filters[config['filter_key']] = filters['bill_title'] if isinstance(filters['bill_title'], list) else [filters['bill_title']]
-                else:
-                    del remaining_filters[config['filter_key']]
+                del remaining_filters[config['filter_key']]
         else:
-            # For bill_title, always keep it for substring matching (GSI only does exact match)
-            if config['filter_key'] == 'bill_title':
-                # Keep the filter for substring matching - don't remove it
-                pass
+            # For exact match filters (sponsor_name, sponsor_party, bill_title, policy_area), remove since GSI already applied exact match
+            # Non-queryable filters (sponsor_state, etc.) can still apply substring matching
+            if config['filter_key'] in ['sponsor_name', 'sponsor_party', 'bill_title', 'policy_area']:
+                # Remove exact match filter - GSI already applied it
+                del remaining_filters[config['filter_key']]
             else:
-                # For other filters, remove since GSI already applied exact match
+                # For other queryable filters (congress, bill_type, bipartisan, etc.), remove since GSI already applied exact match
                 del remaining_filters[config['filter_key']]
     
     filtered_items = [item for item in items if apply_python_filter(item, remaining_filters)]
