@@ -1,6 +1,7 @@
 """
 LDA Search tool for the chat agent
-Searches DynamoDB for LDA filings and contributions with various filters
+Searches LDA filings by invoking the LDA Search Lambda function
+The Lambda function handles all DynamoDB queries, filtering, and pagination logic
 """
 
 import json
@@ -8,12 +9,9 @@ import os
 import logging
 import boto3
 import gzip
-from typing import Dict, List, Any, Optional, Set
-from decimal import Decimal
+from typing import Dict, Any, Optional
 from datetime import datetime
 import sys
-from boto3.dynamodb.conditions import Key, Attr
-from boto3.dynamodb.types import TypeDeserializer
 
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -38,543 +36,93 @@ except ImportError as e:
         return func
 
 # AWS clients
-dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
+lambda_client = boto3.client('lambda')
 
 # Environment variables
-FILINGS_TABLE_NAME = os.environ.get('FILINGS_TABLE_NAME')
-if not FILINGS_TABLE_NAME:
-    raise ValueError("FILINGS_TABLE_NAME environment variable is required")
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'staging')
+PROJECT_NAME = os.environ.get('PROJECT_NAME', 'cosine')
 CHAT_FILES_BUCKET_NAME = os.environ.get('CHAT_FILES_BUCKET_NAME')
 if not CHAT_FILES_BUCKET_NAME:
     raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
 
-# Get DynamoDB table
-filings_table = dynamodb.Table(FILINGS_TABLE_NAME) if FILINGS_TABLE_NAME else None
+# Lambda function name for LDA search
+LDA_SEARCH_LAMBDA_NAME = f"{PROJECT_NAME}-lda-search-{ENVIRONMENT}"
 
 
-def convert_decimal_to_float(obj: Any) -> Any:
-    """Recursively convert Decimal values to float for JSON serialization"""
-    if isinstance(obj, Decimal):
-        return float(obj)
-    elif isinstance(obj, dict):
-        return {key: convert_decimal_to_float(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_decimal_to_float(item) for item in obj]
-    else:
-        return obj
-
-
-def clean_quotes(value: str) -> str:
-    """Remove surrounding quotes from a string"""
-    if not value:
-        return value
-    value = value.strip()
-    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-        return value[1:-1]
-    return value
-
-
-def query_gsi_for_filing_ids(
-    index_name: str,
-    hash_key_name: str,
-    hash_key_value: Any,
-    range_key_name: Optional[str] = None,
-    range_key_value: Optional[Any] = None,
-    range_key_condition: Optional[str] = None,
-    limit: int = 1000,
-    exclusive_start_key: Optional[Dict] = None
-) -> tuple[List[str], Optional[Dict]]:
-    """
-    Query a GSI to get filing IDs
-    
-    Returns:
-        Tuple of (list of filing IDs, last_evaluated_key)
-    """
-    if not filings_table:
-        raise Exception("DynamoDB filings table not initialized")
-    
-    try:
-        key_condition = Key(hash_key_name).eq(hash_key_value)
-        
-        if range_key_name and range_key_value:
-            if range_key_condition == 'gte':
-                key_condition = key_condition & Key(range_key_name).gte(range_key_value)
-            elif range_key_condition == 'lte':
-                key_condition = key_condition & Key(range_key_name).lte(range_key_value)
-            elif range_key_condition == 'between':
-                # Assuming range_key_value is a tuple (start, end)
-                if isinstance(range_key_value, (list, tuple)) and len(range_key_value) == 2:
-                    key_condition = key_condition & Key(range_key_name).between(range_key_value[0], range_key_value[1])
-        
-        query_params = {
-            'IndexName': index_name,
-            'KeyConditionExpression': key_condition,
-            'ProjectionExpression': 'PK, SK',
-            'Limit': limit
-        }
-        
-        if exclusive_start_key:
-            query_params['ExclusiveStartKey'] = exclusive_start_key
-        
-        response = filings_table.query(**query_params)
-        
-        filing_ids = []
-        for item in response.get('Items', []):
-            pk = item.get('PK', '')
-            if pk.startswith('FILING#'):
-                filing_id = pk.replace('FILING#', '')
-                filing_ids.append(filing_id)
-            elif pk.startswith('CONTRIBUTION#'):
-                filing_id = pk.replace('CONTRIBUTION#', '')
-                filing_ids.append(filing_id)
-        
-        last_eval_key = response.get('LastEvaluatedKey')
-        return filing_ids, last_eval_key
-        
-    except Exception as e:
-        logger.error(f"Error querying GSI {index_name}: {str(e)}", exc_info=True)
-        raise
-
-
-def get_all_from_gsi(query_func, *args, max_items: int = 50000, **kwargs) -> Set[str]:
-    """Get all items from a GSI using internal pagination"""
-    all_ids = set()
-    exclusive_start_key = kwargs.pop('exclusive_start_key', None)
-    
-    while len(all_ids) < max_items:
-        kwargs['exclusive_start_key'] = exclusive_start_key
-        kwargs['limit'] = 1000  # Use larger limit for efficiency
-        
-        ids, last_key = query_func(*args, **kwargs)
-        all_ids.update(ids)
-        
-        if not last_key or len(ids) == 0:
-            break
-        exclusive_start_key = last_key
-    
-    return all_ids
-
-
-def query_search_index(
-    search_type: str,
-    search_values: List[str],
-    limit: int = 1000,
-    exclusive_start_key: Optional[Dict] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None
-) -> tuple[List[str], Optional[Dict]]:
-    """
-    Query materialized search index items to get entity PKs
-    """
-    if not filings_table:
-        raise Exception("DynamoDB filings table not initialized")
-    
-    if not search_values:
-        return [], None
-    
-    search_value = clean_quotes(str(search_values[0]).strip())
-    if not search_value:
-        return [], None
-    
-    search_pk = f"SEARCH#{search_type}#{search_value}"
-    key_condition = Key('PK').eq(search_pk)
-    
-    # Add date filtering if provided
-    if date_from or date_to:
-        def extract_date(date_str):
-            if not date_str:
-                return None
-            if 'T' in date_str:
-                return date_str.split('T')[0]
-            elif ' ' in date_str:
-                return date_str.split(' ')[0]
-            return date_str[:10]
-        
-        date_from_part = extract_date(date_from) if date_from else None
-        date_to_part = extract_date(date_to) if date_to else None
-        
-        if date_from_part and date_to_part:
-            sk_start = f"DT_POSTED#{date_from_part}#"
-            sk_end = f"DT_POSTED#{date_to_part}#~"
-            key_condition = Key('PK').eq(search_pk) & Key('SK').between(sk_start, sk_end)
-        elif date_from_part:
-            sk_start = f"DT_POSTED#{date_from_part}#"
-            key_condition = Key('PK').eq(search_pk) & Key('SK').gte(sk_start)
-        elif date_to_part:
-            sk_end = f"DT_POSTED#{date_to_part}#~"
-            key_condition = Key('PK').eq(search_pk) & Key('SK').lte(sk_end)
-    
-    query_params = {
-        'KeyConditionExpression': key_condition,
-        'ProjectionExpression': 'entity_pk, SK',
-        'Limit': limit
-    }
-    
-    if exclusive_start_key:
-        if isinstance(exclusive_start_key, dict) and 'search_index_key' in exclusive_start_key:
-            query_params['ExclusiveStartKey'] = exclusive_start_key['search_index_key']
-        else:
-            query_params['ExclusiveStartKey'] = exclusive_start_key
-    
-    response = filings_table.query(**query_params)
-    
-    entity_pks = []
-    for item in response.get('Items', []):
-        entity_pk = item.get('entity_pk')
-        if entity_pk:
-            entity_pks.append(str(entity_pk))
-    
-    last_eval_key = response.get('LastEvaluatedKey')
-    return entity_pks, last_eval_key
-
-
-def batch_get_filings(entity_pks: List[str], limit: int = 100) -> List[Dict[str, Any]]:
-    """
-    Batch get filing/contribution items from DynamoDB using entity PKs
-    
-    Args:
-        entity_pks: List of entity PKs in format "FILING#uuid" or "CONTRIBUTION#uuid"
-        limit: Maximum number of items to fetch
-    """
-    if not filings_table:
-        raise Exception("DynamoDB filings table not initialized")
-    
-    results = []
-    entity_pks = entity_pks[:limit]  # Limit the number of PKs
-    
-    # DynamoDB BatchGetItem can handle up to 100 items
-    for i in range(0, len(entity_pks), 100):
-        batch_pks = entity_pks[i:i+100]
-        
-        # Build request items - entity_pks are already in correct format (FILING#uuid or CONTRIBUTION#uuid)
-        request_items = {
-            FILINGS_TABLE_NAME: {
-                'Keys': [
-                    {'PK': pk, 'SK': pk}  # PK and SK are the same for filings/contributions
-                    for pk in batch_pks
-                ]
-            }
-        }
-        
-        try:
-            response = dynamodb.batch_get_item(RequestItems=request_items)
-            items = response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
-            results.extend(items)
-        except Exception as e:
-            logger.error(f"Error in batch_get_item: {str(e)}", exc_info=True)
-            continue
-    
-    return results
-
-
-def search_filings_simplified(
+def invoke_lda_search_lambda(
     filters: Dict[str, Any],
-    limit: int = 5,
+    limit: int = 10,
     last_evaluated_key: Optional[Dict] = None
 ) -> Dict[str, Any]:
     """
-    Simplified search filings function for agent tool
+    Invoke the LDA Search Lambda function directly
     
-    Default limit is 5 to prevent massive searches without explicit user request.
-    Users can request pagination or narrow their search as needed.
+    Args:
+        filters: Search filters dictionary
+        limit: Maximum number of results
+        last_evaluated_key: Pagination token
+    
+    Returns:
+        Search results dictionary
     """
-    if not filings_table:
-        raise Exception("DynamoDB filings table not initialized")
-    
     try:
-        # Extract search parameters
-        registrant_name = filters.get('registrant_name')
-        client_name = filters.get('client_name')
-        lobbyist_name = filters.get('lobbyist_name')
-        pac_name = filters.get('pac_name')
-        general_issue_code = filters.get('general_issue_code')
-        government_entity = filters.get('government_entity')
-        foreign_entity_name = filters.get('foreign_entity_name')
-        date_from = filters.get('date_from')
-        date_to = filters.get('date_to')
-        filing_year = filters.get('filing_year')
-        item_type = filters.get('item_type')
-        
-        # Collect entity PKs (FILING#uuid or CONTRIBUTION#uuid) from different sources
-        # Use intersection logic: if multiple filters, only return filings that match ALL filters
-        entity_pk_sets = []
-        last_eval_keys = {}
-        
-        # Query registrant if provided
-        if registrant_name:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(registrant_name, list):
-                registrant_name = registrant_name[0] if registrant_name else None
-            if registrant_name:
-                registrant_name = clean_quotes(str(registrant_name).strip())
-                if registrant_name:
-                    # Get all filing IDs using pagination helper
-                    filing_ids_set = get_all_from_gsi(
-                        query_gsi_for_filing_ids,
-                        index_name='RegistrantPostedDateIndex',
-                        hash_key_name='registrant_name',
-                        hash_key_value=registrant_name,
-                        range_key_name='dt_posted',
-                        range_key_value=date_from if date_from else None,
-                        range_key_condition='gte' if date_from else None,
-                        max_items=50000
-                    )
-                    # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
-                    entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
-                    entity_pk_sets.append(entity_pks)
-                    logger.info(f"Registrant '{registrant_name}': Found {len(entity_pks)} entity PKs")
-        
-        # Query client if provided
-        if client_name:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(client_name, list):
-                client_name = client_name[0] if client_name else None
-            if client_name:
-                client_name = clean_quotes(str(client_name).strip())
-                if client_name:
-                    # Get all filing IDs using pagination helper
-                    filing_ids_set = get_all_from_gsi(
-                        query_gsi_for_filing_ids,
-                        index_name='ClientPostedDateIndex',
-                        hash_key_name='client_name',
-                        hash_key_value=client_name,
-                        range_key_name='dt_posted',
-                        range_key_value=date_from if date_from else None,
-                        range_key_condition='gte' if date_from else None,
-                        max_items=50000
-                    )
-                    # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
-                    entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
-                    entity_pk_sets.append(entity_pks)
-                    logger.info(f"Client '{client_name}': Found {len(entity_pks)} entity PKs")
-        
-        # Query lobbyist using search index if provided
-        if lobbyist_name:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(lobbyist_name, list):
-                lobbyist_name = lobbyist_name[0] if lobbyist_name else None
-            if lobbyist_name:
-                lobbyist_name = clean_quotes(str(lobbyist_name).strip())
-                if lobbyist_name:
-                    # Get all entity PKs using pagination - need to implement pagination for search_index
-                    all_entity_pks_list = []
-                    exclusive_start_key = None
-                    while len(all_entity_pks_list) < 50000:
-                        entity_pks, last_key = query_search_index(
-                            search_type='LOBBYIST',
-                            search_values=[lobbyist_name],
-                            limit=1000,
-                            exclusive_start_key=exclusive_start_key,
-                            date_from=date_from,
-                            date_to=date_to
-                        )
-                        all_entity_pks_list.extend(entity_pks)
-                        if not last_key or len(entity_pks) == 0:
-                            break
-                        exclusive_start_key = last_key
-                    # Keep entity PKs as-is (already in FILING#uuid or CONTRIBUTION#uuid format)
-                    entity_pk_sets.append(set(all_entity_pks_list))
-                    logger.info(f"Lobbyist '{lobbyist_name}': Found {len(all_entity_pks_list)} entity PKs")
-        
-        # Query PAC using search index if provided
-        if pac_name:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(pac_name, list):
-                pac_name = pac_name[0] if pac_name else None
-            if pac_name:
-                pac_name = clean_quotes(str(pac_name).strip())
-                if pac_name:
-                    # Get all entity PKs using pagination
-                    all_entity_pks_list = []
-                    exclusive_start_key = None
-                    while len(all_entity_pks_list) < 50000:
-                        entity_pks, last_key = query_search_index(
-                            search_type='PAC',
-                            search_values=[pac_name],
-                            limit=1000,
-                            exclusive_start_key=exclusive_start_key,
-                            date_from=date_from,
-                            date_to=date_to
-                        )
-                        all_entity_pks_list.extend(entity_pks)
-                        if not last_key or len(entity_pks) == 0:
-                            break
-                        exclusive_start_key = last_key
-                    # Keep entity PKs as-is (already in FILING#uuid or CONTRIBUTION#uuid format)
-                    entity_pk_sets.append(set(all_entity_pks_list))
-                    logger.info(f"PAC '{pac_name}': Found {len(all_entity_pks_list)} entity PKs")
-        
-        # Query general issue code using search index if provided
-        if general_issue_code:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(general_issue_code, list):
-                general_issue_code = general_issue_code[0] if general_issue_code else None
-            if general_issue_code:
-                general_issue_code = clean_quotes(str(general_issue_code).strip())
-                if general_issue_code:
-                    # Get all entity PKs using pagination
-                    all_entity_pks_list = []
-                    exclusive_start_key = None
-                    while len(all_entity_pks_list) < 50000:
-                        entity_pks, last_key = query_search_index(
-                            search_type='GENERAL_ISSUE',
-                            search_values=[general_issue_code],
-                            limit=1000,
-                            exclusive_start_key=exclusive_start_key,
-                            date_from=date_from,
-                            date_to=date_to
-                        )
-                        all_entity_pks_list.extend(entity_pks)
-                        if not last_key or len(entity_pks) == 0:
-                            break
-                        exclusive_start_key = last_key
-                    entity_pk_sets.append(set(all_entity_pks_list))
-                    logger.info(f"General issue '{general_issue_code}': Found {len(all_entity_pks_list)} entity PKs")
-        
-        # Query government entity using search index if provided
-        if government_entity:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(government_entity, list):
-                government_entity = government_entity[0] if government_entity else None
-            if government_entity:
-                government_entity = clean_quotes(str(government_entity).strip())
-                if government_entity:
-                    # Get all entity PKs using pagination
-                    all_entity_pks_list = []
-                    exclusive_start_key = None
-                    while len(all_entity_pks_list) < 50000:
-                        entity_pks, last_key = query_search_index(
-                            search_type='GOVERNMENT_ENTITY',
-                            search_values=[government_entity],
-                            limit=1000,
-                            exclusive_start_key=exclusive_start_key,
-                            date_from=date_from,
-                            date_to=date_to
-                        )
-                        all_entity_pks_list.extend(entity_pks)
-                        if not last_key or len(entity_pks) == 0:
-                            break
-                        exclusive_start_key = last_key
-                    entity_pk_sets.append(set(all_entity_pks_list))
-                    logger.info(f"Government entity '{government_entity}': Found {len(all_entity_pks_list)} entity PKs")
-        
-        # Query foreign entity using search index if provided
-        if foreign_entity_name:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(foreign_entity_name, list):
-                foreign_entity_name = foreign_entity_name[0] if foreign_entity_name else None
-            if foreign_entity_name:
-                foreign_entity_name = clean_quotes(str(foreign_entity_name).strip())
-                if foreign_entity_name:
-                    # Get all entity PKs using pagination
-                    all_entity_pks_list = []
-                    exclusive_start_key = None
-                    while len(all_entity_pks_list) < 50000:
-                        entity_pks, last_key = query_search_index(
-                            search_type='FOREIGN_COUNTRY',
-                            search_values=[foreign_entity_name],
-                            limit=1000,
-                            exclusive_start_key=exclusive_start_key,
-                            date_from=date_from,
-                            date_to=date_to
-                        )
-                        all_entity_pks_list.extend(entity_pks)
-                        if not last_key or len(entity_pks) == 0:
-                            break
-                        exclusive_start_key = last_key
-                    entity_pk_sets.append(set(all_entity_pks_list))
-                    logger.info(f"Foreign entity '{foreign_entity_name}': Found {len(all_entity_pks_list)} entity PKs")
-        
-        # Query by filing year if provided
-        if filing_year:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(filing_year, list):
-                filing_year = filing_year[0] if filing_year else None
-            if filing_year:
-                try:
-                    filing_year_int = int(filing_year) if isinstance(filing_year, (int, str)) else filing_year
-                    # Get all filing IDs using pagination helper
-                    filing_ids_set = get_all_from_gsi(
-                        query_gsi_for_filing_ids,
-                        index_name='YearPostedDateIndex',
-                        hash_key_name='filing_year',
-                        hash_key_value=filing_year_int,
-                        range_key_name='dt_posted',
-                        range_key_value=date_from if date_from else None,
-                        range_key_condition='gte' if date_from else None,
-                        max_items=50000
-                    )
-                    # Convert filing IDs to entity PKs (assume FILING# for GSI queries)
-                    entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
-                    entity_pk_sets.append(entity_pks)
-                    logger.info(f"Filing year '{filing_year}': Found {len(entity_pks)} entity PKs")
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error parsing filing_year: {e}")
-        
-        # Query by item type if provided
-        if item_type:
-            # Extract first value if list (combinatorial logic handled by agent)
-            if isinstance(item_type, list):
-                item_type = item_type[0] if item_type else None
-            if item_type:
-                item_type_upper = str(item_type).upper().strip()
-                # Get all filing IDs using pagination helper
-                filing_ids_set = get_all_from_gsi(
-                    query_gsi_for_filing_ids,
-                    index_name='ItemTypePostedDateIndex',
-                    hash_key_name='item_type',
-                    hash_key_value=item_type_upper,
-                    range_key_name='dt_posted',
-                    range_key_value=date_from if date_from else None,
-                    range_key_condition='gte' if date_from else None,
-                    max_items=50000
-                )
-                # Convert filing IDs to entity PKs (assume FILING# for GSI queries, but item_type filter will handle CONTRIBUTION#)
-                entity_pks = {f'FILING#{fid}' if not fid.startswith('FILING#') and not fid.startswith('CONTRIBUTION#') else fid for fid in filing_ids_set}
-                entity_pk_sets.append(entity_pks)
-                logger.info(f"Item type '{item_type_upper}': Found {len(entity_pks)} entity PKs")
-        
-        # Intersect all entity PK sets (AND logic across filters)
-        if entity_pk_sets:
-            all_entity_pks = entity_pk_sets[0]
-            for entity_pk_set in entity_pk_sets[1:]:
-                all_entity_pks = all_entity_pks.intersection(entity_pk_set)
-        else:
-            all_entity_pks = set()
-        
-        # If no specific filters, return empty
-        if not all_entity_pks:
-            return {
-                'success': True,
-                'results': [],
-                'count': 0,
-                'has_more': False
+        # Prepare Lambda event (mimics API Gateway event structure)
+        lambda_event = {
+            'httpMethod': 'POST',
+            'body': json.dumps({
+                'filters': filters,
+                'limit': limit,
+                'last_evaluated_key': last_evaluated_key
+            }),
+            'headers': {},
+            'requestContext': {
+                'http': {
+                    'method': 'POST'
+                }
             }
-        
-        # Fetch full items (limited to requested limit)
-        # Convert entity PKs to format expected by batch_get_filings
-        entity_pks_list = list(all_entity_pks)[:limit]
-        items = batch_get_filings(entity_pks_list, limit=limit)
-        
-        # Convert items
-        results = [convert_decimal_to_float(item) for item in items]
-        
-        # Determine if there are more results
-        has_more = len(all_entity_pks) > len(results)
-        
-        return {
-            'success': True,
-            'results': results,
-            'count': len(results),
-            'total_matched': len(all_entity_pks),
-            'has_more': has_more,
-            'last_evaluated_keys': last_eval_keys if last_eval_keys else None
         }
         
+        # Invoke Lambda function
+        logger.info(f"Invoking LDA Search Lambda: {LDA_SEARCH_LAMBDA_NAME}")
+        response = lambda_client.invoke(
+            FunctionName=LDA_SEARCH_LAMBDA_NAME,
+            InvocationType='RequestResponse',  # Synchronous invocation
+            Payload=json.dumps(lambda_event)
+        )
+        
+        # Check for Lambda errors
+        if 'FunctionError' in response:
+            error_payload = json.loads(response['Payload'].read())
+            logger.error(f"Lambda function error: {error_payload}")
+            return {
+                'success': False,
+                'error': error_payload.get('errorMessage', 'Lambda function error')
+            }
+        
+        # Parse response
+        response_payload = json.loads(response['Payload'].read())
+        
+        # Lambda returns API Gateway-style response with statusCode and body
+        if response_payload.get('statusCode') == 200:
+            body = json.loads(response_payload.get('body', '{}'))
+            logger.info(f"Lambda search completed: {body.get('count', 0)} results, has_more={body.get('has_more', False)}")
+            return body
+        else:
+            # Error response
+            error_body = json.loads(response_payload.get('body', '{}'))
+            logger.error(f"Lambda returned error status {response_payload.get('statusCode')}: {error_body}")
+            return {
+                'success': False,
+                'error': error_body.get('error', f"Lambda returned status {response_payload.get('statusCode')}")
+            }
+            
     except Exception as e:
-        logger.error(f"Error searching filings: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Error invoking LDA Search Lambda: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': f"Failed to invoke search Lambda: {str(e)}"
+        }
 
 
 def store_results_in_s3(results: Dict[str, Any], user_id: str, session_id: str) -> str:
@@ -614,7 +162,8 @@ def lda_search(
     last_evaluated_key: str = None
 ) -> str:
     """
-    Search for LDA (Lobbying Disclosure Act) filings and contributions.
+    Search for LDA (Lobbying Disclosure Act) filings and contributions by invoking the LDA Search Lambda function.
+    The Lambda handles all DynamoDB queries, filtering, and pagination.
     
     **IMPORTANT: Use autocomplete before searching:**
     Before using this tool, you should first use lda_autocomplete to find the exact names of registrants, clients,
@@ -651,10 +200,12 @@ def lda_search(
             - date_to: End date in YYYY-MM-DD format
             - filing_year: Filing year (integer, e.g., 2023)
             - item_type: Item type - "FILING" or "CONTRIBUTION" (default: both)
+            - general_text_search_fields: Dict with fields to search (e.g., {"registrant": ["TESLA"], "client": ["TESLA"]})
         limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)
         last_evaluated_key: JSON string of pagination token from previous request (optional)
         
     Note: Multiple filters use AND logic (intersection) - results must match ALL specified filters.
+    Exception: general_text_search_fields uses OR logic within the field.
     
     Returns:
         JSON string with search results. For large results (>50 items or >50KB), returns S3 key reference.
@@ -699,13 +250,15 @@ def lda_search(
         
         agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
         
-        # Perform search
-        result = search_filings_simplified(filters_dict, limit=limit, last_evaluated_key=last_key)
+        # Invoke Lambda function to perform search
+        result = invoke_lda_search_lambda(filters_dict, limit, last_key)
         
-        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, total_matched={result.get('total_matched', 'N/A')}, has_more={result.get('has_more', False)}")
-        
-        if not result.get('success'):
+        # Check if Lambda returned an error
+        if not result.get('success', True):
+            agent_logger.error(f"❌ Lambda search failed: {result.get('error')}")
             return json.dumps(result, default=str)
+        
+        agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, has_more={result.get('has_more', False)}")
         
         # Check if result is large enough to store in S3
         result_json = json.dumps(result)
@@ -723,7 +276,7 @@ def lda_search(
         if should_store_in_s3:
             # Store in S3
             try:
-                # SECURITY: Get user_id from secure source (set by lambda_handler from authorizer/headers)
+                # SECURITY: Get user_id from secure source
                 try:
                     from utils.auth_helper import get_secure_user_id
                     user_id = get_secure_user_id({}, fallback_to_env=True)
@@ -749,13 +302,14 @@ def lda_search(
                     "s3_key": s3_key,
                     "data_size_bytes": result_size,
                     "count": result_count,
-                    "total_matched": result.get('total_matched', result_count),
                     "has_more": result.get('has_more', False),
+                    "last_evaluated_key": result.get('last_evaluated_key'),
+                    "method": result.get('method', 'query'),
                     "message": f"Large dataset ({result_count} results) stored in S3. Use read_s3_file_tool to access: {s3_key}",
                     "summary": {
                         "total_results": result_count,
-                        "total_matched": result.get('total_matched', result_count),
                         "has_more": result.get('has_more', False),
+                        "method": result.get('method', 'query'),
                         "sample_results": results_list[:5] if results_list else []  # Include first 5 as sample
                     }
                 }
