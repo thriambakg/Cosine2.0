@@ -13,7 +13,7 @@ from typing import Dict, Optional
 # ============================================================================
 
 API_BASE_URL = "https://lda.senate.gov/api/v1"
-API_KEY = "88f3f8febf11c8321d9c64d67b0b1367b740f435"
+API_KEY = ""
 
 REQUEST_TIMEOUT = 30
 RATE_LIMIT_DELAY = 0.5
