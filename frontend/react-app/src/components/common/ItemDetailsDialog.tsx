@@ -116,6 +116,10 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [enrichmentSuccess, setEnrichmentSuccess] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState<boolean>(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState<boolean>(false);
+  const [loadingChildAwards, setLoadingChildAwards] = useState<boolean>(false);
+  const [childAwardsDetails, setChildAwardsDetails] = useState<any[]>([]);
+  const childAwardsFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched child awards for
+  const fullAwardFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched full award data for
   
   // State to track item data - updated when enrichment completes
   const [itemData, setItemData] = useState<any>(() => {
@@ -131,16 +135,94 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   // State for loading full award data
   const [loadingFullAward, setLoadingFullAward] = useState<boolean>(false);
   
+  // Fetch child award details if we have child_awards but not child_awards_details
+  useEffect(() => {
+    const fetchChildAwards = async () => {
+      const awardId = itemData?.award_id;
+      
+      // Skip if we've already fetched child awards for this award ID
+      if (awardId && childAwardsFetchedRef.current.has(awardId)) {
+        return;
+      }
+      
+      if (itemType === 'govt_contract' && itemData?.is_idv_parent && itemData?.child_awards && 
+          Array.isArray(itemData.child_awards) && itemData.child_awards.length > 0 &&
+          (!itemData.child_awards_details || itemData.child_awards_details.length === 0)) {
+        // Mark as fetched to prevent duplicate calls
+        if (awardId) {
+          childAwardsFetchedRef.current.add(awardId);
+        }
+        
+        setLoadingChildAwards(true);
+        try {
+          const childAwardPromises = itemData.child_awards.map(async (childAwardId: string) => {
+            try {
+              const response = await govtContractsSearchAPI.getAward({ award_id: childAwardId });
+              if (response.success && response.result) {
+                return {
+                  award_id: response.result.award_id,
+                  award_id_piid: response.result.award_id_piid,
+                  description: response.result.transaction_description || response.result.description,
+                  total_obligated_amount: response.result.total_obligated_amount || response.result.total_obligation,
+                  period_of_performance_start_date: response.result.period_of_performance_start_date,
+                  period_of_performance_current_end_date: response.result.period_of_performance_current_end_date,
+                  transaction_count: response.result.transaction_count,
+                  subaward_count: response.result.subaward_count,
+                  award_type: response.result.award_type,
+                  award_type_description: response.result.award_type_description,
+                  recipient_name: response.result.recipient_name,
+                  awarding_agency_name: response.result.awarding_agency_name,
+                };
+              }
+            } catch (error) {
+              console.error(`Error fetching child award ${childAwardId}:`, error);
+              // Return minimal info if fetch fails
+              return {
+                award_id: childAwardId,
+                award_id_piid: childAwardId.split('_').pop() || childAwardId,
+              };
+            }
+            return null;
+          });
+          
+          const fetchedAwards = await Promise.all(childAwardPromises);
+          const validAwards = fetchedAwards.filter(award => award !== null);
+          setChildAwardsDetails(validAwards);
+        } catch (error) {
+          console.error('Error fetching child awards:', error);
+        } finally {
+          setLoadingChildAwards(false);
+        }
+      } else if (itemData?.child_awards_details && Array.isArray(itemData.child_awards_details)) {
+        // If child_awards_details already exists, use it
+        setChildAwardsDetails(itemData.child_awards_details);
+        if (awardId) {
+          childAwardsFetchedRef.current.add(awardId);
+        }
+      } else {
+        setChildAwardsDetails([]);
+      }
+    };
+    
+    if (open && itemData) {
+      fetchChildAwards();
+    }
+  }, [itemData, itemType, open]);
+
   // Update itemData when data prop changes (e.g., when dialog is opened with new data)
   useEffect(() => {
     const newItemData = data?.data && typeof data.data === 'object' ? data.data : data;
+    const awardId = newItemData?.award_id;
+    
     setItemData(newItemData);
     
     // For government contracts, always fetch full award data when dialog opens
     // This ensures we have complete data including transactions and subawards
-    if (itemType === 'govt_contract' && newItemData?.award_id && open) {
+    // Only fetch if we haven't already fetched for this award ID
+    if (itemType === 'govt_contract' && awardId && open && !fullAwardFetchedRef.current.has(awardId)) {
+      fullAwardFetchedRef.current.add(awardId);
       setLoadingFullAward(true);
-      govtContractsSearchAPI.getAward({ award_id: newItemData.award_id })
+      govtContractsSearchAPI.getAward({ award_id: awardId })
         .then((response) => {
           if (response.success && response.result) {
             setItemData(response.result);
@@ -148,12 +230,20 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         })
         .catch((error) => {
           console.error('Error fetching full award data:', error);
+          // Remove from set on error so we can retry
+          fullAwardFetchedRef.current.delete(awardId);
         })
         .finally(() => {
           setLoadingFullAward(false);
         });
     } else {
       setLoadingFullAward(false);
+    }
+    
+    // Clear the refs when dialog closes to allow fresh fetch on next open
+    if (!open) {
+      fullAwardFetchedRef.current.clear();
+      childAwardsFetchedRef.current.clear();
     }
   }, [data, itemType, open]);
   
@@ -2522,11 +2612,18 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           )}
 
           {/* Child Awards (for IDV parents) */}
-          {itemData?.is_idv_parent && itemData?.child_awards_details && Array.isArray(itemData.child_awards_details) && itemData.child_awards_details.length > 0 && (
+          {itemData?.is_idv_parent && (
+            (itemData?.child_awards_details && Array.isArray(itemData.child_awards_details) && itemData.child_awards_details.length > 0) ||
+            (itemData?.child_awards && Array.isArray(itemData.child_awards) && itemData.child_awards.length > 0) ||
+            (childAwardsDetails && Array.isArray(childAwardsDetails) && childAwardsDetails.length > 0)
+          ) && (
             <Box sx={{ mb: 3, position: 'relative' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-                  Child Awards ({itemData.child_awards_details.length})
+                <Typography variant="subtitle2" sx={{ color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                  Child Awards ({itemData?.child_awards_details?.length || itemData?.child_awards?.length || childAwardsDetails.length})
+                  {loadingChildAwards && (
+                    <CircularProgress size={14} sx={{ ml: 1, color: '#3b82f6' }} />
+                  )}
                 </Typography>
                 <Tooltip
                   title={
@@ -2577,7 +2674,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 overflowY: 'auto',
                 ...scrollbarStyles,
               }}>
-                {itemData.child_awards_details.map((childAward: any, idx: number) => (
+                {(itemData?.child_awards_details || childAwardsDetails).map((childAward: any, idx: number) => (
                   <Box
                     key={childAward.award_id || idx}
                     sx={{
