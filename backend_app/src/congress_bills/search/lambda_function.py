@@ -122,12 +122,21 @@ def query_gsi(index_name: str, hash_key_name: str, hash_key_value: Any,
         
         # Add date range condition only for GSIs that have introduced_date as range key
         if index_name in gsis_with_date_range:
-            if date_from and date_to:
-                key_condition = key_condition & Key('introduced_date').between(date_from, date_to)
+            # Make date_to inclusive by appending time if needed
+            date_to_inclusive = None
+            if date_to:
+                # If date_to doesn't already have a time component, append end of day
+                if 'T' not in date_to and ' ' not in date_to:
+                    date_to_inclusive = f"{date_to}T23:59:59.999Z"
+                else:
+                    date_to_inclusive = date_to
+            
+            if date_from and date_to_inclusive:
+                key_condition = key_condition & Key('introduced_date').between(date_from, date_to_inclusive)
             elif date_from:
                 key_condition = key_condition & Key('introduced_date').gte(date_from)
-            elif date_to:
-                key_condition = key_condition & Key('introduced_date').lte(date_to)
+            elif date_to_inclusive:
+                key_condition = key_condition & Key('introduced_date').lte(date_to_inclusive)
         
         # Build projection expression based on GSI type
         # For KEYS_ONLY GSIs, only hash key and bill_id are projected
@@ -516,6 +525,157 @@ def fetch_full_bills_batch(bill_ids: List[str]) -> List[Dict[str, Any]]:
     return all_items
 
 
+def normalize_date_for_comparison(date_str: str) -> str:
+    """Normalize date string to YYYY-MM-DD format for comparison"""
+    if not date_str:
+        return ''
+    # Extract just the date part (YYYY-MM-DD)
+    if 'T' in date_str:
+        return date_str.split('T')[0]
+    elif ' ' in date_str:
+        return date_str.split(' ')[0]
+    return date_str[:10] if len(date_str) >= 10 else date_str
+
+
+def scan_table_with_date_filters(
+    introduced_date_from: Optional[str] = None,
+    introduced_date_to: Optional[str] = None,
+    latest_action_date_from: Optional[str] = None,
+    latest_action_date_to: Optional[str] = None,
+    max_items: int = 10000,
+    exclusive_start_key: Optional[Dict] = None
+) -> tuple:
+    """Scan table with date filters when no hash key filters are provided"""
+    try:
+        filter_conditions = []
+        
+        # Introduced date filters
+        if introduced_date_from:
+            filter_conditions.append(Attr('introduced_date').gte(introduced_date_from))
+        if introduced_date_to:
+            # Make date_to inclusive by appending time if needed
+            date_to_inclusive = introduced_date_to
+            if 'T' not in date_to_inclusive and ' ' not in date_to_inclusive:
+                date_to_inclusive = f"{date_to_inclusive}T23:59:59.999Z"
+            filter_conditions.append(Attr('introduced_date').lte(date_to_inclusive))
+        
+        # Latest action date filters
+        if latest_action_date_from:
+            filter_conditions.append(Attr('latest_action_date').gte(latest_action_date_from))
+        if latest_action_date_to:
+            # Make date_to inclusive by appending time if needed
+            date_to_inclusive = latest_action_date_to
+            if 'T' not in date_to_inclusive and ' ' not in date_to_inclusive:
+                date_to_inclusive = f"{date_to_inclusive}T23:59:59.999Z"
+            filter_conditions.append(Attr('latest_action_date').lte(date_to_inclusive))
+        
+        # Combine filter conditions with AND
+        filter_expression = None
+        if filter_conditions:
+            filter_expression = filter_conditions[0]
+            for condition in filter_conditions[1:]:
+                filter_expression = filter_expression & condition
+        
+        params = {
+            'Limit': 1000
+        }
+        
+        if filter_expression:
+            params['FilterExpression'] = filter_expression
+        
+        if exclusive_start_key:
+            params['ExclusiveStartKey'] = exclusive_start_key
+        
+        response = bills_table.scan(**params)
+        items = response.get('Items', [])
+        # Filter out search index items
+        filtered_items = [item for item in items if not is_search_index_item(item)]
+        return filtered_items, response.get('LastEvaluatedKey')
+    except Exception as e:
+        logger.error(f"Error scanning table with date filters: {e}", exc_info=True)
+        return [], None
+
+
+def search_bills_with_scan(filters: Dict[str, Any], limit: int = 100,
+                          last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
+    """Search bills using table scan when only date filters are provided"""
+    try:
+        logger.info(f"Searching bills with scan (date-only filters)")
+        
+        # Extract offset from pagination token
+        offset = 0
+        if last_evaluated_key and isinstance(last_evaluated_key, dict):
+            offset = last_evaluated_key.get('offset', 0)
+            if not isinstance(offset, int) or offset < 0:
+                offset = 0
+        
+        # Extract date filters
+        introduced_date_from = filters.get('introduced_date_from')
+        introduced_date_to = filters.get('introduced_date_to')
+        latest_action_date_from = filters.get('latest_action_date_from')
+        latest_action_date_to = filters.get('latest_action_date_to')
+        
+        # Scan table with date filters
+        all_items = []
+        exclusive_start_key = last_evaluated_key.get('exclusive_start_key') if last_evaluated_key else None
+        
+        while len(all_items) < 10000:
+            items, last_key = scan_table_with_date_filters(
+                introduced_date_from=introduced_date_from,
+                introduced_date_to=introduced_date_to,
+                latest_action_date_from=latest_action_date_from,
+                latest_action_date_to=latest_action_date_to,
+                max_items=10000,
+                exclusive_start_key=exclusive_start_key
+            )
+            all_items.extend(items)
+            if not last_key:
+                break
+            exclusive_start_key = last_key
+        
+        logger.info(f"Scanned {len(all_items)} items from table")
+        
+        # Apply additional Python filters (if any)
+        filtered_items = [item for item in all_items if apply_python_filters(item, filters)]
+        logger.info(f"After Python filters: {len(filtered_items)} items")
+        
+        # Sort by introduced_date descending (most recent first)
+        filtered_items.sort(key=lambda x: (
+            x.get('introduced_date') or '',
+            x.get('bill_id') or ''
+        ), reverse=True)
+        
+        # Apply pagination
+        paginated_items = filtered_items[offset:offset + limit]
+        results = [convert_decimal_to_float(item) for item in paginated_items]
+        
+        has_more = offset + limit < len(filtered_items)
+        next_last_evaluated_key = None
+        if has_more:
+            next_last_evaluated_key = {
+                'offset': offset + len(results),
+                'exclusive_start_key': exclusive_start_key,
+                'method': 'scan'
+            }
+        
+        return {
+            'success': True,
+            'results': results,
+            'count': len(results),
+            'has_more': has_more,
+            'last_evaluated_key': next_last_evaluated_key,
+            'method': 'scan'
+        }
+    except Exception as e:
+        logger.error(f"Error in search_bills_with_scan: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'results': [],
+            'count': 0
+        }
+
+
 def apply_python_filters(bill: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     """Apply filters that can't be handled by GSIs"""
     # Filter out search index items
@@ -524,23 +684,29 @@ def apply_python_filters(bill: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     
     # Date range filters (handled in Python since IntroducedDateIndex and LatestActionDateIndex have no range keys)
     if filters.get('introduced_date_from'):
-        introduced_date = bill.get('introduced_date', '')
-        if not introduced_date or introduced_date < filters.get('introduced_date_from', ''):
+        introduced_date = normalize_date_for_comparison(bill.get('introduced_date', ''))
+        date_from = normalize_date_for_comparison(filters.get('introduced_date_from', ''))
+        if not introduced_date or introduced_date < date_from:
             return False
     
     if filters.get('introduced_date_to'):
-        introduced_date = bill.get('introduced_date', '')
-        if not introduced_date or introduced_date > filters.get('introduced_date_to', ''):
+        introduced_date = normalize_date_for_comparison(bill.get('introduced_date', ''))
+        date_to = normalize_date_for_comparison(filters.get('introduced_date_to', ''))
+        # Make date_to inclusive: compare normalized dates (YYYY-MM-DD format)
+        if not introduced_date or introduced_date > date_to:
             return False
     
     if filters.get('latest_action_date_from'):
-        latest_action_date = bill.get('latest_action_date', '')
-        if not latest_action_date or latest_action_date < filters.get('latest_action_date_from', ''):
+        latest_action_date = normalize_date_for_comparison(bill.get('latest_action_date', ''))
+        date_from = normalize_date_for_comparison(filters.get('latest_action_date_from', ''))
+        if not latest_action_date or latest_action_date < date_from:
             return False
     
     if filters.get('latest_action_date_to'):
-        latest_action_date = bill.get('latest_action_date', '')
-        if not latest_action_date or latest_action_date > filters.get('latest_action_date_to', ''):
+        latest_action_date = normalize_date_for_comparison(bill.get('latest_action_date', ''))
+        date_to = normalize_date_for_comparison(filters.get('latest_action_date_to', ''))
+        # Make date_to inclusive: compare normalized dates (YYYY-MM-DD format)
+        if not latest_action_date or latest_action_date > date_to:
             return False
     
     # Apply any remaining filters that weren't handled by GSIs
@@ -573,6 +739,17 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
     
     # Identify all queries
     all_queries = identify_queries(filters)
+    
+    # Check if we have date-only filters (no hash key filters)
+    has_date_filters = bool(
+        filters.get('introduced_date_from') or filters.get('introduced_date_to') or
+        filters.get('latest_action_date_from') or filters.get('latest_action_date_to')
+    )
+    
+    # If no queries but we have date filters, use table scan
+    if not all_queries and has_date_filters:
+        logger.info("No hash key filters provided, but date filters exist - using table scan")
+        return search_bills_with_scan(filters, limit, last_evaluated_key)
     
     if not all_queries:
         return {
