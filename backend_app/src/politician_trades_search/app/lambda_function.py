@@ -295,6 +295,35 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return queries
 
 
+def scan_table_with_date_filter(date_from: Optional[int] = None, date_to: Optional[int] = None,
+                                 max_items: int = 10000, exclusive_start_key: Optional[Dict] = None) -> tuple:
+    """Scan table with date filter when no hash key filters are provided"""
+    try:
+        filter_expression = None
+        if date_from and date_to:
+            filter_expression = Attr('transactionDate').between(date_from, date_to)
+        elif date_from:
+            filter_expression = Attr('transactionDate').gte(date_from)
+        elif date_to:
+            filter_expression = Attr('transactionDate').lte(date_to)
+        
+        params = {
+            'Limit': 1000
+        }
+        
+        if filter_expression:
+            params['FilterExpression'] = filter_expression
+        
+        if exclusive_start_key:
+            params['ExclusiveStartKey'] = exclusive_start_key
+        
+        response = trades_table.scan(**params)
+        return response.get('Items', []), response.get('LastEvaluatedKey')
+    except Exception as e:
+        logger.error(f"Error scanning table with date filter: {e}", exc_info=True)
+        return [], None
+
+
 def search_trades(filters: Dict[str, Any], limit: int = 50,
                  last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """Search trades using query-based approach"""
@@ -303,6 +332,101 @@ def search_trades(filters: Dict[str, Any], limit: int = 50,
         
         queries = identify_queries(filters)
         logger.info(f"Identified {len(queries)} queries to execute")
+        
+        # If no queries but we have date filters, use table scan
+        date_from = parse_date(filters.get('dateFrom', '')) if filters.get('dateFrom') else None
+        date_to = parse_date(filters.get('dateTo', '')) if filters.get('dateTo') else None
+        
+        if not queries and (date_from or date_to):
+            logger.info("No hash key filters provided, but date filters exist - using table scan")
+            all_items = []
+            exclusive_start_key = last_evaluated_key if last_evaluated_key else None
+            
+            while len(all_items) < 10000:
+                items, last_key = scan_table_with_date_filter(
+                    date_from, date_to, max_items=10000, exclusive_start_key=exclusive_start_key
+                )
+                all_items.extend(items)
+                if not last_key:
+                    break
+                exclusive_start_key = last_key
+            
+            # Apply additional filters (amount range, etc.)
+            filtered_items = []
+            for item in all_items:
+                # Amount range filter
+                if filters.get('amountRange'):
+                    ranges = filters['amountRange'] if isinstance(filters['amountRange'], list) else [filters['amountRange']]
+                    matches = False
+                    for range_str in ranges:
+                        parsed = parse_amount_range(range_str)
+                        if parsed:
+                            user_min, user_max = parsed
+                            amount_min = item.get('amountMin')
+                            if amount_min is not None:
+                                amount_val = int(amount_min) if isinstance(amount_min, (Decimal, int, float)) else 0
+                                if user_max is None:
+                                    if amount_val >= user_min:
+                                        matches = True
+                                        break
+                                else:
+                                    if user_min <= amount_val <= user_max:
+                                        matches = True
+                                        break
+                    if not matches:
+                        continue
+                
+                # Other filters
+                if filters.get('requiresManualReview') is not None:
+                    if item.get('requiresManualReview') != filters['requiresManualReview']:
+                        continue
+                if filters.get('isUnparsed') is not None:
+                    if item.get('isUnparsed') != filters['isUnparsed']:
+                        continue
+                if filters.get('matchConfidence'):
+                    if item.get('matchConfidence') != filters['matchConfidence']:
+                        continue
+                
+                filtered_items.append(item)
+            
+            # Sort by transactionDate descending
+            filtered_items.sort(key=lambda x: (x.get('transactionDate', 0), x.get('tradeId', '')), reverse=True)
+            
+            # Apply pagination
+            paginated_items = filtered_items[:limit]
+            has_more = len(filtered_items) > limit
+            
+            # Determine next cursor
+            next_key = None
+            if paginated_items and has_more:
+                last_item = paginated_items[-1]
+                last_date = last_item.get('transactionDate')
+                last_date_int = int(last_date) if last_date is not None else None
+                next_key = {
+                    'transactionDate': last_date_int,
+                    'tradeId': str(last_item.get('tradeId', ''))
+                }
+            
+            # Convert Decimal to int/float for JSON
+            def convert_decimal(obj):
+                if isinstance(obj, Decimal):
+                    return int(obj) if obj % 1 == 0 else float(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_decimal(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_decimal(v) for v in obj]
+                return obj
+            
+            results = [convert_decimal(item) for item in paginated_items]
+            
+            return {
+                'success': True,
+                'results': results,
+                'count': len(results),
+                'total_found': len(filtered_items),
+                'has_more': has_more,
+                'last_evaluated_key': next_key
+            }
         
         if not queries:
             logger.warning("No queries identified from filters - returning empty results")
