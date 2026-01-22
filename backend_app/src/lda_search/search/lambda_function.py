@@ -70,7 +70,7 @@ def query_gsi(index_name: str, hash_key_name: str, hash_key_value: Any,
         hash_key_name: Hash key attribute name
         hash_key_value: Hash key value
         date_from: Optional date filter (YYYY-MM-DD) - uses dt_posted range key
-        date_to: Optional date filter (YYYY-MM-DD) - uses dt_posted range key
+        date_to: Optional date filter (YYYY-MM-DD) - uses dt_posted range key (inclusive of entire day)
         limit: Maximum number of items to return
         exclusive_start_key: Pagination token
     
@@ -81,13 +81,23 @@ def query_gsi(index_name: str, hash_key_name: str, hash_key_value: Any,
         key_condition = Key(hash_key_name).eq(hash_key_value)
         
         # Add date range condition if dt_posted is the range key
+        # For date_to, append time to make it inclusive of the entire day
         if date_from or date_to:
-            if date_from and date_to:
-                key_condition = key_condition & Key('dt_posted').between(date_from, date_to)
+            # Make date_to inclusive of entire day by appending T23:59:59.999Z
+            date_to_inclusive = None
+            if date_to:
+                # If date_to doesn't already have a time component, append end of day
+                if 'T' not in date_to and ' ' not in date_to:
+                    date_to_inclusive = f"{date_to}T23:59:59.999Z"
+                else:
+                    date_to_inclusive = date_to
+            
+            if date_from and date_to_inclusive:
+                key_condition = key_condition & Key('dt_posted').between(date_from, date_to_inclusive)
             elif date_from:
                 key_condition = key_condition & Key('dt_posted').gte(date_from)
-            elif date_to:
-                key_condition = key_condition & Key('dt_posted').lte(date_to)
+            elif date_to_inclusive:
+                key_condition = key_condition & Key('dt_posted').lte(date_to_inclusive)
         
         params = {
             'IndexName': index_name,
@@ -152,13 +162,31 @@ def query_search_index(search_type: str, search_value: str,
             
             if date_from_part and date_to_part:
                 sk_start = f"DT_POSTED#{date_from_part}#"
-                sk_end = f"DT_POSTED#{date_to_part}#~"
+                # Make date_to inclusive by using the next day's prefix (exclusive) or appending max time
+                # Since SK format is "DT_POSTED#YYYY-MM-DD#...", we need to include all items on that date
+                # Use the next day's date with "#" to ensure we get all items up to and including date_to
+                from datetime import datetime, timedelta
+                try:
+                    date_obj = datetime.strptime(date_to_part, '%Y-%m-%d')
+                    next_day = (date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
+                    sk_end = f"DT_POSTED#{next_day}#"  # Exclusive of next day = inclusive of date_to
+                except ValueError:
+                    # Fallback: use date_to with max suffix
+                    sk_end = f"DT_POSTED#{date_to_part}#~"
                 key_condition = key_condition & Key('SK').between(sk_start, sk_end)
             elif date_from_part:
                 sk_start = f"DT_POSTED#{date_from_part}#"
                 key_condition = key_condition & Key('SK').gte(sk_start)
             elif date_to_part:
-                sk_end = f"DT_POSTED#{date_to_part}#~"
+                # Make date_to inclusive by using the next day's prefix
+                from datetime import datetime, timedelta
+                try:
+                    date_obj = datetime.strptime(date_to_part, '%Y-%m-%d')
+                    next_day = (date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
+                    sk_end = f"DT_POSTED#{next_day}#"  # Exclusive of next day = inclusive of date_to
+                except ValueError:
+                    # Fallback: use date_to with max suffix
+                    sk_end = f"DT_POSTED#{date_to_part}#~"
                 key_condition = key_condition & Key('SK').lte(sk_end)
         
         params = {
@@ -811,12 +839,45 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
     else:
         all_filing_ids = set()
     
-    # Step 4: Handle other filters (item_type, is_foreign, pac, state, etc.)
-    # Execute GSI-based filters (item_type, is_foreign, pac) and intersect with results
+    # Step 4: Handle other filters (item_type, is_foreign, pac, state, date_range, etc.)
+    # Execute GSI-based filters (item_type, is_foreign, pac, date_range) and intersect with results
     # State filter will be applied via Python filters later
     if other_queries:
-        other_gsi_queries = [q for q in other_queries if q.get('filter_type') in ['item_type', 'is_foreign', 'pac']]
-        other_python_filters = [q for q in other_queries if q.get('filter_type') not in ['item_type', 'is_foreign', 'pac']]
+        other_gsi_queries = [q for q in other_queries if q.get('filter_type') in ['item_type', 'is_foreign', 'pac', 'date_range']]
+        other_python_filters = [q for q in other_queries if q.get('filter_type') not in ['item_type', 'is_foreign', 'pac', 'date_range']]
+        
+        # Check if we have date_range queries and no other search results
+        date_range_queries = [q for q in other_gsi_queries if q.get('filter_type') == 'date_range']
+        if date_range_queries and len(all_filing_ids) == 0 and not general_search_queries and not advanced_search_queries:
+            # Only date_range queries exist - use them as primary source (UNION across years)
+            logger.info(f"Only date_range queries found ({len(date_range_queries)} queries) - using as primary source")
+            date_range_ids = set()
+            for query in date_range_queries:
+                query_func = query['query_func']
+                pks = list(get_all_from_gsi(
+                    query_func,
+                    index_name=query['index_name'],
+                    hash_key_name=query['hash_key'],
+                    hash_key_value=query['hash_value'],
+                    date_from=query.get('date_from'),
+                    date_to=query.get('date_to'),
+                    max_items=50000
+                ))
+                # Convert PKs to filing IDs
+                filing_ids = []
+                for pk in pks:
+                    if pk:
+                        pk_str = str(pk) if not isinstance(pk, str) else pk
+                        if pk_str.startswith('FILING#'):
+                            filing_ids.append(pk_str.replace('FILING#', ''))
+                        elif pk_str.startswith('CONTRIBUTION#'):
+                            filing_ids.append(pk_str.replace('CONTRIBUTION#', ''))
+                date_range_ids.update(filing_ids)
+                logger.info(f"Date range query for year {query['hash_value']} returned {len(filing_ids)} filing IDs")
+            all_filing_ids = date_range_ids
+            logger.info(f"Date range UNION complete: {len(all_filing_ids)} total unique filing IDs")
+            # Remove date_range queries from other_gsi_queries since we've already processed them
+            other_gsi_queries = [q for q in other_gsi_queries if q.get('filter_type') != 'date_range']
         
         if other_gsi_queries:
             logger.info(f"Found {len(other_gsi_queries)} GSI-based other filter(s) - will intersect with search results")
