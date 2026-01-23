@@ -229,12 +229,12 @@ export default function LandingPageMUI() {
                   }}
                 />
                 
-                {/* Cosine Logo */}
+                {/* FinGov Logo */}
                 <Box sx={{ mb: 3, display: 'flex', justifyContent: { xs: 'center', lg: 'flex-start' } }}>
                   <Box 
                     component="img"
                     src="/logo-dark.svg"
-                    alt="Cosine"
+                    alt="FinGov"
                     sx={{ 
                       height: { xs: 120, md: 160 },
                       width: 'auto',
@@ -574,7 +574,7 @@ export default function LandingPageMUI() {
           <Container maxWidth="lg">
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 600 }}>
-                © 2025 Cosine Research Platform. All rights reserved.
+                © 2025 FinGov Research Platform. All rights reserved.
               </Typography>
             </Box>
           </Container>

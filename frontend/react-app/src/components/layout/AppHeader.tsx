@@ -232,7 +232,7 @@ export default function AppHeader() {
               <Box
                 component="img"
                 src="/logo-dark.svg"
-                alt="Cosine"
+                alt="FinGov"
                 sx={{
                   height: 36,
                   width: 'auto',
