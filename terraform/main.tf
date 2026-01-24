@@ -2358,17 +2358,26 @@ module "cloudfront" {
   tags = var.common_tags
 }
 
-# Data source for existing investcosine.com hosted zone (for backward compatibility)
-# Note: This will fail if the hosted zone doesn't exist - you may need to create it manually or import it
-data "aws_route53_zone" "investcosine" {
+# Route53 Hosted Zone for investcosine.com (for backward compatibility)
+# Create the hosted zone if it doesn't exist
+resource "aws_route53_zone" "investcosine" {
   count = var.use_cloudfront_deployment && var.enable_custom_domain ? 1 : 0
   name  = "investcosine.com"
+
+  tags = merge(var.common_tags, {
+    Name    = "${var.project_name}-${var.environment}-investcosine-hosted-zone"
+    Purpose = "Backward compatibility - routes to fingov.ai"
+  })
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Unified ACM Certificate for CloudFront (includes both fingov.ai and investcosine.com)
 # CloudFront can only use one certificate, so we create a unified one
 resource "aws_acm_certificate" "unified_cloudfront" {
-  count    = var.use_cloudfront_deployment && var.enable_custom_domain && length(module.domain) > 0 && length(data.aws_route53_zone.investcosine) > 0 ? 1 : 0
+  count    = var.use_cloudfront_deployment && var.enable_custom_domain && length(module.domain) > 0 && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
   provider = aws.us_east_1 # CloudFront requires certificates in us-east-1
 
   domain_name = var.domain_name # fingov.ai
@@ -2409,12 +2418,12 @@ resource "aws_route53_record" "unified_cert_validation_fingov" {
 
 # Certificate validation records for unified certificate (investcosine.com domains)
 resource "aws_route53_record" "unified_cert_validation_investcosine" {
-  for_each = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 && length(data.aws_route53_zone.investcosine) > 0 ? {
+  for_each = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 && length(aws_route53_zone.investcosine) > 0 ? {
     for dvo in aws_acm_certificate.unified_cloudfront[0].domain_validation_options : dvo.domain_name => {
       name    = dvo.resource_record_name
       record  = dvo.resource_record_value
       type    = dvo.resource_record_type
-      zone_id = data.aws_route53_zone.investcosine[0].zone_id
+      zone_id = aws_route53_zone.investcosine[0].zone_id
     }
     if can(regex("investcosine\\.com", dvo.domain_name))
   } : {}
@@ -2441,8 +2450,8 @@ resource "aws_acm_certificate_validation" "unified_cloudfront" {
 
 # DNS Records for investcosine.com pointing to CloudFront (backward compatibility)
 resource "aws_route53_record" "investcosine_cloudfront_alias" {
-  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(data.aws_route53_zone.investcosine) > 0 ? 1 : 0
-  zone_id = data.aws_route53_zone.investcosine[0].zone_id
+  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
+  zone_id = aws_route53_zone.investcosine[0].zone_id
   name    = "investcosine.com"
   type    = "A"
 
@@ -2455,8 +2464,8 @@ resource "aws_route53_record" "investcosine_cloudfront_alias" {
 
 # AAAA record for investcosine.com (IPv6 support)
 resource "aws_route53_record" "investcosine_cloudfront_alias_ipv6" {
-  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(data.aws_route53_zone.investcosine) > 0 ? 1 : 0
-  zone_id = data.aws_route53_zone.investcosine[0].zone_id
+  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
+  zone_id = aws_route53_zone.investcosine[0].zone_id
   name    = "investcosine.com"
   type    = "AAAA"
 
@@ -2469,8 +2478,8 @@ resource "aws_route53_record" "investcosine_cloudfront_alias_ipv6" {
 
 # DNS Records for www.investcosine.com pointing to CloudFront
 resource "aws_route53_record" "www_investcosine_cloudfront_alias" {
-  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(data.aws_route53_zone.investcosine) > 0 ? 1 : 0
-  zone_id = data.aws_route53_zone.investcosine[0].zone_id
+  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
+  zone_id = aws_route53_zone.investcosine[0].zone_id
   name    = "www.investcosine.com"
   type    = "A"
 
@@ -2483,8 +2492,8 @@ resource "aws_route53_record" "www_investcosine_cloudfront_alias" {
 
 # AAAA record for www.investcosine.com (IPv6 support)
 resource "aws_route53_record" "www_investcosine_cloudfront_alias_ipv6" {
-  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(data.aws_route53_zone.investcosine) > 0 ? 1 : 0
-  zone_id = data.aws_route53_zone.investcosine[0].zone_id
+  count   = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
+  zone_id = aws_route53_zone.investcosine[0].zone_id
   name    = "www.investcosine.com"
   type    = "AAAA"
 
