@@ -254,7 +254,7 @@ class ChartImageGenerator:
             logger.info(f"📊 Y-axis scaled: {y_min:.2f} to {y_max:.2f} (data range: {min_price:.2f} to {max_price:.2f})")
         
         # Add watermark
-        fig.text(0.99, 0.01, 'investcosine.com', fontsize=8, color='gray',
+        fig.text(0.99, 0.01, 'fingov.ai', fontsize=8, color='gray',
                 ha='right', va='bottom', alpha=0.7, transform=fig.transFigure)
         
         plt.tight_layout()

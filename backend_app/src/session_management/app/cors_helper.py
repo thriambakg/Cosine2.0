@@ -1,7 +1,7 @@
 """
 CORS Helper Module
 Centralized CORS handling for all Lambda functions
-Restricts access to fingov.ai, investcosine.com, and localhost:3000*
+Restricts access to fingov.ai, fingov.ai, and localhost:3000*
 """
 
 import re
@@ -10,14 +10,14 @@ import re
 # These match Origin headers like:
 # - https://fingov.ai
 # - https://www.fingov.ai
-# - https://investcosine.com (legacy, kept for backward compatibility)
+# - https://fingov.ai (legacy, kept for backward compatibility)
 # - http://localhost:3000
 # - https://*.cloudfront.net (for CloudFront distributions)
 ALLOWED_ORIGIN_PATTERNS = [
     r'^https?://.*\.?fingov\.ai(:\d+)?$',         # Any subdomain of fingov.ai
     r'^https?://fingov\.ai(:\d+)?$',               # fingov.ai itself
-    r'^https?://.*\.?investcosine\.com(:\d+)?$',  # Any subdomain of investcosine.com (legacy)
-    r'^https?://investcosine\.com(:\d+)?$',        # investcosine.com itself (legacy)
+    r'^https?://.*\.?fingov\.ai(:\d+)?$',  # Any subdomain of fingov.ai (legacy)
+    r'^https?://fingov\.ai(:\d+)?$',        # fingov.ai itself (legacy)
     r'^http://localhost:3000(:\d+)?$',            # localhost:3000 for development
     r'^https://.*\.cloudfront\.net$',             # CloudFront distributions (for staging/production)
 ]

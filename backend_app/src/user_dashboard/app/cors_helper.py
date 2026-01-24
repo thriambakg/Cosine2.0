@@ -1,21 +1,21 @@
 """
 CORS Helper Module
 Centralized CORS handling for all Lambda functions
-Restricts access to investcosine* and localhost:3000*
+Restricts access to fingov* and localhost:3000*
 """
 
 import re
 
 # Allowed origin patterns (regex patterns)
 # These match Origin headers like:
-# - https://investcosine.com
-# - https://www.investcosine.com
-# - https://api.investcosine.com
+# - https://fingov.ai
+# - https://www.fingov.ai
+# - https://api.fingov.ai
 # - http://localhost:3000
 # - https://*.cloudfront.net (for CloudFront distributions)
 ALLOWED_ORIGIN_PATTERNS = [
-    r'^https?://.*\.?investcosine\.com(:\d+)?$',  # Any subdomain of investcosine.com
-    r'^https?://investcosine\.com(:\d+)?$',       # investcosine.com itself
+    r'^https?://.*\.?fingov\.ai(:\d+)?$',  # Any subdomain of fingov.ai
+    r'^https?://fingov\.ai(:\d+)?$',       # fingov.ai itself
     r'^http://localhost:3000(:\d+)?$',            # localhost:3000 for development
     r'^https://.*\.cloudfront\.net$',             # CloudFront distributions (for staging/production)
 ]
