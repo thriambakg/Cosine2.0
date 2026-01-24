@@ -2337,9 +2337,10 @@ module "cloudfront" {
     }
   ]
 
-  tags = var.common_tags
+  # DNS configuration (if custom domain is enabled)
+  hosted_zone_id = var.enable_custom_domain && length(module.domain) > 0 ? module.domain[0].hosted_zone_id : null
 
-  depends_on = [data.aws_s3_bucket.static_hosting]
+  tags = var.common_tags
 }
 
 # Portfolio Analysis Lambda Function (with SQS and wrapper support)

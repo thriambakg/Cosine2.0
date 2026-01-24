@@ -472,3 +472,31 @@ resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
     create_before_destroy = false
   }
 }
+
+# DNS Records for CloudFront (if hosted zone ID is provided)
+resource "aws_route53_record" "cloudfront_alias" {
+  count   = var.hosted_zone_id != null && length(var.aliases) > 0 ? length(var.aliases) : 0
+  zone_id = var.hosted_zone_id
+  name    = var.aliases[count.index]
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.distribution.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+# AAAA record for IPv6 support
+resource "aws_route53_record" "cloudfront_alias_ipv6" {
+  count   = var.hosted_zone_id != null && length(var.aliases) > 0 ? length(var.aliases) : 0
+  zone_id = var.hosted_zone_id
+  name    = var.aliases[count.index]
+  type    = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.distribution.hosted_zone_id
+    evaluate_target_health = false
+  }
+}

@@ -196,3 +196,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "hosted_zone_id" {
+  description = "Route53 hosted zone ID for creating DNS records (optional)"
+  type        = string
+  default     = null
+}
