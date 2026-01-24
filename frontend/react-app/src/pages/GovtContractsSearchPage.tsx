@@ -1725,8 +1725,8 @@ const GovtContractsSearchPage: React.FC = () => {
                             }}
                             disabled={selectedAwards.size === 0}
                             sx={{ 
-                              color: selectedAwards.size > 0 ? '#F59E0B' : '#9ca3af', 
-                              '&:hover': { color: '#F59E0B' },
+                              color: selectedAwards.size > 0 ? '#10b981' : '#9ca3af', 
+                              '&:hover': { color: '#10b981' },
                               '&:disabled': { color: '#4b5563' }
                             }}
                           >
@@ -1739,9 +1739,9 @@ const GovtContractsSearchPage: React.FC = () => {
                       <Chip
                         label={`${currentResults.length} award${currentResults.length !== 1 ? 's' : ''} found`}
                         sx={{
-                          backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                          color: '#FDE047',
-                          border: '1px solid #F59E0B',
+                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          border: '1px solid #22c55e',
                           fontWeight: 600,
                         }}
                       />
@@ -1945,8 +1945,8 @@ const GovtContractsSearchPage: React.FC = () => {
                                   }}
                                   sx={{ 
                                     color: '#9ca3af', 
-                                    '&.Mui-checked': { color: '#F59E0B' }, 
-                                    '&.MuiCheckbox-indeterminate': { color: '#F59E0B' } 
+                                    '&.Mui-checked': { color: '#10b981' }, 
+                                    '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
                                   }}
                                 />
                               </TableCell>
@@ -2044,9 +2044,9 @@ const GovtContractsSearchPage: React.FC = () => {
                                   }
                                 }}
                                 sx={{
-                                  backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                                  backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                                   '&:hover': {
-                                    backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(245, 158, 11, 0.25)' : 'rgba(59, 130, 246, 0.05)',
+                                    backgroundColor: selectedAwards.has(award.award_id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
                                   },
                                   cursor: 'pointer',
                                   userSelect: 'none',
