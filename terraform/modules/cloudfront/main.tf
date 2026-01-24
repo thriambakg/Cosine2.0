@@ -381,7 +381,9 @@ resource "aws_cloudfront_distribution" "distribution" {
   })
 
   # Wait for the OAC to be created
-  depends_on = [aws_cloudfront_origin_access_control.s3_oac]
+  depends_on = [
+    aws_cloudfront_origin_access_control.s3_oac
+  ]
 }
 
 # Cache Policy for optimized caching

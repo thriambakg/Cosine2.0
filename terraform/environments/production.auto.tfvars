@@ -15,11 +15,9 @@ waf_rate_limit        = 1000               # More restrictive rate limit for pro
 waf_blocked_countries = ["CN", "RU", "KP"] # Block high-risk countries for production
 
 # CloudFront Configuration
-# CloudFront Configuration
-# Note: investcosine.com will be added back once unified certificate validates
-# Temporarily using only fingov.ai to avoid certificate validation timeout
-cloudfront_aliases        = ["fingov.ai", "www.fingov.ai"] # Custom domains for CloudFront
-use_cloudfront_deployment = true                           # Enable CloudFront + S3 static hosting
+# Note: Both domains use unified certificate (when validated) or fingov.ai certificate (fallback)
+cloudfront_aliases        = ["fingov.ai", "www.fingov.ai", "investcosine.com", "www.investcosine.com"] # Custom domains for CloudFront
+use_cloudfront_deployment = true                                                                       # Enable CloudFront + S3 static hosting
 
 # Common tags
 common_tags = {

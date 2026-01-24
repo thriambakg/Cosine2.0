@@ -68,12 +68,12 @@ data "aws_s3_bucket" "static_hosting" {
 # Local values for resource naming
 locals {
   # Use certificate when available: either from custom domain module or provided certificate_arn
-  # For CloudFront: Use fingov.ai certificate for now (already validated)
-  # Unified certificate (with investcosine.com) will be used once it validates
-  # TODO: Once unified certificate validates, switch to: aws_acm_certificate_validation.unified_cloudfront[0].certificate_arn
+  # For CloudFront: Prefer unified certificate (includes both domains) when validated, otherwise use fingov.ai certificate
   certificate_arn = var.enable_custom_domain && var.use_cloudfront_deployment ? (
-    # Use fingov.ai certificate (already validated) - unified certificate will be added later
-    length(module.domain) > 0 && length(module.domain[0].certificate_arn) > 0 ? module.domain[0].certificate_arn : ""
+    # Try unified certificate first (if validated), otherwise fall back to fingov.ai certificate
+    length(aws_acm_certificate_validation.unified_cloudfront) > 0 && try(aws_acm_certificate_validation.unified_cloudfront[0].certificate_arn, null) != null ? aws_acm_certificate_validation.unified_cloudfront[0].certificate_arn : (
+      length(module.domain) > 0 && length(module.domain[0].certificate_arn) > 0 ? module.domain[0].certificate_arn : ""
+    )
     ) : var.enable_custom_domain ? (
     length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
     ) : (
@@ -2360,6 +2360,7 @@ module "cloudfront" {
 
   # Note: Certificate selection is handled in locals.certificate_arn
   # It will use unified certificate if validated, otherwise falls back to fingov.ai certificate
+  # CloudFront will wait for unified certificate validation to complete before using it
 }
 
 # Route53 Hosted Zone for investcosine.com (for backward compatibility)
@@ -2380,81 +2381,83 @@ resource "aws_route53_zone" "investcosine" {
 
 # Unified ACM Certificate for CloudFront (includes both fingov.ai and investcosine.com)
 # CloudFront can only use one certificate, so we create a unified one
-# DISABLED: Currently using fingov.ai certificate only. Re-enable when investcosine.com DNS is ready.
-# resource "aws_acm_certificate" "unified_cloudfront" {
-#   count    = var.use_cloudfront_deployment && var.enable_custom_domain && length(module.domain) > 0 && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
-#   provider = aws.us_east_1 # CloudFront requires certificates in us-east-1
-#
-#   domain_name = var.domain_name # fingov.ai
-#   subject_alternative_names = concat(
-#     ["*.${var.domain_name}"],                  # *.fingov.ai
-#     ["investcosine.com", "*.investcosine.com"] # investcosine.com and *.investcosine.com
-#   )
-#   validation_method = "DNS"
-#
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-#
-#   tags = merge(var.common_tags, {
-#     Name = "${var.project_name}-${var.environment}-unified-cloudfront-certificate"
-#   })
-# }
+resource "aws_acm_certificate" "unified_cloudfront" {
+  count    = var.use_cloudfront_deployment && var.enable_custom_domain && length(module.domain) > 0 && length(aws_route53_zone.investcosine) > 0 ? 1 : 0
+  provider = aws.us_east_1 # CloudFront requires certificates in us-east-1
+
+  domain_name = var.domain_name # fingov.ai
+  subject_alternative_names = concat(
+    ["*.${var.domain_name}"],                  # *.fingov.ai
+    ["investcosine.com", "*.investcosine.com"] # investcosine.com and *.investcosine.com
+  )
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-${var.environment}-unified-cloudfront-certificate"
+  })
+}
 
 # Certificate validation records for unified certificate (fingov.ai domains)
-# DISABLED: Currently using fingov.ai certificate only. Re-enable when investcosine.com DNS is ready.
-# resource "aws_route53_record" "unified_cert_validation_fingov" {
-#   for_each = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 && length(module.domain) > 0 ? {
-#     for dvo in aws_acm_certificate.unified_cloudfront[0].domain_validation_options : dvo.domain_name => {
-#       name    = dvo.resource_record_name
-#       record  = dvo.resource_record_value
-#       type    = dvo.resource_record_type
-#       zone_id = module.domain[0].hosted_zone_id
-#     }
-#     if can(regex("fingov\\.ai", dvo.domain_name))
-#   } : {}
-#
-#   allow_overwrite = true
-#   name            = each.value.name
-#   records         = [each.value.record]
-#   ttl             = 60
-#   type            = each.value.type
-#   zone_id         = each.value.zone_id
-# }
+resource "aws_route53_record" "unified_cert_validation_fingov" {
+  for_each = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 && length(module.domain) > 0 ? {
+    for dvo in aws_acm_certificate.unified_cloudfront[0].domain_validation_options : dvo.domain_name => {
+      name    = dvo.resource_record_name
+      record  = dvo.resource_record_value
+      type    = dvo.resource_record_type
+      zone_id = module.domain[0].hosted_zone_id
+    }
+    if can(regex("fingov\\.ai", dvo.domain_name))
+  } : {}
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = each.value.zone_id
+}
 
 # Certificate validation records for unified certificate (investcosine.com domains)
-# DISABLED: Currently using fingov.ai certificate only. Re-enable when investcosine.com DNS is ready.
-# resource "aws_route53_record" "unified_cert_validation_investcosine" {
-#   for_each = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 && length(aws_route53_zone.investcosine) > 0 ? {
-#     for dvo in aws_acm_certificate.unified_cloudfront[0].domain_validation_options : dvo.domain_name => {
-#       name    = dvo.resource_record_name
-#       record  = dvo.resource_record_value
-#       type    = dvo.resource_record_type
-#       zone_id = aws_route53_zone.investcosine[0].zone_id
-#     }
-#     if can(regex("investcosine\\.com", dvo.domain_name))
-#   } : {}
-#
-#   allow_overwrite = true
-#   name            = each.value.name
-#   records         = [each.value.record]
-#   ttl             = 60
-#   type            = each.value.type
-#   zone_id         = each.value.zone_id
-# }
+resource "aws_route53_record" "unified_cert_validation_investcosine" {
+  for_each = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 && length(aws_route53_zone.investcosine) > 0 ? {
+    for dvo in aws_acm_certificate.unified_cloudfront[0].domain_validation_options : dvo.domain_name => {
+      name    = dvo.resource_record_name
+      record  = dvo.resource_record_value
+      type    = dvo.resource_record_type
+      zone_id = aws_route53_zone.investcosine[0].zone_id
+    }
+    if can(regex("investcosine\\.com", dvo.domain_name))
+  } : {}
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = each.value.zone_id
+}
 
 # Certificate validation for unified certificate
-# DISABLED: Currently using fingov.ai certificate only. Re-enable when investcosine.com DNS is ready.
-# resource "aws_acm_certificate_validation" "unified_cloudfront" {
-#   count    = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 ? 1 : 0
-#   provider = aws.us_east_1
-#
-#   certificate_arn = aws_acm_certificate.unified_cloudfront[0].arn
-#   validation_record_fqdns = concat(
-#     [for record in aws_route53_record.unified_cert_validation_fingov : record.fqdn],
-#     [for record in aws_route53_record.unified_cert_validation_investcosine : record.fqdn]
-#   )
-# }
+# Note: This will wait for validation, but CloudFront will use fingov.ai cert as fallback
+resource "aws_acm_certificate_validation" "unified_cloudfront" {
+  count    = var.use_cloudfront_deployment && var.enable_custom_domain && length(aws_acm_certificate.unified_cloudfront) > 0 ? 1 : 0
+  provider = aws.us_east_1
+
+  certificate_arn = aws_acm_certificate.unified_cloudfront[0].arn
+  validation_record_fqdns = concat(
+    [for record in aws_route53_record.unified_cert_validation_fingov : record.fqdn],
+    [for record in aws_route53_record.unified_cert_validation_investcosine : record.fqdn]
+  )
+
+  # Increase timeout to 2 hours to allow DNS propagation
+  timeouts {
+    create = "2h"
+  }
+}
 
 # DNS Records for investcosine.com pointing to CloudFront (backward compatibility)
 resource "aws_route53_record" "investcosine_cloudfront_alias" {
