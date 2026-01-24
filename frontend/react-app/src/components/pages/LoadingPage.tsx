@@ -99,8 +99,8 @@ interface LoadingPageProps {
 }
 
 const LoadingPage: React.FC<LoadingPageProps> = ({ 
-  message = "Loading Cosine...", 
-  subMessage = "AI Trading Intelligence"
+  message = "Loading FinGov...", 
+  subMessage = "Government Financial Research"
 }) => {
   return (
     <LoadingContainer>
