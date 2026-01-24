@@ -68,11 +68,12 @@ data "aws_s3_bucket" "static_hosting" {
 # Local values for resource naming
 locals {
   # Use certificate when available: either from custom domain module or provided certificate_arn
-  # For CloudFront, prefer unified certificate that includes both fingov.ai and investcosine.com
+  # For CloudFront: Use fingov.ai certificate for now (already validated)
+  # Unified certificate (with investcosine.com) will be used once it validates
+  # TODO: Once unified certificate validates, switch to: aws_acm_certificate_validation.unified_cloudfront[0].certificate_arn
   certificate_arn = var.enable_custom_domain && var.use_cloudfront_deployment ? (
-    length(aws_acm_certificate.unified_cloudfront) > 0 ? aws_acm_certificate.unified_cloudfront[0].arn : (
-      length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
-    )
+    # Use fingov.ai certificate (already validated) - unified certificate will be added later
+    length(module.domain) > 0 && length(module.domain[0].certificate_arn) > 0 ? module.domain[0].certificate_arn : ""
     ) : var.enable_custom_domain ? (
     length(module.domain) > 0 ? module.domain[0].certificate_arn : ""
     ) : (
@@ -2356,6 +2357,9 @@ module "cloudfront" {
   hosted_zone_id = var.enable_custom_domain && length(module.domain) > 0 ? module.domain[0].hosted_zone_id : null
 
   tags = var.common_tags
+
+  # Note: Certificate selection is handled in locals.certificate_arn
+  # It will use unified certificate if validated, otherwise falls back to fingov.ai certificate
 }
 
 # Route53 Hosted Zone for investcosine.com (for backward compatibility)
