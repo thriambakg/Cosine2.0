@@ -1489,8 +1489,8 @@ const CongressBillsSearchPage: React.FC = () => {
                             }}
                             disabled={selectedBills.size === 0}
                             sx={{ 
-                              color: selectedBills.size > 0 ? '#10b981' : '#9ca3af', 
-                              '&:hover': { color: '#10b981' },
+                              color: selectedBills.size > 0 ? '#F59E0B' : '#9ca3af', 
+                              '&:hover': { color: '#F59E0B' },
                               '&:disabled': { color: '#4b5563' }
                             }}
                           >
@@ -1503,9 +1503,9 @@ const CongressBillsSearchPage: React.FC = () => {
                       <Chip
                         label={`${currentResults.length} bill${currentResults.length !== 1 ? 's' : ''} found`}
                         sx={{
-                          backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                          color: '#86efac',
-                          border: '1px solid #22c55e',
+                          backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                          color: '#FDE047',
+                          border: '1px solid #F59E0B',
                           fontWeight: 600,
                         }}
                       />
@@ -1722,9 +1722,9 @@ const CongressBillsSearchPage: React.FC = () => {
                          }
                        }}
                        sx={{
-                         backgroundColor: selectedBills.has(bill.bill_id) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                         backgroundColor: selectedBills.has(bill.bill_id) ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
                          '&:hover': {
-                           backgroundColor: selectedBills.has(bill.bill_id) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
+                           backgroundColor: selectedBills.has(bill.bill_id) ? 'rgba(245, 158, 11, 0.25)' : 'rgba(59, 130, 246, 0.05)',
                          },
                          cursor: 'pointer',
                          userSelect: 'none',

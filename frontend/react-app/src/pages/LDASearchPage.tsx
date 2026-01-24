@@ -1121,7 +1121,7 @@ const LDASearchPage: React.FC = () => {
                         }
                         const typeColors: Record<string, { bg: string; text: string; border: string }> = {
                           registrant: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa', border: '#3b82f6' },
-                          client: { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: '#10b981' },
+                          client: { bg: 'rgba(245, 158, 11, 0.15)', text: '#FDE047', border: '#F59E0B' },
                           lobbyist: { bg: 'rgba(168, 85, 247, 0.15)', text: '#a78bfa', border: '#a855f7' },
                           pac: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24', border: '#f59e0b' },
                           foreign: { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171', border: '#ef4444' },
@@ -1383,9 +1383,9 @@ const LDASearchPage: React.FC = () => {
                                   label="Client"
                                   size="small"
                                   sx={{
-                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                    color: '#34d399',
-                                    border: '1px solid #10b981',
+                                    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                                    color: '#FDE047',
+                                    border: '1px solid #F59E0B',
                                     fontSize: '0.7rem',
                                     height: '20px',
                                     fontWeight: 500,
@@ -1768,8 +1768,8 @@ const LDASearchPage: React.FC = () => {
                               onClick={handleContextMenuClick}
                               disabled={selectedFilings.size === 0}
                               sx={{ 
-                                color: selectedFilings.size > 0 ? '#10b981' : '#9ca3af', 
-                                '&:hover': { color: '#10b981' },
+                                color: selectedFilings.size > 0 ? '#F59E0B' : '#9ca3af', 
+                                '&:hover': { color: '#F59E0B' },
                                 '&:disabled': { color: '#4b5563' }
                               }}
                             >
@@ -1782,9 +1782,9 @@ const LDASearchPage: React.FC = () => {
                         <Chip
                           label={`${currentResults.length} filing${currentResults.length !== 1 ? 's' : ''} found`}
                           sx={{
-                            backgroundColor: 'rgba(34, 197, 94, 0.2)',
-                            color: '#86efac',
-                            border: '1px solid #22c55e',
+                            backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                            color: '#FDE047',
+                            border: '1px solid #F59E0B',
                             fontWeight: 600,
                           }}
                         />
@@ -1951,8 +1951,8 @@ const LDASearchPage: React.FC = () => {
                                   }}
                                   sx={{ 
                                     color: '#9ca3af', 
-                                    '&.Mui-checked': { color: '#10b981' }, 
-                                    '&.MuiCheckbox-indeterminate': { color: '#10b981' } 
+                                    '&.Mui-checked': { color: '#F59E0B' }, 
+                                    '&.MuiCheckbox-indeterminate': { color: '#F59E0B' } 
                                   }}
                                 />
                               </TableCell>
@@ -2004,9 +2004,9 @@ const LDASearchPage: React.FC = () => {
                                   }
                                 }}
                                 sx={{
-                                  backgroundColor: selectedFilings.has(filingId) ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                                  backgroundColor: selectedFilings.has(filingId) ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
                                   '&:hover': {
-                                    backgroundColor: selectedFilings.has(filingId) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)',
+                                    backgroundColor: selectedFilings.has(filingId) ? 'rgba(245, 158, 11, 0.25)' : 'rgba(59, 130, 246, 0.05)',
                                   },
                                   cursor: 'pointer',
                                   userSelect: 'none',
