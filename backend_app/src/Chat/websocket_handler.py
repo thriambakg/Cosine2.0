@@ -419,7 +419,7 @@ class WebSocketHandler:
                 connection_message = {
                     'type': 'connection_established',
                     'session_id': session_id,
-                    'message': 'Connected to Cosine AI Chat',
+                    'message': 'Connected to FinGov AI Chat',
                     'timestamp': datetime.now().isoformat()
                 }
                 self.send_to_client(connection_id, connection_message)
@@ -438,7 +438,7 @@ class WebSocketHandler:
                 welcome_message = {
                     'type': 'connection_established',
                     'session_id': session_id,
-                    'message': 'Connected to Cosine AI Chat',
+                    'message': 'Connected to FinGov AI Chat',
                     'timestamp': datetime.now().isoformat()
                 }
                 self.send_to_client(connection_id, welcome_message)

@@ -15,8 +15,8 @@ waf_rate_limit        = 1000               # More restrictive rate limit for pro
 waf_blocked_countries = ["CN", "RU", "KP"] # Block high-risk countries for production
 
 # CloudFront Configuration
-cloudfront_aliases        = ["fingov.ai", "www.fingov.ai"] # Custom domains for CloudFront
-use_cloudfront_deployment = true                           # Enable CloudFront + S3 static hosting
+cloudfront_aliases        = ["fingov.ai", "www.fingov.ai", "investcosine.com", "www.investcosine.com"] # Custom domains for CloudFront (investcosine.com for backward compatibility)
+use_cloudfront_deployment = true                                                                       # Enable CloudFront + S3 static hosting
 
 # Common tags
 common_tags = {
