@@ -116,6 +116,8 @@ module "domain" {
   project_name         = var.project_name
   environment          = var.environment
   common_tags          = var.common_tags
+  # Skip certificate creation in domain module when using unified certificate for CloudFront
+  skip_certificate_creation = var.use_cloudfront_deployment && var.enable_custom_domain
 }
 
 # ============================================================================

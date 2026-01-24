@@ -14,8 +14,8 @@ output "hosted_zone_name_servers" {
 }
 
 output "certificate_arn" {
-  description = "ARN of the ACM certificate"
-  value       = var.enable_custom_domain ? aws_acm_certificate_validation.main[0].certificate_arn : null
+  description = "ARN of the ACM certificate (null if skip_certificate_creation is true)"
+  value       = var.enable_custom_domain && !var.skip_certificate_creation && length(aws_acm_certificate_validation.main) > 0 ? aws_acm_certificate_validation.main[0].certificate_arn : null
 }
 
 output "domain_name" {

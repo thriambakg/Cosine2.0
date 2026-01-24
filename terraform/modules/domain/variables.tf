@@ -36,3 +36,15 @@ variable "common_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "additional_domains" {
+  description = "Additional domains to include in the certificate (for unified certificates covering multiple domains)"
+  type        = list(string)
+  default     = []
+}
+
+variable "skip_certificate_creation" {
+  description = "Skip certificate creation in this module (useful when using a unified certificate created elsewhere)"
+  type        = bool
+  default     = false
+}
