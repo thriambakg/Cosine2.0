@@ -221,30 +221,6 @@ export default function AppSidebar() {
       />
       
       <Box sx={{ position: 'relative', zIndex: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box
-          sx={{
-            p: 3,
-            borderBottom: '1px solid #374151',
-            background: 'rgba(15, 23, 42, 0.95)',
-            backdropFilter: 'blur(10px)',
-            flexShrink: 0,
-          }}
-        >
-          <Box display="flex" alignItems="center">
-            <Box
-              component="img"
-              src="/logo-dark.svg"
-              alt="Cosine"
-              sx={{
-                height: 40,
-                width: 'auto',
-                filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3))',
-              }}
-            />
-          </Box>
-        </Box>
-
         {/* Navigation Items */}
         <Box 
           sx={{ 
@@ -273,35 +249,6 @@ export default function AppSidebar() {
             return items && items.length > 0 ? renderNavigationSection(category, items) : null;
           })}
         </Box>
-
-        {/* Footer */}
-        <Box sx={{ 
-          p: 2, 
-          borderTop: '1px solid #374151',
-          background: 'rgba(15, 23, 42, 0.95)',
-          backdropFilter: 'blur(10px)',
-          flexShrink: 0,
-        }}>
-          <Box 
-            sx={{ 
-              p: 2, 
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              borderRadius: '0px',
-              border: '1px solid #374151',
-              backdropFilter: 'blur(10px)',
-            }}
-          >
-            <Typography variant="caption" sx={{ 
-              color: '#9ca3af', 
-              textAlign: 'center', 
-              display: 'block',
-              fontWeight: 500,
-              fontSize: '0.75rem',
-            }}>
-              © Fingov Research Platform. All rights reserved.
-            </Typography>
-          </Box>
-        </Box>
       </Box>
     </Box>
   );
@@ -322,6 +269,8 @@ export default function AppSidebar() {
           border: 'none',
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
           backdropFilter: 'blur(20px)',
+          top: 70, // Position below the fixed header
+          height: 'calc(100% - 70px)', // Adjust height to account for header
         },
       }}
     >
