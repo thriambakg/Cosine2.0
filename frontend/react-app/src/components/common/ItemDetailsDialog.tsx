@@ -4395,8 +4395,30 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             }}
             data-tutorial="item-details-content"
           >
-        {/* Enrichment status messages (for Government Contracts) */}
+        {/* Enrichment status messages (for Government Contracts and Congress Bills) */}
         {itemType === 'govt_contract' && (
+          <>
+            {enrichmentSuccess && (
+              <Alert 
+                severity="success" 
+                onClose={() => setEnrichmentSuccess(null)}
+                sx={{ mb: 2, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}
+              >
+                {enrichmentSuccess}
+              </Alert>
+            )}
+            {enrichmentError && (
+              <Alert 
+                severity="error" 
+                onClose={() => setEnrichmentError(null)}
+                sx={{ mb: 2, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+              >
+                {enrichmentError}
+              </Alert>
+            )}
+          </>
+        )}
+        {itemType === 'congress_bill' && (
           <>
             {enrichmentSuccess && (
               <Alert 
