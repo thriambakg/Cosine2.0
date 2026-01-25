@@ -7,7 +7,7 @@ export const welcomeTutorialSteps: Step[] = [
     placement: 'center',
     content: (
       <div>
-        <h2 style={{ margin: 0, color: '#ffffff', fontSize: '1.5rem' }}>Welcome to FinGov</h2>
+        <h2 style={{ margin: 0, color: '#ffffff', fontSize: '1.5rem' }}>oWelcome to Fingov.ai</h2>
         <p style={{ margin: '12px 0 8px 0', color: '#e5e7eb', fontSize: '1rem' }}>
           The first-in-class AI-powered government financial research platform
         </p>
@@ -23,7 +23,7 @@ export const welcomeTutorialSteps: Step[] = [
     placement: 'center',
     content: (
       <div>
-        <h3 style={{ margin: 0, color: '#ffffff' }}>What is FinGov?</h3>
+        <h3 style={{ margin: 0, color: '#ffffff' }}>What is Fingov?</h3>
         <p style={{ margin: '12px 0 8px 0', color: '#e5e7eb' }}>
           FinGov is a cutting-edge research platform that combines government financial data, market intelligence, and AI-powered insights.
         </p>

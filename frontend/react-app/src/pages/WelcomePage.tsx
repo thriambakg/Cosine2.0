@@ -155,7 +155,7 @@ const WelcomePage: React.FC = () => {
                 fontSize: { xs: '2.5rem', md: '3.5rem' }
               }}
             >
-              Welcome to FinGov
+              Welcome to Fingov.ai
             </Typography>
             <Typography 
               variant="h5" 

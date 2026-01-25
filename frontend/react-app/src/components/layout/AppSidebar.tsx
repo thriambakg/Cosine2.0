@@ -298,7 +298,7 @@ export default function AppSidebar() {
               fontWeight: 500,
               fontSize: '0.75rem',
             }}>
-              © 2025 Cosine AI
+              © Fingov Research Platform. All rights reserved.
             </Typography>
           </Box>
         </Box>
