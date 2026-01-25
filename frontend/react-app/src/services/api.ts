@@ -1619,6 +1619,18 @@ export const congressBillsSearchAPI = {
       body: JSON.stringify(params),
     });
   },
+  getBill: async (params: { bill_id: string }): Promise<{
+    success: boolean;
+    result?: any;
+    count?: number;
+    error?: string;
+  }> => {
+    console.log('📋 API - Fetching congress bill by ID:', params);
+    return apiRequest('/congress-bills-search', {
+      method: 'POST',
+      body: JSON.stringify({ bill_id: params.bill_id }),
+    });
+  },
 };
 
 export const congressBillsAutocompleteAPI = {

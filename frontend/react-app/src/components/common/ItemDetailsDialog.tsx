@@ -28,7 +28,7 @@ import {
   Minimize as MinimizeIcon,
 } from '@mui/icons-material';
 import TutorialHelpIcon from './TutorialHelpIcon';
-import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI, fileReturnAPI } from '@/services/api';
+import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI, fileReturnAPI, congressBillsSearchAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -120,6 +120,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [childAwardsDetails, setChildAwardsDetails] = useState<any[]>([]);
   const childAwardsFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched child awards for
   const fullAwardFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched full award data for
+  const [refreshBillLoading, setRefreshBillLoading] = useState<boolean>(false);
   
   // State to track item data - updated when enrichment completes
   const [itemData, setItemData] = useState<any>(() => {
@@ -373,6 +374,57 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       backgroundColor: 'rgba(59, 130, 246, 0.7)',
     },
   };
+
+  // Handle refresh for Congress Bills
+  const handleRefreshBill = useCallback(async () => {
+    const billId = itemData?.bill_id;
+    
+    if (!billId || refreshBillLoading) return;
+
+    setRefreshBillLoading(true);
+    setEnrichmentError(null);
+    setEnrichmentSuccess(null);
+
+    try {
+      console.log('🔄 Refreshing bill data from DynamoDB...', billId);
+      const response = await congressBillsSearchAPI.getBill({
+        bill_id: billId,
+      });
+
+      if (response.success && response.result) {
+        const updatedBill = response.result;
+        console.log('✅ Fetched updated bill', {
+          bill_id: updatedBill.bill_id,
+          title: updatedBill.title,
+        });
+        
+        // Update local state with refreshed bill data
+        console.log('🔄 Updating ItemDetailsDialog state with refreshed bill');
+        setItemData(updatedBill);
+        
+        // Call onEnrich callback with updated data (to update tile)
+        if (onEnrich) {
+          console.log('📤 Calling onEnrich callback with updated bill data');
+          onEnrich(updatedBill);
+        }
+        
+        setEnrichmentSuccess('Bill data refreshed successfully!');
+        
+        // Clear success message after 5 seconds
+        setTimeout(() => {
+          setEnrichmentSuccess(null);
+        }, 5000);
+      } else {
+        console.warn('⚠️ Bill fetch returned unsuccessful response', response);
+        setEnrichmentError(response.error || 'Failed to refresh bill data');
+      }
+    } catch (error) {
+      console.error('❌ Error refreshing bill:', error);
+      setEnrichmentError('Failed to refresh bill data');
+    } finally {
+      setRefreshBillLoading(false);
+    }
+  }, [itemData?.bill_id, refreshBillLoading, onEnrich]);
 
   // Handle enrichment for Government Contracts
   const handleEnrichAward = useCallback(async () => {
@@ -4074,12 +4126,38 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <Box sx={{ flex: 1 }}>
               <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600, mb: 1 }}>
-                {title || data?.bill_title || 'Bill Details'}
+                {title || itemData?.bill_title || data?.bill_title || 'Bill Details'}
               </Typography>
-              {data?.bill_id && (
-                <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
-                  {data.bill_id}
-                </Typography>
+              {(itemData?.bill_id || data?.bill_id) && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
+                    {itemData?.bill_id || data.bill_id}
+                  </Typography>
+                  <Tooltip title="Refresh bill data from DynamoDB">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={handleRefreshBill}
+                        disabled={refreshBillLoading || !itemData?.bill_id}
+                        sx={{
+                          color: '#3b82f6',
+                          '&:hover': {
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                          '&:disabled': {
+                            color: '#6b7280',
+                          },
+                        }}
+                      >
+                        {refreshBillLoading ? (
+                          <CircularProgress size={20} sx={{ color: '#3b82f6' }} />
+                        ) : (
+                          <RefreshIcon fontSize="small" />
+                        )}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
               )}
             </Box>
           </Box>
