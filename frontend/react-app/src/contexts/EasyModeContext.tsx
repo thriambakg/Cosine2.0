@@ -60,4 +60,3 @@ export const EasyModeProvider: React.FC<EasyModeProviderProps> = ({ children }) 
 
 
 
-
