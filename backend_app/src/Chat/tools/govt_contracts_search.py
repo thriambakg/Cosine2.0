@@ -705,7 +705,7 @@ def search_awards_union(
         try:
             enriched = enrich_award_with_details(item)
             enriched_items.append(enriched)
-        except Exception as e:
+            except Exception as e:
             logger.error(f"Error enriching award {item.get('award_id')}: {str(e)}")
             enriched_items.append(item)
     
@@ -733,9 +733,9 @@ def search_awards_union(
         }
     
     logger.info(f"Returning {len(results)} results (union search), offset: {offset}, next_offset: {next_offset}, total: {total_unique_award_ids}, has_more: {has_more}")
-    
-    return {
-        'success': True,
+        
+        return {
+            'success': True,
         'results': results,
         'count': len(results),
         'has_more': has_more,
