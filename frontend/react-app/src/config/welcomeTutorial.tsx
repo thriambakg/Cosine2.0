@@ -7,12 +7,12 @@ export const welcomeTutorialSteps: Step[] = [
     placement: 'center',
     content: (
       <div>
-        <h2 style={{ margin: 0, color: '#ffffff', fontSize: '1.5rem' }}>Welcome to FinGov</h2>
+        <h2 style={{ margin: 0, color: '#ffffff', fontSize: '1.5rem' }}>Welcome to Fingov.ai</h2>
         <p style={{ margin: '12px 0 8px 0', color: '#e5e7eb', fontSize: '1rem' }}>
           The first-in-class AI-powered government financial research platform
         </p>
         <p style={{ margin: '8px 0', color: '#9ca3af', fontSize: '0.9rem' }}>
-          Let's explore how FinGov empowers your research with real-time data and intelligent analysis.
+          Let's explore how Fingov empowers your research with real-time data and intelligent analysis.
         </p>
       </div>
     ),
@@ -23,12 +23,12 @@ export const welcomeTutorialSteps: Step[] = [
     placement: 'center',
     content: (
       <div>
-        <h3 style={{ margin: 0, color: '#ffffff' }}>What is FinGov?</h3>
+        <h3 style={{ margin: 0, color: '#ffffff' }}>What is Fingov?</h3>
         <p style={{ margin: '12px 0 8px 0', color: '#e5e7eb' }}>
           FinGov is a cutting-edge research platform that combines government financial data, market intelligence, and AI-powered insights.
         </p>
         <p style={{ margin: '8px 0', color: '#9ca3af', fontSize: '0.9rem' }}>
-          Unlike traditional research tools, FinGov uses conversational AI to help you discover patterns, track politicians' trades, analyze government contracts, and monitor SEC filings—all in one unified interface.
+          Unlike traditional research tools, Fingov uses conversational AI to help you discover patterns, track politicians' trades, analyze government contracts, and monitor SEC filings—all in one unified interface.
         </p>
       </div>
     ),

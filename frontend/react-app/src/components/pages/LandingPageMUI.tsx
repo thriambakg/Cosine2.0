@@ -6,7 +6,6 @@ import {
   Typography,
   Button,
   Card,
-  Chip,
 } from '@mui/material';
 import {
   SmartToy as BotIcon,
@@ -14,12 +13,14 @@ import {
   Security as ShieldIcon,
   Bolt as ZapIcon,
   ArrowForward as ArrowRightIcon,
-  Star,
   People as UsersIcon,
   TrendingDown,
   Gavel as GavelIcon,
   Description as DescriptionIcon,
   Article as ArticleIcon,
+  AccountBalance as InstitutionIcon,
+  Storage as StorageIcon,
+  Psychology as BrainIcon,
 } from '@mui/icons-material';
 
 import { AuthModal } from '../auth';
@@ -130,7 +131,7 @@ export default function LandingPageMUI() {
           left: '25%',
           width: 384,
           height: 384,
-          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
           borderRadius: '0%',
           filter: 'blur(48px)',
           animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
@@ -173,9 +174,9 @@ export default function LandingPageMUI() {
             top: 24,
             right: 24,
             zIndex: 50,
-            border: '2px solid #dc2626',
-            backgroundColor: 'rgba(220, 38, 38, 0.1)',
-            color: '#dc2626',
+            border: '2px solid #3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            color: '#3b82f6',
             fontWeight: 600,
             backdropFilter: 'blur(4px)',
             borderRadius: '0px',
@@ -184,9 +185,9 @@ export default function LandingPageMUI() {
             textTransform: 'uppercase',
             letterSpacing: '0.1em',
             '&:hover': {
-              backgroundColor: '#dc2626',
+              backgroundColor: '#3b82f6',
               color: '#ffffff',
-              border: '2px solid #dc2626',
+              border: '2px solid #3b82f6',
               transform: 'scale(1.05)',
             }
           }}
@@ -211,32 +212,14 @@ export default function LandingPageMUI() {
               alignItems: 'center'
             }}>
               <Box sx={{ textAlign: { xs: 'center', lg: 'left' } }}>
-                <Chip
-                  icon={<Star sx={{ fontSize: '16px !important', color: '#fbbf24' }} />}
-                  label="Transparency & Research Platform"
-                  sx={{
-                    backgroundColor: 'rgba(220, 38, 38, 0.2)',
-                    backdropFilter: 'blur(4px)',
-                    color: '#dc2626',
-                    fontSize: '0.875rem',
-                    px: 2,
-                    py: 1,
-                    borderRadius: '0px',
-                    mb: 3,
-                    display: 'inline-flex',
-                    fontWeight: 600,
-                    border: '1px solid #dc2626'
-                  }}
-                />
-                
                 {/* FinGov Logo */}
                 <Box sx={{ mb: 3, display: 'flex', justifyContent: { xs: 'center', lg: 'flex-start' } }}>
                   <Box 
                     component="img"
-                    src="/logo-dark.svg"
+                    src="/logo-new.png"
                     alt="FinGov"
                     sx={{ 
-                      height: { xs: 120, md: 160 },
+                      height: { xs: 150, md: 200 },
                       width: 'auto',
                       filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))',
                     }} 
@@ -261,23 +244,26 @@ export default function LandingPageMUI() {
                   <Button
                     onClick={handleGetStarted}
                     size="large"
+                    variant="outlined"
                     sx={{
-                      background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
-                      color: '#ffffff',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                      color: '#93c5fd',
                       px: 4,
                       py: 2,
-                      fontSize: '1.125rem',
-                      fontWeight: 700,
+                      fontSize: '1rem',
+                      fontWeight: 600,
                       borderRadius: '0px',
-                      boxShadow: '0 20px 25px -5px rgb(220 38 38 / 0.3), 0 8px 10px -6px rgb(220 38 38 / 0.2)',
+                      boxShadow: '0 4px 6px -1px rgb(59 130 246 / 0.1)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.1em',
                       transition: 'all 0.3s ease',
-                      border: '2px solid #dc2626',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
                       '&:hover': {
-                        background: 'linear-gradient(135deg, #b91c1c 0%, #991b1b 100%)',
-                        boxShadow: '0 25px 50px -12px rgb(220 38 38 / 0.4)',
-                        transform: 'scale(1.05)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        border: '1px solid rgba(59, 130, 246, 0.5)',
+                        color: '#bfdbfe',
+                        boxShadow: '0 6px 8px -2px rgb(59 130 246 / 0.15)',
+                        transform: 'scale(1.02)',
                       }
                     }}
                     endIcon={<ArrowRightIcon />}
@@ -360,7 +346,7 @@ export default function LandingPageMUI() {
                         border: '1px solid #4b5563'
                       }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                          <GavelIcon sx={{ fontSize: 16, color: '#dc2626' }} />
+                          <GavelIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
                           <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600 }}>
                             LDA Disclosures
                           </Typography>
@@ -465,23 +451,23 @@ export default function LandingPageMUI() {
                 '&:hover': {
                   backgroundColor: 'rgba(31, 41, 55, 0.9)',
                   transform: 'scale(1.05)',
-                  border: '2px solid #dc2626',
+                  border: '2px solid #6b7280',
                 }
               }}>
                 <Box sx={{ textAlign: 'center' }}>
                   <Box sx={{
                     width: 64,
                     height: 64,
-                    background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
                     borderRadius: '0px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     mx: 'auto',
                     mb: 2,
-                    border: '2px solid #b91c1c'
+                    border: '2px solid #4b5563'
                   }}>
-                    <BotIcon sx={{ fontSize: 32, color: '#ffffff' }} />
+                    <InstitutionIcon sx={{ fontSize: 32, color: '#9ca3af' }} />
                   </Box>
                   <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
                     Government Data Search
@@ -502,23 +488,23 @@ export default function LandingPageMUI() {
                 '&:hover': {
                   backgroundColor: 'rgba(31, 41, 55, 0.9)',
                   transform: 'scale(1.05)',
-                  border: '2px solid #22c55e',
+                  border: '2px solid #6b7280',
                 }
               }}>
                 <Box sx={{ textAlign: 'center' }}>
                   <Box sx={{
                     width: 64,
                     height: 64,
-                    background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
                     borderRadius: '0px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     mx: 'auto',
                     mb: 2,
-                    border: '2px solid #16a34a'
+                    border: '2px solid #4b5563'
                   }}>
-                    <ShieldIcon sx={{ fontSize: 32, color: '#ffffff' }} />
+                    <BrainIcon sx={{ fontSize: 32, color: '#9ca3af' }} />
                   </Box>
                   <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
                     AI Research Assistant
@@ -539,23 +525,23 @@ export default function LandingPageMUI() {
                 '&:hover': {
                   backgroundColor: 'rgba(31, 41, 55, 0.9)',
                   transform: 'scale(1.05)',
-                  border: '2px solid #3b82f6',
+                  border: '2px solid #6b7280',
                 }
               }}>
                 <Box sx={{ textAlign: 'center' }}>
                   <Box sx={{
                     width: 64,
                     height: 64,
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
                     borderRadius: '0px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     mx: 'auto',
                     mb: 2,
-                    border: '2px solid #2563eb'
+                    border: '2px solid #4b5563'
                   }}>
-                    <ZapIcon sx={{ fontSize: 32, color: '#ffffff' }} />
+                    <StorageIcon sx={{ fontSize: 32, color: '#9ca3af' }} />
                   </Box>
                   <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
                     Comprehensive Data
@@ -574,7 +560,7 @@ export default function LandingPageMUI() {
           <Container maxWidth="lg">
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 600 }}>
-                © 2025 FinGov Research Platform. All rights reserved.
+                © 2025 Fingov Research Platform. All rights reserved.
               </Typography>
             </Box>
           </Container>

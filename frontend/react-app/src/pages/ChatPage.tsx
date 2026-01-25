@@ -2832,7 +2832,7 @@ export default function ChatPage() {
               }}>
                 <BotIcon sx={{ fontSize: 64, mb: 2, opacity: 0.5 }} />
                 <Typography variant="h6" gutterBottom>
-                  Welcome to Cosine AI
+                  Welcome to Fingov.ai
                 </Typography>
                 <Typography variant="body1" sx={{ mb: 1 }}>
                   Start a conversation by typing a message below

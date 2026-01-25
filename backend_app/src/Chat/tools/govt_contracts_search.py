@@ -733,7 +733,7 @@ def search_awards_union(
         }
     
     logger.info(f"Returning {len(results)} results (union search), offset: {offset}, next_offset: {next_offset}, total: {total_unique_award_ids}, has_more: {has_more}")
-    
+        
     return {
         'success': True,
         'results': results,
