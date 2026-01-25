@@ -163,7 +163,7 @@ export default function LoginForm({ onSwitchToRegister, onSwitchToReset, onClose
             textTransform: 'uppercase'
           }}
         >
-          Sign in to Cosine
+          Sign in to FinGov
         </Typography>
         <Typography 
           variant="body2" 

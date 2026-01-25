@@ -15,8 +15,9 @@ waf_rate_limit        = 1000               # More restrictive rate limit for pro
 waf_blocked_countries = ["CN", "RU", "KP"] # Block high-risk countries for production
 
 # CloudFront Configuration
-cloudfront_aliases        = ["investcosine.com", "www.investcosine.com"] # Custom domains for CloudFront
-use_cloudfront_deployment = true                                         # Enable CloudFront + S3 static hosting
+# Note: Both domains use unified certificate (when validated) or fingov.ai certificate (fallback)
+cloudfront_aliases        = ["fingov.ai", "www.fingov.ai", "investcosine.com", "www.investcosine.com"] # Custom domains for CloudFront
+use_cloudfront_deployment = true                                                                       # Enable CloudFront + S3 static hosting
 
 # Common tags
 common_tags = {
@@ -40,7 +41,7 @@ common_tags = {
 enable_custom_domain = true
 
 # Your domain name (e.g., "mycompany.com" or "cosineapp.com")
-domain_name = "investcosine.com" # Your new production domain
+domain_name = "fingov.ai" # Your new production domain
 
 # Staging subdomain (will create staging.your-domain.com)
 staging_subdomain = "staging"
@@ -57,7 +58,7 @@ lambda_provisioned_concurrency_default = 2    # Provisioned concurrency for chat
 lambda_reserved_concurrency_default    = null # Unlimited concurrency in production (no throttling)
 
 # Note: When enabling custom domain in production:
-# 1. Purchase and register your domain (investcosine.com) ✅ DONE
+# 1. Purchase and register your domain (fingov.ai) ✅ DONE
 # 2. After terraform apply, update your domain's nameservers to Route53
-# 3. Production URL will be: https://investcosine.com
+# 3. Production URL will be: https://fingov.ai
 # 4. Certificate will be automatically managed by AWS ACM

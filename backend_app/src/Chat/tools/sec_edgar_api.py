@@ -45,7 +45,7 @@ except ImportError as e:
 # SEC EDGAR API Configuration
 SEC_BASE_URL = "https://www.sec.gov"
 EDGAR_API_BASE = "https://data.sec.gov"
-USER_AGENT = "Cosine Financial Analysis Agent (contact@cosine.com)"
+USER_AGENT = "FinGov Financial Analysis Agent (contact@fingov.ai)"
 
 # Rate limiting
 REQUEST_DELAY = 0.1  # 100ms between requests to respect SEC rate limits

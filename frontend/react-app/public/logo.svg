@@ -42,7 +42,7 @@
         font-weight="600" 
         fill="url(#textGradient)"
         filter="url(#dropshadow)">
-    Cosine
+    FinGov
   </text>
   
   <!-- Subtle tagline -->
@@ -51,6 +51,6 @@
         font-size="9" 
         font-weight="400" 
         fill="#64748b">
-    AI Trading Intelligence
+    Government Financial Research
   </text>
 </svg>

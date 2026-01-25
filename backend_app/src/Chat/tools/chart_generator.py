@@ -279,8 +279,8 @@ class UnifiedChartGenerator:
             return "Error: Shared file upload module not available"
 
     def _add_watermark(self, fig):
-        """Add investcosine.com watermark to the chart."""
-        fig.text(0.99, 0.01, 'investcosine.com', 
+        """Add fingov.ai watermark to the chart."""
+        fig.text(0.99, 0.01, 'fingov.ai', 
                 fontsize=8, color='gray', alpha=0.7,
                 ha='right', va='bottom', 
                 transform=fig.transFigure)
@@ -841,7 +841,7 @@ class UnifiedChartGenerator:
                 ax.legend(loc='upper left', fontsize=11, framealpha=0.9)
             
             # Add watermark
-            fig.text(0.99, 0.01, 'investcosine.com', fontsize=10, color='gray', 
+            fig.text(0.99, 0.01, 'fingov.ai', fontsize=10, color='gray', 
                     ha='right', va='bottom', alpha=0.7, transform=fig.transFigure)
             
             plt.tight_layout()

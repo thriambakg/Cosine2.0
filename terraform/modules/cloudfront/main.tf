@@ -308,6 +308,15 @@ resource "aws_cloudfront_distribution" "distribution" {
     min_ttl     = var.default_cache_behavior_settings.min_ttl
     default_ttl = var.default_cache_behavior_settings.default_ttl
     max_ttl     = var.default_cache_behavior_settings.max_ttl
+
+    # CloudFront Function to redirect investcosine.com to fingov.ai
+    dynamic "function_association" {
+      for_each = length(aws_cloudfront_function.redirect_investcosine) > 0 ? [1] : []
+      content {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.redirect_investcosine[0].arn
+      }
+    }
   }
 
   # Ordered Cache Behaviors
@@ -381,7 +390,50 @@ resource "aws_cloudfront_distribution" "distribution" {
   })
 
   # Wait for the OAC to be created
-  depends_on = [aws_cloudfront_origin_access_control.s3_oac]
+  depends_on = [
+    aws_cloudfront_origin_access_control.s3_oac
+  ]
+}
+
+# CloudFront Function to redirect investcosine.com to fingov.ai
+# Only create if investcosine.com is in the aliases
+resource "aws_cloudfront_function" "redirect_investcosine" {
+  count   = length([for alias in var.aliases : alias if can(regex("investcosine\\.com", alias))]) > 0 ? 1 : 0
+  name    = "${var.project_name}-redirect-investcosine-${var.environment}"
+  runtime = "cloudfront-js-1.0"
+  comment = "Redirect investcosine.com to fingov.ai to maintain single state"
+  publish = true
+  code    = <<-EOF
+function handler(event) {
+    var request = event.request;
+    var host = request.headers.host ? request.headers.host.value : '';
+    
+    // Redirect investcosine.com to fingov.ai
+    if (host.includes('investcosine.com')) {
+        var newHost = host.replace('investcosine.com', 'fingov.ai');
+        var url = 'https://' + newHost + request.uri;
+        
+        // Preserve query string if present
+        if (request.querystring) {
+            var queryString = Object.keys(request.querystring)
+                .map(key => key + '=' + encodeURIComponent(request.querystring[key].value))
+                .join('&');
+            url += '?' + queryString;
+        }
+        
+        return {
+            statusCode: 301,
+            statusDescription: 'Moved Permanently',
+            headers: {
+                'location': { value: url }
+            }
+        };
+    }
+    
+    // Continue with normal request for other domains
+    return request;
+}
+EOF
 }
 
 # Cache Policy for optimized caching
@@ -470,5 +522,33 @@ resource "aws_s3_bucket_policy" "cloudfront_oac_policy" {
   # Lifecycle to handle updates when distribution ARN changes
   lifecycle {
     create_before_destroy = false
+  }
+}
+
+# DNS Records for CloudFront (if hosted zone ID is provided)
+resource "aws_route53_record" "cloudfront_alias" {
+  count   = var.hosted_zone_id != null && length(var.aliases) > 0 ? length(var.aliases) : 0
+  zone_id = var.hosted_zone_id
+  name    = var.aliases[count.index]
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.distribution.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+# AAAA record for IPv6 support
+resource "aws_route53_record" "cloudfront_alias_ipv6" {
+  count   = var.hosted_zone_id != null && length(var.aliases) > 0 ? length(var.aliases) : 0
+  zone_id = var.hosted_zone_id
+  name    = var.aliases[count.index]
+  type    = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.distribution.hosted_zone_id
+    evaluate_target_health = false
   }
 }

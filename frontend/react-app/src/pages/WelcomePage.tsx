@@ -155,7 +155,7 @@ const WelcomePage: React.FC = () => {
                 fontSize: { xs: '2.5rem', md: '3.5rem' }
               }}
             >
-              Welcome to Cosine
+              Welcome to FinGov
             </Typography>
             <Typography 
               variant="h5" 
@@ -167,7 +167,7 @@ const WelcomePage: React.FC = () => {
                 mx: 'auto'
               }}
             >
-              Your AI-powered financial command center is ready. Let's build something amazing together.
+              Your AI-powered government financial research platform. Track politicians' trades, analyze contracts, and monitor SEC filings.
             </Typography>
             <Chip
               icon={<StarIcon sx={{ fontSize: '16px !important', color: '#fbbf24' }} />}

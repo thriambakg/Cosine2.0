@@ -855,7 +855,7 @@ const NewsSearchPage: React.FC = () => {
                             onClick={handleAddToContext}
                             disabled={selectedArticles.size === 0}
                             sx={{ 
-                              color: selectedArticles.size > 0 ? '#10b981' : '#9ca3af', 
+                              color: selectedArticles.size > 0 ? '#10b981' : '#9ca3af',
                               '&:hover': { color: '#10b981' },
                               '&:disabled': { color: '#4b5563' }
                             }}

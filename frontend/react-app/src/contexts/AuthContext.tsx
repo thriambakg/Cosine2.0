@@ -650,8 +650,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           timestamp: new Date().toISOString() 
         });
       }
+      
+      // Explicitly redirect to fingov.ai to ensure consistent state
+      // This handles cases where users came from investcosine.com
+      const currentHost = window.location.hostname;
+      if (currentHost.includes('investcosine.com') || currentHost.includes('fingov.ai')) {
+        // Always redirect to fingov.ai after logout
+        window.location.href = 'https://fingov.ai/';
+      }
     } catch (error) {
       console.error('Logout error:', error);
+      // Even on error, try to redirect to fingov.ai
+      const currentHost = window.location.hostname;
+      if (currentHost.includes('investcosine.com') || currentHost.includes('fingov.ai')) {
+        window.location.href = 'https://fingov.ai/';
+      }
     } finally {
       setIsLoading(false);
     }

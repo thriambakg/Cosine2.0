@@ -1,5 +1,5 @@
 """
-AWS Lambda handler for Cosine Financial Analysis Agent
+AWS Lambda handler for FinGov Financial Analysis Agent
 Focused on API Gateway integration and business logic only
 Resource configuration handled by Terraform
 Updated for container deployment
@@ -1043,7 +1043,7 @@ def handle_rest_api_request(event: Dict[str, Any], cors_headers: Dict[str, str])
                 'statusCode': 200,
                 'body': {
                     'status': 'healthy',
-                    'service': 'Cosine Financial Analysis Agent',
+                    'service': 'FinGov Financial Analysis Agent',
                     'version': '1.0.0',
                     'timestamp': FinancialTools.get_current_timestamp()
                 }
