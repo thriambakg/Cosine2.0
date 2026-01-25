@@ -97,7 +97,7 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
       target: 'body',
       content: (
         <div>
-          <h2 style={{ marginTop: 0, color: '#ffffff' }}>Welcome to Cosine! 👋</h2>
+          <h2 style={{ marginTop: 0, color: '#ffffff' }}>Welcome to Fingov.ai! 👋</h2>
           <p>Let's take a quick tour of your dashboard to help you get started.</p>
           <p style={{ fontSize: '0.9em', color: '#9ca3af', marginBottom: 0 }}>
             You can skip this tutorial anytime by clicking "Skip" or pressing ESC.
