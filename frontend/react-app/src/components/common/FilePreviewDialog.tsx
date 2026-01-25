@@ -30,7 +30,7 @@ import {
   Dashboard as DashboardIcon,
 } from '@mui/icons-material';
 import TutorialHelpIcon from './TutorialHelpIcon';
-import { fileReturnAPI } from '@/services/api';
+import { fileReturnAPI, filesystemAPI } from '@/services/api';
 import { API_CONFIG } from '@/config/api';
 import TilePreview from './TilePreview';
 import { UnifiedTile } from '../../types/dashboardTypes';
@@ -2937,7 +2937,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             folder_path={folder_path}
             item_id={item.id}
             contentOnly={true}
-            onEnrich={(enrichedData) => {
+            onEnrich={async (enrichedData) => {
               // Update preview data with enriched data
               setPreviewData({
                 ...previewData,
@@ -2946,6 +2946,27 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                   data: enrichedData,
                 },
               });
+              
+              // Also update the filesystem item to persist the refreshed data
+              // This ensures the updated bill data is saved for next time
+              if (item.id && user_id && folder_path !== undefined) {
+                try {
+                  console.log('💾 Updating filesystem item with refreshed bill data:', item.id);
+                  await filesystemAPI.updateItem({
+                    user_id: user_id,
+                    folder_path: folder_path || '',
+                    item_id: item.id,
+                    content_data: {
+                      ...content,
+                      data: enrichedData,
+                    },
+                  });
+                  console.log('✅ Filesystem item updated with refreshed bill data');
+                } catch (error) {
+                  console.error('❌ Error updating filesystem item:', error);
+                  // Don't show error to user - preview is already updated
+                }
+              }
             }}
           />
         );

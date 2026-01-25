@@ -481,6 +481,36 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return queries
 
 
+def get_bill_by_id(bill_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a single bill by bill_id directly from DynamoDB"""
+    if not bills_table or not bill_id:
+        return None
+    
+    try:
+        # For regular bills, search_index_sk equals bill_id
+        response = bills_table.get_item(
+            Key={
+                'bill_id': str(bill_id),
+                'search_index_sk': str(bill_id)
+            }
+        )
+        
+        if 'Item' in response:
+            item = response['Item']
+            # Filter out search index items
+            if not is_search_index_item(item):
+                return item
+            else:
+                logger.warning(f"Bill {bill_id} is a search index item, skipping")
+                return None
+        else:
+            logger.info(f"Bill {bill_id} not found in DynamoDB")
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching bill {bill_id}: {str(e)}", exc_info=True)
+        return None
+
+
 def fetch_full_bills_batch(bill_ids: List[str]) -> List[Dict[str, Any]]:
     """Fetch full bill items using BatchGetItem"""
     if not bill_ids:
@@ -962,13 +992,44 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             body = event.get('body', {})
         
-        # Extract search parameters
-        filters = body.get('filters', {})
-        limit = body.get('limit', 100)
-        last_evaluated_key = body.get('last_evaluated_key')
-        
-        # Perform search
-        result = search_bills(filters=filters, limit=limit, last_evaluated_key=last_evaluated_key)
+        # Check if this is a direct bill_id query (similar to getAward for contracts)
+        bill_id = body.get('bill_id')
+        if bill_id:
+            # Direct bill fetch by bill_id
+            try:
+                logger.info(f"Fetching bill directly by bill_id: {bill_id}")
+                bill = get_bill_by_id(bill_id)
+                if bill:
+                    # Enrich with S3 data if needed
+                    bill = enrich_bill_with_details(bill)
+                    result = {
+                        'success': True,
+                        'result': convert_decimal_to_float(bill),
+                        'count': 1
+                    }
+                else:
+                    result = {
+                        'success': False,
+                        'error': f'Bill not found: {bill_id}',
+                        'result': None,
+                        'count': 0
+                    }
+            except Exception as e:
+                logger.error(f"Error fetching bill by ID: {str(e)}", exc_info=True)
+                result = {
+                    'success': False,
+                    'error': str(e),
+                    'result': None,
+                    'count': 0
+                }
+        else:
+            # Extract search parameters
+            filters = body.get('filters', {})
+            limit = body.get('limit', 100)
+            last_evaluated_key = body.get('last_evaluated_key')
+            
+            # Perform search
+            result = search_bills(filters=filters, limit=limit, last_evaluated_key=last_evaluated_key)
         
         # Return response
         return {
