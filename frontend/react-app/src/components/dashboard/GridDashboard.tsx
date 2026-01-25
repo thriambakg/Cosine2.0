@@ -1000,7 +1000,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const stockScreenerProps = {
       ...commonProps,
       criteria: tile.criteria,
-      filterSettings: tile.filterSettings,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateScreener,
       results: sessionResultsScreener,
       displayOptions: (tile.displayOptions as any) || {
@@ -1075,7 +1075,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     const politicianTradesProps = {
       ...commonProps,
       searchParams: tile.searchParams,
-      filterSettings: tile.filterSettings,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateTrades,
       results: sessionResultsTrades,
       displayOptions: (tile.displayOptions as any) || {
@@ -1127,7 +1127,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (isSelected: boolean) => handleTileSelection(tile.id, isSelected),
       searchParams: tile.searchParams,
-      filterSettings: tile.filterSettings,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateSEC,
       results: sessionResultsSEC,
       displayOptions: {
@@ -1219,7 +1219,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
-      filterSettings: tile.filterSettings,
+      filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateBills,
       results: sessionResultsBills as CongressBill[] | undefined,
       displayOptions: {
