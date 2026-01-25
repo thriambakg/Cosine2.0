@@ -308,6 +308,15 @@ resource "aws_cloudfront_distribution" "distribution" {
     min_ttl     = var.default_cache_behavior_settings.min_ttl
     default_ttl = var.default_cache_behavior_settings.default_ttl
     max_ttl     = var.default_cache_behavior_settings.max_ttl
+
+    # CloudFront Function to redirect investcosine.com to fingov.ai
+    dynamic "function_association" {
+      for_each = length(aws_cloudfront_function.redirect_investcosine) > 0 ? [1] : []
+      content {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.redirect_investcosine[0].arn
+      }
+    }
   }
 
   # Ordered Cache Behaviors
@@ -384,6 +393,47 @@ resource "aws_cloudfront_distribution" "distribution" {
   depends_on = [
     aws_cloudfront_origin_access_control.s3_oac
   ]
+}
+
+# CloudFront Function to redirect investcosine.com to fingov.ai
+# Only create if investcosine.com is in the aliases
+resource "aws_cloudfront_function" "redirect_investcosine" {
+  count   = length([for alias in var.aliases : alias if can(regex("investcosine\\.com", alias))]) > 0 ? 1 : 0
+  name    = "${var.project_name}-redirect-investcosine-${var.environment}"
+  runtime = "cloudfront-js-1.0"
+  comment = "Redirect investcosine.com to fingov.ai to maintain single state"
+  publish = true
+  code    = <<-EOF
+function handler(event) {
+    var request = event.request;
+    var host = request.headers.host ? request.headers.host.value : '';
+    
+    // Redirect investcosine.com to fingov.ai
+    if (host.includes('investcosine.com')) {
+        var newHost = host.replace('investcosine.com', 'fingov.ai');
+        var url = 'https://' + newHost + request.uri;
+        
+        // Preserve query string if present
+        if (request.querystring) {
+            var queryString = Object.keys(request.querystring)
+                .map(key => key + '=' + encodeURIComponent(request.querystring[key].value))
+                .join('&');
+            url += '?' + queryString;
+        }
+        
+        return {
+            statusCode: 301,
+            statusDescription: 'Moved Permanently',
+            headers: {
+                'location': { value: url }
+            }
+        };
+    }
+    
+    // Continue with normal request for other domains
+    return request;
+}
+EOF
 }
 
 # Cache Policy for optimized caching
