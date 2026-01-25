@@ -958,9 +958,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           }}
         >
           {itemData?.bill_title && (
-            <Typography variant="body1" sx={{ color: '#e5e7eb', mb: 3, fontStyle: 'italic' }}>
-              {itemData.bill_title}
-            </Typography>
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                Bill Title
+              </Typography>
+              <Typography variant="body1" sx={{ color: '#e5e7eb', fontStyle: 'italic' }}>
+                {itemData.bill_title}
+              </Typography>
+            </Box>
           )}
 
           {/* Bill Overview Section */}
@@ -3658,8 +3663,71 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           </Box>
         )}
         
-        {/* Enrichment status messages (for Government Contracts) */}
+        {/* Header for Congress Bills in contentOnly mode */}
+        {itemType === 'congress_bill' && (
+          <Box sx={{ mb: 3, pb: 2, borderBottom: '1px solid #374151' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <Box sx={{ flex: 1 }}>
+                {(itemDataForHeader?.bill_id || data?.bill_id) && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
+                      {itemDataForHeader?.bill_id || data.bill_id}
+                    </Typography>
+                    <Tooltip title="Refresh bill data from DynamoDB">
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={handleRefreshBill}
+                          disabled={refreshBillLoading || !itemDataForHeader?.bill_id}
+                          sx={{
+                            color: '#3b82f6',
+                            '&:hover': {
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                            '&:disabled': {
+                              color: '#6b7280',
+                            },
+                          }}
+                        >
+                          {refreshBillLoading ? (
+                            <CircularProgress size={20} sx={{ color: '#3b82f6' }} />
+                          ) : (
+                            <RefreshIcon fontSize="small" />
+                          )}
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          </Box>
+        )}
+        
+        {/* Enrichment status messages (for Government Contracts and Congress Bills) */}
         {itemType === 'govt_contract' && (
+          <>
+            {enrichmentSuccess && (
+              <Alert 
+                severity="success" 
+                onClose={() => setEnrichmentSuccess(null)}
+                sx={{ mb: 2, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}
+              >
+                {enrichmentSuccess}
+              </Alert>
+            )}
+            {enrichmentError && (
+              <Alert 
+                severity="error" 
+                onClose={() => setEnrichmentError(null)}
+                sx={{ mb: 2, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+              >
+                {enrichmentError}
+              </Alert>
+            )}
+          </>
+        )}
+        {itemType === 'congress_bill' && (
           <>
             {enrichmentSuccess && (
               <Alert 
@@ -4125,9 +4193,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         {itemType === 'congress_bill' && (
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 600, mb: 1 }}>
-                {title || itemData?.bill_title || data?.bill_title || 'Bill Details'}
-              </Typography>
               {(itemData?.bill_id || data?.bill_id) && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
