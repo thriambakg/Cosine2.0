@@ -59,8 +59,5 @@ export const EasyModeProvider: React.FC<EasyModeProviderProps> = ({ children }) 
 
 
 
-<<<<<<< HEAD
 
 
-=======
->>>>>>> ba70d61c88cd76e9f7598f57d72ecdf857e6c9f5
