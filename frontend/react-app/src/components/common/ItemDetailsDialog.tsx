@@ -3673,6 +3673,25 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                     <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
                       {itemDataForHeader?.bill_id || data.bill_id}
                     </Typography>
+                    {itemDataForHeader?.bill_url && (
+                      <Tooltip title="View on Congress.gov">
+                        <IconButton
+                          size="small"
+                          onClick={() => {
+                            window.open(itemDataForHeader.bill_url, '_blank', 'noopener,noreferrer');
+                          }}
+                          sx={{
+                            color: '#9ca3af',
+                            '&:hover': {
+                              color: '#3b82f6',
+                              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            },
+                          }}
+                        >
+                          <OpenInNewIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="Refresh bill data from DynamoDB">
                       <span>
                         <IconButton
@@ -4198,6 +4217,25 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
                     {itemData?.bill_id || data.bill_id}
                   </Typography>
+                  {itemData?.bill_url && (
+                    <Tooltip title="View on Congress.gov">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          window.open(itemData.bill_url, '_blank', 'noopener,noreferrer');
+                        }}
+                        sx={{
+                          color: '#9ca3af',
+                          '&:hover': {
+                            color: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          },
+                        }}
+                      >
+                        <OpenInNewIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   <Tooltip title="Refresh bill data from DynamoDB">
                     <span>
                       <IconButton
