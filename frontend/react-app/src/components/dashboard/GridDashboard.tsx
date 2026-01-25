@@ -1771,3 +1771,5 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     </>
   );
 };
+
+export default GridDashboard;
