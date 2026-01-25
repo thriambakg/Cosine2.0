@@ -1351,10 +1351,21 @@ const SECSearchPage: React.FC = () => {
     
     // Filter by forms (OR logic - any selected form matches)
     // A result matches if its form is ANY of the selected forms
+    // Also matches form variants (e.g., "10-Q" matches "10-Q/A", "10-QT", "10-QSB", etc.)
     if (selectedFilters.forms.length > 0) {
       filtered = filtered.filter(result => {
         const resultForm = result.form || '';
-        return selectedFilters.forms.some(form => form === resultForm);
+        return selectedFilters.forms.some(form => {
+          // Exact match
+          if (form === resultForm) {
+            return true;
+          }
+          // Match form variants (e.g., "10-Q" matches "10-Q/A", "10-QT", "10-QSB")
+          // Check if resultForm starts with the selected form followed by "/", "-", or a letter
+          // This handles variants like "10-Q/A", "10-QT", "10-QSB", "10-K/A", etc.
+          const formRegex = new RegExp(`^${form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|-|[A-Z]|$)`);
+          return formRegex.test(resultForm);
+        });
       });
     }
     
