@@ -28,7 +28,7 @@ import {
   Minimize as MinimizeIcon,
 } from '@mui/icons-material';
 import TutorialHelpIcon from './TutorialHelpIcon';
-import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI, fileReturnAPI, congressBillsSearchAPI } from '@/services/api';
+import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI, fileReturnAPI, congressBillsSearchAPI, ldaSearchAPI } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -120,6 +120,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [childAwardsDetails, setChildAwardsDetails] = useState<any[]>([]);
   const childAwardsFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched child awards for
   const fullAwardFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched full award data for
+  const fullFilingFetchedRef = useRef<Set<string>>(new Set()); // Track which filing IDs/PKs we've already fetched full filing data for
   const [refreshBillLoading, setRefreshBillLoading] = useState<boolean>(false);
   
   // State to track item data - updated when enrichment completes
@@ -237,7 +238,48 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         .finally(() => {
           setLoadingFullAward(false);
         });
-    } else {
+    }
+    
+    // For LDA disclosures, always fetch full filing data when dialog opens
+    // This ensures we have complete data structure
+    // Only fetch if we haven't already fetched for this filing ID/PK
+    if (itemType === 'lda_disclosure' && open) {
+      // Extract filing ID or PK from various possible fields
+      let filingIdOrPk: string | undefined;
+      
+      if (newItemData?.PK) {
+        // Use PK directly (format: FILING#uuid or CONTRIBUTION#uuid)
+        filingIdOrPk = typeof newItemData.PK === 'string' ? newItemData.PK : String(newItemData.PK);
+      } else if (newItemData?.id || newItemData?.filing_uuid) {
+        // Fallback to ID if PK not available
+        filingIdOrPk = newItemData.id || newItemData.filing_uuid;
+      }
+      
+      if (filingIdOrPk && !fullFilingFetchedRef.current.has(filingIdOrPk)) {
+        fullFilingFetchedRef.current.add(filingIdOrPk);
+        setLoadingFullAward(true);
+        ldaSearchAPI.getFiling({ filing_id: filingIdOrPk })
+          .then((response) => {
+            if (response.success && response.result) {
+              setItemData(response.result);
+            } else {
+              console.warn('Failed to fetch full filing details:', response.error);
+              // Keep the original data if fetch fails
+              fullFilingFetchedRef.current.delete(filingIdOrPk);
+            }
+          })
+          .catch((error) => {
+            console.error('Error fetching full filing data:', error);
+            // Keep the original data if fetch fails
+            fullFilingFetchedRef.current.delete(filingIdOrPk);
+          })
+          .finally(() => {
+            setLoadingFullAward(false);
+          });
+      } else if (!filingIdOrPk) {
+        setLoadingFullAward(false);
+      }
+    } else if (itemType !== 'lda_disclosure') {
       setLoadingFullAward(false);
     }
     
@@ -245,6 +287,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     if (!open) {
       fullAwardFetchedRef.current.clear();
       childAwardsFetchedRef.current.clear();
+      fullFilingFetchedRef.current.clear();
     }
   }, [data, itemType, open]);
   
@@ -1360,31 +1403,54 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Box>
           )}
 
-          {/* All Lobbyist Names */}
-          {itemData?.all_lobbyist_names && Array.isArray(itemData.all_lobbyist_names) && itemData.all_lobbyist_names.length > 0 && (
-            <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
-              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
-                Lobbyists
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {itemData.all_lobbyist_names.map((name: string, index: number) => (
-                  <Chip
-                    key={index}
-                    label={name}
-                    size="small"
-                    sx={{
-                      backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                      color: '#93c5fd',
-                      border: '1px solid rgba(59, 130, 246, 0.3)',
-                      '&:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.25)',
-                      },
-                    }}
-                  />
-                ))}
+          {/* All Lobbyist Names - Handle both FILING (all_lobbyist_names) and CONTRIBUTION (lobbyist_name/lobbyist) types */}
+          {(() => {
+            // For FILING type: use all_lobbyist_names array
+            // For CONTRIBUTION type: use lobbyist_name or construct from lobbyist object
+            let lobbyistNames: string[] = [];
+            
+            if (itemData?.all_lobbyist_names && Array.isArray(itemData.all_lobbyist_names) && itemData.all_lobbyist_names.length > 0) {
+              lobbyistNames = itemData.all_lobbyist_names;
+            } else if (itemData?.lobbyist_name) {
+              // CONTRIBUTION type with top-level lobbyist_name
+              lobbyistNames = [itemData.lobbyist_name];
+            } else if (itemData?.lobbyist) {
+              // CONTRIBUTION type with nested lobbyist object
+              const lobbyist = itemData.lobbyist;
+              const name = lobbyist.nickname || 
+                `${lobbyist.prefix_display || ''} ${lobbyist.first_name || ''} ${lobbyist.middle_name || ''} ${lobbyist.last_name || ''} ${lobbyist.suffix_display || ''}`.trim() ||
+                `${lobbyist.first_name || ''} ${lobbyist.last_name || ''}`.trim() ||
+                'Unknown Lobbyist';
+              if (name && name !== 'Unknown Lobbyist') {
+                lobbyistNames = [name];
+              }
+            }
+            
+            return lobbyistNames.length > 0 ? (
+              <Box sx={{ mb: 3, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
+                  Lobbyists
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {lobbyistNames.map((name: string, index: number) => (
+                    <Chip
+                      key={index}
+                      label={name}
+                      size="small"
+                      sx={{
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        color: '#93c5fd',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        '&:hover': {
+                          backgroundColor: 'rgba(59, 130, 246, 0.25)',
+                        },
+                      }}
+                    />
+                  ))}
+                </Box>
               </Box>
-            </Box>
-          )}
+            ) : null;
+          })()}
 
           {/* Lobbying Activities */}
           {itemData?.lobbying_activities && Array.isArray(itemData.lobbying_activities) && itemData.lobbying_activities.length > 0 && (

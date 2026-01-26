@@ -627,13 +627,15 @@ def fetch_minimal_filings_batch(filing_ids: List[str]) -> List[Dict[str, Any]]:
     # Essential fields for search results table and filtering
     # Includes: Filing Type, Filing Period, Registrant, Client, Amount, Date Posted, State
     # Plus fields needed for filtering: registrant_name, client_name, lobbyist_name, 
-    # state, amount_reported, general_issue_code, report_type
+    # all_lobbyist_names (for FILING type), state, amount_reported, general_issue_code, report_type
     # Plus fields needed for sorting: dt_posted
     # Plus ID fields: PK, SK, id, filing_uuid
+    # Note: 'state' is a reserved keyword in DynamoDB, so we use ExpressionAttributeNames
+    # Note: We include all_lobbyist_names for FILING type filings to support filtering
     projection_expression = (
         'PK, '
         'SK, '
-        'id, '
+        '#id, '
         'filing_uuid, '
         'report_type, '
         'report_type_display, '
@@ -644,11 +646,18 @@ def fetch_minimal_filings_batch(filing_ids: List[str]) -> List[Dict[str, Any]]:
         'registrant_name, '
         'client_name, '
         'lobbyist_name, '
+        'all_lobbyist_names, '
         'amount_reported, '
         'dt_posted, '
-        'state, '
+        '#state, '
         'general_issue_code'
     )
+    
+    # ExpressionAttributeNames for reserved keywords
+    expression_attribute_names = {
+        '#id': 'id',
+        '#state': 'state'
+    }
     
     items = []
     batch_size = 50  # Reduced to 50 since we're trying both formats (effectively 100 keys per batch)
@@ -665,7 +674,8 @@ def fetch_minimal_filings_batch(filing_ids: List[str]) -> List[Dict[str, Any]]:
         request_items = {
             FILINGS_TABLE_NAME: {
                 'Keys': keys,
-                'ProjectionExpression': projection_expression
+                'ProjectionExpression': projection_expression,
+                'ExpressionAttributeNames': expression_attribute_names
             }
         }
         
@@ -718,51 +728,80 @@ def fetch_full_items(filing_ids: List[str]) -> List[Dict[str, Any]]:
     return items
 
 
-def get_filing_by_id(filing_id: str) -> Optional[Dict[str, Any]]:
-    """Get a single filing by ID directly from DynamoDB (fetches full details)"""
+def get_filing_by_id(filing_id_or_pk: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a single filing by ID or PK directly from DynamoDB (fetches full details)
+    Accepts either:
+    - Full PK format: 'FILING#uuid' or 'CONTRIBUTION#uuid'
+    - Just the UUID: 'uuid' (will try both FILING# and CONTRIBUTION# formats)
+    """
     try:
-        if not filing_id:
+        if not filing_id_or_pk:
             return None
         
-        # Try both FILING# and CONTRIBUTION# formats
-        filing_key = {'PK': {'S': f'FILING#{filing_id}'}, 'SK': {'S': f'FILING#{filing_id}'}}
-        contribution_key = {'PK': {'S': f'CONTRIBUTION#{filing_id}'}, 'SK': {'S': f'CONTRIBUTION#{filing_id}'}}
-        
-        # Try FILING# first
-        try:
-            response = dynamodb_client.get_item(
-                TableName=FILINGS_TABLE_NAME,
-                Key=filing_key
-            )
-            item = response.get('Item')
-            if item:
-                deserializer = TypeDeserializer()
-                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                logger.info(f"Found filing {filing_id} as FILING#")
-                return converted_item
-        except Exception as e:
-            logger.warning(f"Error fetching FILING#{filing_id}: {str(e)}")
-        
-        # Try CONTRIBUTION# if FILING# didn't work
-        try:
-            response = dynamodb_client.get_item(
-                TableName=FILINGS_TABLE_NAME,
-                Key=contribution_key
-            )
-            item = response.get('Item')
-            if item:
-                deserializer = TypeDeserializer()
-                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                logger.info(f"Found filing {filing_id} as CONTRIBUTION#")
-                return converted_item
-        except Exception as e:
-            logger.warning(f"Error fetching CONTRIBUTION#{filing_id}: {str(e)}")
-        
-        logger.warning(f"Filing {filing_id} not found in either FILING# or CONTRIBUTION# format")
-        return None
+        # Check if the input is already a full PK (starts with FILING# or CONTRIBUTION#)
+        if filing_id_or_pk.startswith('FILING#') or filing_id_or_pk.startswith('CONTRIBUTION#'):
+            # Use PK directly
+            pk_value = filing_id_or_pk
+            sk_value = filing_id_or_pk  # SK is typically the same as PK for LDA filings
+            key = {'PK': {'S': pk_value}, 'SK': {'S': sk_value}}
+            
+            logger.info(f"Fetching filing using PK directly: {pk_value}")
+            try:
+                response = dynamodb_client.get_item(
+                    TableName=FILINGS_TABLE_NAME,
+                    Key=key
+                )
+                item = response.get('Item')
+                if item:
+                    deserializer = TypeDeserializer()
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    logger.info(f"Found filing using PK: {pk_value}")
+                    return converted_item
+            except Exception as e:
+                logger.warning(f"Error fetching filing with PK {pk_value}: {str(e)}")
+                return None
+        else:
+            # Input is just the UUID, try both FILING# and CONTRIBUTION# formats
+            filing_id = filing_id_or_pk
+            filing_key = {'PK': {'S': f'FILING#{filing_id}'}, 'SK': {'S': f'FILING#{filing_id}'}}
+            contribution_key = {'PK': {'S': f'CONTRIBUTION#{filing_id}'}, 'SK': {'S': f'CONTRIBUTION#{filing_id}'}}
+            
+            # Try FILING# first
+            try:
+                response = dynamodb_client.get_item(
+                    TableName=FILINGS_TABLE_NAME,
+                    Key=filing_key
+                )
+                item = response.get('Item')
+                if item:
+                    deserializer = TypeDeserializer()
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    logger.info(f"Found filing {filing_id} as FILING#")
+                    return converted_item
+            except Exception as e:
+                logger.warning(f"Error fetching FILING#{filing_id}: {str(e)}")
+            
+            # Try CONTRIBUTION# if FILING# didn't work
+            try:
+                response = dynamodb_client.get_item(
+                    TableName=FILINGS_TABLE_NAME,
+                    Key=contribution_key
+                )
+                item = response.get('Item')
+                if item:
+                    deserializer = TypeDeserializer()
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    logger.info(f"Found filing {filing_id} as CONTRIBUTION#")
+                    return converted_item
+            except Exception as e:
+                logger.warning(f"Error fetching CONTRIBUTION#{filing_id}: {str(e)}")
+            
+            logger.warning(f"Filing {filing_id} not found in either FILING# or CONTRIBUTION# format")
+            return None
         
     except Exception as e:
-        logger.error(f"Error fetching filing {filing_id}: {str(e)}", exc_info=True)
+        logger.error(f"Error fetching filing {filing_id_or_pk}: {str(e)}", exc_info=True)
         return None
 
 

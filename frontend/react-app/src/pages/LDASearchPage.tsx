@@ -141,9 +141,11 @@ const LDASearchPage: React.FC = () => {
   );
   
   const [allSearchResults, setAllSearchResults] = useState<LDAFiling[]>(
-    savedState?.allSearchResults || [] // May be empty if only resultCount was saved
+    savedState?.allSearchResults || [] // Restore cached results
   );
-  const [currentResults, setCurrentResults] = useState<LDAFiling[]>([]);
+  const [currentResults, setCurrentResults] = useState<LDAFiling[]>(
+    savedState?.allSearchResults || [] // Initialize with cached results
+  );
   const [totalFound, setTotalFound] = useState<number>(savedState?.totalFound || 0);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
@@ -406,17 +408,16 @@ const LDASearchPage: React.FC = () => {
   // Save state to sessionStorage
   useEffect(() => {
     try {
-      // Don't save allSearchResults to avoid quota exceeded errors
-      // Only save essential state - results will be re-fetched on page load if needed
+      // Save allSearchResults since they contain minimal data (keys and top-level GSI data)
+      // This enables client-side filtering and table display without re-fetching
       const stateToSave = {
         searchParams,
         generalSearchItems, // Include generalSearchItems in saved state
-        // Only save result count, not full results
-        resultCount: allSearchResults.length,
+        allSearchResults, // Save results for caching (minimal data - keys and GSI fields)
         totalFound,
         isSearching,
         selectedFilters,
-        // Don't save availableFilters as it can be large
+        availableFilters, // Save filters for quick restoration
         expandedFilters,
         isFiltered,
         currentPage,
@@ -435,11 +436,12 @@ const LDASearchPage: React.FC = () => {
       if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
         console.warn('SessionStorage quota exceeded, saving minimal state only');
         try {
-          // Save only essential state (compressed)
+          // Save only essential state (compressed) - still include results for caching
           const minimalState = {
             searchParams,
             generalSearchItems,
-            resultCount: allSearchResults.length,
+            allSearchResults, // Keep results even in minimal state for caching
+            totalFound,
             lastEvaluatedKey,
             hasMore,
             currentPage,
@@ -457,10 +459,11 @@ const LDASearchPage: React.FC = () => {
   }, [
     searchParams,
     generalSearchItems,
-    allSearchResults.length, // Only depend on length, not full array
+    allSearchResults, // Depend on full array to save cached results
     totalFound,
     isSearching,
     selectedFilters,
+    availableFilters, // Save filters for quick restoration
     expandedFilters,
     isFiltered,
     currentPage,
@@ -498,8 +501,16 @@ const LDASearchPage: React.FC = () => {
         clientCounts.set(filing.client_name, (clientCounts.get(filing.client_name) || 0) + 1);
       }
       
-      // Lobbyists
-      if (filing.lobbyist_name) {
+      // Lobbyists - handle both FILING (all_lobbyist_names) and CONTRIBUTION (lobbyist_name) types
+      if (filing.all_lobbyist_names && Array.isArray(filing.all_lobbyist_names)) {
+        // FILING type: use all_lobbyist_names array
+        filing.all_lobbyist_names.forEach((name: string) => {
+          if (name) {
+            lobbyistCounts.set(name, (lobbyistCounts.get(name) || 0) + 1);
+          }
+        });
+      } else if (filing.lobbyist_name) {
+        // CONTRIBUTION type: use lobbyist_name
         lobbyistCounts.set(filing.lobbyist_name, (lobbyistCounts.get(filing.lobbyist_name) || 0) + 1);
       }
       
@@ -569,11 +580,20 @@ const LDASearchPage: React.FC = () => {
       );
     }
     
-    // Filter by lobbyists
+    // Filter by lobbyists - handle both FILING (all_lobbyist_names) and CONTRIBUTION (lobbyist_name) types
     if (selectedFilters.lobbyists.length > 0) {
-      filtered = filtered.filter(filing => 
-        selectedFilters.lobbyists.includes(filing.lobbyist_name || '')
-      );
+      filtered = filtered.filter(filing => {
+        if (filing.all_lobbyist_names && Array.isArray(filing.all_lobbyist_names)) {
+          // FILING type: check if any lobbyist name matches
+          return filing.all_lobbyist_names.some((name: string) => 
+            selectedFilters.lobbyists.includes(name)
+          );
+        } else if (filing.lobbyist_name) {
+          // CONTRIBUTION type: check lobbyist_name
+          return selectedFilters.lobbyists.includes(filing.lobbyist_name);
+        }
+        return false;
+      });
     }
     
     // Filter by filing types
@@ -723,12 +743,23 @@ const LDASearchPage: React.FC = () => {
     }
   };
 
-  // Auto-search on mount if no results exist
+  // Restore cached results and filters on mount
   useEffect(() => {
-    // Only auto-search if we have no results and haven't performed a search yet
-    if (allSearchResults.length === 0 && !isSearching && !savedState?.allSearchResults) {
-      console.log('🔄 LDA Search Page: Auto-running initial search on mount');
-      handleSearch();
+    // If we have cached results, restore them and compute filters
+    if (savedState?.allSearchResults && savedState.allSearchResults.length > 0) {
+      console.log('🔄 LDA Search Page: Restoring cached results from sessionStorage:', savedState.allSearchResults.length, 'results');
+      setAllSearchResults(savedState.allSearchResults);
+      setCurrentResults(savedState.allSearchResults);
+      setTotalFound(savedState.totalFound || savedState.allSearchResults.length);
+      setHasMore(savedState.hasMore || false);
+      setLastEvaluatedKey(savedState.lastEvaluatedKey || null);
+      
+      // Compute filters from cached results
+      computeFiltersFromResults(savedState.allSearchResults);
+    } else if (savedState?.availableFilters) {
+      // Restore available filters if they were cached
+      console.log('🔄 LDA Search Page: Restoring cached filters from sessionStorage');
+      setAvailableFilters(savedState.availableFilters);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
@@ -1992,15 +2023,69 @@ const LDASearchPage: React.FC = () => {
                                 onContextMenu={(e) => handleRowContextMenu(e, filingId)}
                                 draggable={selectedFilings.has(filingId)}
                                 onDragStart={(e) => handleDragStart(e, filingId)}
-                                onDoubleClick={(e) => {
+                                onDoubleClick={async (e) => {
                                   e.stopPropagation();
                                   if (user?.id) {
-                                    openItemDetails(
-                                      'lda_disclosure',
-                                      filing,
-                                      'Filing Details',
-                                      { user_id: user.id }
-                                    );
+                                    // Use PK directly if available (preferred), otherwise extract ID from other fields
+                                    let filingIdOrPk: string | undefined;
+                                    
+                                    if (filing.PK) {
+                                      // Use PK directly (format: FILING#uuid or CONTRIBUTION#uuid)
+                                      filingIdOrPk = typeof filing.PK === 'string' ? filing.PK : String(filing.PK);
+                                    } else if (filing.id || filing.filing_uuid) {
+                                      // Fallback to ID if PK not available
+                                      filingIdOrPk = filing.id || filing.filing_uuid;
+                                    }
+                                    
+                                    if (filingIdOrPk) {
+                                      try {
+                                        // Fetch full filing details from API using PK or ID
+                                        const response = await ldaSearchAPI.getFiling({ filing_id: filingIdOrPk });
+                                        if (response.success && response.result) {
+                                          openItemDetails(
+                                            'lda_disclosure',
+                                            response.result,
+                                            response.result.registrant_name 
+                                              ? `LDA Filing - ${response.result.registrant_name}${response.result.client_name ? ` / ${response.result.client_name}` : ''}`
+                                              : 'Filing Details',
+                                            { user_id: user.id }
+                                          );
+                                        } else {
+                                          // Fallback to using minimal filing data if fetch fails
+                                          console.warn('Failed to fetch full filing details, using minimal data:', response.error);
+                                          openItemDetails(
+                                            'lda_disclosure',
+                                            filing,
+                                            filing.registrant_name 
+                                              ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+                                              : 'Filing Details',
+                                            { user_id: user.id }
+                                          );
+                                        }
+                                      } catch (error) {
+                                        console.error('Error fetching filing details:', error);
+                                        // Fallback to using minimal filing data on error
+                                        openItemDetails(
+                                          'lda_disclosure',
+                                          filing,
+                                          filing.registrant_name 
+                                            ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+                                            : 'Filing Details',
+                                          { user_id: user.id }
+                                        );
+                                      }
+                                    } else {
+                                      // No filing ID or PK available, use minimal data
+                                      console.warn('No filing ID or PK found, using minimal data');
+                                      openItemDetails(
+                                        'lda_disclosure',
+                                        filing,
+                                        filing.registrant_name 
+                                          ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+                                          : 'Filing Details',
+                                        { user_id: user.id }
+                                      );
+                                    }
                                   }
                                 }}
                                 sx={{

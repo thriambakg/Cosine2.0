@@ -1837,18 +1837,21 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                     onDoubleClick={async (e) => {
                       e.stopPropagation();
                       if (user?.id) {
-                        // Extract filing ID from various possible fields
-                        let filingId = filing.id || filing.filing_uuid;
-                        if (!filingId && filing.PK) {
-                          // Extract ID from PK (format: FILING#uuid or CONTRIBUTION#uuid)
-                          const pkStr = typeof filing.PK === 'string' ? filing.PK : String(filing.PK);
-                          filingId = pkStr.replace(/^(FILING#|CONTRIBUTION#)/, '');
+                        // Use PK directly if available (preferred), otherwise extract ID from other fields
+                        let filingIdOrPk: string | undefined;
+                        
+                        if (filing.PK) {
+                          // Use PK directly (format: FILING#uuid or CONTRIBUTION#uuid)
+                          filingIdOrPk = typeof filing.PK === 'string' ? filing.PK : String(filing.PK);
+                        } else if (filing.id || filing.filing_uuid) {
+                          // Fallback to ID if PK not available
+                          filingIdOrPk = filing.id || filing.filing_uuid;
                         }
                         
-                        if (filingId) {
+                        if (filingIdOrPk) {
                           try {
-                            // Fetch full filing details from API
-                            const response = await ldaSearchAPI.getFiling({ filing_id: filingId });
+                            // Fetch full filing details from API using PK or ID
+                            const response = await ldaSearchAPI.getFiling({ filing_id: filingIdOrPk });
                             if (response.success && response.result) {
                               openItemDetails(
                                 'lda_disclosure',
@@ -1883,8 +1886,8 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                             );
                           }
                         } else {
-                          // No filing ID available, use minimal data
-                          console.warn('No filing ID found, using minimal data');
+                          // No filing ID or PK available, use minimal data
+                          console.warn('No filing ID or PK found, using minimal data');
                           openItemDetails(
                             'lda_disclosure',
                             filing,
