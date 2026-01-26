@@ -13,6 +13,7 @@ import time
 import requests
 from typing import Dict, List, Any, Optional
 from decimal import Decimal
+import decimal
 from datetime import datetime, timezone
 import sys
 from cors_helper import get_cors_headers, validate_origin
@@ -398,10 +399,29 @@ def store_child_award_as_full_record(child_award_id: str, parent_idv_id: str, pa
                     child_award_record['primary_place_of_performance_country_name'] = pop.get('country_name')
         
         # Additional important fields
-        if 'base_exercised_options' in child_award_details:
-            child_award_record['base_and_exercised_options_value'] = Decimal(str(child_award_details['base_exercised_options']))
-        if 'base_and_all_options' in child_award_details:
-            child_award_record['base_and_all_options_value'] = Decimal(str(child_award_details['base_and_all_options']))
+        if 'base_exercised_options' in child_award_details and child_award_details['base_exercised_options'] is not None:
+            try:
+                child_award_record['base_and_exercised_options_value'] = Decimal(str(child_award_details['base_exercised_options']))
+            except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                logger.warning(f"Could not convert base_exercised_options to Decimal for child award {child_award_id}: {e}")
+        
+        if 'base_and_all_options' in child_award_details and child_award_details['base_and_all_options'] is not None:
+            try:
+                child_award_record['base_and_all_options_value'] = Decimal(str(child_award_details['base_and_all_options']))
+            except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                logger.warning(f"Could not convert base_and_all_options to Decimal for child award {child_award_id}: {e}")
+        
+        # Update outlay amounts (Amount Paid in UI)
+        # The UI checks multiple field names: total_outlayed_amount_for_overall_award, total_outlay, total_account_outlay
+        if 'total_account_outlay' in child_award_details and child_award_details['total_account_outlay'] is not None:
+            try:
+                outlay_amount = Decimal(str(child_award_details['total_account_outlay']))
+                child_award_record['total_account_outlay'] = outlay_amount
+                child_award_record['total_outlay'] = outlay_amount
+                child_award_record['total_outlayed_amount_for_overall_award'] = str(outlay_amount)  # UI expects string for this field
+                child_award_record['total_outlayed_amount'] = outlay_amount
+            except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                logger.warning(f"Could not convert total_account_outlay to Decimal for child award {child_award_id}: {e}")
         
         # Merge with existing data if it exists
         if existing_child:
@@ -897,11 +917,30 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
                     updated_award['recipient_name_normalized'] = "unknown"
                     logger.warning(f"Recipient name missing for award {award_id}, setting recipient_name_normalized to 'unknown'")
                 
-                # Update recipient location state (GSI field)
+                # Update recipient location fields
                 if 'location' in recipient and isinstance(recipient['location'], dict):
                     location = recipient['location']
                     if location.get('state_code'):
                         updated_award['recipient_location_state'] = location.get('state_code')
+                    if location.get('state_name'):
+                        updated_award['recipient_state_name'] = location.get('state_name')
+                    if location.get('city_name'):
+                        updated_award['recipient_city_name'] = location.get('city_name')
+                    if location.get('country_name'):
+                        updated_award['recipient_country_name'] = location.get('country_name')
+        
+        # Update place of performance fields
+        if 'place_of_performance' in award_details:
+            pop = award_details['place_of_performance']
+            if isinstance(pop, dict):
+                if pop.get('state_code'):
+                    updated_award['primary_place_of_performance_state_code'] = pop.get('state_code')
+                if pop.get('state_name'):
+                    updated_award['primary_place_of_performance_state_name'] = pop.get('state_name')
+                if pop.get('city_name'):
+                    updated_award['primary_place_of_performance_city_name'] = pop.get('city_name')
+                if pop.get('country_name'):
+                    updated_award['primary_place_of_performance_country_name'] = pop.get('country_name')
         
         # Update agency information (GSI fields)
         if 'awarding_agency' in award_details:
@@ -925,6 +964,17 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
             updated_award['award_type'] = award_type
         if award_details.get('type_description'):
             updated_award['award_type_description'] = award_details.get('type_description')
+        
+        # Update description
+        if 'description' in award_details:
+            updated_award['description'] = award_details.get('description')
+        
+        # Update PIID (Procurement Instrument Identifier)
+        if 'piid' in award_details:
+            updated_award['award_id_piid'] = award_details.get('piid')
+        
+        # Update USAspending permalink
+        updated_award['usaspending_permalink'] = f'https://www.usaspending.gov/award/{award_id}'
         
         # Update category and is_assistance (GSI field) from API response
         if award_category:
@@ -959,6 +1009,62 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
         # Update total_obligated_amount (GSI range key)
         if 'total_obligation' in award_details:
             updated_award['total_obligated_amount'] = Decimal(str(award_details['total_obligation']))
+        
+        # Update base_and_exercised_options_value and base_and_all_options_value
+        # These fields show the full contract value including exercised options and all potential options
+        if 'base_exercised_options' in award_details and award_details['base_exercised_options'] is not None:
+            try:
+                updated_award['base_and_exercised_options_value'] = Decimal(str(award_details['base_exercised_options']))
+            except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                logger.warning(f"Could not convert base_exercised_options to Decimal for award {award_id}: {e}")
+        
+        if 'base_and_all_options' in award_details and award_details['base_and_all_options'] is not None:
+            try:
+                updated_award['base_and_all_options_value'] = Decimal(str(award_details['base_and_all_options']))
+            except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                logger.warning(f"Could not convert base_and_all_options to Decimal for award {award_id}: {e}")
+        
+        # Update outlay amounts (Amount Paid in UI)
+        # For IDVs, use combined outlay from IDV amounts API (child awards)
+        # For regular awards, use outlay from award details API
+        if is_idv and idv_amounts:
+            # For parent IDVs, get combined outlay from child awards via IDV amounts API
+            # Try child_award_total_outlay first (direct child outlay)
+            if 'child_award_total_outlay' in idv_amounts and idv_amounts['child_award_total_outlay'] is not None:
+                try:
+                    combined_outlay = Decimal(str(idv_amounts['child_award_total_outlay']))
+                    updated_award['total_account_outlay'] = combined_outlay
+                    updated_award['total_outlay'] = combined_outlay
+                    updated_award['total_outlayed_amount_for_overall_award'] = str(combined_outlay)
+                    updated_award['total_outlayed_amount'] = combined_outlay
+                    logger.info(f"Updated combined outlay from IDV amounts for {award_id}: {combined_outlay}")
+                except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                    logger.warning(f"Could not convert child_award_total_outlay to Decimal for IDV {award_id}: {e}")
+            
+            # Fallback to child_total_account_outlay if child_award_total_outlay is not available
+            elif 'child_total_account_outlay' in idv_amounts and idv_amounts['child_total_account_outlay'] is not None:
+                try:
+                    combined_outlay = Decimal(str(idv_amounts['child_total_account_outlay']))
+                    updated_award['total_account_outlay'] = combined_outlay
+                    updated_award['total_outlay'] = combined_outlay
+                    updated_award['total_outlayed_amount_for_overall_award'] = str(combined_outlay)
+                    updated_award['total_outlayed_amount'] = combined_outlay
+                    logger.info(f"Updated combined outlay from IDV account outlay for {award_id}: {combined_outlay}")
+                except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                    logger.warning(f"Could not convert child_total_account_outlay to Decimal for IDV {award_id}: {e}")
+        else:
+            # For regular awards, use outlay from award details API
+            # The UI checks multiple field names: total_outlayed_amount_for_overall_award, total_outlay, total_account_outlay
+            # The API returns total_account_outlay, so we'll store it in all the expected field names
+            if 'total_account_outlay' in award_details and award_details['total_account_outlay'] is not None:
+                try:
+                    outlay_amount = Decimal(str(award_details['total_account_outlay']))
+                    updated_award['total_account_outlay'] = outlay_amount
+                    updated_award['total_outlay'] = outlay_amount
+                    updated_award['total_outlayed_amount_for_overall_award'] = str(outlay_amount)  # UI expects string for this field
+                    updated_award['total_outlayed_amount'] = outlay_amount
+                except (ValueError, TypeError, decimal.InvalidOperation) as e:
+                    logger.warning(f"Could not convert total_account_outlay to Decimal for award {award_id}: {e}")
         
         # Update transactions if changed
         if transactions_changed:
