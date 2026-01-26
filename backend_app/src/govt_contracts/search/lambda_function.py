@@ -692,17 +692,20 @@ def search_awards_union(
     logger.info(f"Grouped queries by field: {dict((k, len(v)) for k, v in queries_by_field.items())}")
     
     # Step 1: For each field, UNION all queries within that field
+    # Query each field separately and get award_ids (not full items - that's expensive)
     field_result_sets: Dict[str, Set[str]] = {}
+    field_query_counts: Dict[str, int] = {}  # Track how many items each field query returned
     
     for filter_type, query_configs in queries_by_field.items():
         field_award_ids: Set[str] = set()
+        total_items_queried = 0
         
         logger.info(f"UNION queries for field '{filter_type}': {len(query_configs)} queries")
         
         for query_config in query_configs:
             logger.info(f"  Executing query: {query_config['index_name']} ({query_config['hash_key_name']}={query_config['hash_key_value']})")
             
-            # Get all items from this GSI
+            # Get all items from this GSI (just IDs, not full items)
             gsi_items = get_all_items_from_gsi(
                 index_name=query_config['index_name'],
                 hash_key_name=query_config['hash_key_name'],
@@ -716,11 +719,13 @@ def search_awards_union(
             # Extract award_ids and UNION them with other queries in this field
             query_award_ids = {item.get('award_id') for item in gsi_items if item.get('award_id')}
             field_award_ids.update(query_award_ids)  # UNION: add all IDs from this query
+            total_items_queried += len(gsi_items)
             
             logger.info(f"    Query returned {len(query_award_ids)} items, field total: {len(field_award_ids)}")
         
         field_result_sets[filter_type] = field_award_ids
-        logger.info(f"Field '{filter_type}' UNION complete: {len(field_award_ids)} unique award_ids")
+        field_query_counts[filter_type] = total_items_queried
+        logger.info(f"Field '{filter_type}' UNION complete: {len(field_award_ids)} unique award_ids (queried {total_items_queried} total items)")
     
     # Step 2: INTERSECT results across different fields (different fields = AND)
     # If award_id filter is present, start with it; otherwise start with first field
@@ -732,16 +737,139 @@ def search_awards_union(
         logger.info(f"Starting with award_id filter: {len(all_award_ids)} award IDs")
     
     if field_result_sets:
-        for filter_type, field_ids in field_result_sets.items():
-            if all_award_ids is None:
-                # First field: use its results as starting point
-                all_award_ids = field_ids.copy()
-                logger.info(f"Starting with field '{filter_type}': {len(all_award_ids)} award_ids")
+        # OPTIMIZATION: When one query hit the 50k limit and the other is small, use reverse filtering
+        # This ensures we get complete results when the larger field query is truncated
+        if len(field_result_sets) == 2:
+            field_list = list(field_result_sets.items())
+            field1_type, field1_ids = field_list[0]
+            field2_type, field2_ids = field_list[1]
+            field1_count = field_query_counts.get(field1_type, 0)
+            field2_count = field_query_counts.get(field2_type, 0)
+            
+            # Check if one hit the limit (50k) and the other is small (< 10k)
+            field1_hit_limit = field1_count >= 50000
+            field2_hit_limit = field2_count >= 50000
+            field1_small = len(field1_ids) < 10000
+            field2_small = len(field2_ids) < 10000
+            
+            if (field1_hit_limit and field2_small) or (field2_hit_limit and field1_small):
+                # Use reverse filtering: fetch full items for the small field, filter for the large field
+                small_field_type = field1_type if field1_small else field2_type
+                small_field_ids = field1_ids if field1_small else field2_ids
+                large_field_type = field2_type if field1_small else field1_type
+                large_field_queries = queries_by_field[large_field_type]
+                
+                logger.info(f"OPTIMIZATION: {small_field_type} is small ({len(small_field_ids)} IDs), {large_field_type} hit limit ({field_query_counts.get(large_field_type, 0)} items)")
+                logger.info(f"  Fetching full items for {small_field_type} and filtering for {large_field_type}")
+                
+                # Fetch full items for the small field (reasonable since it's < 10k)
+                small_field_full_items = []
+                small_field_ids_list = list(small_field_ids)
+                batch_size = 100
+                
+                for i in range(0, len(small_field_ids_list), batch_size):
+                    batch_ids = small_field_ids_list[i:i + batch_size]
+                    batch_items = fetch_full_awards_batch(batch_ids)
+                    small_field_full_items.extend(batch_items)
+                
+                logger.info(f"  Fetched {len(small_field_full_items)} full items for {small_field_type}")
+                
+                # Get large field filter values
+                large_field_values = set()
+                large_field_attr_name = None
+                for query_config in large_field_queries:
+                    hash_key_name = query_config.get('hash_key_name')
+                    hash_key_value = query_config.get('hash_key_value')
+                    if hash_key_name and hash_key_value:
+                        large_field_attr_name = hash_key_name
+                        large_field_values.add(str(hash_key_value).strip())
+                
+                # Filter small field items for large field values
+                if large_field_attr_name and large_field_values:
+                    # Handle attribute name mapping
+                    item_attr_name = large_field_attr_name
+                    if large_field_attr_name == 'recipient_name_normalized':
+                        item_attr_name = 'recipient_name'
+                    elif large_field_attr_name == 'recipient_location_state':
+                        large_field_values = {v.upper() for v in large_field_values}
+                    elif large_field_attr_name == 'awarding_agency_name':
+                        # Normalize agency names for case-insensitive comparison
+                        large_field_values = {v.strip() for v in large_field_values}
+                    
+                    filtered_items = []
+                    for item in small_field_full_items:
+                        item_value = item.get(item_attr_name) or item.get(large_field_attr_name)
+                        if item_value:
+                            item_value_str = str(item_value).strip()
+                            # Normalize for comparison
+                            if large_field_attr_name == 'recipient_name_normalized':
+                                item_value_str = item_value_str.lower()
+                            elif large_field_attr_name == 'recipient_location_state':
+                                item_value_str = item_value_str.upper()
+                            elif large_field_attr_name == 'awarding_agency_name':
+                                # Case-insensitive comparison for agency names
+                                item_value_str = item_value_str.strip()
+                                # Check if any search value matches (case-insensitive)
+                                item_value_lower = item_value_str.lower()
+                                for search_value in large_field_values:
+                                    if item_value_lower == search_value.lower() or item_value_str == search_value:
+                                        filtered_items.append(item)
+                                        break
+                                continue
+                            elif large_field_attr_name == 'recipient_zip_code':
+                                # Handle zip+4 format
+                                item_value_str = item_value_str.strip()
+                                if item_value_str in large_field_values:
+                                    filtered_items.append(item)
+                                    continue
+                                # Check prefix match for zip+4
+                                for search_value in large_field_values:
+                                    if item_value_str.startswith(search_value) or search_value.startswith(item_value_str.split('-')[0]):
+                                        filtered_items.append(item)
+                                        break
+                                continue
+                            
+                            if item_value_str in large_field_values:
+                                filtered_items.append(item)
+                    
+                    # Extract award_ids from filtered items
+                    filtered_award_ids = {item.get('award_id') for item in filtered_items if item.get('award_id')}
+                    if all_award_ids is None:
+                        all_award_ids = filtered_award_ids
+                    else:
+                        all_award_ids &= filtered_award_ids
+                    logger.info(f"  Filtered to {len(filtered_award_ids)} award_ids matching both fields")
+                else:
+                    # Fallback to normal intersection
+                    if all_award_ids is None:
+                        all_award_ids = small_field_ids.copy()
+                    else:
+                        all_award_ids &= small_field_ids
+                    logger.warning(f"Could not determine {large_field_type} filter, using {small_field_type} results only")
             else:
-                # Subsequent fields: INTERSECT with existing results
-                before_count = len(all_award_ids)
-                all_award_ids &= field_ids  # INTERSECT: keep only IDs in both sets
-                logger.info(f"INTERSECT with field '{filter_type}': {before_count} -> {len(all_award_ids)} award_ids")
+                # Normal intersection: both queries are reasonable size or both hit limit
+                sorted_fields = sorted(field_result_sets.items(), key=lambda x: len(x[1]))
+                
+                for filter_type, field_ids in sorted_fields:
+                    if all_award_ids is None:
+                        all_award_ids = field_ids.copy()
+                        logger.info(f"Starting with field '{filter_type}': {len(all_award_ids)} award_ids (smallest set)")
+                    else:
+                        before_count = len(all_award_ids)
+                        all_award_ids &= field_ids
+                        logger.info(f"INTERSECT with field '{filter_type}': {before_count} -> {len(all_award_ids)} award_ids")
+        else:
+            # More than 2 fields: use normal intersection
+            sorted_fields = sorted(field_result_sets.items(), key=lambda x: len(x[1]))
+            
+            for filter_type, field_ids in sorted_fields:
+                if all_award_ids is None:
+                    all_award_ids = field_ids.copy()
+                    logger.info(f"Starting with field '{filter_type}': {len(all_award_ids)} award_ids (smallest set)")
+                else:
+                    before_count = len(all_award_ids)
+                    all_award_ids &= field_ids
+                    logger.info(f"INTERSECT with field '{filter_type}': {before_count} -> {len(all_award_ids)} award_ids")
     
     if all_award_ids is None:
         all_award_ids = set()
@@ -868,32 +996,44 @@ def search_awards_union(
     
     total_unique_award_ids = len(all_award_ids)
     
-    # Step 3: Fetch full award items for the items we need (considering offset)
-    # Calculate how many items we need to fetch (offset + limit + buffer for enrichment)
-    items_to_fetch = min(offset + limit * 5, total_unique_award_ids)  # Fetch enough for offset + limit + buffer
+    # Step 3: For consistent pagination, we need to sort ALL items by the same criteria
+    # The issue: if we fetch a subset, sort it, and paginate, the sort order changes
+    # between pages because different subsets have different sort orders.
+    # Solution: Fetch ALL items, sort them once, then paginate.
+    # This ensures consistent ordering across all pages.
     
-    logger.info(f"Fetching minimal award fields for {items_to_fetch} award_ids (offset: {offset}, limit: {limit}, total: {total_unique_award_ids})")
+    # Convert set to sorted list for consistent ordering (by award_id string)
+    # This ensures we always process the same award_ids in the same order
+    all_award_ids_sorted = sorted(list(all_award_ids))
     
-    # Convert set to sorted list for consistent ordering
-    award_ids_list = sorted(list(all_award_ids))[:items_to_fetch]
-    full_items = fetch_minimal_awards_batch(award_ids_list)
+    # Safety limit: Don't fetch more than 100k items to avoid timeouts
+    MAX_ITEMS_TO_FETCH = 100000
+    if total_unique_award_ids > MAX_ITEMS_TO_FETCH:
+        logger.warning(f"Result set is very large ({total_unique_award_ids} items). Limiting to {MAX_ITEMS_TO_FETCH} for performance.")
+        all_award_ids_sorted = all_award_ids_sorted[:MAX_ITEMS_TO_FETCH]
+        total_unique_award_ids = MAX_ITEMS_TO_FETCH
     
-    # Step 4: Skip S3 enrichment for search results to keep response size manageable
-    # Enrichment is only done for individual award lookups (get_award_by_id)
+    # Step 4: Fetch ALL items (or at least enough to cover pagination)
+    # We need to fetch all items to sort them consistently, then paginate
+    # This is expensive but necessary for correct pagination
+    logger.info(f"Fetching all {total_unique_award_ids} award items for consistent sorting and pagination")
+    full_items = fetch_minimal_awards_batch(all_award_ids_sorted)
     
     # Step 5: Sort by fiscal_year descending (most recent first), then by total_obligation descending
+    # Use award_id as tiebreaker for stable sort
     full_items.sort(key=lambda x: (
         x.get('fiscal_year', 0) or 0,
-        x.get('total_obligation', 0) or 0
+        x.get('total_obligation', 0) or 0,
+        x.get('award_id', '')  # Tiebreaker for stable sort
     ), reverse=True)
     
-    # Step 6: Apply offset and limit for pagination
+    # Step 6: Apply offset and limit for pagination (now safe since we have all items sorted)
     paginated_items = full_items[offset:offset + limit]
     results = [convert_decimal_to_float(item) for item in paginated_items]
     
     # Step 7: Determine pagination info
     next_offset = offset + len(results)
-    has_more = next_offset < len(full_items) or next_offset < total_unique_award_ids
+    has_more = next_offset < len(full_items)
     
     # Create pagination token for next page
     next_last_evaluated_key = None

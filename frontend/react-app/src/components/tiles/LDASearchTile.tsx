@@ -1834,15 +1834,66 @@ const LDASearchTile: React.FC<LDASearchTileProps> = ({
                     draggable
                     onDragStart={(e) => handleDragStart(e, filingId)}
                     onClick={(e) => handleFilingClick(e, filingId, index)}
-                    onDoubleClick={(e) => {
+                    onDoubleClick={async (e) => {
                       e.stopPropagation();
                       if (user?.id) {
-                        openItemDetails(
-                          'lda_disclosure',
-                          filing,
-                          'Filing Details',
-                          { user_id: user.id }
-                        );
+                        // Extract filing ID from various possible fields
+                        let filingId = filing.id || filing.filing_uuid;
+                        if (!filingId && filing.PK) {
+                          // Extract ID from PK (format: FILING#uuid or CONTRIBUTION#uuid)
+                          const pkStr = typeof filing.PK === 'string' ? filing.PK : String(filing.PK);
+                          filingId = pkStr.replace(/^(FILING#|CONTRIBUTION#)/, '');
+                        }
+                        
+                        if (filingId) {
+                          try {
+                            // Fetch full filing details from API
+                            const response = await ldaSearchAPI.getFiling({ filing_id: filingId });
+                            if (response.success && response.result) {
+                              openItemDetails(
+                                'lda_disclosure',
+                                response.result,
+                                response.result.registrant_name 
+                                  ? `LDA Filing - ${response.result.registrant_name}${response.result.client_name ? ` / ${response.result.client_name}` : ''}`
+                                  : 'Filing Details',
+                                { user_id: user.id }
+                              );
+                            } else {
+                              // Fallback to using minimal filing data if fetch fails
+                              console.warn('Failed to fetch full filing details, using minimal data:', response.error);
+                              openItemDetails(
+                                'lda_disclosure',
+                                filing,
+                                filing.registrant_name 
+                                  ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+                                  : 'Filing Details',
+                                { user_id: user.id }
+                              );
+                            }
+                          } catch (error) {
+                            console.error('Error fetching filing details:', error);
+                            // Fallback to using minimal filing data on error
+                            openItemDetails(
+                              'lda_disclosure',
+                              filing,
+                              filing.registrant_name 
+                                ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+                                : 'Filing Details',
+                              { user_id: user.id }
+                            );
+                          }
+                        } else {
+                          // No filing ID available, use minimal data
+                          console.warn('No filing ID found, using minimal data');
+                          openItemDetails(
+                            'lda_disclosure',
+                            filing,
+                            filing.registrant_name 
+                              ? `LDA Filing - ${filing.registrant_name}${filing.client_name ? ` / ${filing.client_name}` : ''}`
+                              : 'Filing Details',
+                            { user_id: user.id }
+                          );
+                        }
                       }
                     }}
                     onContextMenu={(e) => handleRowContextMenu(e, filingId)}

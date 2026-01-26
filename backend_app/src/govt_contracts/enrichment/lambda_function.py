@@ -1087,8 +1087,13 @@ def enrich_award(award_id: str) -> Dict[str, Any]:
             logger.info(f"Updated {len(child_award_ids)} child award IDs for IDV {award_id}")
             
             # Update combined obligated amount from IDV amounts
+            # Also update total_obligated_amount so IDV parents can be queried properly in GSIs
             if idv_amounts and 'child_award_total_obligation' in idv_amounts:
-                updated_award['combined_obligated_amount'] = Decimal(str(idv_amounts['child_award_total_obligation']))
+                combined_obligation = Decimal(str(idv_amounts['child_award_total_obligation']))
+                updated_award['combined_obligated_amount'] = combined_obligation
+                # Update total_obligated_amount for GSI queries (IDV parents have 0 in CSV, but should use combined from child awards)
+                updated_award['total_obligated_amount'] = combined_obligation
+                logger.info(f"Updated total_obligated_amount for IDV parent {award_id} from combined child obligations: {combined_obligation}")
         
         # Preserve important fields from existing award that shouldn't be overwritten
         # Note: is_assistance and category are already updated from API response above if available

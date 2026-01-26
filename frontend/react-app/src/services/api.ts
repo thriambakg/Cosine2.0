@@ -1711,6 +1711,17 @@ export interface LDASearchResponse {
   index_used?: string;
 }
 
+export interface LDAGetFilingRequest {
+  filing_id: string;
+}
+
+export interface LDAGetFilingResponse {
+  success: boolean;
+  result?: LDAFiling;
+  count?: number;
+  error?: string;
+}
+
 export const ldaSearchAPI = {
   search: async (params: {
     filters: LDASearchFilters;
@@ -1719,6 +1730,13 @@ export const ldaSearchAPI = {
   }): Promise<LDASearchResponse> => {
     console.log('📋 API - Searching LDA filings:', params);
     return apiRequest<LDASearchResponse>('/lda-search', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+  getFiling: async (params: LDAGetFilingRequest): Promise<LDAGetFilingResponse> => {
+    console.log('📋 API - Getting LDA filing:', params.filing_id);
+    return apiRequest<LDAGetFilingResponse>('/lda-search', {
       method: 'POST',
       body: JSON.stringify(params),
     });
