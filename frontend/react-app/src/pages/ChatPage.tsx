@@ -36,7 +36,12 @@ import {
   ListItemText,
   Tooltip,
   Checkbox,
+  FormControlLabel,
   Collapse,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -683,6 +688,9 @@ export default function ChatPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+  const [uploadTermsDialogOpen, setUploadTermsDialogOpen] = useState(false);
+  const [uploadTermsAccepted, setUploadTermsAccepted] = useState(false);
+  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
   const { selectedModel, setSelectedModel } = usePersistentModel();
   
   // Available models with nicknames, tooltips, and cost indicators (1-4 scale)
@@ -1901,13 +1909,12 @@ export default function ChatPage() {
   // Remove auto-creation - let user start typing first
   // Sessions will be created when user actually sends a message
 
-  // NEW: Use shared file upload service
-  const handleFileUpload = async (files: FileList) => {
+  // NEW: Use shared file upload service. Show terms dialog first; on accept, process and add files.
+  const handleFileUpload = (files: FileList) => {
     console.log(`📁 ChatPage: User selected ${files.length} file(s) for upload`);
     
-    // Validate file sizes before processing
     const fileArray = Array.from(files);
-    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 10MB
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
     const oversizedFiles = fileArray.filter(file => file.size > MAX_FILE_SIZE);
     
     if (oversizedFiles.length > 0) {
@@ -1916,22 +1923,28 @@ export default function ChatPage() {
         `File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(2)} MB). Maximum size is ${maxSizeMB}MB to ensure quick compression.`
       ).join('\n');
       setFileUploadError(errorMessage);
-      // Clear error after 5 seconds
       setTimeout(() => setFileUploadError(null), 5000);
-      // Don't process if any files are too large
       return;
     }
     
-    // Clear any previous errors when starting new upload
     setFileUploadError(null);
-    
+    setPendingUploadFiles(fileArray);
+    setUploadTermsAccepted(false);
+    setUploadTermsDialogOpen(true);
+  };
+
+  const confirmChatFileUploadAccept = async () => {
+    if (pendingUploadFiles.length === 0 || !uploadTermsAccepted) return;
+    const dt = new DataTransfer();
+    pendingUploadFiles.forEach(f => dt.items.add(f));
+    const fileList = dt.files;
+    setUploadTermsDialogOpen(false);
+    setUploadTermsAccepted(false);
+    setPendingUploadFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     setIsProcessingFiles(true);
-    
     try {
-      // Use shared file upload service
-      const processedFiles = await FileUploadService.processFiles(files);
-      
-      // Add processed files to state
+      const processedFiles = await FileUploadService.processFiles(fileList);
       setUploadedFiles(prev => {
         const newFiles = [...prev, ...processedFiles];
         console.log(`✅ ChatPage: Added ${processedFiles.length} files to upload queue (${newFiles.length} total files)`);
@@ -3240,7 +3253,13 @@ export default function ChatPage() {
             <input
               type="file"
               ref={fileInputRef}
-              onChange={(e) => handleFileUpload(e.target.files!)}
+              onChange={(e) => {
+                const f = e.target.files;
+                if (f?.length) {
+                  handleFileUpload(f);
+                  e.target.value = '';
+                }
+              }}
               multiple
               style={{ display: 'none' }}
             />
@@ -3340,6 +3359,94 @@ export default function ChatPage() {
         </Box>
       </Box>
       </Box>
+
+      {/* Upload Terms & Conditions Dialog (chat file upload) */}
+      <Dialog
+        open={uploadTermsDialogOpen}
+        onClose={() => {
+          setUploadTermsDialogOpen(false);
+          setUploadTermsAccepted(false);
+          setPendingUploadFiles([]);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid #374151',
+            color: '#ffffff',
+          },
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2 }}>
+          Terms & Conditions — File Upload
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <Typography variant="body1" sx={{ color: '#e5e7eb', mb: 2, lineHeight: 1.6 }}>
+            By uploading files to this system, you confirm that:
+          </Typography>
+          <Box
+            component="ul"
+            sx={{
+              color: '#d1d5db',
+              pl: 2.5,
+              mb: 2,
+              '& li': { mb: 1 },
+            }}
+          >
+            <li>You will <strong>not</strong> upload any <strong>Official Use Only (OUO)</strong> or similarly restricted documents.</li>
+            <li>You will <strong>not</strong> upload any documents that could create <strong>compliance risks</strong>, including but not limited to: classified, export-controlled, attorney-client privileged, or personally identifiable information (PII) that is not authorized for this system.</li>
+            <li>You are responsible for ensuring that your uploads comply with your organization&apos;s policies and applicable laws.</li>
+          </Box>
+          <Typography variant="body2" sx={{ color: '#9ca3af', fontStyle: 'italic' }}>
+            Violation of these terms may result in disciplinary action and removal of content.
+          </Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={uploadTermsAccepted}
+                onChange={(e) => setUploadTermsAccepted(e.target.checked)}
+                sx={{
+                  color: '#9ca3af',
+                  '&.Mui-checked': { color: '#10b981' },
+                }}
+              />
+            }
+            label={
+              <Typography variant="body2" sx={{ color: '#e5e7eb' }}>
+                I have read and agree to these terms. I confirm that my upload does not include OUO or compliance-sensitive content.
+              </Typography>
+            }
+            sx={{ mt: 2, display: 'block' }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button
+            onClick={() => {
+              setUploadTermsDialogOpen(false);
+              setUploadTermsAccepted(false);
+              setPendingUploadFiles([]);
+              if (fileInputRef.current) fileInputRef.current.value = '';
+            }}
+            sx={{ color: '#9ca3af' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmChatFileUploadAccept}
+            disabled={!uploadTermsAccepted || isProcessingFiles}
+            variant="contained"
+            sx={{
+              backgroundColor: '#10b981',
+              '&:hover': { backgroundColor: '#059669' },
+              '&:disabled': { backgroundColor: '#374151', color: '#6b7280' },
+            }}
+          >
+            {isProcessingFiles ? <CircularProgress size={20} /> : 'I Accept'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Context Drawer */}
       <Drawer

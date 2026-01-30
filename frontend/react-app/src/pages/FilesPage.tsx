@@ -24,6 +24,7 @@ import {
   CardContent,
   Container,
   Checkbox,
+  FormControlLabel,
   CircularProgress,
 } from '@mui/material';
 import {
@@ -111,6 +112,8 @@ const FilesPage: React.FC = () => {
   // Dialog states
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
   const [addFileDialogOpen, setAddFileDialogOpen] = useState(false);
+  const [uploadTermsDialogOpen, setUploadTermsDialogOpen] = useState(false);
+  const [uploadTermsAccepted, setUploadTermsAccepted] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileTitle, setFileTitle] = useState('');
@@ -2251,6 +2254,8 @@ const FilesPage: React.FC = () => {
         onClose={() => {
           if (!isUploading) {
             setAddFileDialogOpen(false);
+            setUploadTermsDialogOpen(false);
+            setUploadTermsAccepted(false);
             setSelectedFile(null);
             setFileTitle('');
             setFileDescription('');
@@ -2358,6 +2363,8 @@ const FilesPage: React.FC = () => {
           <Button 
             onClick={() => {
               setAddFileDialogOpen(false);
+              setUploadTermsDialogOpen(false);
+              setUploadTermsAccepted(false);
               setSelectedFile(null);
               setFileTitle('');
               setFileDescription('');
@@ -2378,7 +2385,7 @@ const FilesPage: React.FC = () => {
             Cancel
           </Button>
           <Button
-            onClick={handleAddFile}
+            onClick={() => setUploadTermsDialogOpen(true)}
             variant="contained"
             disabled={!selectedFile || isUploading}
             sx={{
@@ -2395,6 +2402,118 @@ const FilesPage: React.FC = () => {
             }}
           >
             {isUploading ? 'Uploading...' : 'Upload'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Upload Terms & Conditions Dialog */}
+      <Dialog
+        open={uploadTermsDialogOpen}
+        onClose={() => {
+          if (!isUploading) {
+            setUploadTermsDialogOpen(false);
+            setUploadTermsAccepted(false);
+          }
+        }}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid #374151',
+            borderRadius: '0px',
+            color: '#ffffff',
+            backdropFilter: 'blur(10px)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid #374151', pb: 2 }}>
+          Terms & Conditions — File Upload
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <Typography variant="body1" sx={{ color: '#e5e7eb', mb: 2, lineHeight: 1.6 }}>
+            By uploading files to this system, you confirm that:
+          </Typography>
+          <Box
+            component="ul"
+            sx={{
+              color: '#d1d5db',
+              pl: 2.5,
+              mb: 2,
+              '& li': { mb: 1 },
+            }}
+          >
+            <li>You will <strong>not</strong> upload any <strong>Official Use Only (OUO)</strong> or similarly restricted documents.</li>
+            <li>You will <strong>not</strong> upload any documents that could create <strong>compliance risks</strong>, including but not limited to: classified, export-controlled, attorney-client privileged, or personally identifiable information (PII) that is not authorized for this system.</li>
+            <li>You are responsible for ensuring that your uploads comply with your organization&apos;s policies and applicable laws.</li>
+          </Box>
+          <Typography variant="body2" sx={{ color: '#9ca3af', fontStyle: 'italic' }}>
+            Violation of these terms may result in disciplinary action and removal of content.
+          </Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={uploadTermsAccepted}
+                onChange={(e) => setUploadTermsAccepted(e.target.checked)}
+                sx={{
+                  color: '#9ca3af',
+                  '&.Mui-checked': { color: '#10b981' },
+                }}
+              />
+            }
+            label={
+              <Typography variant="body2" sx={{ color: '#e5e7eb' }}>
+                I have read and agree to these terms. I confirm that my upload does not include OUO or compliance-sensitive content.
+              </Typography>
+            }
+            sx={{ mt: 2, display: 'block' }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #374151', p: 2 }}>
+          <Button
+            onClick={() => {
+              setUploadTermsDialogOpen(false);
+              setUploadTermsAccepted(false);
+            }}
+            disabled={isUploading}
+            sx={{
+              color: '#9ca3af',
+              borderRadius: '0px',
+              border: '1px solid #374151',
+              '&:hover': {
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderColor: '#ef4444',
+                color: '#ef4444',
+              },
+            }}
+            variant="outlined"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (!uploadTermsAccepted) return;
+              setUploadTermsDialogOpen(false);
+              setUploadTermsAccepted(false);
+              handleAddFile();
+            }}
+            variant="contained"
+            disabled={!uploadTermsAccepted || isUploading}
+            sx={{
+              backgroundColor: '#10b981',
+              color: '#ffffff',
+              borderRadius: '0px',
+              border: '1px solid #059669',
+              '&:hover': { backgroundColor: '#059669' },
+              '&:disabled': {
+                backgroundColor: '#374151',
+                color: '#6b7280',
+                borderColor: '#374151',
+              },
+            }}
+          >
+            I Accept
           </Button>
         </DialogActions>
       </Dialog>
