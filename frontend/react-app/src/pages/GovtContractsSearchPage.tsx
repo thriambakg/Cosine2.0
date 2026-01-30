@@ -1213,7 +1213,7 @@ const GovtContractsSearchPage: React.FC = () => {
           }}
         >
           <Typography variant="body2" component="span">
-            <strong>Note:</strong> This search includes contracts which have been updated in the past year. 
+            <strong>Note:</strong> This search includes contracts which have been updated after 2025-01-01. 
             For older contract records, please visit{' '}
             <a 
               href="https://www.usaspending.gov/" 
