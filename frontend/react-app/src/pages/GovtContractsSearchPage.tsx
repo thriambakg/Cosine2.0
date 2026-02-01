@@ -1128,10 +1128,20 @@ const GovtContractsSearchPage: React.FC = () => {
         selectedAwards.has(award.award_id)
       );
 
+      // Deduplicate by award_id so we only add each contract once (currentResults can
+      // contain the same award multiple times from search/load-more/filtering)
+      const seenIds = new Set<string>();
+      const uniqueAwardObjects = selectedAwardObjects.filter(award => {
+        const id = award.award_id;
+        if (id && seenIds.has(id)) return false;
+        if (id) seenIds.add(id);
+        return true;
+      });
+
       // Save all awards to the filesystem with FULL data using bulk operation
       // Note: currentResults contains the full award objects from the search API
       // This ensures we save the complete award with all fields
-      const items = selectedAwardObjects.map(award => {
+      const items = uniqueAwardObjects.map(award => {
         const title = award.recipient_name 
           ? `Government Contract - ${award.recipient_name}${award.awarding_agency_name ? ` / ${award.awarding_agency_name}` : ''}`
           : `Government Contract ${award.award_id || ''}`;
@@ -1151,7 +1161,7 @@ const GovtContractsSearchPage: React.FC = () => {
       
       if (response.success) {
         const result = response.result as any;
-        console.log(`✅ Saved ${result?.succeeded || selectedAwardObjects.length} of ${selectedAwardObjects.length} award(s) to filesystem`);
+        console.log(`✅ Saved ${result?.succeeded || uniqueAwardObjects.length} of ${uniqueAwardObjects.length} award(s) to filesystem`);
         if (result?.errors && result.errors.length > 0) {
           console.warn(`⚠️ ${result.errors.length} award(s) failed to save:`, result.errors);
         }
@@ -1169,12 +1179,21 @@ const GovtContractsSearchPage: React.FC = () => {
       selectedAwards.has(award.award_id)
     );
 
-    if (selectedAwardObjects.length === 0) return;
+    // Deduplicate by award_id (currentResults can contain the same award multiple times)
+    const seenIds = new Set<string>();
+    const uniqueAwardObjects = selectedAwardObjects.filter(award => {
+      const id = award.award_id;
+      if (id && seenIds.has(id)) return false;
+      if (id) seenIds.add(id);
+      return true;
+    });
 
-    if (selectedAwardObjects.length === 1) {
-      addAwardToContext(selectedAwardObjects[0]);
+    if (uniqueAwardObjects.length === 0) return;
+
+    if (uniqueAwardObjects.length === 1) {
+      addAwardToContext(uniqueAwardObjects[0]);
     } else {
-      addMultipleAwardsToContext(selectedAwardObjects);
+      addMultipleAwardsToContext(uniqueAwardObjects);
     }
 
     setSelectedAwards(new Set());
