@@ -917,7 +917,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 18. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
 19. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3. Requires pre-fetched data from get_financial_data or get_crypto_data_tool.
 20. generate_stock_chart(symbol, timeframe, chart_type, title, start_date, end_date) - Convenience tool: Fetch stock data and generate chart in one step. Use this for simpler stock chart requests when you don't already have the data.
-20. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms and tables using Amazon Textract
+20. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms using basic parsing (PyPDF2)
 21. return_session_files_wrapper(file_indices) - Return files from current session to user
 22. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
 23. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
@@ -1397,7 +1397,7 @@ FOR PDF FILE ANALYSIS:
      b. read_pdf_tool(s3_key, page_number=2) → Get next section
      c. Continue incrementally as needed
 2. analyze_pdf_content_tool(s3_key, analysis_type) → Perform specific analysis on PDF content
-3. analyze_pdf_forms_tool(s3_key) → Analyze PDF forms and tables using Amazon Textract
+3. analyze_pdf_forms_tool(s3_key) → Analyze PDF forms using basic parsing (PyPDF2)
 4. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
 5. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
 6. Detect document type (financial, legal, technical, academic, report) automatically
@@ -2481,7 +2481,7 @@ enhanced_tools = [
     compare_crypto_tool,  # Cryptocurrency comparison tool
     read_pdf_tool,  # PDF file reader tool
     analyze_pdf_content_tool,  # PDF content analysis tool
-    analyze_pdf_forms_tool,  # PDF forms analysis tool with Textract
+    analyze_pdf_forms_tool,  # PDF forms analysis (PyPDF2)
     get_company_cik,  # Get company CIK from ticker symbol
     get_company_filings,  # Get SEC filings for a company
     get_filing_document,  # Get full text of SEC filing

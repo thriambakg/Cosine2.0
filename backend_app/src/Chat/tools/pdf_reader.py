@@ -8,7 +8,6 @@ import logging
 import boto3
 from typing import Dict, Any, List, Optional
 from io import BytesIO
-import time
 
 # Configure logging
 logger = logging.getLogger()
@@ -48,7 +47,6 @@ class PDFReader:
     
     def __init__(self):
         self.s3_client = boto3.client('s3')
-        self.textract_client = boto3.client('textract')
         self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
         if not self.bucket_name:
             raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
@@ -85,11 +83,8 @@ class PDFReader:
                     "is_partial": True
                 }
             
-            # For full document reading, try Textract first for better accuracy, fallback to PyPDF2
-            text_content = self._extract_text_with_textract(s3_key)
-            if not text_content or len(text_content.strip()) < 50:
-                logger.info("Textract extraction insufficient, falling back to PyPDF2")
-                text_content = self._extract_text_from_pdf(pdf_content)
+            # Full document: extract text with PyPDF2 (basic PDF parsing)
+            text_content = self._extract_text_from_pdf(pdf_content)
             
             # Analyze the content
             analysis = self._analyze_pdf_content(text_content)
@@ -171,253 +166,35 @@ class PDFReader:
             logger.error(f"Error getting PDF page count: {str(e)}")
             return 0
     
-    def _extract_text_with_textract(self, s3_key: str) -> str:
-        """Extract text using Amazon Textract for better accuracy"""
+    def _analyze_forms_with_pypdf(self, s3_key: str) -> Dict[str, Any]:
+        """Analyze PDF forms using basic parsing (PyPDF2). Extracts text and detects key: value style lines."""
         try:
-            # Use the correct bucket name
-            bucket_name = self.bucket_name
-            logger.info(f"Using bucket {bucket_name} for Textract extraction of {s3_key}")
-            
-            # Start document text detection job
-            response = self.textract_client.start_document_text_detection(
-                DocumentLocation={
-                    'S3Object': {
-                        'Bucket': bucket_name,
-                        'Name': s3_key
-                    }
-                }
-            )
-            
-            job_id = response['JobId']
-            logger.info(f"Started Textract job: {job_id}")
-            
-            # Wait for job to complete
-            max_attempts = 30  # 5 minutes max
-            for attempt in range(max_attempts):
-                time.sleep(10)  # Wait 10 seconds between checks
-                
-                job_response = self.textract_client.get_document_text_detection(JobId=job_id)
-                status = job_response['JobStatus']
-                
-                if status == 'SUCCEEDED':
-                    logger.info(f"Textract job completed successfully")
-                    return self._extract_text_from_textract_response(job_response)
-                elif status == 'FAILED':
-                    logger.error(f"Textract job failed: {job_response.get('StatusMessage', 'Unknown error')}")
-                    return ""
-                elif status in ['IN_PROGRESS', 'PARTIAL_SUCCESS']:
-                    logger.info(f"Textract job in progress, attempt {attempt + 1}/{max_attempts}")
-                    continue
-                else:
-                    logger.warning(f"Unexpected Textract job status: {status}")
-                    return ""
-            
-            logger.warning("Textract job timed out")
-            return ""
-            
-        except Exception as e:
-            logger.error(f"Error with Textract extraction: {str(e)}")
-            return ""
-    
-    def _extract_text_from_textract_response(self, response: Dict[str, Any]) -> str:
-        """Extract text from Textract response"""
-        try:
-            text_blocks = []
-            
-            # Process all pages
-            for page in response.get('Blocks', []):
-                if page['BlockType'] == 'LINE':
-                    text_blocks.append(page['Text'])
-            
-            # If there are more pages, get them
-            next_token = response.get('NextToken')
-            while next_token:
-                next_response = self.textract_client.get_document_text_detection(
-                    JobId=response['JobId'],
-                    NextToken=next_token
-                )
-                
-                for page in next_response.get('Blocks', []):
-                    if page['BlockType'] == 'LINE':
-                        text_blocks.append(page['Text'])
-                
-                next_token = next_response.get('NextToken')
-            
-            return '\n'.join(text_blocks)
-            
-        except Exception as e:
-            logger.error(f"Error processing Textract response: {str(e)}")
-            return ""
-    
-    def _analyze_forms_with_textract(self, s3_key: str) -> Dict[str, Any]:
-        """Analyze PDF forms using Amazon Textract"""
-        try:
-            # Use the correct bucket name
-            bucket_name = self.bucket_name
-            logger.info(f"Using bucket {bucket_name} for Textract form analysis of {s3_key}")
-            
-            # Start document analysis job for forms and tables
-            response = self.textract_client.start_document_analysis(
-                DocumentLocation={
-                    'S3Object': {
-                        'Bucket': bucket_name,
-                        'Name': s3_key
-                    }
-                },
-                FeatureTypes=['FORMS', 'TABLES']
-            )
-            
-            job_id = response['JobId']
-            logger.info(f"Started Textract form analysis job: {job_id}")
-            
-            # Wait for job to complete
-            max_attempts = 30  # 5 minutes max
-            for attempt in range(max_attempts):
-                time.sleep(10)  # Wait 10 seconds between checks
-                
-                job_response = self.textract_client.get_document_analysis(JobId=job_id)
-                status = job_response['JobStatus']
-                
-                if status == 'SUCCEEDED':
-                    logger.info(f"Textract form analysis job completed successfully")
-                    return self._process_form_analysis_response(job_response)
-                elif status == 'FAILED':
-                    logger.error(f"Textract form analysis job failed: {job_response.get('StatusMessage', 'Unknown error')}")
-                    return {"success": False, "error": "Textract job failed"}
-                elif status in ['IN_PROGRESS', 'PARTIAL_SUCCESS']:
-                    logger.info(f"Textract form analysis job in progress, attempt {attempt + 1}/{max_attempts}")
-                    continue
-                else:
-                    logger.warning(f"Unexpected Textract form analysis job status: {status}")
-                    return {"success": False, "error": f"Unexpected status: {status}"}
-            
-            logger.warning("Textract form analysis job timed out")
-            return {"success": False, "error": "Job timed out"}
-            
-        except Exception as e:
-            logger.error(f"Error with Textract form analysis: {str(e)}")
-            return {"success": False, "error": f"Textract error: {str(e)}"}
-    
-    def _process_form_analysis_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
-        """Process Textract form analysis response"""
-        try:
+            import re
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
+            pdf_content = response['Body'].read()
+            text_content = self._extract_text_from_pdf(pdf_content)
+            if not text_content:
+                return {"success": True, "form_count": 0, "table_count": 0, "key_value_pairs": 0, "forms": [], "tables": []}
+            # Detect key: value style lines (basic form-like patterns)
             forms = []
-            tables = []
-            key_value_pairs = 0
-            
-            # Process all blocks
-            for block in response.get('Blocks', []):
-                if block['BlockType'] == 'KEY_VALUE_SET':
-                    if block.get('EntityTypes', []) == ['KEY']:
-                        key_value_pairs += 1
-                        # Find the corresponding value
-                        value_block = self._find_value_block(block, response.get('Blocks', []))
-                        if value_block:
-                            forms.append({
-                                'key': self._get_text_from_block(block, response.get('Blocks', [])),
-                                'value': self._get_text_from_block(value_block, response.get('Blocks', []))
-                            })
-                
-                elif block['BlockType'] == 'TABLE':
-                    table_info = self._process_table_block(block, response.get('Blocks', []))
-                    if table_info:
-                        tables.append(table_info)
-            
-            # Handle pagination if there are more results
-            next_token = response.get('NextToken')
-            while next_token:
-                next_response = self.textract_client.get_document_analysis(
-                    JobId=response['JobId'],
-                    NextToken=next_token
-                )
-                
-                for block in next_response.get('Blocks', []):
-                    if block['BlockType'] == 'KEY_VALUE_SET':
-                        if block.get('EntityTypes', []) == ['KEY']:
-                            key_value_pairs += 1
-                            value_block = self._find_value_block(block, next_response.get('Blocks', []))
-                            if value_block:
-                                forms.append({
-                                    'key': self._get_text_from_block(block, next_response.get('Blocks', [])),
-                                    'value': self._get_text_from_block(value_block, next_response.get('Blocks', []))
-                                })
-                    
-                    elif block['BlockType'] == 'TABLE':
-                        table_info = self._process_table_block(block, next_response.get('Blocks', []))
-                        if table_info:
-                            tables.append(table_info)
-                
-                next_token = next_response.get('NextToken')
-            
+            pattern = re.compile(r'^([^:]+):\s*(.+)$', re.MULTILINE)
+            for m in pattern.finditer(text_content):
+                key = m.group(1).strip()
+                value = m.group(2).strip()
+                if key and value and len(key) < 200 and len(value) < 500:
+                    forms.append({"key": key, "value": value})
             return {
                 "success": True,
                 "form_count": len(forms),
-                "table_count": len(tables),
-                "key_value_pairs": key_value_pairs,
+                "table_count": 0,
+                "key_value_pairs": len(forms),
                 "forms": forms,
-                "tables": tables
-            }
-            
-        except Exception as e:
-            logger.error(f"Error processing form analysis response: {str(e)}")
-            return {"success": False, "error": f"Processing error: {str(e)}"}
-    
-    def _find_value_block(self, key_block: Dict[str, Any], blocks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Find the value block corresponding to a key block"""
-        try:
-            key_id = key_block['Id']
-            for relationship in key_block.get('Relationships', []):
-                if relationship['Type'] == 'VALUE':
-                    for value_id in relationship['Ids']:
-                        for block in blocks:
-                            if block['Id'] == value_id and block['BlockType'] == 'KEY_VALUE_SET':
-                                if block.get('EntityTypes', []) == ['VALUE']:
-                                    return block
-            return None
-        except Exception as e:
-            logger.error(f"Error finding value block: {str(e)}")
-            return None
-    
-    def _get_text_from_block(self, block: Dict[str, Any], blocks: List[Dict[str, Any]]) -> str:
-        """Extract text from a block by following relationships to child blocks"""
-        try:
-            text_parts = []
-            for relationship in block.get('Relationships', []):
-                if relationship['Type'] == 'CHILD':
-                    for child_id in relationship['Ids']:
-                        for child_block in blocks:
-                            if child_block['Id'] == child_id and child_block['BlockType'] == 'WORD':
-                                text_parts.append(child_block['Text'])
-            return ' '.join(text_parts)
-        except Exception as e:
-            logger.error(f"Error getting text from block: {str(e)}")
-            return ""
-    
-    def _process_table_block(self, table_block: Dict[str, Any], blocks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Process a table block to extract table information"""
-        try:
-            rows = 0
-            columns = 0
-            cells = []
-            
-            for relationship in table_block.get('Relationships', []):
-                if relationship['Type'] == 'CHILD':
-                    for child_id in relationship['Ids']:
-                        for child_block in blocks:
-                            if child_block['Id'] == child_id and child_block['BlockType'] == 'CELL':
-                                cells.append(child_block)
-                                rows = max(rows, child_block.get('RowIndex', 0))
-                                columns = max(columns, child_block.get('ColumnIndex', 0))
-            
-            return {
-                'rows': rows,
-                'columns': columns,
-                'cell_count': len(cells)
+                "tables": []
             }
         except Exception as e:
-            logger.error(f"Error processing table block: {str(e)}")
-            return None
-    
+            logger.error(f"Error in basic PDF form analysis: {str(e)}")
+            return {"success": False, "error": str(e), "form_count": 0, "table_count": 0, "key_value_pairs": 0, "forms": [], "tables": []}
+
     def _extract_text_fallback(self, pdf_content: bytes) -> str:
         """Fallback method if PyPDF2 is not available"""
         try:
@@ -671,7 +448,8 @@ def analyze_pdf_content_tool(s3_key: str, analysis_type: str = "summary") -> str
 @tool
 def analyze_pdf_forms_tool(s3_key: str) -> str:
     """
-    Tool function to analyze PDF forms using Amazon Textract
+    Tool function to analyze PDF forms using basic parsing (PyPDF2).
+    Extracts text and detects key: value style lines.
     
     Args:
         s3_key: S3 key of the PDF file to analyze
@@ -683,8 +461,7 @@ def analyze_pdf_forms_tool(s3_key: str) -> str:
         if not s3_key:
             return "Error: s3_key parameter is required"
         
-        # Use Textract for form analysis
-        result = pdf_reader._analyze_forms_with_textract(s3_key)
+        result = pdf_reader._analyze_forms_with_pypdf(s3_key)
         
         if not result["success"]:
             return f"Error analyzing forms: {result['error']}"

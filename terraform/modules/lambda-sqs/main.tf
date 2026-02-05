@@ -160,6 +160,42 @@ resource "aws_sqs_queue" "main" {
   })
 }
 
+# SQS Queue Policy: only wrapper can send, only root Lambda can receive (least privilege)
+resource "aws_sqs_queue_policy" "main" {
+  count = var.enable_wrapper_lambda ? 1 : 0
+
+  queue_url = aws_sqs_queue.main.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowWrapperSend"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.wrapper_execution_role[0].arn
+        }
+        Action   = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.main.arn
+      },
+      {
+        Sid    = "AllowRootReceive"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.lambda_execution_role.arn
+        }
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = aws_sqs_queue.main.arn
+      }
+    ]
+  })
+}
+
 # IAM Policy for Lambda to read from SQS
 resource "aws_iam_policy" "sqs_read_policy" {
   name        = "${var.function_name}-sqs-read-policy"
@@ -318,26 +354,21 @@ resource "aws_iam_role_policy_attachment" "wrapper_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# IAM Policy for Wrapper Lambda to send messages to SQS
+# IAM Policy for Wrapper Lambda to send messages to SQS only (no receive/list)
 resource "aws_iam_policy" "wrapper_sqs_send_policy" {
   count = var.enable_wrapper_lambda ? 1 : 0
 
   name        = "${local.wrapper_function_name}-sqs-send-policy"
-  description = "Policy for ${local.wrapper_function_name} to send messages to SQS queue"
+  description = "Policy for ${local.wrapper_function_name} to send messages to SQS queue only"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
       [
         {
-          Effect = "Allow"
-          Action = [
-            "sqs:SendMessage",
-            "sqs:GetQueueAttributes"
-          ]
-          Resource = [
-            aws_sqs_queue.main.arn
-          ]
+          Effect   = "Allow"
+          Action   = ["sqs:SendMessage"]
+          Resource = [aws_sqs_queue.main.arn]
         }
       ],
       var.kms_key_id != null ? [
@@ -359,79 +390,20 @@ resource "aws_iam_policy" "wrapper_sqs_send_policy" {
   tags = var.tags
 }
 
-# IAM Policy for Wrapper Lambda to subscribe to SNS
-resource "aws_iam_policy" "wrapper_sns_subscribe_policy" {
-  count = var.enable_wrapper_lambda ? 1 : 0
-
-  name        = "${local.wrapper_function_name}-sns-subscribe-policy"
-  description = "Policy for ${local.wrapper_function_name} to subscribe to SNS topic"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sns:Subscribe",
-          "sns:Receive",
-          "sns:GetTopicAttributes"
-        ]
-        Resource = [
-          aws_sns_topic.completion[0].arn
-        ]
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-
-# IAM Policy for Wrapper Lambda to access DynamoDB (if response table provided)
-resource "aws_iam_policy" "wrapper_dynamodb_policy" {
-  count = var.enable_wrapper_lambda && var.response_table_name != null ? 1 : 0
-
-  name        = "${local.wrapper_function_name}-dynamodb-policy"
-  description = "Policy for ${local.wrapper_function_name} to access DynamoDB response table"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem"
-        ]
-        Resource = [
-          "arn:aws:dynamodb:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/${var.response_table_name}"
-        ]
-      }
-    ]
-  })
-
-  tags = var.tags
-}
-
-# IAM Policy for Wrapper Lambda to invoke worker Lambda
+# IAM Policy for Wrapper Lambda to invoke root/worker Lambda only (direct invoke; no other Lambda access)
 resource "aws_iam_policy" "wrapper_lambda_invoke_policy" {
   count = var.enable_wrapper_lambda ? 1 : 0
 
   name        = "${local.wrapper_function_name}-lambda-invoke-policy"
-  description = "Policy for ${local.wrapper_function_name} to invoke worker Lambda function"
+  description = "Policy for ${local.wrapper_function_name} to invoke worker Lambda function only"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "lambda:InvokeFunction"
-        ]
-        Resource = [
-          aws_lambda_function.function.arn
-        ]
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = [aws_lambda_function.function.arn]
       }
     ]
   })
@@ -439,26 +411,12 @@ resource "aws_iam_policy" "wrapper_lambda_invoke_policy" {
   tags = var.tags
 }
 
-# Attach policies to wrapper execution role
+# Attach policies to wrapper execution role (SQS send + Lambda invoke only; no SNS - wrapper is invoked by SNS)
 resource "aws_iam_role_policy_attachment" "wrapper_sqs_send_policy" {
   count = var.enable_wrapper_lambda ? 1 : 0
 
   role       = aws_iam_role.wrapper_execution_role[0].name
   policy_arn = aws_iam_policy.wrapper_sqs_send_policy[0].arn
-}
-
-resource "aws_iam_role_policy_attachment" "wrapper_sns_subscribe_policy" {
-  count = var.enable_wrapper_lambda ? 1 : 0
-
-  role       = aws_iam_role.wrapper_execution_role[0].name
-  policy_arn = aws_iam_policy.wrapper_sns_subscribe_policy[0].arn
-}
-
-resource "aws_iam_role_policy_attachment" "wrapper_dynamodb_policy" {
-  count = var.enable_wrapper_lambda && var.response_table_name != null ? 1 : 0
-
-  role       = aws_iam_role.wrapper_execution_role[0].name
-  policy_arn = aws_iam_policy.wrapper_dynamodb_policy[0].arn
 }
 
 resource "aws_iam_role_policy_attachment" "wrapper_lambda_invoke_policy" {
