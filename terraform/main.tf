@@ -1000,25 +1000,37 @@ resource "aws_iam_policy" "lambda_invoke_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for SEC Search Lambda to access S3 filings bucket
+# IAM Policy for SEC Search Lambda - GetObject, PutObject, HeadObject only on filings bucket (no ListBucket)
 resource "aws_iam_policy" "sec_search_s3_policy" {
   name        = "${var.project_name}-sec-search-s3-policy-${var.environment}"
-  description = "Policy for SEC Search Lambda to access S3 filings bucket"
+  description = "Policy for SEC Search Lambda to read/write S3 filings bucket objects (GetObject, PutObject, HeadObject)"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          "arn:aws:s3:::cosine-sec-filings-${var.environment}",
-          "arn:aws:s3:::cosine-sec-filings-${var.environment}/*"
-        ]
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:HeadObject"]
+        Resource = ["arn:aws:s3:::cosine-sec-filings-${var.environment}/*"]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+# SEC Search Lambda may invoke only itself (async job handler)
+resource "aws_iam_policy" "sec_search_self_invoke_policy" {
+  name        = "${var.project_name}-sec-search-self-invoke-policy-${var.environment}"
+  description = "Policy for SEC Search Lambda to invoke only itself for async jobs"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = ["arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-sec-search-${var.environment}"]
       }
     ]
   })
@@ -1161,7 +1173,7 @@ resource "aws_iam_policy" "stock_alerts_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# Stock Alert Trigger Lambda - only needs alerts_table (read and update)
+# Stock Alert Trigger Lambda - Query, GetItem, UpdateItem, DeleteItem on alerts_table only
 resource "aws_iam_policy" "stock_alert_trigger_dynamodb_policy" {
   name        = "${var.project_name}-stock-alert-trigger-dynamodb-policy-${var.environment}"
   description = "Dedicated DynamoDB policy for stock_alert_trigger lambda - alerts_table only"
@@ -1174,7 +1186,8 @@ resource "aws_iam_policy" "stock_alert_trigger_dynamodb_policy" {
         Action = [
           "dynamodb:Query",
           "dynamodb:GetItem",
-          "dynamodb:UpdateItem"
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.alerts_table_arn,
@@ -1187,10 +1200,10 @@ resource "aws_iam_policy" "stock_alert_trigger_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# WebSocket Handler Lambda - needs chat_connections_table and chat_sessions_table
+# WebSocket Connection Manager Lambda - chat_connections_table only (PutItem on connect, DeleteItem on disconnect)
 resource "aws_iam_policy" "websocket_handler_dynamodb_policy" {
   name        = "${var.project_name}-websocket-handler-dynamodb-policy-${var.environment}"
-  description = "Dedicated DynamoDB policy for websocket_handler lambda - chat_connections_table and chat_sessions_table"
+  description = "Dedicated DynamoDB policy for websocket_connection lambda - chat_connections_table PutItem, DeleteItem only"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1198,16 +1211,11 @@ resource "aws_iam_policy" "websocket_handler_dynamodb_policy" {
       {
         Effect = "Allow"
         Action = [
-          "dynamodb:GetItem",
           "dynamodb:PutItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Query"
+          "dynamodb:DeleteItem"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*",
-          data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn}/index/*"
+          data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn
         ]
       }
     ]
@@ -1216,7 +1224,7 @@ resource "aws_iam_policy" "websocket_handler_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# Session Management Lambda - only needs chat_sessions_table
+# Session Management Lambda - GetItem, PutItem, UpdateItem, DeleteItem, Query only (no BatchWriteItem)
 resource "aws_iam_policy" "session_management_dynamodb_policy" {
   name        = "${var.project_name}-session-management-dynamodb-policy-${var.environment}"
   description = "Dedicated DynamoDB policy for session_management lambda - chat_sessions_table only"
@@ -1231,8 +1239,7 @@ resource "aws_iam_policy" "session_management_dynamodb_policy" {
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
           "dynamodb:DeleteItem",
-          "dynamodb:Query",
-          "dynamodb:BatchWriteItem"
+          "dynamodb:Query"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.chat_sessions_table_arn,
@@ -1269,10 +1276,10 @@ resource "aws_iam_policy" "file_return_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# News Search Lambda - only needs news_table
+# News Search Lambda - read-only Scan and Query on news_table only (no GetItem; SNS from lambda-sqs)
 resource "aws_iam_policy" "news_search_dynamodb_policy" {
   name        = "${var.project_name}-news-search-dynamodb-policy-${var.environment}"
-  description = "Dedicated DynamoDB policy for news_search lambda - news_table only"
+  description = "Dedicated DynamoDB policy for news_search lambda - news_table Query and Scan only"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1281,8 +1288,7 @@ resource "aws_iam_policy" "news_search_dynamodb_policy" {
         Effect = "Allow"
         Action = [
           "dynamodb:Query",
-          "dynamodb:Scan",
-          "dynamodb:GetItem"
+          "dynamodb:Scan"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.news_table_arn,
@@ -1320,10 +1326,10 @@ resource "aws_iam_policy" "lambda_kms_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Politician Trades Search Lambda to access DynamoDB
+# IAM Policy for Politician Trades Search Lambda - Query, Scan, BatchGetItem only (no GetItem)
 resource "aws_iam_policy" "politician_trades_search_dynamodb_policy" {
   name        = "${var.project_name}-politician-trades-search-dynamodb-policy-${var.environment}"
-  description = "Policy for Politician Trades Search Lambda to access DynamoDB table"
+  description = "Policy for Politician Trades Search Lambda to read DynamoDB table (Query, Scan, BatchGetItem)"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1333,7 +1339,6 @@ resource "aws_iam_policy" "politician_trades_search_dynamodb_policy" {
         Action = [
           "dynamodb:Query",
           "dynamodb:Scan",
-          "dynamodb:GetItem",
           "dynamodb:BatchGetItem"
         ]
         Resource = [
@@ -1444,10 +1449,8 @@ module "stock_volatility_lambda" {
     data.terraform_remote_state.base_infra.outputs.financial_layer_arn
   ]
 
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
-  ]
+  # SNS publish from lambda-sqs module; no Secrets/DynamoDB
+  additional_policy_arns = []
 
   # Enable wrapper Lambda for synchronous API Gateway responses
   enable_wrapper_lambda       = true
@@ -1492,10 +1495,8 @@ module "crypto_stats_lambda" {
     data.terraform_remote_state.base_infra.outputs.crypto_layer_arn
   ]
 
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
-  ]
+  # Crypto stats: no Secrets Manager (code only uses SNS publish; SNS policy from lambda-sqs module)
+  additional_policy_arns = []
 
   # Enable wrapper Lambda for synchronous API Gateway responses
   enable_wrapper_lambda       = true
@@ -1542,9 +1543,8 @@ module "user_dashboard_lambda" {
     data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
-  # Additional IAM policies
+  # DynamoDB (user_profiles), S3 (chat files from base_infra), KMS; ENCRYPTION_SECRET from env (Terraform), no GetSecretValue
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.user_dashboard_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
@@ -1598,9 +1598,8 @@ module "stock_alerts_lambda" {
   # Attach core layer
   layers = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
 
-  # Additional IAM policies
+  # DynamoDB (alerts + user_profiles), SES, KMS; no Secrets (SNS from lambda-sqs)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.stock_alerts_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     module.ses.lambda_ses_policy_arn
@@ -1707,11 +1706,7 @@ resource "aws_iam_role_policy_attachment" "chat_agent_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Attach additional IAM policies
-resource "aws_iam_role_policy_attachment" "chat_agent_secrets_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.lambda_secrets_policy.arn
-}
+# Chat agent does not call Secrets Manager (ENCRYPTION_SECRET is injected via env) - no secrets policy
 
 # IAM Policy for Chat Agent S3 access with restricted filesys permissions
 # Chat agent is completely denied access to filesys folder - no read, no write, nothing
@@ -1870,20 +1865,8 @@ resource "aws_iam_policy" "chat_agent_dynamodb_policy" {
           "${data.terraform_remote_state.base_infra.outputs.chat_connections_table_arn}/index/*"
         ]
       },
-      # LDA filings table - read-only access (for LDA search tool)
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:Query",
-          "dynamodb:GetItem",
-          "dynamodb:BatchGetItem"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn}/index/*"
-        ]
-      },
-      # USAspending awards table - read-only access (for government contracts search tool)
+      # LDA/Congress: chat agent invokes lda-search and congress-bills-search Lambdas; no direct table access
+      # USAspending awards table - read-only access (govt_contracts_search tool uses DynamoDB directly)
       {
         Effect = "Allow"
         Action = [
@@ -1896,20 +1879,7 @@ resource "aws_iam_policy" "chat_agent_dynamodb_policy" {
           "${data.terraform_remote_state.base_infra.outputs.usaspending_awards_table_arn}/index/*"
         ]
       },
-      # Congress bills table - read-only access (for congress bills search tool)
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:Query",
-          "dynamodb:GetItem",
-          "dynamodb:BatchGetItem"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn,
-          "${data.terraform_remote_state.base_infra.outputs.congress_bills_table_arn}/index/*"
-        ]
-      },
-      # Politician trades table - read-only access (for politician trades search tool)
+      # Politician trades table - read-only access (politician_trades_search tool uses DynamoDB directly)
       {
         Effect = "Allow"
         Action = [
@@ -1940,10 +1910,31 @@ resource "aws_iam_role_policy_attachment" "chat_agent_kms_policy" {
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
-# Attach Lambda invoke policy for file return service
+# Chat agent: least-privilege Lambda invoke - only lambdas it actually invokes (see tools: congress_bills_search, lda_search_tool, lda_autocomplete_tool)
+resource "aws_iam_policy" "chat_agent_lambda_invoke_policy" {
+  name        = "${var.project_name}-chat-agent-lambda-invoke-${var.environment}"
+  description = "Chat agent may invoke only congress-bills-search, lda-search, lda-autocomplete"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-congress-bills-search-${var.environment}",
+          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-lda-search-${var.environment}",
+          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-lda-autocomplete-${var.environment}"
+        ]
+      }
+    ]
+  })
+  tags = var.common_tags
+}
+
 resource "aws_iam_role_policy_attachment" "chat_agent_lambda_invoke_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.lambda_invoke_policy.arn
+  policy_arn = aws_iam_policy.chat_agent_lambda_invoke_policy.arn
 }
 
 # Attach WebSocket policy for chat agent (for direct WebSocket message delivery)
@@ -2600,11 +2591,9 @@ module "stock_screener_lambda" {
     data.terraform_remote_state.base_infra.outputs.financial_layer_arn
   ]
 
-  # Additional IAM policies
+  # KMS only; no DynamoDB (stock_data Lambda does not use stock_data_table). No Secrets (SNS from lambda-sqs)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
-    aws_iam_policy.lambda_kms_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.stock_data_table_policy_arn
+    aws_iam_policy.lambda_kms_policy.arn
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
@@ -2806,11 +2795,10 @@ module "robinhood_integration_lambda" {
     data.terraform_remote_state.base_infra.outputs.financial_layer_arn
   ]
 
-  # Additional IAM policies
-  # Note: robinhood_integration lambda does not use DynamoDB - removed lambda_dynamodb_policy
+  # KMS; invoke portfolio_analysis Lambda only (SNS from lambda-sqs)
   additional_policy_arns = [
     aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn
+    aws_iam_policy.robinhood_portfolio_invoke_policy.arn
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
@@ -2826,6 +2814,28 @@ module "robinhood_integration_lambda" {
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
+
+  tags = var.common_tags
+}
+
+# Robinhood Integration may invoke only portfolio_analysis Lambda (root and wrapper)
+resource "aws_iam_policy" "robinhood_portfolio_invoke_policy" {
+  name        = "${var.project_name}-robinhood-portfolio-invoke-policy-${var.environment}"
+  description = "Policy for Robinhood Integration Lambda to invoke only portfolio_analysis Lambda"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = concat(
+          [module.portfolio_analysis_lambda.function_arn],
+          module.portfolio_analysis_lambda.wrapper_function_arn != null ? [module.portfolio_analysis_lambda.wrapper_function_arn] : []
+        )
+      }
+    ]
+  })
 
   tags = var.common_tags
 }
@@ -2855,11 +2865,10 @@ module "session_management_lambda" {
     data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
+  # DynamoDB (chat_sessions), S3 (chat files from base_infra), KMS; ENCRYPTION_SECRET from env (Terraform), no GetSecretValue
   additional_policy_arns = [
     aws_iam_policy.session_management_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
-    aws_iam_policy.lambda_invoke_policy.arn,
-    aws_iam_policy.lambda_secrets_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn
   ]
 
@@ -2907,10 +2916,10 @@ module "filesystem_lambda" {
     data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
+  # Filesystem: S3 chat files bucket only (get/put/delete/head/copy, presigned POST). KMS for bucket encryption. No Secrets Manager (ENCRYPTION_SECRET from env).
   additional_policy_arns = [
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
-    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
-    aws_iam_policy.lambda_secrets_policy.arn
+    data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn
   ]
 
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -2950,16 +2959,15 @@ module "file_return_lambda" {
     data.terraform_remote_state.base_infra.outputs.utility_layer_arn
   ]
 
+  # File return: DynamoDB GetItem (chat_sessions), S3 read (chat + SEC/LDA/politician/congress buckets), KMS. No Secrets Manager (ENCRYPTION_SECRET from env), no WebSocket.
   additional_policy_arns = [
     aws_iam_policy.file_return_dynamodb_policy.arn,
     data.terraform_remote_state.base_infra.outputs.lambda_s3_chat_files_policy_arn,
-    aws_iam_policy.lambda_websocket_policy.arn,
     data.terraform_remote_state.base_infra.outputs.kms_access_policy_arn,
-    aws_iam_policy.sec_search_s3_policy.arn,        # Add SEC filings bucket access
-    aws_iam_policy.politician_trades_s3_policy.arn, # Add politician trades bucket access
-    aws_iam_policy.lda_disclosures_s3_policy.arn,   # Add LDA disclosures bucket access
-    aws_iam_policy.congress_bills_s3_policy.arn,    # Add Congress bills bucket access
-    aws_iam_policy.lambda_secrets_policy.arn        # Add secrets manager access for encryption secret
+    aws_iam_policy.sec_search_s3_policy.arn,
+    aws_iam_policy.politician_trades_s3_policy.arn,
+    aws_iam_policy.lda_disclosures_s3_policy.arn,
+    aws_iam_policy.congress_bills_s3_policy.arn
   ]
 
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -2967,21 +2975,18 @@ module "file_return_lambda" {
   tags = var.common_tags
 }
 
-# IAM Policy for Billing Spending Lambda to access Cost Explorer and S3
+# IAM Policy for Billing Spending Lambda - only what aws_spending/app uses: ce get_cost_and_usage, S3 spending bucket read/write
 resource "aws_iam_policy" "billing_spending_policy" {
   name        = "${var.project_name}-billing-spending-policy-${var.environment}"
-  description = "Policy for Billing Spending Lambda to access Cost Explorer and S3 spending bucket"
+  description = "Billing spending Lambda: Cost Explorer GetCostAndUsage only; S3 spending bucket"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # Cost Explorer: code only calls get_cost_and_usage(); CE does not support resource-level policy
       {
-        Effect = "Allow"
-        Action = [
-          "ce:GetCostAndUsage",
-          "ce:GetDimensionValues",
-          "ce:GetUsageReport"
-        ]
+        Effect   = "Allow"
+        Action   = ["ce:GetCostAndUsage"]
         Resource = "*"
       },
       {
@@ -3012,26 +3017,29 @@ resource "aws_iam_policy" "billing_spending_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Billing Payment Lambda to access S3 and Secrets Manager
+# IAM Policy for Billing Payment Lambda - only what payment_processing/app uses: S3 spending bucket, one Stripe secret
 resource "aws_iam_policy" "billing_payment_policy" {
   name        = "${var.project_name}-billing-payment-policy-${var.environment}"
-  description = "Policy for Billing Payment Lambda to access S3 spending bucket and Secrets Manager"
+  description = "Billing payment Lambda: S3 spending bucket; Stripe secret only"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # S3: get_object, put_object, list_objects_v2, head_object (idempotency check)
       {
         Effect = "Allow"
         Action = [
-          "s3:PutObject",
           "s3:GetObject",
-          "s3:ListBucket"
+          "s3:PutObject",
+          "s3:ListBucket",
+          "s3:HeadObject"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.spending_bucket_arn,
           "${data.terraform_remote_state.base_infra.outputs.spending_bucket_arn}/*"
         ]
       },
+      # Secrets Manager: only STRIPE_SECRET_NAME (cosine-stripe-${env}); no account/region wildcard
       {
         Effect = "Allow"
         Action = [
@@ -3039,10 +3047,10 @@ resource "aws_iam_policy" "billing_payment_policy" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = [
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-*",
-          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-stripe-${var.environment}*"
+          "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}-stripe-${var.environment}*"
         ]
       },
+      # KMS for S3 ServerSideEncryption
       {
         Effect = "Allow"
         Action = [
@@ -3203,6 +3211,55 @@ module "sec_search_progress_sns" {
   })
 }
 
+# Dedicated DynamoDB policies for SEC search - least privilege from Python (scraper + query_cache + async_job_handler + progress_subscriber)
+resource "aws_iam_policy" "sec_search_dynamodb_policy" {
+  name        = "${var.project_name}-sec-search-dynamodb-${var.environment}"
+  description = "SEC search worker: sec_filings BatchGetItem+UpdateItem+PutItem; sec_search_query_cache GetItem+PutItem+UpdateItem+Query"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:BatchGetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.sec_filings_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.sec_filings_table_arn}/index/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+  tags = var.common_tags
+}
+
+resource "aws_iam_policy" "sec_search_query_cache_dynamodb_policy" {
+  name        = "${var.project_name}-sec-search-query-cache-dynamodb-${var.environment}"
+  description = "SEC search progress subscriber: Query and UpdateItem on sec_search_query_cache only (progress_subscriber lambda_function.py)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["dynamodb:Query", "dynamodb:UpdateItem"]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_arn,
+          "${data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_arn}/index/*"
+        ]
+      }
+    ]
+  })
+  tags = var.common_tags
+}
+
 # SEC Search Lambda Function (with SQS and wrapper support)
 module "sec_search_lambda" {
   source = "./modules/lambda-sqs"
@@ -3234,24 +3291,21 @@ module "sec_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for caching, S3 access for filing storage, KMS for S3 encryption, SNS for progress updates, Lambda self-invocation for async jobs, and query cache table access
-  # Note: SNS publish for completion will be added by the module
+  # Additional IAM policies - dedicated DynamoDB (filings + query cache), S3, KMS, SNS, self-invoke; no base_infra table policy
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.sec_filings_table_policy_arn,
-    data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_policy_arn,
+    aws_iam_policy.sec_search_dynamodb_policy.arn,
     aws_iam_policy.sec_search_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn,
     aws_iam_policy.lambda_sns_publish_policy_restricted.arn,
-    aws_iam_policy.lambda_invoke_policy.arn
+    aws_iam_policy.sec_search_self_invoke_policy.arn
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
   enable_wrapper_lambda = true
   wrapper_timeout       = 300 # 5 minutes to match worker timeout
   sns_topic_name        = "${var.project_name}-sec-search-completion-${var.environment}"
-  # Use DynamoDB query cache table for response correlation (optional, can use SNS message attributes instead)
-  response_table_name = data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_name
+  # No response_table_name: no DynamoDB table defined for request_id-keyed response correlation in base infra
+  response_table_name = null
   # Environment variable name for completion SNS topic in worker Lambda
   completion_sns_env_var_name = "SEC_SEARCH_COMPLETION_SNS_TOPIC_ARN"
   # Attach core layer to wrapper Lambda (boto3 and standard library)
@@ -3295,9 +3349,8 @@ module "politician_trades_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for politician trades table
+  # Additional IAM policies - DynamoDB only (no Secrets; SNS from lambda-sqs)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.politician_trades_search_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
@@ -3351,10 +3404,8 @@ module "usaspending_autocomplete_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies
-  additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn
-  ]
+  # Additional IAM policies (SNS publish provided by lambda-sqs module; no Secrets/DynamoDB/S3)
+  additional_policy_arns = []
 
   # Enable wrapper Lambda for synchronous API Gateway responses
   enable_wrapper_lambda = true
@@ -3403,7 +3454,7 @@ resource "aws_iam_policy" "usaspending_search_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for USAspending Search Lambda to access S3 bucket (read-only)
+# IAM Policy for USAspending Search Lambda to access S3 bucket (GetObject only; no ListBucket)
 resource "aws_iam_policy" "usaspending_search_s3_policy" {
   name        = "${var.project_name}-usaspending-search-s3-policy-${var.environment}"
   description = "Policy for USAspending Search Lambda to read from S3 bucket for award details"
@@ -3414,11 +3465,9 @@ resource "aws_iam_policy" "usaspending_search_s3_policy" {
       {
         Effect = "Allow"
         Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
+          "s3:GetObject"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
           "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
         ]
       }
@@ -3456,9 +3505,8 @@ module "usaspending_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - Read-only access to DynamoDB awards table and S3 bucket
+  # Additional IAM policies - Read-only DynamoDB and S3 GetObject only (no Secrets, no ListBucket)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_search_dynamodb_policy.arn,
     aws_iam_policy.usaspending_search_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
@@ -3512,24 +3560,18 @@ resource "aws_iam_policy" "congress_bills_search_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for Congress Bills Search Lambda to access S3 bucket (read-only)
+# Congress Bills Search Lambda: S3 read-only (get_object for oversized bill details only; no list)
 resource "aws_iam_policy" "congress_bills_search_s3_policy" {
   name        = "${var.project_name}-congress-bills-search-s3-policy-${var.environment}"
-  description = "Policy for Congress Bills Search Lambda to read from S3 bucket for bill details"
+  description = "Congress bills search: GetObject only on congress bills data bucket"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*"
-        ]
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*"]
       }
     ]
   })
@@ -3564,9 +3606,8 @@ module "congress_bills_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - Read-only access to DynamoDB bills table and S3 bucket
+  # Congress bills search: DynamoDB (read-only), S3 GetObject, KMS for decryption. No Secrets Manager (code does not use it).
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.congress_bills_search_dynamodb_policy.arn,
     aws_iam_policy.congress_bills_search_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
@@ -3619,9 +3660,8 @@ module "lda_search_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - Read-only access to DynamoDB filings table
+  # Additional IAM policies - Read-only DynamoDB only (no Secrets; SNS from lambda-sqs)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.lda_search_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
@@ -3674,9 +3714,8 @@ module "lda_autocomplete_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - Read-only access to S3 bucket for CSV files
+  # Additional IAM policies - S3 GetObject only for lists/* (no Secrets; SNS from lambda-sqs)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.lda_autocomplete_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
@@ -3702,7 +3741,7 @@ module "lda_autocomplete_lambda" {
   tags = var.common_tags
 }
 
-# IAM Policy for LDA Search Lambda to access DynamoDB filings table (read-only)
+# IAM Policy for LDA Search Lambda to access DynamoDB filings table (GetItem, BatchGetItem, Query only; no Scan)
 resource "aws_iam_policy" "lda_search_dynamodb_policy" {
   name        = "${var.project_name}-lda-search-dynamodb-policy-${var.environment}"
   description = "Policy for LDA Search Lambda to read DynamoDB filings table"
@@ -3714,9 +3753,8 @@ resource "aws_iam_policy" "lda_search_dynamodb_policy" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
-          "dynamodb:Query",
           "dynamodb:BatchGetItem",
-          "dynamodb:Scan"
+          "dynamodb:Query"
         ]
         Resource = [
           data.terraform_remote_state.base_infra.outputs.lda_filings_table_arn,
@@ -3729,24 +3767,18 @@ resource "aws_iam_policy" "lda_search_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for LDA Autocomplete Lambda to access S3 bucket (read-only for CSV files)
+# IAM Policy for LDA Autocomplete Lambda to access S3 bucket (GetObject only on lists/*; no ListBucket)
 resource "aws_iam_policy" "lda_autocomplete_s3_policy" {
   name        = "${var.project_name}-lda-autocomplete-s3-policy-${var.environment}"
-  description = "Policy for LDA Autocomplete Lambda to read CSV files from S3"
+  description = "Policy for LDA Autocomplete Lambda to read CSV/TXT files from S3 lists/ prefix"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/lists/*",
-          data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn
-        ]
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/lists/*"]
       }
     ]
   })
@@ -3782,7 +3814,7 @@ resource "aws_iam_policy" "usaspending_enrichment_dynamodb_policy" {
   tags = var.common_tags
 }
 
-# IAM Policy for USAspending Enrichment Lambda to access S3 bucket (read/write for oversized items)
+# IAM Policy for USAspending Enrichment Lambda to access S3 bucket (GetObject/PutObject only; no ListBucket)
 resource "aws_iam_policy" "usaspending_enrichment_s3_policy" {
   name        = "${var.project_name}-usaspending-enrichment-s3-policy-${var.environment}"
   description = "Policy for USAspending Enrichment Lambda to read/write S3 bucket for award details"
@@ -3794,11 +3826,9 @@ resource "aws_iam_policy" "usaspending_enrichment_s3_policy" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:PutObject",
-          "s3:ListBucket"
+          "s3:PutObject"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
           "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
         ]
       }
@@ -3840,9 +3870,8 @@ module "usaspending_enrichment_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - Read/write access to DynamoDB awards table and S3 bucket
+  # Additional IAM policies - DynamoDB and S3 read/write (no Secrets; SNS from lambda-sqs)
   additional_policy_arns = [
-    aws_iam_policy.lambda_secrets_policy.arn,
     aws_iam_policy.usaspending_enrichment_dynamodb_policy.arn,
     aws_iam_policy.usaspending_enrichment_s3_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
@@ -3895,10 +3924,10 @@ module "sec_search_progress_subscriber_lambda" {
     data.terraform_remote_state.base_infra.outputs.core_layer_arn
   ]
 
-  # Additional IAM policies - DynamoDB access for updating job status in query cache table
+  # Additional IAM policies - dedicated DynamoDB (query cache only), Secrets, KMS; no base_infra table policy
   additional_policy_arns = [
     aws_iam_policy.lambda_secrets_policy.arn,
-    data.terraform_remote_state.base_infra.outputs.sec_search_query_cache_table_policy_arn,
+    aws_iam_policy.sec_search_query_cache_dynamodb_policy.arn,
     aws_iam_policy.lambda_kms_policy.arn
   ]
 

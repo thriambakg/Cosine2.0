@@ -615,8 +615,87 @@ def apply_python_filters(item: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     return True
 
 
+def fetch_minimal_filings_batch(filing_ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch minimal filing fields using BatchGetItem with ProjectionExpression
+    Only fetches fields needed for search results table display and filtering
+    This significantly reduces data transfer and improves performance
+    """
+    if not filing_ids:
+        return []
+    
+    # Essential fields for search results table and filtering
+    # Includes: Filing Type, Filing Period, Registrant, Client, Amount, Date Posted, State
+    # Plus fields needed for filtering: registrant_name, client_name, lobbyist_name, 
+    # all_lobbyist_names (for FILING type), state, amount_reported, general_issue_code, report_type
+    # Plus fields needed for sorting: dt_posted
+    # Plus ID fields: PK, SK, id, filing_uuid
+    # Note: 'state' is a reserved keyword in DynamoDB, so we use ExpressionAttributeNames
+    # Note: We include all_lobbyist_names for FILING type filings to support filtering
+    projection_expression = (
+        'PK, '
+        'SK, '
+        '#id, '
+        'filing_uuid, '
+        'report_type, '
+        'report_type_display, '
+        'filing_type, '
+        'filing_type_display, '
+        'filing_period, '
+        'filing_period_display, '
+        'registrant_name, '
+        'client_name, '
+        'lobbyist_name, '
+        'all_lobbyist_names, '
+        'amount_reported, '
+        'dt_posted, '
+        '#state, '
+        'general_issue_code'
+    )
+    
+    # ExpressionAttributeNames for reserved keywords
+    expression_attribute_names = {
+        '#id': 'id',
+        '#state': 'state'
+    }
+    
+    items = []
+    batch_size = 50  # Reduced to 50 since we're trying both formats (effectively 100 keys per batch)
+    
+    for i in range(0, len(filing_ids), batch_size):
+        batch_ids = filing_ids[i:i + batch_size]
+        
+        # Try both FILING# and CONTRIBUTION# formats
+        keys = []
+        for fid in batch_ids:
+            keys.append({'PK': {'S': f'FILING#{fid}'}, 'SK': {'S': f'FILING#{fid}'}})
+            keys.append({'PK': {'S': f'CONTRIBUTION#{fid}'}, 'SK': {'S': f'CONTRIBUTION#{fid}'}})
+        
+        request_items = {
+            FILINGS_TABLE_NAME: {
+                'Keys': keys,
+                'ProjectionExpression': projection_expression,
+                'ExpressionAttributeNames': expression_attribute_names
+            }
+        }
+        
+        try:
+            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+            batch_items = batch_response.get('Responses', {}).get(FILINGS_TABLE_NAME, [])
+            deserializer = TypeDeserializer()
+            
+            for item in batch_items:
+                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                items.append(converted_item)
+        except Exception as e:
+            logger.error(f"Error fetching batch: {str(e)}", exc_info=True)
+            continue
+    
+    return items
+
+
 def fetch_full_items(filing_ids: List[str]) -> List[Dict[str, Any]]:
-    """Fetch full items from DynamoDB using batch_get_item"""
+    """Fetch full items from DynamoDB using batch_get_item (for individual filing lookups)"""
     if not filing_ids:
         return []
     
@@ -649,7 +728,84 @@ def fetch_full_items(filing_ids: List[str]) -> List[Dict[str, Any]]:
     return items
 
 
-def search_filings(filters: Dict[str, Any], limit: int = 125,
+def get_filing_by_id(filing_id_or_pk: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a single filing by ID or PK directly from DynamoDB (fetches full details)
+    Accepts either:
+    - Full PK format: 'FILING#uuid' or 'CONTRIBUTION#uuid'
+    - Just the UUID: 'uuid' (will try both FILING# and CONTRIBUTION# formats)
+    """
+    try:
+        if not filing_id_or_pk:
+            return None
+        
+        # Check if the input is already a full PK (starts with FILING# or CONTRIBUTION#)
+        if filing_id_or_pk.startswith('FILING#') or filing_id_or_pk.startswith('CONTRIBUTION#'):
+            # Use PK directly
+            pk_value = filing_id_or_pk
+            sk_value = filing_id_or_pk  # SK is typically the same as PK for LDA filings
+            key = {'PK': {'S': pk_value}, 'SK': {'S': sk_value}}
+            
+            logger.info(f"Fetching filing using PK directly: {pk_value}")
+            try:
+                response = dynamodb_client.get_item(
+                    TableName=FILINGS_TABLE_NAME,
+                    Key=key
+                )
+                item = response.get('Item')
+                if item:
+                    deserializer = TypeDeserializer()
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    logger.info(f"Found filing using PK: {pk_value}")
+                    return converted_item
+            except Exception as e:
+                logger.warning(f"Error fetching filing with PK {pk_value}: {str(e)}")
+                return None
+        else:
+            # Input is just the UUID, try both FILING# and CONTRIBUTION# formats
+            filing_id = filing_id_or_pk
+            filing_key = {'PK': {'S': f'FILING#{filing_id}'}, 'SK': {'S': f'FILING#{filing_id}'}}
+            contribution_key = {'PK': {'S': f'CONTRIBUTION#{filing_id}'}, 'SK': {'S': f'CONTRIBUTION#{filing_id}'}}
+            
+            # Try FILING# first
+            try:
+                response = dynamodb_client.get_item(
+                    TableName=FILINGS_TABLE_NAME,
+                    Key=filing_key
+                )
+                item = response.get('Item')
+                if item:
+                    deserializer = TypeDeserializer()
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    logger.info(f"Found filing {filing_id} as FILING#")
+                    return converted_item
+            except Exception as e:
+                logger.warning(f"Error fetching FILING#{filing_id}: {str(e)}")
+            
+            # Try CONTRIBUTION# if FILING# didn't work
+            try:
+                response = dynamodb_client.get_item(
+                    TableName=FILINGS_TABLE_NAME,
+                    Key=contribution_key
+                )
+                item = response.get('Item')
+                if item:
+                    deserializer = TypeDeserializer()
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    logger.info(f"Found filing {filing_id} as CONTRIBUTION#")
+                    return converted_item
+            except Exception as e:
+                logger.warning(f"Error fetching CONTRIBUTION#{filing_id}: {str(e)}")
+            
+            logger.warning(f"Filing {filing_id} not found in either FILING# or CONTRIBUTION# format")
+            return None
+        
+    except Exception as e:
+        logger.error(f"Error fetching filing {filing_id_or_pk}: {str(e)}", exc_info=True)
+        return None
+
+
+def search_filings(filters: Dict[str, Any], limit: int = 100,
                    last_evaluated_key: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Search filings using union/intersection logic based on search source
@@ -945,19 +1101,48 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
     
     logger.info(f"Total unique filing IDs after union/intersection: {len(all_filing_ids)}")
     
-    # Handle pagination offset
+    # Handle pagination offset (offset is in filtered results, not raw results)
     offset = 0
     if last_evaluated_key and isinstance(last_evaluated_key, dict):
         offset = last_evaluated_key.get('offset', 0)
         logger.info(f"Using pagination offset: {offset}")
     
-    # Fetch full items - fetch all since we need to sort and paginate
+    # OPTIMIZATION: Only fetch a reasonable buffer of items instead of all items
+    # This prevents timeouts on large result sets (e.g., 13,370 filing IDs)
+    # 
+    # Strategy: Fetch only what we need for the current page
+    # Since filtering happens after fetching, we use a small buffer (2-3x) to account for filtering
     filing_ids_list = sorted(list(all_filing_ids))
-    items_to_fetch = len(filing_ids_list)  # Fetch all items for proper sorting and pagination
-    logger.info(f"Fetching full items for {items_to_fetch} filing IDs (offset: {offset}, limit: {limit}, total: {len(filing_ids_list)})")
+    total_filing_ids = len(filing_ids_list)
     
-    full_items = fetch_full_items(filing_ids_list)
-    logger.info(f"Fetched {len(full_items)} full items from DynamoDB")
+    # Use a conservative buffer multiplier of 2-3x to account for filtering
+    # Most filters don't filter out many items, so 2-3x should be sufficient
+    buffer_multiplier = 3
+    
+    # Calculate how many items to fetch
+    # For first page (offset=0): fetch limit * buffer_multiplier
+    # For later pages: fetch offset + limit * buffer_multiplier (to cover offset + limit filtered items)
+    if offset == 0:
+        items_to_fetch = limit * buffer_multiplier
+    else:
+        # For offset > 0, we need to fetch enough to cover:
+        # - Items to skip (offset filtered items) - estimate as offset * buffer_multiplier
+        # - Items to return (limit filtered items) - estimate as limit * buffer_multiplier
+        items_to_fetch = offset * buffer_multiplier + limit * buffer_multiplier
+    
+    # Cap at total available items
+    items_to_fetch = min(items_to_fetch, total_filing_ids)
+    
+    # Ensure we fetch at least limit items (for edge cases)
+    items_to_fetch = max(limit, items_to_fetch)
+    
+    logger.info(f"Fetching full items for {items_to_fetch} filing IDs (offset: {offset}, limit: {limit}, total: {total_filing_ids}, buffer_multiplier: {buffer_multiplier})")
+    
+    # Only fetch the subset we need
+    filing_ids_to_fetch = filing_ids_list[:items_to_fetch]
+    # Use minimal fetch to only get fields needed for search results (much faster)
+    full_items = fetch_minimal_filings_batch(filing_ids_to_fetch)
+    logger.info(f"Fetched {len(full_items)} minimal filing items from DynamoDB")
     
     # Apply Python-side filters
     filtered_items = [item for item in full_items if apply_python_filters(item, filters)]
@@ -966,20 +1151,46 @@ def search_filings(filters: Dict[str, Any], limit: int = 125,
     # Sort by date (most recent first)
     filtered_items.sort(key=lambda x: x.get('dt_posted', ''), reverse=True)
     
-    # Paginate using offset
-    end_offset = offset + limit
-    paginated_items = filtered_items[offset:end_offset]
-    results = [convert_decimal_to_float(item) for item in paginated_items]
-    
-    has_more = end_offset < len(filtered_items)
-    
-    next_last_evaluated_key = None
-    if has_more:
+    # Check if we have enough filtered items for the requested offset
+    if offset >= len(filtered_items):
+        # We don't have enough filtered items - need to fetch more
+        # This can happen if filtering is very aggressive
+        # For now, return empty results but indicate there might be more
+        logger.warning(f"Offset {offset} exceeds filtered items {len(filtered_items)}. May need to fetch more items.")
+        results = []
+        has_more = items_to_fetch < total_filing_ids
         next_last_evaluated_key = {
-            'offset': end_offset,
-            'total_items': len(filtered_items),
+            'offset': offset,  # Keep same offset, will fetch more next time
+            'total_items': total_filing_ids,
             'method': 'query'
-        }
+        } if has_more else None
+    else:
+        # Paginate using offset
+        end_offset = offset + limit
+        paginated_items = filtered_items[offset:end_offset]
+        results = [convert_decimal_to_float(item) for item in paginated_items]
+        
+        # Determine if there are more results
+        fetched_all_items = items_to_fetch >= total_filing_ids
+        has_more_filtered = end_offset < len(filtered_items)
+        has_more = has_more_filtered or (not fetched_all_items and len(filtered_items) > 0)
+        
+        next_last_evaluated_key = None
+        if has_more:
+            if not fetched_all_items and end_offset >= len(filtered_items):
+                # We've exhausted filtered items but haven't fetched all raw items
+                # Next request should continue from where we left off in raw items
+                # But offset should be based on filtered items we've seen so far
+                next_offset = len(filtered_items)  # Continue from current filtered count
+            else:
+                # We have more filtered items in current batch
+                next_offset = end_offset
+            
+            next_last_evaluated_key = {
+                'offset': next_offset,
+                'total_items': total_filing_ids,
+                'method': 'query'
+            }
     
     logger.info(f"Returning {len(results)} results, has_more: {has_more}")
     
@@ -1018,15 +1229,47 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             request_body = event.get('body', {})
         
+        # Check if this is a direct filing_id lookup (getFiling request)
+        filing_id = request_body.get('filing_id')
+        if filing_id:
+            logger.info(f"Direct filing lookup requested for filing_id: {filing_id}")
+            filing = get_filing_by_id(filing_id)
+            
+            if filing:
+                # Convert to response format matching search results
+                result = convert_decimal_to_float(filing)
+                return {
+                    'statusCode': 200,
+                    'headers': cors_headers,
+                    'body': json.dumps({
+                        'success': True,
+                        'result': result,
+                        'count': 1
+                    }, default=str)
+                }
+            else:
+                # Filing not found
+                return {
+                    'statusCode': 200,
+                    'headers': cors_headers,
+                    'body': json.dumps({
+                        'success': True,
+                        'result': None,
+                        'count': 0,
+                        'error': f'Filing {filing_id} not found'
+                    }, default=str)
+                }
+        
+        # Extract search parameters (regular search)
         filters = request_body.get('filters', {})
         last_evaluated_key = request_body.get('last_evaluated_key')
-        limit = request_body.get('limit', 125)
+        limit = request_body.get('limit', 100)
         
         if limit is not None:
             try:
                 limit = int(limit)
             except (ValueError, TypeError):
-                limit = 125
+                limit = 100
         
         logger.info(f"Search request - filters: {json.dumps(filters, default=str)}, limit: {limit}")
         

@@ -347,7 +347,20 @@ const FileBrowserDialog: React.FC<FileBrowserDialogProps> = ({
 
         {/* Items list */}
         <Box sx={{ border: '1px solid #374151', backgroundColor: 'rgba(30, 41, 59, 0.3)' }}>
-          <List sx={{ p: 0, maxHeight: '300px', overflow: 'auto' }}>
+          <List
+            sx={{
+              p: 0,
+              maxHeight: '300px',
+              overflow: 'auto',
+              '&::-webkit-scrollbar': { width: '6px' },
+              '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' },
+              '&::-webkit-scrollbar-thumb': {
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderRadius: '3px',
+              },
+              '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' },
+            }}
+          >
             {/* Folders */}
             {folders.map((folder) => (
               <ListItem
