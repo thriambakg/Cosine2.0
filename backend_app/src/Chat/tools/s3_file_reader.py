@@ -538,48 +538,7 @@ class S3FileReader:
         except Exception as e:
             return f"Error reading file: {str(e)}"
     
-<<<<<<< HEAD
-    def _decode_content_for_type(self, content: bytes, content_type: str, file_type: str, s3_key: str) -> str:
-        """
-        Decode content based on file type (helper method)
-        
-        Args:
-            content: File content bytes
-            content_type: Content type from S3
-            file_type: Explicit file type parameter
-            s3_key: S3 key (for extension detection)
-            
-        Returns:
-            Decoded content string
-        """
-        if 'json' in content_type or file_type == 'json' or s3_key.endswith('.json'):
-            # JSON file
-            try:
-                json_data = json.loads(content.decode('utf-8'))
-                return json.dumps(json_data, indent=2)
-            except json.JSONDecodeError as e:
-                return f"Error parsing JSON: {str(e)}\nRaw content: {content.decode('utf-8')}"
-        elif 'csv' in content_type or file_type == 'csv' or s3_key.endswith('.csv'):
-            # CSV file
-            return content.decode('utf-8')
-        elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
-            # Text file
-            return content.decode('utf-8')
-        elif 'html' in content_type or s3_key.endswith('.html'):
-            # HTML file
-            return content.decode('utf-8')
-        else:
-            # Try to decode as UTF-8, fallback to base64 if it fails
-            try:
-                return content.decode('utf-8')
-            except UnicodeDecodeError:
-                import base64
-                return f"Binary file content (base64): {base64.b64encode(content).decode('utf-8')}"
-    
-    def get_file_info(self, s3_key: str) -> Dict[str, Any]:
-=======
     def get_file_info(self, s3_key: str, s3_bucket: str = None) -> Dict[str, Any]:
->>>>>>> e946d9d50161ab4b0348cbf1209c39ad7a82d52a
         """
         Get metadata about a file in S3
         
