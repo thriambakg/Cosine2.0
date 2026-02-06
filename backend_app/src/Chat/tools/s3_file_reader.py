@@ -25,19 +25,23 @@ except ImportError as e:
 # Tool specification following Strands pattern
 TOOL_SPEC = {
     "name": "read_s3_file",
-    "description": "Read and analyze files uploaded to S3 by users. Use this tool when users ask about uploaded files or when you need to analyze file content.",
+    "description": "Read and analyze files uploaded to S3 by users. Use this tool when users ask about uploaded files or when you need to analyze file content. When context items include s3_bucket and s3_key (or s3_uri), pass s3_bucket so the correct bucket is used.",
     "inputSchema": {
         "json": {
             "type": "object",
             "properties": {
                 "s3_key": {
                     "type": "string",
-                    "description": "The S3 key/path of the file to read (e.g., 'users/user_id/sessions/session_id/files/file_id_filename.json')"
+                    "description": "The S3 key/path of the file to read (e.g., 'users/user_id/sessions/session_id/files/file_id_filename.json' or 'filings/4-xxx/documentformatfiles/file.txt')"
                 },
                 "file_type": {
                     "type": "string",
                     "description": "The type of file being read (e.g., 'json', 'csv', 'txt', 'pdf')",
                     "default": "auto"
+                },
+                "s3_bucket": {
+                    "type": "string",
+                    "description": "Optional. The S3 bucket name. When provided (e.g. from context item data.s3_bucket), the file is read from this bucket instead of inferring from the key. Use when context has s3_bucket and s3_key for SEC filings, congress bills, LDA, politician trades, etc."
                 }
             },
             "required": ["s3_key"]
@@ -111,7 +115,7 @@ class S3FileReader:
                 raise ValueError("CHAT_FILES_BUCKET_NAME environment variable not set")
         return self.bucket_name
     
-    def read_file(self, s3_key: str, file_type: str = "auto") -> str:
+    def read_file(self, s3_key: str, file_type: str = "auto", s3_bucket: str = None) -> str:
         """
         Read a file from S3 and return its content as a string
         
@@ -120,6 +124,7 @@ class S3FileReader:
         Args:
             s3_key: The S3 key/path of the file
             file_type: The type of file (auto-detect if not specified)
+            s3_bucket: Optional. When provided, use this bucket instead of inferring from key (for context items with explicit bucket).
             
         Returns:
             File content as string
@@ -151,7 +156,7 @@ class S3FileReader:
                     logger.error(f"Error validating S3 key user_id: {str(e)}")
             else:
                 logger.info(f"Reading public/app S3 key (no user validation): {s3_key[:80]}...")
-            bucket_name = self.get_bucket_name(s3_key)
+            bucket_name = s3_bucket if s3_bucket else self.get_bucket_name(s3_key)
             logger.info(f"Reading file from S3: {bucket_name}/{s3_key}")
             
             # Get the object from S3
@@ -315,18 +320,19 @@ class S3FileReader:
         except Exception as e:
             return f"Error reading file: {str(e)}"
     
-    def get_file_info(self, s3_key: str) -> Dict[str, Any]:
+    def get_file_info(self, s3_key: str, s3_bucket: str = None) -> Dict[str, Any]:
         """
         Get metadata about a file in S3
         
         Args:
             s3_key: The S3 key/path of the file
+            s3_bucket: Optional. When provided, use this bucket instead of inferring from key.
             
         Returns:
             Dictionary with file metadata
         """
         try:
-            bucket_name = self.get_bucket_name(s3_key)
+            bucket_name = s3_bucket if s3_bucket else self.get_bucket_name(s3_key)
             response = self.s3_client.head_object(Bucket=bucket_name, Key=s3_key)
             
             return {
@@ -341,13 +347,14 @@ class S3FileReader:
             return {'error': str(e)}
 
 @tool
-def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
+def read_s3_file_tool(s3_key: str, file_type: str = "auto", s3_bucket: str = None) -> str:
     """
     Tool function to read files from S3
     
     Args:
         s3_key: The S3 key/path of the file to read
         file_type: The type of file (auto-detect if not specified)
+        s3_bucket: Optional. When provided (e.g. from context item data.s3_bucket), read from this bucket instead of inferring from key.
         
     Returns:
         String with file content or error message
@@ -359,11 +366,11 @@ def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
         # Create S3 file reader instance
         reader = S3FileReader()
         
-        # Read the file
-        content = reader.read_file(s3_key, file_type)
+        # Read the file (use explicit bucket when provided so SEC/LDA/bills/trades go to correct bucket)
+        content = reader.read_file(s3_key, file_type, s3_bucket=s3_bucket)
         
         # Get file info for context
-        file_info = reader.get_file_info(s3_key)
+        file_info = reader.get_file_info(s3_key, s3_bucket=s3_bucket)
         
         # Format the response
         if 'error' in file_info:

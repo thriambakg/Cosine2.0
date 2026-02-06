@@ -1318,7 +1318,7 @@ When you encounter filesystem objects in session context (items with type "conte
       "s3_key": "users/123/filesys/folder/Congress Bill.cosine"
     }
   }
-- When you see this, IMMEDIATELY call: read_s3_file_tool(context_item["data"]["s3_key"])
+- When you see this, IMMEDIATELY call: read_s3_file_tool(context_item["data"]["s3_key"]). If the context item has data.s3_bucket, also pass it: read_s3_file_tool(s3_key=context_item["data"]["s3_key"], s3_bucket=context_item["data"]["s3_bucket"]) so the file is read from the correct bucket (SEC filings, congress bills, LDA, politician trades, etc.).
 
 **FOR NON-COSINE FILES:**
 - Use read_s3_file_tool(s3_key, file_type) to read the file directly
@@ -1553,8 +1553,8 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES, SEC FILINGS, POLITICIAN TRADES):
          // ... other metadata
        }
      }
-   - To read the full filing document, use read_s3_file_tool(data.s3_key) where s3_key is from data.s3_key
-   - The s3_key will start with "filings/" and points to an HTML file containing the full filing document
+   - To read the full filing document, use read_s3_file_tool with the key (and bucket when present): when context item data has s3_bucket and s3_key, call read_s3_file_tool(s3_key=data.s3_key, s3_bucket=data.s3_bucket) so the correct bucket is used; otherwise use read_s3_file_tool(data.s3_key).
+   - The s3_key will start with "filings/" and points to the document file. When data.s3_uri is present it is "bucket/key" for the same purpose.
    - The context item metadata includes key information, but use read_s3_file_tool to get complete details when needed
 9. **FOR POLITICIAN TRADE CONTEXT ITEMS**:
    - When politician trades are already in context (from the Politician Trades Search UI or previous steps), analyze the provided trade object directly.
@@ -1576,7 +1576,7 @@ FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES, SEC FILINGS, POLITICIAN TRADES):
      - formS3Key: S3 key for the filing document (contains multiple trades from the same filing)
      - metadata: Additional asset-specific metadata (e.g., Maturity date, Rate/Coupon for bonds)
      - websiteUrl: Politician's official website URL
-   - The formS3Key points to a filing document that contains multiple trades. If you need to see all trades from the same filing, use read_s3_file_tool(s3_key=formS3Key, file_type="html") to read the full document.
+   - The formS3Key points to a filing document that contains multiple trades. If you need to see all trades from the same filing, use read_s3_file_tool(s3_key=formS3Key, file_type="html", s3_bucket=data.s3_bucket) when data.s3_bucket is present, else read_s3_file_tool(s3_key=formS3Key, file_type="html").
    - Use the trade data to provide analysis on:
      - Transaction patterns and timing
      - Asset types and diversification
@@ -1822,19 +1822,20 @@ class S3FileReader:
                 raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
         return self.bucket_name
     
-    def read_file(self, s3_key: str, file_type: str = "auto") -> str:
+    def read_file(self, s3_key: str, file_type: str = "auto", s3_bucket: str = None) -> str:
         """
         Read file content from S3
         
         Args:
             s3_key: The S3 key/path of the file to read
             file_type: The type of file (auto-detect if not specified)
+            s3_bucket: Optional. When provided, use this bucket instead of inferring from key.
             
         Returns:
             String with file content
         """
         try:
-            bucket_name = self.get_bucket_name(s3_key)
+            bucket_name = s3_bucket if s3_bucket else self.get_bucket_name(s3_key)
             logger.info(f"Reading file from S3: {bucket_name}/{s3_key}")
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()  # This is bytes, not string
@@ -1979,18 +1980,19 @@ class S3FileReader:
         except Exception as e:
             return f"Error reading file: {str(e)}"
     
-    def get_file_info(self, s3_key: str) -> Dict[str, Any]:
+    def get_file_info(self, s3_key: str, s3_bucket: str = None) -> Dict[str, Any]:
         """
         Get metadata about a file in S3
         
         Args:
             s3_key: The S3 key/path of the file
+            s3_bucket: Optional. When provided, use this bucket instead of inferring from key.
             
         Returns:
             Dictionary with file metadata
         """
         try:
-            bucket_name = self.get_bucket_name(s3_key)
+            bucket_name = s3_bucket if s3_bucket else self.get_bucket_name(s3_key)
             response = self.s3_client.head_object(Bucket=bucket_name, Key=s3_key)
             
             return {
@@ -2005,21 +2007,21 @@ class S3FileReader:
             return {'error': str(e)}
 
 @tool
-def read_s3_file_tool(s3_key: str, file_type: str = "auto") -> str:
-    """Read uploaded files from S3 storage. When you see an uploaded file context with an S3 key, use this tool to read the file content. Pass the S3 key exactly as provided in the context."""
+def read_s3_file_tool(s3_key: str, file_type: str = "auto", s3_bucket: str = None) -> str:
+    """Read uploaded files from S3 storage. When you see an uploaded file context with an S3 key, use this tool to read the file content. When context has s3_bucket and s3_key, pass both so the correct bucket is used."""
     try:
-        agent_logger.info(f"Reading S3 file: {s3_key}")
+        agent_logger.info(f"Reading S3 file: {s3_key}" + (f" (bucket: {s3_bucket})" if s3_bucket else ""))
         if not s3_key:
             return "Error: s3_key parameter is required"
         
         # Create S3 file reader instance
         reader = S3FileReader()
         
-        # Read the file
-        content = reader.read_file(s3_key, file_type)
+        # Read the file (use explicit bucket when provided)
+        content = reader.read_file(s3_key, file_type, s3_bucket=s3_bucket)
         
         # Get file info for context
-        file_info = reader.get_file_info(s3_key)
+        file_info = reader.get_file_info(s3_key, s3_bucket=s3_bucket)
         
         # Format the response
         if 'error' in file_info:

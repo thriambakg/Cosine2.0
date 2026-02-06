@@ -909,6 +909,20 @@ module "api_gateway" {
 
   # Deployment trigger - increment this when you want to force a redeployment
   deployment_trigger = "85" # Updated for CORS fixes (dynamic origin headers)
+
+  # Chat agent least-privilege S3 read: one GetObject-only policy per bucket type (read_s3_file_tool)
+  chat_agent_role_name = aws_iam_role.chat_agent_execution_role.name
+  chat_agent_s3_read_bucket_arns = {
+    sec_filings       = "arn:aws:s3:::${var.project_name}-sec-filings-${var.environment}"
+    congress_bills    = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn
+    lda_disclosures   = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn
+    politician_trades = "arn:aws:s3:::${var.project_name}-politician-trades-${var.environment}"
+    stock_historical  = data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn
+    usaspending_data  = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn
+  }
+  project_name = var.project_name
+  environment  = var.environment
+  common_tags  = var.common_tags
 }
 
 
@@ -1943,95 +1957,13 @@ resource "aws_iam_role_policy_attachment" "chat_agent_websocket_policy" {
   policy_arn = aws_iam_policy.lambda_websocket_policy.arn
 }
 
-# IAM Policy for Chat Agent to read from Stock Historical S3 Bucket (READ ONLY)
-resource "aws_iam_policy" "chat_agent_stock_historical_s3_read_policy" {
-  name        = "${var.project_name}-chat-agent-stock-historical-s3-read-${var.environment}"
-  description = "Allows Chat Agent Lambda to read from stock historical data S3 bucket (READ ONLY)"
+# Stock historical S3 read for chat agent is in api-gateway module (GetObject only).
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*"
-        ]
-      }
-    ]
-  })
+# Congress bills, LDA, usaspending S3 read for chat agent are in api-gateway module (per-bucket GetObject only).
 
-  tags = var.common_tags
-}
-
-# IAM Policy for Chat Agent to read from Search Data S3 Buckets (READ ONLY)
-resource "aws_iam_policy" "chat_agent_search_data_s3_read_policy" {
-  name        = "${var.project_name}-chat-agent-search-data-s3-read-${var.environment}"
-  description = "Allows Chat Agent Lambda to read from search data S3 buckets (congress bills, usaspending, LDA disclosures) for oversized items (READ ONLY)"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*",
-          data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*",
-          data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn,
-          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/*"
-        ]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-# Attach Search Data S3 read policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_search_data_s3_read_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_search_data_s3_read_policy.arn
-}
-
-# IAM Policy for Chat Agent to read SEC EDGAR filings (read_s3_file_tool when context has SEC filing)
-resource "aws_iam_policy" "chat_agent_sec_filings_s3_read_policy" {
-  name        = "${var.project_name}-chat-agent-sec-filings-s3-read-${var.environment}"
-  description = "Allows Chat Agent to read SEC filings from S3 (read_s3_file_tool for filings/ keys)"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = ["arn:aws:s3:::cosine-sec-filings-${var.environment}/*"]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-resource "aws_iam_role_policy_attachment" "chat_agent_sec_filings_s3_read_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_sec_filings_s3_read_policy.arn
-}
-
-# Attach Stock Historical S3 read policy for chat agent
-resource "aws_iam_role_policy_attachment" "chat_agent_stock_historical_s3_read_policy" {
-  role       = aws_iam_role.chat_agent_execution_role.name
-  policy_arn = aws_iam_policy.chat_agent_stock_historical_s3_read_policy.arn
-}
+# SEC filings, congress bills, LDA, politician trades, stock historical, usaspending S3 read
+# for the chat agent are managed by the api-gateway module (one GetObject-only policy per bucket).
+# See module "api_gateway" -> chat_agent_s3_read_bucket_arns.
 
 # SQS policy for chat agent - REMOVED
 # SQS queues are no longer used - direct WebSocket delivery is used instead

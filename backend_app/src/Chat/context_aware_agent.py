@@ -399,7 +399,7 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
 📄 READING BILL TEXT FROM S3:
 - When bills are returned from search_congress_bills, each bill includes a `bill_text_html_s3_key` field
 - This field contains the S3 key to the full HTML bill text (e.g., "billtext/119-HR-5789.html")
-- To read the COMPLETE BILL TEXT, use: read_s3_file_tool(bill_text_html_s3_key)
+- To read the COMPLETE BILL TEXT, use: read_s3_file_tool(bill_text_html_s3_key). When the context item has data.s3_bucket, pass it: read_s3_file_tool(s3_key=bill_text_html_s3_key, s3_bucket=data.s3_bucket).
 - The bill text is stored as HTML in S3 and will be returned as readable text
 - ALWAYS check for bill_text_html_s3_key when users ask about:
   * "What does this bill do?"
