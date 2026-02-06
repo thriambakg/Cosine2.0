@@ -2003,6 +2003,30 @@ resource "aws_iam_role_policy_attachment" "chat_agent_search_data_s3_read_policy
   policy_arn = aws_iam_policy.chat_agent_search_data_s3_read_policy.arn
 }
 
+# IAM Policy for Chat Agent to read SEC EDGAR filings (read_s3_file_tool when context has SEC filing)
+resource "aws_iam_policy" "chat_agent_sec_filings_s3_read_policy" {
+  name        = "${var.project_name}-chat-agent-sec-filings-s3-read-${var.environment}"
+  description = "Allows Chat Agent to read SEC filings from S3 (read_s3_file_tool for filings/ keys)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["arn:aws:s3:::cosine-sec-filings-${var.environment}/*"]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "chat_agent_sec_filings_s3_read_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.chat_agent_sec_filings_s3_read_policy.arn
+}
+
 # Attach Stock Historical S3 read policy for chat agent
 resource "aws_iam_role_policy_attachment" "chat_agent_stock_historical_s3_read_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
@@ -2128,6 +2152,7 @@ resource "aws_lambda_function" "chat_agent" {
       # S3 Bucket Names for Search Tools (using generic S3_BUCKET_NAME for tool compatibility)
       USASPENDING_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_name
       LDA_DISCLOSURES_S3_BUCKET_NAME  = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
+      SEC_FILINGS_S3_BUCKET           = "cosine-sec-filings-${var.environment}"
 
       # DynamoDB Table Names for Search Tools
       FILINGS_TABLE_NAME  = data.terraform_remote_state.base_infra.outputs.lda_filings_table_name

@@ -79,17 +79,29 @@ class S3FileReader:
             logger.info(f"Using constructed congress bills data bucket name: {bucket_name}")
             return bucket_name
         
-        # If s3_key starts with filings/, use LDA disclosures bucket
+        # If s3_key starts with filings/, distinguish SEC EDGAR vs LDA (lobbying) disclosures
+        # LDA uses filings/RR/ or filings/LDA/; SEC search stores filings/{accession}/documentformatfiles/ etc.
         if s3_key and s3_key.startswith('filings/'):
-            bucket_name = os.environ.get('LDA_DISCLOSURES_S3_BUCKET_NAME')
-            if bucket_name:
-                logger.info(f"Using LDA disclosures bucket for filings/ file: {bucket_name}")
+            is_lda = s3_key.startswith('filings/RR/') or s3_key.startswith('filings/LDA/')
+            if is_lda:
+                bucket_name = os.environ.get('LDA_DISCLOSURES_S3_BUCKET_NAME')
+                if bucket_name:
+                    logger.info(f"Using LDA disclosures bucket for LDA filings/ file: {bucket_name}")
+                    return bucket_name
+                project_name = os.environ.get('PROJECT_NAME', 'cosine')
+                environment = os.environ.get('ENVIRONMENT', 'production')
+                bucket_name = f"{project_name}-lda-disclosures-{environment}"
+                logger.info(f"Using constructed LDA disclosures bucket name: {bucket_name}")
                 return bucket_name
-            # Fallback: try to construct bucket name if env var not set
+            # SEC EDGAR filings (e.g. filings/4-0001179864-001-36743-21587910/documentformatfiles/...)
+            bucket_name = os.environ.get('SEC_FILINGS_S3_BUCKET') or os.environ.get('SEC_FILINGS_BUCKET')
+            if bucket_name:
+                logger.info(f"Using SEC filings bucket for filings/ file: {bucket_name}")
+                return bucket_name
             project_name = os.environ.get('PROJECT_NAME', 'cosine')
             environment = os.environ.get('ENVIRONMENT', 'production')
-            bucket_name = f"{project_name}-lda-disclosures-{environment}"
-            logger.info(f"Using constructed LDA disclosures bucket name: {bucket_name}")
+            bucket_name = f"{project_name}-sec-filings-{environment}"
+            logger.info(f"Using constructed SEC filings bucket name: {bucket_name}")
             return bucket_name
         
         # Default to chat files bucket
@@ -116,27 +128,29 @@ class S3FileReader:
             ValueError: If user_id validation fails
         """
         try:
-            # SECURITY: Validate user_id from S3 key matches authenticated user
-            try:
-                from utils.auth_helper import validate_s3_key_user_id, get_secure_user_id
-                
-                # Get authenticated user_id (from environment set by lambda_handler)
-                authenticated_user_id = get_secure_user_id({}, fallback_to_env=True)
-                
-                if authenticated_user_id:
-                    # Validate S3 key belongs to authenticated user
-                    if not validate_s3_key_user_id(s3_key, authenticated_user_id):
-                        error_msg = f"Access denied: S3 key does not belong to authenticated user"
-                        logger.error(f"❌ {error_msg}")
-                        return f"Error: {error_msg}. You can only access files in your own user directory."
-                else:
-                    logger.warning("⚠️ Could not get authenticated user_id for S3 key validation")
-            except ImportError:
-                logger.warning("⚠️ auth_helper not available, skipping user_id validation")
-            except Exception as e:
-                logger.error(f"Error validating S3 key user_id: {str(e)}")
-                # Continue but log the error
-            
+            # SECURITY: Validate user_id for user-scoped keys (users/...); skip for public/app keys
+            is_public_key = s3_key and (
+                s3_key.startswith('billtext/') or
+                s3_key.startswith('filings/') or
+                s3_key.startswith('trades/')
+            )
+            if not is_public_key:
+                try:
+                    from utils.auth_helper import validate_s3_key_user_id, get_secure_user_id
+                    authenticated_user_id = get_secure_user_id({}, fallback_to_env=True)
+                    if authenticated_user_id:
+                        if not validate_s3_key_user_id(s3_key, authenticated_user_id):
+                            error_msg = f"Access denied: S3 key does not belong to authenticated user"
+                            logger.error(f"❌ {error_msg}")
+                            return f"Error: {error_msg}. You can only access files in your own user directory."
+                    else:
+                        logger.warning("⚠️ Could not get authenticated user_id for S3 key validation")
+                except ImportError:
+                    logger.warning("⚠️ auth_helper not available, skipping user_id validation")
+                except Exception as e:
+                    logger.error(f"Error validating S3 key user_id: {str(e)}")
+            else:
+                logger.info(f"Reading public/app S3 key (no user validation): {s3_key[:80]}...")
             bucket_name = self.get_bucket_name(s3_key)
             logger.info(f"Reading file from S3: {bucket_name}/{s3_key}")
             
