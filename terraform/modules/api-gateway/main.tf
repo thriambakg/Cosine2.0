@@ -444,34 +444,3 @@ resource "aws_api_gateway_gateway_response" "cors_403" {
   }
 }
 
-# -----------------------------------------------------------------------------
-# Chat agent: least-privilege S3 read (GetObject only) in a single policy to stay
-# under AWS limit of 10 managed policies per role. Covers sec_filings, congress_bills,
-# lda_disclosures, politician_trades, stock_historical, usaspending_data.
-# -----------------------------------------------------------------------------
-resource "aws_iam_policy" "chat_agent_s3_read" {
-  count = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? 1 : 0
-
-  name        = "${var.project_name}-chat-agent-s3-read-${var.environment}"
-  description = "Chat agent: GetObject only on S3 buckets for read_s3_file_tool (SEC, congress, LDA, trades, stock, usaspending)"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = [for arn in values(var.chat_agent_s3_read_bucket_arns) : "${arn}/*"]
-      }
-    ]
-  })
-
-  tags = var.common_tags
-}
-
-resource "aws_iam_role_policy_attachment" "chat_agent_s3_read" {
-  count = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? 1 : 0
-
-  role       = var.chat_agent_role_name
-  policy_arn = aws_iam_policy.chat_agent_s3_read[0].arn
-}

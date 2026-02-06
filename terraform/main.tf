@@ -909,24 +909,6 @@ module "api_gateway" {
 
   # Deployment trigger - increment this when you want to force a redeployment
   deployment_trigger = "85" # Updated for CORS fixes (dynamic origin headers)
-
-  # Chat agent least-privilege S3 read: one GetObject-only policy per bucket type (read_s3_file_tool).
-  # Bucket names must match actual buckets, e.g. production: cosine-sec-filings-production,
-  # cosine-congress-bills-data-production, cosine-lda-disclosures-production,
-  # cosine-politician-trades-production, cosine-stock-historical-production,
-  # cosine-usaspending-data-production. (cosine-chat-files-* is separate policy in root.)
-  chat_agent_role_name = aws_iam_role.chat_agent_execution_role.name
-  chat_agent_s3_read_bucket_arns = {
-    sec_filings       = "arn:aws:s3:::cosine-sec-filings-${var.environment}"
-    congress_bills    = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn
-    lda_disclosures   = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn
-    politician_trades = "arn:aws:s3:::cosine-politician-trades-${var.environment}"
-    stock_historical  = data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn
-    usaspending_data  = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn
-  }
-  project_name = var.project_name
-  environment  = var.environment
-  common_tags  = var.common_tags
 }
 
 
@@ -1806,6 +1788,38 @@ resource "aws_iam_policy" "chat_agent_s3_restricted_policy" {
 resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
   role       = aws_iam_role.chat_agent_execution_role.name
   policy_arn = aws_iam_policy.chat_agent_s3_restricted_policy.arn
+}
+
+# Chat agent: GetObject only on S3 buckets for read_s3_file_tool (single policy to stay under 10 policies/role)
+# Covers: sec_filings, congress_bills, lda_disclosures, politician_trades, stock_historical, usaspending_data
+resource "aws_iam_policy" "chat_agent_s3_read_policy" {
+  name        = "${var.project_name}-chat-agent-s3-read-${var.environment}"
+  description = "Chat agent: GetObject only on S3 buckets for read_s3_file_tool (SEC, congress, LDA, trades, stock, usaspending)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "arn:aws:s3:::cosine-sec-filings-${var.environment}/*",
+          "${data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn}/*",
+          "${data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn}/*",
+          "arn:aws:s3:::cosine-politician-trades-${var.environment}/*",
+          "${data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn}/*",
+          "${data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "chat_agent_s3_read_policy" {
+  role       = aws_iam_role.chat_agent_execution_role.name
+  policy_arn = aws_iam_policy.chat_agent_s3_read_policy.arn
 }
 
 # ECR policy for container image access
