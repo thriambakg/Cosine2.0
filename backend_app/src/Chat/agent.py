@@ -1795,26 +1795,45 @@ class S3FileReader:
     def get_bucket_name(self, s3_key: str = None) -> str:
         """
         Get the appropriate bucket name based on the S3 key pattern.
-        
-        Args:
-            s3_key: The S3 key/path to determine which bucket to use
-            
-        Returns:
-            Bucket name string
+        Must match logic in tools/s3_file_reader.py so filings/ and trades/ route to correct buckets.
         """
+        project_name = os.environ.get('PROJECT_NAME', 'cosine')
+        environment = os.environ.get('ENVIRONMENT', 'production')
+
         # If s3_key starts with billtext/, use congress bills data bucket
         if s3_key and s3_key.startswith('billtext/'):
             bucket_name = os.environ.get('CONGRESS_BILLS_DATA_S3_BUCKET_NAME')
             if bucket_name:
                 logger.info(f"Using congress bills data bucket for billtext file: {bucket_name}")
                 return bucket_name
-            # Fallback: try to construct bucket name if env var not set
-            project_name = os.environ.get('PROJECT_NAME', 'cosine')
-            environment = os.environ.get('ENVIRONMENT', 'production')
             bucket_name = f"{project_name}-congress-bills-data-{environment}"
             logger.info(f"Using constructed congress bills data bucket name: {bucket_name}")
             return bucket_name
-        
+
+        # If s3_key starts with filings/, distinguish SEC EDGAR vs LDA
+        if s3_key and s3_key.startswith('filings/'):
+            is_lda = s3_key.startswith('filings/RR/') or s3_key.startswith('filings/LDA/')
+            if is_lda:
+                bucket_name = os.environ.get('LDA_DISCLOSURES_S3_BUCKET_NAME')
+                if bucket_name:
+                    return bucket_name
+                return f"{project_name}-lda-disclosures-{environment}"
+            # SEC EDGAR filings
+            bucket_name = os.environ.get('SEC_FILINGS_S3_BUCKET') or os.environ.get('SEC_FILINGS_BUCKET')
+            if bucket_name:
+                logger.info(f"Using SEC filings bucket for filings/ file: {bucket_name}")
+                return bucket_name
+            bucket_name = f"{project_name}-sec-filings-{environment}"
+            logger.info(f"Using constructed SEC filings bucket name: {bucket_name}")
+            return bucket_name
+
+        # If s3_key starts with trades/, use politician trades bucket
+        if s3_key and s3_key.startswith('trades/'):
+            bucket_name = os.environ.get('POLITICIAN_TRADES_BUCKET') or os.environ.get('POLITICIAN_TRADES_S3_BUCKET')
+            if bucket_name:
+                return bucket_name
+            return f"{project_name}-politician-trades-{environment}"
+
         # Default to chat files bucket
         if self.bucket_name is None:
             self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')

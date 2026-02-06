@@ -7,7 +7,7 @@
 
 import { getEnvironmentConfig } from '../../../config/environment';
 
-/** S3 bucket names for the current environment (used so the agent can read files deterministically via s3_uri). */
+/** S3 bucket names for the current environment (used so the agent can read files via s3_uri/s3_bucket). Must match actual bucket names, e.g. production: cosine-sec-filings-production, cosine-congress-bills-data-production, cosine-lda-disclosures-production, cosine-politician-trades-production. */
 export function getS3BucketNames(): {
   secFilings: string;
   ldaDisclosures: string;
@@ -15,13 +15,13 @@ export function getS3BucketNames(): {
   politicianTrades: string;
 } {
   const config = getEnvironmentConfig();
-  const project = config.projectName || 'cosine';
   const env = config.environment || 'development';
+  const prefix = 'cosine';
   return {
-    secFilings: `${project}-sec-filings-${env}`,
-    ldaDisclosures: `${project}-lda-disclosures-${env}`,
-    congressBills: `${project}-congress-bills-data-${env}`,
-    politicianTrades: `${project}-politician-trades-${env}`,
+    secFilings: `${prefix}-sec-filings-${env}`,
+    ldaDisclosures: `${prefix}-lda-disclosures-${env}`,
+    congressBills: `${prefix}-congress-bills-data-${env}`,
+    politicianTrades: `${prefix}-politician-trades-${env}`,
   };
 }
 

@@ -910,13 +910,17 @@ module "api_gateway" {
   # Deployment trigger - increment this when you want to force a redeployment
   deployment_trigger = "85" # Updated for CORS fixes (dynamic origin headers)
 
-  # Chat agent least-privilege S3 read: one GetObject-only policy per bucket type (read_s3_file_tool)
+  # Chat agent least-privilege S3 read: one GetObject-only policy per bucket type (read_s3_file_tool).
+  # Bucket names must match actual buckets, e.g. production: cosine-sec-filings-production,
+  # cosine-congress-bills-data-production, cosine-lda-disclosures-production,
+  # cosine-politician-trades-production, cosine-stock-historical-production,
+  # cosine-usaspending-data-production. (cosine-chat-files-* is separate policy in root.)
   chat_agent_role_name = aws_iam_role.chat_agent_execution_role.name
   chat_agent_s3_read_bucket_arns = {
-    sec_filings       = "arn:aws:s3:::${var.project_name}-sec-filings-${var.environment}"
+    sec_filings       = "arn:aws:s3:::cosine-sec-filings-${var.environment}"
     congress_bills    = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_arn
     lda_disclosures   = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_arn
-    politician_trades = "arn:aws:s3:::${var.project_name}-politician-trades-${var.environment}"
+    politician_trades = "arn:aws:s3:::cosine-politician-trades-${var.environment}"
     stock_historical  = data.terraform_remote_state.base_infra.outputs.stock_historical_bucket_arn
     usaspending_data  = data.terraform_remote_state.base_infra.outputs.usaspending_data_s3_bucket_arn
   }
