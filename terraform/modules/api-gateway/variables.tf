@@ -101,37 +101,3 @@ variable "force_cognito_authorization" {
   default     = true
 }
 
-# -----------------------------------------------------------------------------
-# Optional: Chat agent least-privilege S3 read (GetObject only per bucket type)
-# When set, the module creates one IAM policy per bucket and attaches to the role.
-# -----------------------------------------------------------------------------
-variable "chat_agent_role_name" {
-  description = "Optional. IAM role name of the chat agent Lambda. If set with chat_agent_s3_read_bucket_arns, creates one GetObject-only policy per bucket and attaches to this role."
-  type        = string
-  default     = null
-}
-
-variable "chat_agent_s3_read_bucket_arns" {
-  description = "Optional. Map of S3 bucket ARNs for chat agent read-only access. Keys: sec_filings, congress_bills, lda_disclosures, politician_trades, chat_files, stock_historical, usaspending_data. Each gets a separate GetObject-only policy."
-  type        = map(string)
-  default     = {}
-}
-
-variable "project_name" {
-  description = "Project name used for IAM policy names (e.g. cosine). Required when chat_agent_role_name is set."
-  type        = string
-  default     = "cosine"
-}
-
-variable "environment" {
-  description = "Environment used for IAM policy names (e.g. production). Required when chat_agent_role_name is set."
-  type        = string
-  default     = "production"
-}
-
-variable "common_tags" {
-  description = "Tags to apply to IAM policies (when chat agent S3 policies are created)"
-  type        = map(string)
-  default     = {}
-}
-
