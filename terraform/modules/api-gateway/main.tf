@@ -445,16 +445,15 @@ resource "aws_api_gateway_gateway_response" "cors_403" {
 }
 
 # -----------------------------------------------------------------------------
-# Chat agent: least-privilege S3 read (GetObject only per bucket type)
-# One policy per bucket so the chat agent can read SEC filings, congress bills,
-# LDA disclosures, politician trades, etc. via read_s3_file_tool without
-# broad S3 access.
+# Chat agent: least-privilege S3 read (GetObject only) in a single policy to stay
+# under AWS limit of 10 managed policies per role. Covers sec_filings, congress_bills,
+# lda_disclosures, politician_trades, stock_historical, usaspending_data.
 # -----------------------------------------------------------------------------
 resource "aws_iam_policy" "chat_agent_s3_read" {
-  for_each = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? var.chat_agent_s3_read_bucket_arns : {}
+  count = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? 1 : 0
 
-  name        = "${var.project_name}-chat-agent-s3-read-${each.key}-${var.environment}"
-  description = "Chat agent: GetObject only on ${each.key} S3 bucket (read_s3_file_tool for this object type)"
+  name        = "${var.project_name}-chat-agent-s3-read-${var.environment}"
+  description = "Chat agent: GetObject only on S3 buckets for read_s3_file_tool (SEC, congress, LDA, trades, stock, usaspending)"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -462,7 +461,7 @@ resource "aws_iam_policy" "chat_agent_s3_read" {
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
-        Resource = ["${each.value}/*"]
+        Resource = [for arn in values(var.chat_agent_s3_read_bucket_arns) : "${arn}/*"]
       }
     ]
   })
@@ -471,8 +470,8 @@ resource "aws_iam_policy" "chat_agent_s3_read" {
 }
 
 resource "aws_iam_role_policy_attachment" "chat_agent_s3_read" {
-  for_each = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? var.chat_agent_s3_read_bucket_arns : {}
+  count = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? 1 : 0
 
   role       = var.chat_agent_role_name
-  policy_arn = aws_iam_policy.chat_agent_s3_read[each.key].arn
+  policy_arn = aws_iam_policy.chat_agent_s3_read[0].arn
 }
