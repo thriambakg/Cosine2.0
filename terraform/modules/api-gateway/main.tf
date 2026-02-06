@@ -443,3 +443,36 @@ resource "aws_api_gateway_gateway_response" "cors_403" {
     "application/json" = "{\"message\":$context.error.messageString}"
   }
 }
+
+# -----------------------------------------------------------------------------
+# Chat agent: least-privilege S3 read (GetObject only per bucket type)
+# One policy per bucket so the chat agent can read SEC filings, congress bills,
+# LDA disclosures, politician trades, etc. via read_s3_file_tool without
+# broad S3 access.
+# -----------------------------------------------------------------------------
+resource "aws_iam_policy" "chat_agent_s3_read" {
+  for_each = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? var.chat_agent_s3_read_bucket_arns : {}
+
+  name        = "${var.project_name}-chat-agent-s3-read-${each.key}-${var.environment}"
+  description = "Chat agent: GetObject only on ${each.key} S3 bucket (read_s3_file_tool for this object type)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${each.value}/*"]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "chat_agent_s3_read" {
+  for_each = var.chat_agent_role_name != null && length(var.chat_agent_s3_read_bucket_arns) > 0 ? var.chat_agent_s3_read_bucket_arns : {}
+
+  role       = var.chat_agent_role_name
+  policy_arn = aws_iam_policy.chat_agent_s3_read[each.key].arn
+}

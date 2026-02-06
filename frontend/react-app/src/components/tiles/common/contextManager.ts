@@ -5,6 +5,26 @@
  * allowing users to collect tiles, articles, and other data for AI analysis.
  */
 
+import { getEnvironmentConfig } from '../../../config/environment';
+
+/** S3 bucket names for the current environment (used so the agent can read files via s3_uri/s3_bucket). Must match actual bucket names, e.g. production: cosine-sec-filings-production, cosine-congress-bills-data-production, cosine-lda-disclosures-production, cosine-politician-trades-production. */
+export function getS3BucketNames(): {
+  secFilings: string;
+  ldaDisclosures: string;
+  congressBills: string;
+  politicianTrades: string;
+} {
+  const config = getEnvironmentConfig();
+  const env = config.environment || 'development';
+  const prefix = 'cosine';
+  return {
+    secFilings: `${prefix}-sec-filings-${env}`,
+    ldaDisclosures: `${prefix}-lda-disclosures-${env}`,
+    congressBills: `${prefix}-congress-bills-data-${env}`,
+    politicianTrades: `${prefix}-politician-trades-${env}`,
+  };
+}
+
 export interface ContextItem {
   id: string;
   type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'lda_filing' | 'custom' | 'filesystem';
@@ -531,13 +551,23 @@ export const addFilingToContext = (
   const subtitle = filing.filingDate 
     ? `Filed: ${filing.filingDate}${filing.cik ? ` • CIK: ${filing.cik}` : ''}`
     : filing.cik ? `CIK: ${filing.cik}` : 'SEC Filing';
+
+  const data = { ...filing };
+  const docKeys = filing.documentS3Keys && typeof filing.documentS3Keys === 'object' ? Object.values(filing.documentS3Keys) as string[] : [];
+  if (docKeys.length > 0) {
+    const primaryKey = docKeys.find((k: string) => k.endsWith('.txt')) ?? docKeys[0];
+    const buckets = getS3BucketNames();
+    data.s3_bucket = buckets.secFilings;
+    data.s3_key = primaryKey;
+    data.s3_uri = `${buckets.secFilings}/${primaryKey}`;
+  }
   
   const contextItem: ContextItem = {
     id: `sec_filing_${filingId}_${Date.now()}`,
     type: 'sec_filing',
     title,
     subtitle,
-    data: filing, // Include all filing data
+    data,
     timestamp: Date.now(),
   };
   
@@ -574,13 +604,21 @@ export const addMultipleFilingsToContext = (
     const subtitle = filing.filingDate 
       ? `Filed: ${filing.filingDate}${filing.cik ? ` • CIK: ${filing.cik}` : ''}`
       : filing.cik ? `CIK: ${filing.cik}` : 'SEC Filing';
-    
+    const data = { ...filing };
+    const docKeys = filing.documentS3Keys && typeof filing.documentS3Keys === 'object' ? Object.values(filing.documentS3Keys) as string[] : [];
+    if (docKeys.length > 0) {
+      const primaryKey = docKeys.find((k: string) => k.endsWith('.txt')) ?? docKeys[0];
+      const buckets = getS3BucketNames();
+      data.s3_bucket = buckets.secFilings;
+      data.s3_key = primaryKey;
+      data.s3_uri = `${buckets.secFilings}/${primaryKey}`;
+    }
     return {
       id: `sec_filing_${filingId}_${Date.now()}-batch-${Math.random()}`,
       type: 'sec_filing' as const,
       title,
       subtitle,
-      data: filing, // Include all filing data
+      data,
       timestamp: Date.now(),
     };
   });
@@ -677,13 +715,22 @@ export const addTradeToContext = (
   const subtitle = trade.transactionDate 
     ? `${trade.transactionType || 'Trade'} on ${formatTransactionDate(trade.transactionDate)}${formatAmountRange(trade) ? ` • ${formatAmountRange(trade)}` : ''}`
     : trade.transactionType ? `${trade.transactionType}` : 'Politician Trade';
+
+  const data = { ...trade };
+  const tradeS3Key = trade.formS3Key ?? trade.s3_key;
+  if (tradeS3Key) {
+    const buckets = getS3BucketNames();
+    data.s3_bucket = buckets.politicianTrades;
+    data.s3_key = tradeS3Key;
+    data.s3_uri = `${buckets.politicianTrades}/${tradeS3Key}`;
+  }
   
   const contextItem: ContextItem = {
     id: `politician_trade_${tradeId}_${Date.now()}`,
     type: 'politician_trade',
     title,
     subtitle,
-    data: trade, // Include all trade data
+    data,
     timestamp: Date.now(),
   };
   
@@ -757,13 +804,20 @@ export const addMultipleTradesToContext = (
     const subtitle = trade.transactionDate 
       ? `${trade.transactionType || 'Trade'} on ${formatTransactionDate(trade.transactionDate)}${formatAmountRange(trade) ? ` • ${formatAmountRange(trade)}` : ''}`
       : trade.transactionType ? `${trade.transactionType}` : 'Politician Trade';
-    
+    const data = { ...trade };
+    const tradeS3Key = trade.formS3Key ?? trade.s3_key;
+    if (tradeS3Key) {
+      const buckets = getS3BucketNames();
+      data.s3_bucket = buckets.politicianTrades;
+      data.s3_key = tradeS3Key;
+      data.s3_uri = `${buckets.politicianTrades}/${tradeS3Key}`;
+    }
     return {
       id: `politician_trade_${tradeId}_${Date.now()}-batch-${Math.random()}`,
       type: 'politician_trade' as const,
       title,
       subtitle,
-      data: trade, // Include all trade data
+      data,
       timestamp: Date.now(),
     };
   });
@@ -970,13 +1024,21 @@ export const addBillToContext = (
   if (bill.introduced_date) subtitleParts.push(`Introduced: ${formatDate(bill.introduced_date)}`);
   
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Congress Bill';
+
+  const data = { ...bill };
+  if (bill.bill_text_html_s3_key) {
+    const buckets = getS3BucketNames();
+    data.s3_bucket = buckets.congressBills;
+    data.s3_key = bill.bill_text_html_s3_key;
+    data.s3_uri = `${buckets.congressBills}/${bill.bill_text_html_s3_key}`;
+  }
   
   const contextItem: ContextItem = {
     id: `congress_bill_${billId}_${Date.now()}`,
     type: 'congress_bill',
     title,
     subtitle,
-    data: bill,
+    data,
     timestamp: Date.now(),
   };
   
@@ -1033,13 +1095,19 @@ export const addMultipleBillsToContext = (
     if (bill.introduced_date) subtitleParts.push(`Introduced: ${formatDate(bill.introduced_date)}`);
     
     const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Congress Bill';
-    
+    const data = { ...bill };
+    if (bill.bill_text_html_s3_key) {
+      const buckets = getS3BucketNames();
+      data.s3_bucket = buckets.congressBills;
+      data.s3_key = bill.bill_text_html_s3_key;
+      data.s3_uri = `${buckets.congressBills}/${bill.bill_text_html_s3_key}`;
+    }
     return {
       id: `congress_bill_${billId}_${Date.now()}_${Math.random()}`,
       type: 'congress_bill' as const,
       title,
       subtitle,
-      data: bill,
+      data,
       timestamp: Date.now(),
     };
   });
@@ -1135,13 +1203,22 @@ export const addLDAFilingToContext = (
   }
   
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'LDA Filing';
+
+  const data = { ...filing };
+  const ldaS3Key = filing.s3_key ?? filing.document_s3_key;
+  if (ldaS3Key) {
+    const buckets = getS3BucketNames();
+    data.s3_bucket = buckets.ldaDisclosures;
+    data.s3_key = ldaS3Key;
+    data.s3_uri = `${buckets.ldaDisclosures}/${ldaS3Key}`;
+  }
   
   const contextItem: ContextItem = {
     id: `lda_filing_${filingId}_${Date.now()}`,
     type: 'lda_filing',
     title,
     subtitle,
-    data: filing, // Include all filing data
+    data,
     timestamp: Date.now(),
   };
   
@@ -1202,13 +1279,20 @@ export const addMultipleLDAFilingsToContext = (
     }
     
     const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'LDA Filing';
-    
+    const data = { ...filing };
+    const ldaS3Key = filing.s3_key ?? filing.document_s3_key;
+    if (ldaS3Key) {
+      const buckets = getS3BucketNames();
+      data.s3_bucket = buckets.ldaDisclosures;
+      data.s3_key = ldaS3Key;
+      data.s3_uri = `${buckets.ldaDisclosures}/${ldaS3Key}`;
+    }
     return {
       id: `lda_filing_${filingId}_${Date.now()}_${Math.random()}`,
       type: 'lda_filing' as const,
       title,
       subtitle,
-      data: filing, // Include all filing data
+      data,
       timestamp: Date.now(),
     };
   });
