@@ -536,8 +536,8 @@ export default function LandingDemoDashboard() {
         {/* Header: title, description, zoom - full width */}
         <Box sx={{ flexShrink: 0, py: 4, px: 2 }}>
           <Box sx={{ textAlign: 'center', mb: 2 }}>
-            <Typography variant="h4" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
-              Try the dashboard
+            <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', mb: 1, fontSize: { xs: '1.75rem', md: '2rem' } }}>
+              Try out FinGov
             </Typography>
             <Typography sx={{ color: 'text.secondary', fontSize: '1.125rem' }}>
               Drag and resize tiles, add items to the chat sidebar. This demo uses sample data only.

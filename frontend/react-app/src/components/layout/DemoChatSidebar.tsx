@@ -129,6 +129,8 @@ export default function DemoChatSidebar() {
   const [isDragOverSidebar, setIsDragOverSidebar] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [inputAreaHeight, setInputAreaHeight] = useState(80);
   const responseIndexRef = useRef(0);
   const suppressScrollUntilRef = useRef(0);
 
@@ -238,6 +240,14 @@ export default function DemoChatSidebar() {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
   }, [messages]);
+
+  useEffect(() => {
+    const el = inputAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setInputAreaHeight(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const handleRemoveContext = useCallback((index: number) => {
     setContextItems((prev) => prev.filter((_, i) => i !== index));
@@ -363,8 +373,24 @@ export default function DemoChatSidebar() {
         )}
       </Box>
 
-      {/* Messages - flex 1, scrolls internally (we scroll this container only to avoid moving the page) */}
-      <Box ref={messagesScrollRef} sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Messages - flex 1, scrolls internally; bottom padding for floating input */}
+      <Box
+        ref={messagesScrollRef}
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          p: 2,
+          pb: `${inputAreaHeight + 10}px`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          '&::-webkit-scrollbar': { width: '6px' },
+          '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' },
+          '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' },
+          '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' },
+        }}
+      >
         {messages.length === 0 && (
           <Typography variant="body2" sx={{ color: '#6b7280', textAlign: 'center', mt: 4 }}>
             Send a message to see a demo response. Chat is not connected in this preview.
@@ -411,24 +437,39 @@ export default function DemoChatSidebar() {
         <div ref={messagesEndRef} />
       </Box>
 
-      {/* Input */}
-      <Box data-demo-input sx={{ flexShrink: 0, p: 2, borderTop: '1px solid #374151' }}>
+      {/* Input - floating, match GlobalChatSidebar (no file upload); no blue highlight, scrollbar, expands to half sidebar */}
+      <Box
+        ref={inputAreaRef}
+        data-demo-input
+        sx={{
+          flexShrink: 0,
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          p: 0.625,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          zIndex: 1,
+          pointerEvents: 'auto',
+        }}
+      >
         <Box
+          onWheel={(e) => e.stopPropagation()}
           sx={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            gap: 1,
-            bgcolor: 'rgba(55, 65, 81, 0.5)',
-            borderRadius: 2,
-            border: '1px solid #374151',
-            px: 1.5,
-            py: 1,
+            width: '100%',
+            p: 1,
+            borderRadius: 0.5,
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+            '& *:focus': { outline: 'none !important' },
           }}
         >
           <TextField
             fullWidth
             multiline
-            maxRows={4}
             placeholder="Message (demo only)..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -441,23 +482,79 @@ export default function DemoChatSidebar() {
             variant="standard"
             InputProps={{ disableUnderline: true }}
             sx={{
-              '& .MuiInput-input': { color: '#e5e7eb', fontSize: '0.875rem' },
+              '& .MuiInput-root': {
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none !important',
+                boxShadow: 'none !important',
+                padding: 0,
+                margin: 0,
+                overflow: 'visible',
+                '&:before': { display: 'none' },
+                '&:after': { display: 'none' },
+                '&:hover:before': { display: 'none' },
+                '&:focus': { outline: 'none !important', boxShadow: 'none !important' },
+                '&:focus-within': { outline: 'none !important', boxShadow: 'none !important' },
+                '&.Mui-focused': {
+                  outline: 'none !important',
+                  boxShadow: 'none !important',
+                  '&:before': { display: 'none' },
+                  '&:after': { display: 'none' },
+                },
+              },
+              '& .MuiInput-input': {
+                color: '#ffffff',
+                fontSize: '0.875rem',
+                paddingTop: '3px',
+                paddingBottom: '3px',
+                paddingLeft: '3px',
+                paddingRight: '3px',
+                lineHeight: '1.5',
+                outline: 'none !important',
+                border: 'none !important',
+                '&:focus': { outline: 'none !important', border: 'none !important', boxShadow: 'none !important' },
+                '&::placeholder': { color: '#6b7280', opacity: 1 },
+              },
+              '& textarea': {
+                outline: 'none !important',
+                border: 'none !important',
+                resize: 'none',
+                boxShadow: 'none !important',
+                maxHeight: '50vh',
+                minHeight: '24px',
+                overflowY: 'auto !important',
+                overflowX: 'hidden',
+                display: 'block',
+                paddingTop: '3px',
+                paddingBottom: '3px',
+                paddingLeft: '3px',
+                paddingRight: '3px',
+                '&:focus': { outline: 'none !important', border: 'none !important', boxShadow: 'none !important' },
+                '&:focus-visible': { outline: 'none !important', border: 'none !important', boxShadow: 'none !important' },
+                '&::-webkit-scrollbar': { width: '6px' },
+                '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' },
+                '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: '3px' },
+                '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' },
+              },
             }}
           />
-          <Tooltip title="Send">
-            <span>
-              <IconButton
-                onClick={handleSend}
-                disabled={!inputValue.trim() || isLoading}
-                sx={{
-                  color: inputValue.trim() && !isLoading ? '#22c55e' : '#6b7280',
-                  '&:hover': { bgcolor: inputValue.trim() && !isLoading ? 'rgba(34, 197, 94, 0.1)' : undefined },
-                }}
-              >
-                <SendIcon fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', mt: 0.5 }}>
+            <Tooltip title="Send">
+              <span>
+                <IconButton
+                  onClick={handleSend}
+                  disabled={!inputValue.trim() || isLoading}
+                  size="small"
+                  sx={{
+                    color: inputValue.trim() && !isLoading ? '#22c55e' : '#6b7280',
+                    '&:hover': { bgcolor: inputValue.trim() && !isLoading ? 'rgba(34, 197, 94, 0.1)' : undefined },
+                  }}
+                >
+                  <SendIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
         </Box>
       </Box>
     </Box>
