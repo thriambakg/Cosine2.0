@@ -1,33 +1,124 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Container,
   Typography,
   Button,
-  Card,
+  Collapse,
+  Dialog,
+  DialogContent,
+  IconButton,
 } from '@mui/material';
 import {
-  SmartToy as BotIcon,
-  TrendingUp,
-  Security as ShieldIcon,
-  Bolt as ZapIcon,
+  Menu as MenuIcon,
+  Close as CloseIcon,
+  ExpandMore as ExpandMoreIcon,
   ArrowForward as ArrowRightIcon,
-  People as UsersIcon,
-  TrendingDown,
-  Gavel as GavelIcon,
-  Description as DescriptionIcon,
-  Article as ArticleIcon,
-  AccountBalance as InstitutionIcon,
-  Storage as StorageIcon,
-  Psychology as BrainIcon,
 } from '@mui/icons-material';
 
 import { AuthModal } from '../auth';
 import { useAuth } from '@/contexts/AuthContext';
+import { GlobalChatProvider } from '@/contexts/GlobalChatContext';
+import LandingDemoDashboard from './LandingDemoDashboard';
+
+// Screenshot block: matches screenshot size/shape, scaled to fit; click opens full-size dialog
+const ScreenshotBlock = ({
+  title,
+  imageSrc,
+  imageAlt,
+  onPreview,
+}: {
+  title: string;
+  imageSrc?: string;
+  imageAlt?: string;
+  onPreview?: (src: string, alt: string) => void;
+}) => (
+  <Box
+    sx={{
+      width: '100%',
+      padding: 0,
+      borderRadius: 1,
+      overflow: 'hidden',
+      border: '1px solid',
+      borderColor: 'divider',
+      bgcolor: 'grey.900',
+      cursor: imageSrc && onPreview ? 'pointer' : 'default',
+      '&:hover': imageSrc && onPreview ? { borderColor: 'primary.main', boxShadow: 2 } : {},
+    }}
+    onClick={() => imageSrc && onPreview?.(imageSrc, imageAlt || title)}
+    role={imageSrc && onPreview ? 'button' : undefined}
+    aria-label={imageSrc && onPreview ? `View larger: ${imageAlt || title}` : undefined}
+  >
+    {imageSrc ? (
+      <Box
+        component="img"
+        src={imageSrc}
+        alt={imageAlt || title}
+        sx={{
+          display: 'block',
+          width: '100%',
+          height: 'auto',
+          maxHeight: 'min(65vh, 520px)',
+          objectFit: 'contain',
+          verticalAlign: 'middle',
+        }}
+      />
+    ) : (
+      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', px: 2, py: 3 }}>
+        Screenshot placeholder: {title}
+        <br />
+        <Typography component="span" variant="caption" color="text.disabled">
+          Add image to public/screenshots/ and set imageSrc
+        </Typography>
+      </Typography>
+    )}
+  </Box>
+);
+
+const FEATURES = [
+  {
+    id: 'dashboards',
+    title: 'Unified dashboards',
+    description: 'Build a custom research workspace with tiles for SEC search, LDA disclosures, Congress bills, politician trades, government contracts, news, and portfolios. Arrange and resize tiles to match how you work, and pin what matters most.',
+    placeholderLabel: 'Dashboards',
+    imageSrc: '/screenshots/DashboardPreview.png',
+    imageAlt: 'FinGov dashboard',
+  },
+  {
+    id: 'search',
+    title: 'Search across government data',
+    description: 'Query SEC filings, lobbying disclosures, Congress bills, politician trades, and government contracts from one interface. Use filters to narrow results, save search sessions for later, and return to your work without starting over.',
+    placeholderLabel: 'Search pages',
+    imageSrc: '/screenshots/ContractSearchPreview.png',
+    imageAlt: 'Search pages',
+  },
+  {
+    id: 'files',
+    title: 'Files and storage',
+    description: 'Keep your research organized in an integrated filesystem. Store documents and data in one workspace, attach files or folders to the AI assistant for context, and avoid juggling multiple tools to find what you need.',
+    placeholderLabel: 'File storage',
+    imageSrc: '/screenshots/FilepagePreview.png',
+    imageAlt: 'File storage',
+  },
+  {
+    id: 'chat',
+    title: 'AI research assistant',
+    description: 'Bring SEC filings, bills, trades, or any document into the conversation. The AI reads your selected context and helps with summaries, comparisons, and answers—so you can analyze faster and make better decisions.',
+    placeholderLabel: 'AI Chat',
+    imageSrc: '/screenshots/ChatPreview.png',
+    imageAlt: 'AI Chat',
+  },
+];
+
+const FAQ_ITEMS = [
+  { q: 'What is FinGov?', a: 'FinGov is a research platform that brings together government disclosures, SEC filings, lobbying data, Congress bills, politician trades, and government contracts in one workspace. You can search across these sources, save sessions and files, and use an AI assistant to summarize, compare, and answer questions about the data you select.' },
+  { q: 'What data can I search?', a: 'You can search SEC filings, LDA lobbying disclosures, Congress bills, politician stock trades, and government contract awards. The platform also supports news, stock data, and your own files, so you can combine public and private sources in a single workflow.' },
+  { q: 'How does the AI chat work?', a: 'You choose what the AI sees by adding search results, filings, or documents to your session context. The assistant reads that material and can summarize it, compare entities, and answer questions—so the answers are grounded in the data you’ve selected rather than generic information.' },
+];
 
 export default function LandingPageMUI() {
-  // Use localStorage to persist modal state across component remounts
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [authModalOpen, setAuthModalOpenRaw] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('authModalOpen');
@@ -42,564 +133,361 @@ export default function LandingPageMUI() {
     }
     return 'login';
   });
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [faqOpen, setFaqOpen] = useState<number | null>(null);
   const { isAuthenticated } = useAuth();
   const [searchParams] = useSearchParams();
 
-  // Wrapper functions to log where state is being changed from AND persist to localStorage
   const setAuthModalOpen = (value: boolean | ((prev: boolean) => boolean)) => {
-    const stack = new Error().stack || '';
-    const caller = stack.split('\n')[2] || 'unknown';
-    console.log(`🏠 LandingPage: setAuthModalOpen(${value}) called from:`, caller);
-    setAuthModalOpenRaw(prevValue => {
-      const newValue = typeof value === 'function' ? value(prevValue) : value;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('authModalOpen', String(newValue));
-      }
-      return newValue;
+    setAuthModalOpenRaw(prev => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      if (typeof window !== 'undefined') localStorage.setItem('authModalOpen', String(next));
+      return next;
     });
   };
 
   const setAuthMode = (mode: 'login' | 'register' | ((prev: 'login' | 'register') => 'login' | 'register')) => {
-    const stack = new Error().stack || '';
-    const caller = stack.split('\n')[2] || 'unknown';
-    console.log(`🏠 LandingPage: setAuthMode(${mode}) called from:`, caller);
-    setAuthModeRaw(prevMode => {
-      const newMode = typeof mode === 'function' ? mode(prevMode) : mode;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('authMode', newMode);
-      }
-      return newMode;
+    setAuthModeRaw(prev => {
+      const next = typeof mode === 'function' ? mode(prev) : mode;
+      if (typeof window !== 'undefined') localStorage.setItem('authMode', next);
+      return next;
     });
   };
 
-  // Log auth modal state changes
   useEffect(() => {
-    console.log('🏠 LandingPage: useEffect [authModalOpen, authMode] fired with:', { authModalOpen, authMode });
-    console.log('🏠 LandingPage: Dependencies changed - checking what changed');
-  }, [authModalOpen, authMode]);
-
-  useEffect(() => {
-    if (isAuthenticated && typeof window !== 'undefined' && !authModalOpen) {
-      console.log('🏠 LandingPage: User authenticated and modal not open - redirecting to /chat');
-      window.location.href = '/chat';
-    }
+    if (isAuthenticated && !authModalOpen) window.location.href = '/chat';
   }, [isAuthenticated, authModalOpen]);
 
-  // Check for error parameters and automatically open auth modal
   useEffect(() => {
     const error = searchParams.get('error');
-    console.log('🏠 LandingPage: searchParams effect running, error param:', error, 'searchParams:', Object.fromEntries(searchParams));
     if (error) {
-      console.log('🏠 LandingPage: Error param detected, opening login modal:', error);
       setAuthMode('login');
       setAuthModalOpen(true);
     }
   }, [searchParams]);
 
   const handleGetStarted = () => {
-    console.log('🏠 LandingPage: handleGetStarted called');
     setAuthMode('register');
     setAuthModalOpen(true);
   };
 
   const handleSignIn = () => {
-    console.log('🏠 LandingPage: handleSignIn called');
     setAuthMode('login');
     setAuthModalOpen(true);
   };
 
+  const scrollTo = (id: string) => {
+    setMobileMenuOpen(false);
+    const el = document.getElementById(id);
+    el?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
-    <Box sx={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Background Effects */}
-      <Box sx={{
-        position: 'absolute',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.3)'
-      }} />
-      <Box sx={{
-        position: 'absolute',
-        inset: 0
-      }}>
-        <Box sx={{
-          position: 'absolute',
-          top: '25%',
-          left: '25%',
-          width: 384,
-          height: 384,
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-          borderRadius: '0%',
-          filter: 'blur(48px)',
-          animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
-        }} />
-        <Box sx={{
-          position: 'absolute',
-          bottom: '25%',
-          right: '25%',
-          width: 384,
-          height: 384,
-          backgroundColor: 'rgba(34, 197, 94, 0.1)',
-          borderRadius: '0%',
-          filter: 'blur(48px)',
-          animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-          animationDelay: '1s'
-        }} />
-        <Box sx={{
-          position: 'absolute',
-          top: '50%',
-          right: '33%',
-          width: 256,
-          height: 256,
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-          borderRadius: '0%',
-          filter: 'blur(32px)',
-          animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-          animationDelay: '0.5s'
-        }} />
+    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.900', position: 'relative', overflow: 'hidden' }}>
+      {/* Background */}
+      <Box sx={{ position: 'absolute', inset: 0 }}>
+        <Box sx={{ position: 'absolute', top: '20%', left: '20%', width: 400, height: 400, bgcolor: 'primary.main', opacity: 0.06, borderRadius: '50%', filter: 'blur(60px)' }} />
+        <Box sx={{ position: 'absolute', bottom: '20%', right: '20%', width: 400, height: 400, bgcolor: 'secondary.main', opacity: 0.06, borderRadius: '50%', filter: 'blur(60px)' }} />
       </Box>
 
-      {/* Content */}
-      <Box sx={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        
-        {/* Sign In Button - Floating in top right */}
-        <Button
-          onClick={handleSignIn}
-          variant="outlined"
-          sx={{
-            position: 'fixed',
-            top: 24,
-            right: 24,
-            zIndex: 50,
-            border: '2px solid #3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-            color: '#3b82f6',
-            fontWeight: 600,
-            backdropFilter: 'blur(4px)',
-            borderRadius: '0px',
-            px: 3,
-            py: 1.5,
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            '&:hover': {
-              backgroundColor: '#3b82f6',
-              color: '#ffffff',
-              border: '2px solid #3b82f6',
-              transform: 'scale(1.05)',
-            }
-          }}
-        >
-          Sign In
-        </Button>
+      {/* Nav */}
+      <Box
+        component="nav"
+        sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
+          bgcolor: 'grey.900',
+          borderBottom: 1,
+          borderColor: 'divider',
+        }}
+      >
+        <Container maxWidth="lg" disableGutters sx={{ px: { xs: 1.5, md: 2 }, py: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Link
+              to="/"
+              style={{
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                margin: 0,
+                padding: 0,
+                lineHeight: 1,
+              }}
+            >
+              <Box
+                component="img"
+                src="/icon.png"
+                alt="FinGov"
+                sx={{
+                  height: { xs: 44, sm: 52, md: 60 },
+                  width: 'auto',
+                  display: 'block',
+                }}
+              />
+            </Link>
+            <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 3 }}>
+              <Button color="inherit" onClick={() => scrollTo('features')} sx={{ textTransform: 'none', fontWeight: 600, fontSize: '1rem' }}>
+                Features
+              </Button>
+              <Button color="inherit" onClick={() => scrollTo('faq')} sx={{ textTransform: 'none', fontWeight: 600, fontSize: '1rem' }}>
+                FAQ
+              </Button>
+              <Button color="inherit" onClick={() => scrollTo('demo')} sx={{ textTransform: 'none', fontWeight: 600, fontSize: '1rem' }}>
+                Try Demo
+              </Button>
+              <Button color="inherit" onClick={handleSignIn} sx={{ textTransform: 'none', fontWeight: 600, fontSize: '1rem' }}>
+                Sign In
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleGetStarted}
+                endIcon={<ArrowRightIcon />}
+                sx={{ textTransform: 'none', fontWeight: 600, px: 2.5, py: 1.25, fontSize: '1rem', borderRadius: 0, boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}
+              >
+                Get Started
+              </Button>
+            </Box>
+            <Button
+              color="inherit"
+              sx={{ display: { md: 'none' }, minWidth: 40 }}
+              onClick={() => setMobileMenuOpen(o => !o)}
+              aria-label="Toggle menu"
+            >
+              {mobileMenuOpen ? <CloseIcon /> : <MenuIcon />}
+            </Button>
+          </Box>
+        </Container>
+        <Collapse in={mobileMenuOpen}>
+          <Box sx={{ px: 2, pb: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Button color="inherit" fullWidth onClick={() => scrollTo('features')}>Features</Button>
+            <Button color="inherit" fullWidth onClick={() => scrollTo('faq')}>FAQ</Button>
+            <Button color="inherit" fullWidth onClick={() => scrollTo('demo')}>Try Demo</Button>
+            <Button color="inherit" fullWidth onClick={handleSignIn}>Sign In</Button>
+            <Button variant="contained" fullWidth onClick={handleGetStarted} sx={{ borderRadius: 0, boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}>Get Started</Button>
+          </Box>
+        </Collapse>
+      </Box>
 
-        {/* Hero Section */}
-        <Box sx={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          px: 3,
-          py: 6
-        }}>
-          <Container maxWidth="lg">
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' },
-              gap: 6,
-              alignItems: 'center'
-            }}>
-              <Box sx={{ textAlign: { xs: 'center', lg: 'left' } }}>
-                {/* FinGov Logo */}
-                <Box sx={{ mb: 3, display: 'flex', justifyContent: { xs: 'center', lg: 'flex-start' } }}>
-                  <Box 
-                    component="img"
-                    src="/logo-new.png"
-                    alt="FinGov"
-                    sx={{ 
-                      height: { xs: 150, md: 200 },
-                      width: 'auto',
-                      filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))',
-                    }} 
-                  />
-                </Box>
-                
-                <Typography 
-                  variant="body1" 
-                  sx={{ 
-                    fontSize: { xs: '1.25rem', md: '1.5rem' },
-                    color: '#e2e8f0',
-                    mb: 4,
-                    lineHeight: 1.6,
-                    fontWeight: 500
-                  }}
-                >
-                  Research government disclosures, track political influence, analyze financial data, and get AI-powered insights. 
-                  Access SEC filings, lobbying disclosures, Congress bills, politician trades, government contracts, and more in one unified platform.
-                </Typography>
-                
-                <Box sx={{ mb: 4 }}>
-                  <Button
-                    onClick={handleGetStarted}
-                    size="large"
-                    variant="outlined"
-                    sx={{
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                      color: '#93c5fd',
-                      px: 4,
-                      py: 2,
-                      fontSize: '1rem',
-                      fontWeight: 600,
-                      borderRadius: '0px',
-                      boxShadow: '0 4px 6px -1px rgb(59 130 246 / 0.1)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.1em',
-                      transition: 'all 0.3s ease',
-                      border: '1px solid rgba(59, 130, 246, 0.3)',
-                      '&:hover': {
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        border: '1px solid rgba(59, 130, 246, 0.5)',
-                        color: '#bfdbfe',
-                        boxShadow: '0 6px 8px -2px rgb(59 130 246 / 0.15)',
-                        transform: 'scale(1.02)',
-                      }
-                    }}
-                    endIcon={<ArrowRightIcon />}
-                  >
-                    Get Started Free
-                  </Button>
-                </Box>
-
-                {/* Trust Indicators */}
-                <Box sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: { xs: 'center', lg: 'flex-start' },
-                  gap: 4,
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  flexWrap: 'wrap'
-                }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <ShieldIcon sx={{ fontSize: 20, color: '#22c55e' }} />
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>Secure & Private</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <UsersIcon sx={{ fontSize: 20, color: '#3b82f6' }} />
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>Open Data Access</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <ZapIcon sx={{ fontSize: 20, color: '#22c55e' }} />
-                    <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 600 }}>AI-Powered Research</Typography>
-                  </Box>
-                </Box>
-              </Box>
-
-              {/* Feature Preview */}
-              <Box sx={{ position: 'relative' }}>
-                <Card sx={{
-                  backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                  backdropFilter: 'blur(16px)',
-                  borderRadius: '0px',
-                  p: 4,
-                  border: '2px solid #374151',
-                  boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.5)'
-                }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                    <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, textTransform: 'uppercase' }}>
-                      Research Dashboard
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Box sx={{ width: 12, height: 12, backgroundColor: '#dc2626', borderRadius: '0%' }} />
-                      <Box sx={{ width: 12, height: 12, backgroundColor: '#fbbf24', borderRadius: '0%' }} />
-                      <Box sx={{ width: 12, height: 12, backgroundColor: '#22c55e', borderRadius: '0%' }} />
-                    </Box>
-                  </Box>
-                  
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <Card sx={{
-                      backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                      borderRadius: '0px',
-                      p: 2,
-                      border: '1px solid #4b5563'
-                    }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.875rem', fontWeight: 600 }}>
-                          SEC Filings Found
-                        </Typography>
-                        <DescriptionIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
-                      </Box>
-                      <Typography variant="h5" sx={{ color: '#ffffff', fontWeight: 800 }}>
-                        1,247
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#3b82f6', fontSize: '0.875rem', fontWeight: 600 }}>
-                        Last 30 days
-                      </Typography>
-                    </Card>
-                    
-                    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                      <Card sx={{
-                        backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                        borderRadius: '0px',
-                        p: 1.5,
-                        border: '1px solid #4b5563'
-                      }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                          <GavelIcon sx={{ fontSize: 16, color: '#3b82f6' }} />
-                          <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600 }}>
-                            LDA Disclosures
-                          </Typography>
-                        </Box>
-                        <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 800 }}>
-                          856
-                        </Typography>
-                      </Card>
-                      <Card sx={{
-                        backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                        borderRadius: '0px',
-                        p: 1.5,
-                        border: '1px solid #4b5563'
-                      }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                          <ArticleIcon sx={{ fontSize: 16, color: '#22c55e' }} />
-                          <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontWeight: 600 }}>
-                            Congress Bills
-                          </Typography>
-                        </Box>
-                        <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 800 }}>
-                          342
-                        </Typography>
-                      </Card>
-                    </Box>
-                    
-                    <Card sx={{
-                      backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                      borderRadius: '0px',
-                      p: 1.5,
-                      border: '1px solid #4b5563'
-                    }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                        <BotIcon sx={{ fontSize: 16, color: '#6366f1' }} />
-                        <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.875rem', fontWeight: 600 }}>
-                          AI Research Assistant
-                        </Typography>
-                      </Box>
-                      <Typography variant="caption" sx={{ color: '#ffffff', fontSize: '0.75rem' }}>
-                        Ask questions about government data, analyze relationships, and get insights powered by AI.
-                      </Typography>
-                    </Card>
-                  </Box>
-                </Card>
-                
-                {/* Floating Elements */}
-                <Box sx={{
-                  position: 'absolute',
-                  top: -16,
-                  right: -16,
-                  background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
-                  borderRadius: '0%',
-                  p: 1.5,
-                  boxShadow: '0 10px 15px -3px rgb(34 197 94 / 0.3)',
-                  animation: 'bounce 1s infinite',
-                  border: '2px solid #16a34a'
-                }}>
-                  <TrendingUp sx={{ fontSize: 24, color: '#ffffff' }} />
-                </Box>
-                <Box sx={{
-                  position: 'absolute',
-                  bottom: -16,
-                  left: -16,
-                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
-                  borderRadius: '0%',
-                  p: 1.5,
-                  boxShadow: '0 10px 15px -3px rgb(220 38 38 / 0.3)',
-                  animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-                  border: '2px solid #b91c1c'
-                }}>
-                  <TrendingDown sx={{ fontSize: 24, color: '#ffffff' }} />
-                </Box>
-              </Box>
+      <Box component="main" sx={{ position: 'relative', zIndex: 1, pt: { xs: 8, md: 10 } }}>
+        {/* Hero */}
+        <Box sx={{ py: { xs: 6, md: 10 }, px: 2 }}>
+          <Container maxWidth="md">
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+              <Box component="img" src="/logo-new.png" alt="FinGov" sx={{ height: { xs: 100, sm: 130, md: 160 }, width: 'auto' }} />
+            </Box>
+            <Typography component="h1" sx={{ fontWeight: 800, color: 'text.primary', mt: 1, mb: 2, fontSize: { xs: '1.75rem', sm: '2.25rem', md: '2.75rem' }, lineHeight: 1.2 }}>
+              Government data and financial research in one place
+            </Typography>
+            <Typography sx={{ color: 'text.secondary', fontSize: { xs: '1.125rem', md: '1.25rem' }, lineHeight: 1.7, mb: 4 }}>
+              FinGov unifies SEC filings, lobbying disclosures, congressional legislation, political disclosures, and government contracts in a single workspace. Search and filter across sources, then add any result to your AI assistant for analysis, summaries, and answers. Designed for researchers, compliance professionals, and investors who need reliable access to government and financial data.
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+              <Button variant="contained" size="large" onClick={handleGetStarted} endIcon={<ArrowRightIcon />} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none' }}>
+                Get Started Free
+              </Button>
+              <Button variant="outlined" size="large" onClick={() => scrollTo('demo')} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0 }}>
+                Try Demo
+              </Button>
             </Box>
           </Container>
         </Box>
 
-        {/* Features Section */}
-        <Box sx={{ px: 3, pb: 6 }}>
+        {/* Features: screenshots — 30% larger; click for full-size preview */}
+        <Box id="features" sx={{ py: 8, px: 2, scrollMarginTop: 80 }}>
           <Container maxWidth="lg">
             <Box sx={{ textAlign: 'center', mb: 6 }}>
-              <Typography variant="h4" sx={{ color: '#ffffff', fontWeight: 800, mb: 2, textTransform: 'uppercase' }}>
-                Powerful Research Tools
+              <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', mb: 1, fontSize: { xs: '1.75rem', md: '2rem' } }}>
+                What you can do with FinGov
               </Typography>
-              <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                Access government data, track political influence, and analyze financial disclosures
+              <Typography sx={{ color: 'text.secondary', fontSize: { xs: '1.125rem', md: '1.25rem' } }}>
+                A single platform for dashboards, search, file storage, and an AI research assistant—so you can find, organize, and analyze without switching tools.
               </Typography>
             </Box>
-            
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' },
-              gap: 4
-            }}>
-              <Card sx={{
-                backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                backdropFilter: 'blur(16px)',
-                border: '2px solid #374151',
-                p: 3,
-                transition: 'all 0.3s ease',
-                borderRadius: '0px',
-                '&:hover': {
-                  backgroundColor: 'rgba(31, 41, 55, 0.9)',
-                  transform: 'scale(1.05)',
-                  border: '2px solid #6b7280',
-                }
-              }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Box sx={{
-                    width: 64,
-                    height: 64,
-                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
-                    borderRadius: '0px',
-                    display: 'flex',
+
+            {FEATURES.map((feature, index) => {
+              const reverse = index % 2 === 1;
+              return (
+                <Box
+                  key={feature.id}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', md: reverse ? '1.3fr 1fr' : '1fr 1.3fr' },
+                    gap: { xs: 3, md: 5 },
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    mx: 'auto',
-                    mb: 2,
-                    border: '2px solid #4b5563'
-                  }}>
-                    <InstitutionIcon sx={{ fontSize: 32, color: '#9ca3af' }} />
+                    mb: 8,
+                  }}
+                >
+                  <Box sx={{ order: { xs: 1, md: reverse ? 2 : 1 }, pr: { md: reverse ? 0 : 1 } }}>
+                    <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary', mb: 1.5, fontSize: { xs: '1.2rem', md: '1.4rem' } }}>
+                      {feature.title}
+                    </Typography>
+                    <Typography sx={{ color: 'text.secondary', lineHeight: 1.65, fontSize: { xs: '0.95rem', md: '1.0625rem' } }}>
+                      {feature.description}
+                    </Typography>
                   </Box>
-                  <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
-                    Government Data Search
+                  <Box sx={{ order: { xs: 2, md: reverse ? 1 : 2 } }}>
+                    <ScreenshotBlock
+                      title={feature.placeholderLabel}
+                      imageSrc={feature.imageSrc}
+                      imageAlt={feature.imageAlt}
+                      onPreview={(src, alt) => setPreviewImage({ src, alt })}
+                    />
+                  </Box>
+                </Box>
+              );
+            })}
+          </Container>
+        </Box>
+
+        <Dialog
+          open={!!previewImage}
+          onClose={() => setPreviewImage(null)}
+          maxWidth={false}
+          PaperProps={{
+            sx: {
+              maxWidth: '95vw',
+              maxHeight: '95vh',
+              bgcolor: 'grey.900',
+              borderRadius: 2,
+            },
+          }}
+        >
+          <DialogContent sx={{ p: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconButton
+              aria-label="Close preview"
+              onClick={() => setPreviewImage(null)}
+              sx={{ position: 'absolute', top: 8, right: 8, color: 'grey.400', zIndex: 1 }}
+            >
+              <CloseIcon />
+            </IconButton>
+            {previewImage && (
+              <Box
+                component="img"
+                src={previewImage.src}
+                alt={previewImage.alt}
+                sx={{ maxWidth: '100%', maxHeight: '95vh', width: 'auto', height: 'auto', objectFit: 'contain' }}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Who is it for */}
+        <Box sx={{ py: 8, px: 2, bgcolor: 'grey.800' }}>
+          <Container maxWidth="lg">
+            <Box sx={{ textAlign: 'center', mb: 6 }}>
+              <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', mb: 1, fontSize: { xs: '1.75rem', md: '2rem' } }}>
+                Who uses FinGov
+              </Typography>
+              <Typography sx={{ color: 'text.secondary', fontSize: { xs: '1.125rem', md: '1.25rem' } }}>
+                Professionals who need to move quickly between government disclosures and financial research—without leaving one platform or losing context.
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 3 }}>
+              {[
+                { title: 'Research & due diligence', desc: 'Run searches across SEC, LDA, Congress, and contracts in one place, save sessions for later, and share context with your team so everyone works from the same view.' },
+                { title: 'Compliance & policy', desc: 'Monitor lobbying activity, political trades, and government spending. Use the AI assistant to summarize and compare filings so you can stay on top of what matters.' },
+                { title: 'Investors', desc: 'Use SEC filings, political trades, and government data for due diligence and market context. Combine them with news and portfolio tools inside a single workspace.' },
+                { title: 'Data & filings', desc: 'Keep filings, documents, and files in one place. Attach them to the AI assistant when you need analysis or answers, without switching between apps.' },
+              ].map((card, i) => (
+                <Box key={i} sx={{ p: 3, borderRadius: 2, border: 1, borderColor: 'divider', bgcolor: 'grey.900' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1, fontSize: '1.125rem' }}>
+                    {card.title}
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    Search SEC filings, lobbying disclosures, Congress bills, politician trades, and government contracts with advanced filtering.
+                  <Typography sx={{ color: 'text.secondary', fontSize: { xs: '1rem', md: '1.0625rem' }, lineHeight: 1.6 }}>
+                    {card.desc}
                   </Typography>
                 </Box>
-              </Card>
-              
-              <Card sx={{
-                backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                backdropFilter: 'blur(16px)',
-                border: '2px solid #374151',
-                p: 3,
-                transition: 'all 0.3s ease',
-                borderRadius: '0px',
-                '&:hover': {
-                  backgroundColor: 'rgba(31, 41, 55, 0.9)',
-                  transform: 'scale(1.05)',
-                  border: '2px solid #6b7280',
-                }
-              }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Box sx={{
-                    width: 64,
-                    height: 64,
-                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
-                    borderRadius: '0px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    mx: 'auto',
-                    mb: 2,
-                    border: '2px solid #4b5563'
-                  }}>
-                    <BrainIcon sx={{ fontSize: 32, color: '#9ca3af' }} />
-                  </Box>
-                  <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
-                    AI Research Assistant
+              ))}
+            </Box>
+          </Container>
+        </Box>
+
+        {/* FAQ */}
+        <Box id="faq" sx={{ py: 8, px: 2, scrollMarginTop: 80 }}>
+          <Container maxWidth="md">
+            <Box sx={{ textAlign: 'center', mb: 6 }}>
+              <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', mb: 1, fontSize: { xs: '1.75rem', md: '2rem' } }}>
+                Frequently Asked Questions
+              </Typography>
+            </Box>
+            {FAQ_ITEMS.map((item, i) => (
+              <Box
+                key={i}
+                sx={{
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  py: 2,
+                }}
+              >
+                <Button
+                  fullWidth
+                  onClick={() => setFaqOpen(faqOpen === i ? null : i)}
+                  endIcon={<ExpandMoreIcon sx={{ transform: faqOpen === i ? 'rotate(180deg)' : 'none' }} />}
+                  sx={{ justifyContent: 'space-between', textTransform: 'none', fontWeight: 600, color: 'text.primary', fontSize: '1.125rem' }}
+                >
+                  {item.q}
+                </Button>
+                <Collapse in={faqOpen === i}>
+                  <Typography sx={{ color: 'text.secondary', pl: 0, pr: 4, pt: 1, fontSize: '1.0625rem' }}>
+                    {item.a}
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    Get intelligent answers about government data, analyze relationships between entities, and discover insights with AI-powered chat.
-                  </Typography>
-                </Box>
-              </Card>
-              
-              <Card sx={{
-                backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                backdropFilter: 'blur(16px)',
-                border: '2px solid #374151',
-                p: 3,
-                transition: 'all 0.3s ease',
-                borderRadius: '0px',
-                '&:hover': {
-                  backgroundColor: 'rgba(31, 41, 55, 0.9)',
-                  transform: 'scale(1.05)',
-                  border: '2px solid #6b7280',
-                }
-              }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Box sx={{
-                    width: 64,
-                    height: 64,
-                    background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
-                    borderRadius: '0px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    mx: 'auto',
-                    mb: 2,
-                    border: '2px solid #4b5563'
-                  }}>
-                    <StorageIcon sx={{ fontSize: 32, color: '#9ca3af' }} />
-                  </Box>
-                  <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 700, mb: 1.5, textTransform: 'uppercase' }}>
-                    Comprehensive Data
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                    Access news articles, stock data, portfolio analysis, and organize your research with our integrated filesystem.
-                  </Typography>
-                </Box>
-              </Card>
+                </Collapse>
+              </Box>
+            ))}
+          </Container>
+        </Box>
+
+        {/* Demo: interactive dashboard with dummy data (wrapped so tiles have GlobalChatProvider) */}
+        <Box id="demo" sx={{ scrollMarginTop: 80 }}>
+          <GlobalChatProvider>
+            <LandingDemoDashboard />
+          </GlobalChatProvider>
+        </Box>
+
+        {/* CTA */}
+        <Box sx={{ py: 8, px: 2, bgcolor: 'grey.800' }}>
+          <Container maxWidth="sm">
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', mb: 1, fontSize: { xs: '1.75rem', md: '2rem' } }}>
+                Ready to bring your research into one place?
+              </Typography>
+              <Typography sx={{ color: 'text.secondary', mb: 3, fontSize: { xs: '1.125rem', md: '1.25rem' } }}>
+                Create a free account to build your workspace, connect your data sources, and start using the AI assistant with your own context.
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2 }}>
+                <Button variant="contained" size="large" onClick={handleGetStarted} endIcon={<ArrowRightIcon />} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}>
+                  Start Free
+                </Button>
+                <Button variant="outlined" size="large" onClick={() => scrollTo('demo')} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0 }}>
+                  Try Demo
+                </Button>
+              </Box>
             </Box>
           </Container>
         </Box>
 
         {/* Footer */}
-        <Box sx={{ p: 3, borderTop: '2px solid #374151' }}>
+        <Box component="footer" sx={{ py: 4, px: 2, borderTop: 1, borderColor: 'divider' }}>
           <Container maxWidth="lg">
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 600 }}>
-                © 2025 Fingov Research Platform. All rights reserved.
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '1rem' }}>
+                © {new Date().getFullYear()} FinGov. All rights reserved.
               </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'center' }}>
+                <Button component={Link} to="/" size="small" color="inherit">Privacy</Button>
+                <Button component={Link} to="/" size="small" color="inherit">Terms</Button>
+              </Box>
             </Box>
           </Container>
         </Box>
       </Box>
 
-      {/* Add CSS animations in a style tag */}
-      <style>
-        {`
-          @keyframes bounce {
-            0%, 100% {
-              transform: translateY(0);
-              animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
-            }
-            50% {
-              transform: translateY(-25%);
-              animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
-            }
-          }
-          
-          @keyframes pulse {
-            0%, 100% {
-              opacity: 1;
-            }
-            50% {
-              opacity: .5;
-            }
-          }
-        `}
-      </style>
-
-      {/* Authentication Modal */}
       <AuthModal
         isOpen={authModalOpen}
-        onClose={() => {
-          console.log('🏠 LandingPage: AuthModal onClose callback triggered');
-          console.trace('🏠 LandingPage: onClose call stack');
-          setAuthModalOpen(false);
-        }}
+        onClose={() => setAuthModalOpen(false)}
         defaultMode={authMode}
       />
     </Box>

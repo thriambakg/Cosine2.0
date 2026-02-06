@@ -45,6 +45,7 @@ import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '../../contexts/AuthContext';
 import { useEasyMode } from '../../contexts/EasyModeContext';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { filesystemAPI } from '../../services/api';
 import { 
   congressBillsSearchAPI, 
@@ -180,6 +181,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   const paginationState = initialPaginationState;
   const { user } = useAuth();
   const { isEasyMode } = useEasyMode();
+  const { isDemo } = useDemoDashboard();
   const { openItemDetails } = useDialogManagerHelpers();
   // const { activeSessionId } = useGlobalChat();
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
@@ -436,7 +438,14 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
   
   const performSearch = useCallback(async (clearFilters: boolean = true) => {
     if (!currentSearchParams) return;
-    
+    if (isDemo) {
+      const source = results?.length ? results : [];
+      setAllResults(source);
+      setFilteredResults(source);
+      setHasPerformedInitialSearch(true);
+      setIsLoading(false);
+      return;
+    }
     console.log('📋 CongressBillsSearchTile: Starting search with params:', currentSearchParams, 'clearFilters:', clearFilters);
     setIsLoading(true);
     setError(null);
@@ -599,7 +608,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange]);
+  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange, isDemo, results]);
   
   // Load more results
   const handleLoadMore = useCallback(async () => {

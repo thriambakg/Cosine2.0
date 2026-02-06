@@ -1,17 +1,17 @@
 import { createTheme } from '@mui/material/styles';
 
-// Your beautiful color palette extracted from landing page
+// Color palette: solid blue primary (no purple/iridescent)
 const colors = {
   primary: {
     main: '#3B82F6', // Blue-500
-    light: '#60A5FA', // Blue-400  
+    light: '#60A5FA', // Blue-400
     dark: '#1E40AF', // Blue-700
-    gradient: 'linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)', // Blue to Purple
+    gradient: '#3B82F6', // Solid blue (no gradient)
   },
   secondary: {
-    main: '#8B5CF6', // Purple-500
-    light: '#A78BFA', // Purple-400
-    dark: '#7C3AED', // Purple-600
+    main: '#2563EB', // Blue-600
+    light: '#60A5FA', // Blue-400
+    dark: '#1E40AF', // Blue-700
   },
   accent: {
     green: '#10B981', // Emerald-500
@@ -19,7 +19,7 @@ const colors = {
     red: '#EF4444', // Red-500
   },
   background: {
-    primary: 'linear-gradient(135deg, #1E3A8A 0%, #7C3AED 50%, #312E81 100%)', // Blue-900 to Purple-900 to Indigo-900
+    primary: 'linear-gradient(135deg, #1E3A8A 0%, #1E40AF 50%, #312E81 100%)', // Blue only
     glass: 'rgba(255, 255, 255, 0.1)',
     glassBorder: 'rgba(255, 255, 255, 0.2)',
   },
@@ -116,10 +116,10 @@ export const theme = createTheme({
           transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         },
         containedPrimary: {
-          background: colors.primary.gradient,
+          background: colors.primary.main,
           color: colors.text.primary,
           '&:hover': {
-            background: 'linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)',
+            background: colors.primary.dark,
           },
         },
         outlined: {
@@ -227,8 +227,8 @@ declare module '@mui/material/styles' {
 // Add custom colors to theme
 theme.customColors = colors;
 theme.palette.gradient = {
-  primary: colors.primary.gradient,
-  secondary: 'linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)',
+  primary: colors.primary.main,
+  secondary: 'linear-gradient(135deg, #2563EB 0%, #3B82F6 100%)',
 };
 
 export default theme;

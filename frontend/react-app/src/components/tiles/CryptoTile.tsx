@@ -30,6 +30,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import { useCryptoStats } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
 import { useTilePinning, PinButton, confirmDialog } from './common';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 
 interface CryptoTileProps {
   id: string;
@@ -92,6 +93,8 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   const [localTimeframe, setLocalTimeframe] = useState(timeframe);
   const [localDisplayOptions, setLocalDisplayOptions] = useState(displayOptions);
   const tileRef = useRef<HTMLDivElement>(null);
+  const { isDemo: isDemoContext } = useDemoDashboard();
+  const isDemo = Boolean(isDemoContext || dashboardContext === 'demo');
 
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -101,35 +104,29 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
     },
   });
 
-  // Get the API hook for fetching data
+  // Get the API hook for fetching data (skip in demo)
   const { executeForceRefresh } = useCryptoStats();
   
-  // Memoize the fetch function to prevent constant re-renders
   const fetchCryptoData = useCallback(async () => {
-    console.log(`CryptoTile ${id}: Fetching data for ${symbol} with timeframe ${timeframe}`);
     const result = await executeForceRefresh({ symbols: [symbol], timeframe });
-    console.log(`CryptoTile ${id}: Received data:`, result);
     return result;
-  }, [executeForceRefresh, symbol, timeframe, id]);
+  }, [executeForceRefresh, symbol, timeframe]);
   
   const { data: cryptoData, loading: isLoading, error, refresh } = useTileCache(
     id,
     'crypto',
     fetchCryptoData,
-    [symbol, timeframe], // Cache parameters
+    [symbol, timeframe],
     {
-      ttl: 5 * 60 * 1000, // 5 minutes cache
-      useSessionStorage: true, // Persist across tab switches
-      enabled: true,
-      forceRefresh: false, // Don't force refresh on mount
-      dashboardContext, // Include dashboard context for cache isolation
+      ttl: 5 * 60 * 1000,
+      useSessionStorage: true,
+      enabled: !isDemo,
+      forceRefresh: false,
+      dashboardContext,
     }
   );
 
-  console.log(`CryptoTile ${id}: State - loading: ${isLoading}, error: ${error}, data:`, cryptoData);
-
-  // Note: Data fetching is now handled by the cache hook
-  // No need to fetch on mount unless cache is empty
+  const crypto = cryptoData?.data?.find((c: any) => c.symbol === symbol);
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -190,17 +187,13 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
       title: 'Remove Tile',
-      message: `Remove ${symbol} from dashboard?`,
+      message: isDemo ? `Remove this tile from the demo?` : `Remove ${symbol} from dashboard?`,
       confirmText: 'Remove',
       cancelText: 'Cancel',
       confirmColor: 'error',
     });
-    if (confirmed) {
-      onRemove(id);
-    }
+    if (confirmed) onRemove(id);
   };
-
-    const crypto = cryptoData?.data?.find((c: any) => c.symbol === symbol);
 
   // Timeframe descriptions for tooltips
   const timeframeDescriptions = {
@@ -425,6 +418,15 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         </Box>
       </Box>
 
+      {/* Demo: placeholder body only */}
+      {isDemo ? (
+        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', py: 3, px: 2 }}>
+          <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center', maxWidth: 320 }}>
+            Data for BTC and other cryptos you select would be shown here after you sign up and log in on the actual app.
+          </Typography>
+        </Box>
+      ) : (
+        <>
       {/* Loading state */}
       {isLoading && (
         <Box sx={{ textAlign: 'center', py: 2 }}>
@@ -443,17 +445,17 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
         </Box>
       )}
 
-                           {/* Chart Section */}
-        {localDisplayOptions.showChart && (
-          <>
-            {isLoading && (
-              <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography variant="body2" color="#9ca3af">
-                  Loading chart...
-                </Typography>
-              </Box>
-            )}
-            {crypto && !isLoading && !error && isRealData && chartData && chartData.length > 0 && (
+      {/* Chart Section */}
+      {localDisplayOptions.showChart && (
+        <>
+          {isLoading && !isDemo && (
+            <Box sx={{ mb: 2, height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography variant="body2" color="#9ca3af">
+                Loading chart...
+              </Typography>
+            </Box>
+          )}
+          {(crypto && !isLoading && !error && chartData && chartData.length > 0) && (
               <Box sx={{ mb: 2, height: '120px' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
@@ -638,6 +640,8 @@ const CryptoTile: React.FC<CryptoTileProps> = ({
           {isPinned ? 'Unpin' : 'Pin'} to Top
         </MenuItem>
       </Menu>
+
+      </> )}
 
       {/* Timeframe Dialog */}
       <Dialog

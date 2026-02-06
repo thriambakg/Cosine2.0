@@ -52,6 +52,7 @@ import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelpe
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEasyMode } from '@/contexts/EasyModeContext';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -355,6 +356,7 @@ interface SECSearchTileProps {
     lastEvaluatedKeys?: any[];
     hasMore?: boolean;
   };
+  results?: SECSearchResult[];
   autoRefresh?: boolean;
   isPinned?: boolean;
   customTitle?: string;
@@ -397,6 +399,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     compactView: false,
   },
   paginationState,
+  results: resultsProp,
   autoRefresh = false,
   isPinned = false,
   customTitle,
@@ -407,6 +410,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const { activeSessionId } = useGlobalChat();
   const { openItemDetails } = useDialogManagerHelpers();
   const { isEasyMode } = useEasyMode();
+  const { isDemo } = useDemoDashboard();
   
   // Debug authentication state
   useEffect(() => {
@@ -500,6 +504,13 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       setAllResults(initialDisplayOptions.results);
     }
   }, [initialDisplayOptions.results, allResults.length]);
+  // Demo mode: seed allResults from results prop so dummy data shows without a search
+  useEffect(() => {
+    if (isDemo && resultsProp && resultsProp.length > 0 && allResults.length === 0) {
+      setAllResults(resultsProp);
+      setHasPerformedInitialSearch(true);
+    }
+  }, [isDemo, resultsProp, allResults.length]);
 
   // Sync filterSettings prop to state (only if actually different)
   useEffect(() => {
@@ -721,6 +732,15 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
   const performSearch = useCallback(async () => {
     if (!currentSearchParams) return;
     
+    // Demo mode: use dummy data only, no API calls. Filter is applied by existing filter effect.
+    if (isDemo) {
+      const source = (resultsProp && resultsProp.length > 0) ? resultsProp : allResults;
+      setAllResults(source);
+      setHasPerformedInitialSearch(true);
+      setIsLoading(false);
+      return;
+    }
+    
     // Reset stop flag
     shouldContinueSearchRef.current = true;
     
@@ -933,7 +953,7 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
       setFetchProgress(null); // Clear progress on error
       currentJobIdRef.current = null; // Clear job ID on error
     }
-  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate]);
+  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, isDemo, resultsProp, allResults]);
   
   // Cleanup polling on unmount
   useEffect(() => {
@@ -1425,10 +1445,10 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
     handleContextMenuClose();
   };
 
-  // Filer search handler
+  // Filer search handler (no API calls in demo mode)
   const handleFilerSearch = (query: string): string[] => {
     if (query.length < 2) return companySuggestions.map(s => s.name);
-    
+    if (isDemo) return companySuggestions.map(s => s.name); // No autocomplete API in demo
     // Trigger async autocomplete search
     const searchAsync = async () => {
       setAutocompleteLoading(true);
@@ -1443,7 +1463,6 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
         setAutocompleteLoading(false);
       }
     };
-    
     searchAsync();
     return companySuggestions.map(s => s.name);
   };

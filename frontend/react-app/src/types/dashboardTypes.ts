@@ -71,7 +71,7 @@ export interface UnifiedTile {
   folderPath?: string; // For folder tiles - path to the folder to display
   folderId?: string; // For folder tiles - ID of the folder to display
   criteria?: StockScreenerCriteria; // For stock_screener tiles
-  results?: StockResult[]; // For stock_screener tiles
+  results?: any[]; // Search/list tiles: StockResult[] (stock_screener), SECSearchResult[] (sec_search), etc.
   filters?: NewsFilters; // For news tiles
   articles?: NewsArticle[]; // For news tiles
   filterSettings?: { // For news tiles and LDA tiles - client-side filtering settings
