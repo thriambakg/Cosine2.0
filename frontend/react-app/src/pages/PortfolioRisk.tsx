@@ -1909,6 +1909,20 @@ export default function PortfolioRisk() {
                     borderRadius: '8px',
                     flex: 1,
                     overflow: 'auto',
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                      height: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      backgroundColor: 'rgba(55, 65, 81, 0.3)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    },
                   }}
                 >
             <Table>
