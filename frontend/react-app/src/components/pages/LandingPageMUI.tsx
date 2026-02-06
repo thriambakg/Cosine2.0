@@ -204,7 +204,7 @@ export default function LandingPageMUI() {
           borderColor: 'divider',
         }}
       >
-        <Container maxWidth="lg" disableGutters sx={{ px: { xs: 2, md: 3 }, py: 2 }}>
+        <Container maxWidth="lg" disableGutters sx={{ px: { xs: 1.5, md: 2 }, py: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Link
               to="/"
@@ -218,22 +218,15 @@ export default function LandingPageMUI() {
               }}
             >
               <Box
-                component="span"
+                component="img"
+                src="/icon.png"
+                alt="FinGov"
                 sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  fontSize: '2.5rem !important',
-                  fontWeight: 800,
-                  letterSpacing: '-0.02em',
-                  lineHeight: 1,
-                  m: 0,
-                  p: 0,
-                  '@media (min-width:900px)': { fontSize: '3.25rem !important' },
+                  height: { xs: 44, sm: 52, md: 60 },
+                  width: 'auto',
+                  display: 'block',
                 }}
-              >
-                <Box component="span" sx={{ color: '#2c5282', fontWeight: 400 }}>Fin</Box>
-                <Box component="span" sx={{ color: '#63b3ed', fontWeight: 400 }}>gov</Box>
-              </Box>
+              />
             </Link>
             <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 3 }}>
               <Button color="inherit" onClick={() => scrollTo('features')} sx={{ textTransform: 'none', fontWeight: 600, fontSize: '1rem' }}>
