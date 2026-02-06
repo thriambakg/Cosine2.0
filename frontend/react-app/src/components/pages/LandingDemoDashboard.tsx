@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Box, Typography, Button, Menu, MenuItem, IconButton, Chip, Tooltip } from '@mui/material';
 import { Add as AddIcon, ZoomIn, ZoomOut, ZoomOutMap, PlayArrow as PlayIcon, Replay as ReplayIcon } from '@mui/icons-material';
 import GridDashboard from '../dashboard/GridDashboard';
@@ -162,11 +163,16 @@ function getSimulationStartTile(): UnifiedTile {
   });
 }
 
+const DEMO_TILE_WIDTH = 6;
+const DEMO_TILE_HEIGHT = 8; // default 6 + 2
+
 function getInitialDemoTiles(): UnifiedTile[] {
   return [
     createDemoTile('sec_search', {
       title: 'SEC Search (Demo)',
       gridPosition: { x: 0, y: 0 },
+      gridSize: { width: DEMO_TILE_WIDTH, height: DEMO_TILE_HEIGHT },
+      size: { width: DEMO_TILE_WIDTH * 96, height: DEMO_TILE_HEIGHT * 80 },
       results: DUMMY_SEC_RESULTS,
       searchParams: {},
       paginationState: {
@@ -178,6 +184,8 @@ function getInitialDemoTiles(): UnifiedTile[] {
     createDemoTile('govt_contracts', {
       title: 'Government Contracts (Demo)',
       gridPosition: { x: 6, y: 0 },
+      gridSize: { width: DEMO_TILE_WIDTH, height: DEMO_TILE_HEIGHT },
+      size: { width: DEMO_TILE_WIDTH * 96, height: DEMO_TILE_HEIGHT * 80 },
       isPinned: true,
       results: DUMMY_GOVT_CONTRACTS as any,
       searchParams: {},
@@ -189,7 +197,9 @@ function getInitialDemoTiles(): UnifiedTile[] {
     }),
     createDemoTile('politician_trades', {
       title: 'Politician Trades (Demo)',
-      gridPosition: { x: 0, y: 6 },
+      gridPosition: { x: 12, y: 0 },
+      gridSize: { width: DEMO_TILE_WIDTH, height: DEMO_TILE_HEIGHT },
+      size: { width: DEMO_TILE_WIDTH * 96, height: DEMO_TILE_HEIGHT * 80 },
       results: DUMMY_TRADES as any,
       searchParams: {},
       paginationState: {
@@ -200,7 +210,9 @@ function getInitialDemoTiles(): UnifiedTile[] {
     }),
     createDemoTile('congress_bills', {
       title: 'Congress Bills (Demo)',
-      gridPosition: { x: 6, y: 6 },
+      gridPosition: { x: 18, y: 0 },
+      gridSize: { width: DEMO_TILE_WIDTH, height: DEMO_TILE_HEIGHT },
+      size: { width: DEMO_TILE_WIDTH * 96, height: DEMO_TILE_HEIGHT * 80 },
       results: DUMMY_CONGRESS_BILLS as any,
       searchParams: {},
       paginationState: {
@@ -308,6 +320,10 @@ export default function LandingDemoDashboard() {
     setShowSimResetButton(false);
     setSimCursorPosition({ x: -100, y: -100 });
     setIsSimulationActive(true);
+    // Bring demo front and center so the cursor is visible during the sim
+    requestAnimationFrame(() => {
+      document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
     // Let DOM update with single tile, then run steps
     const t = setTimeout(() => runSimulationSteps(), 400);
     simTimeoutRef.current.push(t);
@@ -516,7 +532,7 @@ export default function LandingDemoDashboard() {
 
   return (
     <DemoDashboardProvider isDemo>
-      <Box sx={{ width: '100%', minHeight: 600, bgcolor: 'grey.900', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ width: '100%', minHeight: 520, bgcolor: 'grey.900', display: 'flex', flexDirection: 'column' }}>
         {/* Header: title, description, zoom - full width */}
         <Box sx={{ flexShrink: 0, py: 4, px: 2 }}>
           <Box sx={{ textAlign: 'center', mb: 2 }}>
@@ -524,8 +540,69 @@ export default function LandingDemoDashboard() {
               Try the dashboard
             </Typography>
             <Typography sx={{ color: 'text.secondary', fontSize: '1.125rem' }}>
-              Drag, resize, and customize tiles. Add items to the chat sidebar (right). Search and filter use dummy data—nothing is saved.
+              Drag and resize tiles, add items to the chat sidebar. This demo uses sample data only.
             </Typography>
+          </Box>
+
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, justifyContent: 'center', mb: 2 }}>
+            {!isSimulationActive && (
+              <Button
+                variant="contained"
+                startIcon={<PlayIcon />}
+                onClick={startSimulation}
+                sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}
+              >
+                Start simulation
+              </Button>
+            )}
+            {showSimResetButton && (
+              <Button
+                data-demo-sim-reset
+                variant="outlined"
+                color="primary"
+                startIcon={<ReplayIcon />}
+                onClick={resetSimulation}
+                sx={{
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  borderRadius: 0,
+                  animation: 'simResetGlow 2s ease-in-out infinite',
+                  '@keyframes simResetGlow': {
+                    '0%, 100%': { boxShadow: '0 0 12px rgba(59, 130, 246, 0.5), 0 0 24px rgba(59, 130, 246, 0.25)' },
+                    '50%': { boxShadow: '0 0 20px rgba(59, 130, 246, 0.8), 0 0 40px rgba(59, 130, 246, 0.4)' },
+                  },
+                }}
+              >
+                Reset demo
+              </Button>
+            )}
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={(e) => setAddMenuAnchor(e.currentTarget)}
+              disabled={isSimulationActive}
+              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0 }}
+            >
+              Add tile
+            </Button>
+            <Menu
+              anchorEl={addMenuAnchor}
+              open={Boolean(addMenuAnchor)}
+              onClose={() => setAddMenuAnchor(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+              PaperProps={{ sx: { bgcolor: 'grey.800', mt: 1.5 } }}
+            >
+              {DEMO_TILE_TYPES.map(({ type, label }) => (
+                <MenuItem
+                  key={type}
+                  onClick={() => handleAddTile(type)}
+                  sx={{ color: 'text.primary' }}
+                >
+                  {label}
+                </MenuItem>
+              ))}
+            </Menu>
           </Box>
 
           <Box
@@ -592,11 +669,11 @@ export default function LandingDemoDashboard() {
           </Box>
         </Box>
 
-        {/* Grid | sidebar row: sidebar matches grid height exactly (no Add tile below) */}
+        {/* Grid | sidebar row: reduced height so demo fits on 1080p without cutoff */}
         <Box
           sx={{
             flex: 1,
-            minHeight: 420,
+            minHeight: 320,
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'stretch',
@@ -636,134 +713,77 @@ export default function LandingDemoDashboard() {
           </Box>
         </Box>
 
-        {/* Add tile below grid/sidebar row */}
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 2, py: 2, px: 2 }}>
-          {!isSimulationActive && (
-            <Button
-              variant="contained"
-              startIcon={<PlayIcon />}
-              onClick={startSimulation}
-              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}
-            >
-              Start simulation
-            </Button>
+        {/* Simulation cursor and drag preview: portaled to body so position:fixed uses viewport coords (demo section has zoom: 0.8) */}
+        {typeof document !== 'undefined' &&
+          createPortal(
+            <>
+              {isSimulationActive && !showSimResetButton && (
+                <Box
+                  sx={{
+                    position: 'fixed',
+                    left: simCursorPosition.x,
+                    top: simCursorPosition.y,
+                    width: SIM_CURSOR_IMAGE ? 32 : 24,
+                    height: SIM_CURSOR_IMAGE ? 32 : 24,
+                    marginLeft: SIM_CURSOR_IMAGE ? -SIM_CURSOR_HOTSPOT.x : -2,
+                    marginTop: SIM_CURSOR_IMAGE ? -SIM_CURSOR_HOTSPOT.y : -2,
+                    pointerEvents: 'none',
+                    zIndex: 10001,
+                    transition: 'left 0.35s ease-out, top 0.35s ease-out',
+                  }}
+                >
+                  {SIM_CURSOR_IMAGE ? (
+                    <Box
+                      component="img"
+                      src={SIM_CURSOR_IMAGE}
+                      alt=""
+                      sx={{ width: '100%', height: '100%', display: 'block' }}
+                    />
+                  ) : (
+                    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path
+                        d="M2 2L2 28L12 18L18 28L22 26L16 16L28 14L2 2Z"
+                        fill="#fff"
+                        stroke="#000"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </Box>
+              )}
+              {isSimulationActive && simDragPreview && (
+                <Box
+                  sx={{
+                    position: 'fixed',
+                    left: simCursorPosition.x + 18,
+                    top: simCursorPosition.y + 18,
+                    minWidth: 160,
+                    maxWidth: 220,
+                    py: 1,
+                    px: 1.5,
+                    borderRadius: 1,
+                    bgcolor: 'grey.800',
+                    border: '1px solid #3b82f6',
+                    boxShadow: 3,
+                    pointerEvents: 'none',
+                    zIndex: 10000,
+                    transition: 'left 0.35s ease-out, top 0.35s ease-out',
+                  }}
+                >
+                  <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.8125rem' }} noWrap>
+                    {simDragPreview.title}
+                  </Typography>
+                  {simDragPreview.subtitle && (
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }} noWrap>
+                      {simDragPreview.subtitle}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </>,
+            document.body
           )}
-          {showSimResetButton && (
-            <Button
-              data-demo-sim-reset
-              variant="outlined"
-              color="primary"
-              startIcon={<ReplayIcon />}
-              onClick={resetSimulation}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 600,
-                borderRadius: 0,
-                animation: 'simResetGlow 2s ease-in-out infinite',
-                '@keyframes simResetGlow': {
-                  '0%, 100%': { boxShadow: '0 0 12px rgba(59, 130, 246, 0.5), 0 0 24px rgba(59, 130, 246, 0.25)' },
-                  '50%': { boxShadow: '0 0 20px rgba(59, 130, 246, 0.8), 0 0 40px rgba(59, 130, 246, 0.4)' },
-                },
-              }}
-            >
-              Reset demo
-            </Button>
-          )}
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={(e) => setAddMenuAnchor(e.currentTarget)}
-            disabled={isSimulationActive}
-            sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0 }}
-          >
-            Add tile
-          </Button>
-          <Menu
-            anchorEl={addMenuAnchor}
-            open={Boolean(addMenuAnchor)}
-            onClose={() => setAddMenuAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-            PaperProps={{ sx: { bgcolor: 'grey.800', mt: 1.5 } }}
-          >
-            {DEMO_TILE_TYPES.map(({ type, label }) => (
-              <MenuItem
-                key={type}
-                onClick={() => handleAddTile(type)}
-                sx={{ color: 'text.primary' }}
-              >
-                {label}
-              </MenuItem>
-            ))}
-          </Menu>
-        </Box>
-
-        {/* Simulation cursor: hidden once sim completes and Reset button is shown */}
-        {isSimulationActive && !showSimResetButton && (
-          <Box
-            sx={{
-              position: 'fixed',
-              left: simCursorPosition.x,
-              top: simCursorPosition.y,
-              width: SIM_CURSOR_IMAGE ? 32 : 24,
-              height: SIM_CURSOR_IMAGE ? 32 : 24,
-              marginLeft: SIM_CURSOR_IMAGE ? -SIM_CURSOR_HOTSPOT.x : -2,
-              marginTop: SIM_CURSOR_IMAGE ? -SIM_CURSOR_HOTSPOT.y : -2,
-              pointerEvents: 'none',
-              zIndex: 10001,
-              transition: 'left 0.35s ease-out, top 0.35s ease-out',
-            }}
-          >
-            {SIM_CURSOR_IMAGE ? (
-              <Box
-                component="img"
-                src={SIM_CURSOR_IMAGE}
-                alt=""
-                sx={{ width: '100%', height: '100%', display: 'block' }}
-              />
-            ) : (
-              <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path
-                  d="M2 2L2 28L12 18L18 28L22 26L16 16L28 14L2 2Z"
-                  fill="#fff"
-                  stroke="#000"
-                  strokeWidth="1.5"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </Box>
-        )}
-        {/* Drag preview: context item following cursor when dragging to sidebar */}
-        {isSimulationActive && simDragPreview && (
-          <Box
-            sx={{
-              position: 'fixed',
-              left: simCursorPosition.x + 18,
-              top: simCursorPosition.y + 18,
-              minWidth: 160,
-              maxWidth: 220,
-              py: 1,
-              px: 1.5,
-              borderRadius: 1,
-              bgcolor: 'grey.800',
-              border: '1px solid #3b82f6',
-              boxShadow: 3,
-              pointerEvents: 'none',
-              zIndex: 10000,
-              transition: 'left 0.35s ease-out, top 0.35s ease-out',
-            }}
-          >
-            <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.8125rem' }} noWrap>
-              {simDragPreview.title}
-            </Typography>
-            {simDragPreview.subtitle && (
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.75rem' }} noWrap>
-                {simDragPreview.subtitle}
-              </Typography>
-            )}
-          </Box>
-        )}
       </Box>
     </DemoDashboardProvider>
   );

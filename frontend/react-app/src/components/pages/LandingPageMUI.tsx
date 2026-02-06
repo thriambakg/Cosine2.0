@@ -440,8 +440,8 @@ export default function LandingPageMUI() {
           </Container>
         </Box>
 
-        {/* Demo: interactive dashboard with dummy data (wrapped so tiles have GlobalChatProvider) */}
-        <Box id="demo" sx={{ scrollMarginTop: 80 }}>
+        {/* Demo: interactive dashboard; zoom so it fits 1080p without browser zoom */}
+        <Box id="demo" sx={{ scrollMarginTop: 80, zoom: 0.67, paddingBottom: 6 }}>
           <GlobalChatProvider>
             <LandingDemoDashboard />
           </GlobalChatProvider>
