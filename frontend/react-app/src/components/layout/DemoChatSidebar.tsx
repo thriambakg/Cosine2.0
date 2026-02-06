@@ -128,7 +128,9 @@ export default function DemoChatSidebar() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDragOverSidebar, setIsDragOverSidebar] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const responseIndexRef = useRef(0);
+  const suppressScrollUntilRef = useRef(0);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -174,6 +176,7 @@ export default function DemoChatSidebar() {
 
   useEffect(() => {
     const handleSimSendMessage = (e: Event) => {
+      suppressScrollUntilRef.current = Date.now() + 2500;
       const ev = e as CustomEvent<{ text: string; response?: string }>;
       const { text, response } = ev.detail || {};
       if (!text?.trim()) return;
@@ -229,7 +232,11 @@ export default function DemoChatSidebar() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (Date.now() < suppressScrollUntilRef.current) return;
+    const el = messagesScrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages]);
 
   const handleRemoveContext = useCallback((index: number) => {
@@ -356,8 +363,8 @@ export default function DemoChatSidebar() {
         )}
       </Box>
 
-      {/* Messages - flex 1, scrolls internally */}
-      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Messages - flex 1, scrolls internally (we scroll this container only to avoid moving the page) */}
+      <Box ref={messagesScrollRef} sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {messages.length === 0 && (
           <Typography variant="body2" sx={{ color: '#6b7280', textAlign: 'center', mt: 4 }}>
             Send a message to see a demo response. Chat is not connected in this preview.
