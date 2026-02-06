@@ -53,6 +53,7 @@ import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEasyMode } from '@/contexts/EasyModeContext';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { getTileBatchSize, getTileMaxPages, getTileMaxPaginationKeys } from './config/tileConfig';
 
 // US States
@@ -173,6 +174,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
   customColor,
   customIcon,
 }) => {
+  const { isDemo } = useDemoDashboard();
   // Tile pagination configuration
   const TILE_BATCH_SIZE = getTileBatchSize('govt_contracts');
   const TILE_MAX_PAGES = getTileMaxPages('govt_contracts');
@@ -407,8 +409,9 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     });
   }, []);
 
-  // Autocomplete search functions
+  // Autocomplete search functions (no API calls in demo mode)
   const recipientSearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    if (isDemo) return [];
     if (!query || query.length < 2) {
       setRecipientSuggestions([]);
       recipientSuggestionsRef.current = [];
@@ -455,9 +458,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     })();
 
     return [];
-  }, [transformAutocompleteResults]);
+  }, [transformAutocompleteResults, isDemo]);
 
   const awardingAgencySearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    if (isDemo) return [];
     if (!query || query.length < 2) {
       setAwardingAgencySuggestions([]);
       awardingAgencySuggestionsRef.current = [];
@@ -504,9 +508,10 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     })();
 
     return [];
-  }, [transformAutocompleteResults]);
+  }, [transformAutocompleteResults, isDemo]);
 
   const fundingAgencySearch = useCallback((query: string): Array<{ id?: string; code?: string; name?: string; text?: string; [key: string]: any }> => {
+    if (isDemo) return [];
     if (!query || query.length < 2) {
       setFundingAgencySuggestions([]);
       fundingAgencySuggestionsRef.current = [];
@@ -553,7 +558,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     })();
 
     return [];
-  }, [transformAutocompleteResults]);
+  }, [transformAutocompleteResults, isDemo]);
 
   // Helper function to find option by name
   const findOptionByName = useCallback((
@@ -579,7 +584,15 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
 
   const performSearch = useCallback(async (clearFilters: boolean = true) => {
     if (!currentSearchParams) return;
-    
+    if (isDemo) {
+      const source = results?.length ? results : [];
+      setAllResults(source);
+      setFilteredResults(source);
+      setCurrentResults(source);
+      setHasPerformedInitialSearch(true);
+      setIsLoading(false);
+      return;
+    }
     console.log('🏛️ GovtContractsSearchTile: Starting search with params:', currentSearchParams, 'clearFilters:', clearFilters);
     setIsLoading(true);
     setError(null);
@@ -710,7 +723,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange]);
+  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange, isDemo, results]);
   
   // Load more results - limited to TILE_MAX_PAGES (4 pages = 100 total results)
   const handleLoadMore = useCallback(async () => {

@@ -48,6 +48,7 @@ import {
 } from '@mui/icons-material';
 import { useStockScreener } from '../../hooks/useAPI';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addStockToContext, addMultipleStocksToContext, confirmDialog } from './common';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelper';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -122,6 +123,12 @@ interface StockResult {
   volume: number;
   pe: number;
 }
+
+const DEMO_STOCK_RESULTS: StockResult[] = [
+  { symbol: 'AAPL', name: 'Apple Inc.', price: 175.43, priceChange: 2.34, priceChangePercent: 1.35, marketCap: 2750000000000, volatility: 25.4, industry: 'Technology', volume: 45000000, pe: 28.5 },
+  { symbol: 'MSFT', name: 'Microsoft Corporation', price: 378.85, priceChange: -1.23, priceChangePercent: -0.32, marketCap: 2810000000000, volatility: 22.1, industry: 'Technology', volume: 28000000, pe: 32.1 },
+  { symbol: 'GOOGL', name: 'Alphabet Inc.', price: 142.56, priceChange: 1.89, priceChangePercent: 1.34, marketCap: 1780000000000, volatility: 31.2, industry: 'Technology', volume: 22000000, pe: 25.8 },
+];
 
 const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   id,
@@ -210,6 +217,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const { user } = useAuth();
+  const { isDemo } = useDemoDashboard();
   const { openItemDetails } = useDialogManagerHelpers();
   // Pagination state
   const [hasMore, setHasMore] = useState<boolean>(false);
@@ -534,6 +542,24 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
     setIsLoadingMore(false);
     setLastEvaluatedKeys([]); // Clear keys on new search
     
+    if (isDemo) {
+      setAllResults(DEMO_STOCK_RESULTS);
+      setFilteredResults(DEMO_STOCK_RESULTS);
+      setLastEvaluatedKeys([]);
+      onSettingsChange(id, {
+        paginationState: { totalResultsLoaded: DEMO_STOCK_RESULTS.length, lastEvaluatedKeys: [], hasMore: false },
+      });
+      onUpdate(id, {
+        results: DEMO_STOCK_RESULTS,
+        criteria: localCriteria,
+        paginationState: { totalResultsLoaded: DEMO_STOCK_RESULTS.length, lastEvaluatedKeys: [], hasMore: false },
+        lastUpdated: new Date().toISOString(),
+      });
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+    
     try {
       // Format the request properly for the API
       // Map 'industries' to 'sectors' for backend compatibility (industries are actually GICS sectors)
@@ -636,7 +662,7 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  }, [executeScreenerForceRefresh, localCriteria, id, onUpdate]);
+  }, [executeScreenerForceRefresh, localCriteria, id, onUpdate, onSettingsChange, isDemo]);
 
   // Load more results
   const handleLoadMore = useCallback(async () => {
@@ -919,14 +945,12 @@ const StockScreenerTile: React.FC<StockScreenerTileProps> = ({
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
       title: 'Remove Tile',
-      message: 'Remove Stock Screener from dashboard?',
+      message: isDemo ? 'Remove this tile from the demo?' : 'Remove Stock Screener from dashboard?',
       confirmText: 'Remove',
       cancelText: 'Cancel',
       confirmColor: 'error',
     });
-    if (confirmed) {
-      onRemove(id);
-    }
+    if (confirmed) onRemove(id);
   };
 
   // Handle stock selection with single click, Ctrl+click, and Shift+click

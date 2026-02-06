@@ -57,6 +57,7 @@ import { getIconByName, getDefaultIconForTileType } from './common/tileIconHelpe
 import MultiSelectField from '../MultiSelectField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEasyMode } from '@/contexts/EasyModeContext';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { useGlobalChat } from '@/contexts/GlobalChatContext';
 import { politicianSuggestionsService } from '../../services/politicianSuggestions';
 import { securitySuggestionsServiceV2 } from '../../services/securitySuggestionsV2';
@@ -157,6 +158,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
   const { activeSessionId } = useGlobalChat();
   const { openItemDetails } = useDialogManagerHelpers();
   const { isEasyMode } = useEasyMode();
+  const { isDemo } = useDemoDashboard();
   
   // Debug authentication state
   useEffect(() => {
@@ -379,7 +381,15 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
 
   const performSearch = useCallback(async (clearFilters: boolean = true) => {
     if (!currentSearchParams) return;
-    
+    if (isDemo) {
+      const source = results?.length ? results : [];
+      setAllResults(source);
+      setFilteredResults(source);
+      setCurrentResults(source);
+      setHasPerformedInitialSearch(true);
+      setIsLoading(false);
+      return;
+    }
     console.log('🏛️ PoliticianTradesSearchTile: Starting search with params:', currentSearchParams, 'clearFilters:', clearFilters);
     setIsLoading(true);
     setError(null);
@@ -475,7 +485,7 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [currentSearchParams, TILE_BATCH_SIZE, id, onUpdate, onSettingsChange]);
+  }, [currentSearchParams, TILE_BATCH_SIZE, id, onUpdate, onSettingsChange, isDemo, results]);
 
   
   // Load more results using cursor-based pagination

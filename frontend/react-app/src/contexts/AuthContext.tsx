@@ -373,8 +373,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthError(null);
       }
     } catch (error: any) {
-      console.error('Auth initialization failed:', error);
-      // User is not authenticated, which is fine
+      // User not authenticated is expected on landing/demo; avoid logging as error
+      if (error?.name !== 'UserUnAuthenticatedException') {
+        console.error('Auth initialization failed:', error);
+      }
       setUser(null);
       if (error?.name === 'UserUnAuthenticatedException') {
         setAuthError(null); // Don't show error if user is just not signed in

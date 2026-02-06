@@ -31,6 +31,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import { useStockData } from '../../hooks/useAPI';
 import { useTileCache } from '../../hooks/useDashboardCache';
 import { useTilePinning, PinButton, confirmDialog } from './common';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 
 interface StockTileProps {
   id: string;
@@ -87,6 +88,9 @@ const StockTile: React.FC<StockTileProps> = ({
 }) => {
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
   const lastClickTimeRef = useRef<number>(0);
+  const { isDemo: isDemoContext } = useDemoDashboard();
+  // Demo mode: from context or from dashboard id (landing demo uses dashboardContext="demo")
+  const isDemo = Boolean(isDemoContext || dashboardContext === 'demo');
 
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
@@ -124,12 +128,9 @@ const StockTile: React.FC<StockTileProps> = ({
     return trimmed;
   }, []);
 
-  // Get the API hook for fetching data
+  // Get the API hook for fetching data (skip in demo)
   const { executeForceRefresh } = useStockData();
   
-  // Memoize the fetch function to prevent constant re-renders
-  // Parse ticker from symbol to handle CSV/displayText formats
-  // Use ref for executeForceRefresh to prevent unnecessary re-creations
   const executeForceRefreshRef = useRef(executeForceRefresh);
   useEffect(() => {
     executeForceRefreshRef.current = executeForceRefresh;
@@ -144,18 +145,15 @@ const StockTile: React.FC<StockTileProps> = ({
     id,
     'stock',
     fetchStockData,
-    [symbol, timeframe], // Cache parameters
+    [symbol, timeframe],
     {
-      ttl: 5 * 60 * 1000, // 5 minutes cache for stock data (same as crypto)
-      useSessionStorage: true, // Persist across tab switches
-      enabled: true,
-      forceRefresh: false, // Don't force refresh on mount
-      dashboardContext, // Include dashboard context for cache isolation
+      ttl: 5 * 60 * 1000,
+      useSessionStorage: true,
+      enabled: !isDemo,
+      forceRefresh: false,
+      dashboardContext,
     }
   );
-
-  // Note: Data fetching is now handled by the cache hook
-  // No need to fetch on mount unless cache is empty
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -216,14 +214,12 @@ const StockTile: React.FC<StockTileProps> = ({
   const handleRemove = async () => {
     const confirmed = await confirmDialog({
       title: 'Remove Tile',
-      message: `Remove ${symbol} from dashboard?`,
+      message: isDemo ? `Remove this tile from the demo?` : `Remove ${symbol} from dashboard?`,
       confirmText: 'Remove',
       cancelText: 'Cancel',
       confirmColor: 'error',
     });
-    if (confirmed) {
-      onRemove(id);
-    }
+    if (confirmed) onRemove(id);
   };
 
   // Timeframe descriptions for tooltips
@@ -234,22 +230,17 @@ const StockTile: React.FC<StockTileProps> = ({
     '1y': '1 Year - Shows annual trends and long-term market behavior'
   };
 
-  // Process chart data from stock API
+  // Process chart data from stock API (or demo dummy data)
   const getChartData = () => {
     if (!stockData || !stockData.chart_data || stockData.chart_data.length === 0) {
       return { data: [], isRealData: false };
     }
-
-    // Transform chart data to match the expected format
     const transformedData = stockData.chart_data.map((point: any) => ({
       time: point.time,
       price: point.close,
-      // Add formatted date for tooltips
       date: new Date(point.time * 1000).toLocaleDateString(),
-      // Add time label if available
-      timeLabel: point.time_label || new Date(point.time * 1000).toLocaleTimeString()
+      timeLabel: point.time_label || new Date(point.time * 1000).toLocaleTimeString(),
     }));
-
     return { data: transformedData, isRealData: true };
   };
 
@@ -460,6 +451,15 @@ const StockTile: React.FC<StockTileProps> = ({
         </Box>
       </Box>
 
+      {/* Demo: placeholder body only */}
+      {isDemo ? (
+        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', py: 3, px: 2 }}>
+          <Typography variant="body2" sx={{ color: '#9ca3af', textAlign: 'center', maxWidth: 320 }}>
+            Data for AAPL and other stocks you select would be shown here after you sign up and log in on the actual app.
+          </Typography>
+        </Box>
+      ) : (
+        <>
       {/* Loading state */}
       {isLoading && (
         <Box sx={{ textAlign: 'center', py: 2 }}>
@@ -674,6 +674,8 @@ const StockTile: React.FC<StockTileProps> = ({
           {isPinned ? 'Unpin' : 'Pin'} to Top
         </MenuItem>
       </Menu>
+
+      </> )}
 
       {/* Timeframe Dialog */}
       <Dialog

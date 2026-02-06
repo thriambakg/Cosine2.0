@@ -3,7 +3,7 @@ import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mu
 import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy, DeleteOutline } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { filesystemAPI, GovtContractAward, CongressBill } from '@/services/api';
+import { filesystemAPI, GovtContractAward, CongressBill, SECSearchResult } from '@/services/api';
 import CryptoTile from '../tiles/CryptoTile';
 import StockTile from '../tiles/StockTile';
 import StockScreenerTile from '../tiles/StockScreenerTile';
@@ -1129,7 +1129,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       searchParams: tile.searchParams,
       filterSettings: tile.filterSettings as any,
       paginationState: sessionPaginationStateSEC,
-      results: sessionResultsSEC,
+      results: sessionResultsSEC as SECSearchResult[] | undefined,
       displayOptions: {
         showEntity: true,
         showForm: true,
@@ -1308,6 +1308,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
     return (
       <Box
         key={tile.id}
+        data-demo-tile-id={dashboardContext === 'demo' ? tile.id : undefined}
         sx={{
           gridColumn: `${displayPosition.x + 1} / ${displayPosition.x + displaySize.width + 1}`,
           gridRow: `${displayPosition.y + 1} / ${displayPosition.y + displaySize.height + 1}`,

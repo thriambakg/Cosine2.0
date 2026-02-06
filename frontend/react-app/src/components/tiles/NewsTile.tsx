@@ -49,6 +49,7 @@ import {
 } from '@mui/icons-material';
 import { newsSearchAPI, NewsSearchRequest, NewsArticle } from '../../services/api';
 import { filesystemAPI } from '../../services/api';
+import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { useTilePinning, TileHeaderActions, TileCustomizationDialog, addArticleToContext, addMultipleArticlesToContext, getIconByName, getDefaultIconForTileType } from './common';
 import MultiSelectField from '../MultiSelectField';
 import FileBrowserDialog from '../common/FileBrowserDialog';
@@ -501,6 +502,8 @@ const NewsTile: React.FC<NewsTileProps> = ({
     'global',
   ];
 
+  const { isDemo } = useDemoDashboard();
+
   // Pinning functionality
   const { isPinned: pinnedState, togglePin } = useTilePinning({
     initialPinned: isPinned,
@@ -520,6 +523,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
   // Track if initial search has been performed
   const [hasPerformedInitialSearch, setHasPerformedInitialSearch] = useState(false);
 
+  const DUMMY_NEWS_ARTICLES: NewsArticle[] = useMemo(() => [
+    { id: 'demo-1', title: 'Demo: Markets Update', description: 'Sample finance news for demo.', source_url: '#', source_name: 'Demo Source', published_date: new Date().toISOString(), keywords: 'demo', category: 'business', sentiment: 'neutral', ai_tag: '', creator: 'Demo', country: 'us', language: 'en' },
+    { id: 'demo-2', title: 'Demo: Tech Brief', description: 'Sample technology article.', source_url: '#', source_name: 'Demo Tech', published_date: new Date().toISOString(), keywords: 'demo', category: 'technology', sentiment: 'positive', ai_tag: '', creator: 'Demo', country: 'us', language: 'en' },
+    { id: 'demo-3', title: 'Demo: Policy Watch', description: 'Sample policy and regulation news.', source_url: '#', source_name: 'Demo Policy', published_date: new Date().toISOString(), keywords: 'demo', category: 'politics', sentiment: 'neutral', ai_tag: '', creator: 'Demo', country: 'us', language: 'en' },
+  ], []);
+
   const performSearch = useCallback(async () => {
     if (!currentSearchParams) return;
     
@@ -529,6 +538,20 @@ const NewsTile: React.FC<NewsTileProps> = ({
     setLastEvaluatedKey(null);
     setHasMore(false);
     setLastEvaluatedKeys([]); // Clear keys on new search
+    
+    if (isDemo) {
+      const processed = DUMMY_NEWS_ARTICLES.map((a, i) => ({ ...a, id: a.id || `article_${i}_${Date.now()}` }));
+      setAllResults(processed);
+      setHasPerformedInitialSearch(true);
+      setLastEvaluatedKeys([]);
+      onSettingsChange(id, {
+        searchParams: currentSearchParams,
+        paginationState: { totalResultsLoaded: processed.length, lastEvaluatedKeys: [], hasMore: false },
+      });
+      pendingUpdateRef.current = { paginationState: { totalResultsLoaded: processed.length, lastEvaluatedKeys: [], hasMore: false } };
+      setIsLoading(false);
+      return;
+    }
     
     try {
       // Build simplified search request - only keywords are sent to API
@@ -629,7 +652,7 @@ const NewsTile: React.FC<NewsTileProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange]);
+  }, [currentSearchParams, localDisplayOptions.maxResults, id, onUpdate, onSettingsChange, isDemo, DUMMY_NEWS_ARTICLES]);
   
   // Load more results using cursor-based pagination
   const handleLoadMore = useCallback(async () => {
@@ -964,6 +987,15 @@ const NewsTile: React.FC<NewsTileProps> = ({
       if (hasSearchCriteria) {
         console.log('🔄 NewsTile: Initial load - performing search with existing params');
         performSearch();
+      } else if (isDemo) {
+        // Demo: show dummy articles even with no search criteria
+        const processed = DUMMY_NEWS_ARTICLES.map((a, i) => ({ ...a, id: a.id || `article_${i}_${Date.now()}` }));
+        setAllResults(processed);
+        setHasPerformedInitialSearch(true);
+        onSettingsChange(id, {
+          searchParams: currentSearchParams,
+          paginationState: { totalResultsLoaded: processed.length, lastEvaluatedKeys: [], hasMore: false },
+        });
       } else {
         console.log('🔄 NewsTile: No search criteria found, skipping initial search');
       }
