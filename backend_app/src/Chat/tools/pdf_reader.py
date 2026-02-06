@@ -47,10 +47,6 @@ class PDFReader:
     
     def __init__(self):
         self.s3_client = boto3.client('s3')
-<<<<<<< HEAD
-        # Removed Textract client - using PyPDF2 only
-=======
->>>>>>> 56cebb95905230803374277eb4646d09a860044b
         self.bucket_name = os.environ.get('CHAT_FILES_BUCKET_NAME')
         if not self.bucket_name:
             raise ValueError("CHAT_FILES_BUCKET_NAME environment variable is required")
@@ -142,13 +138,8 @@ class PDFReader:
                     "is_partial": True
                 }
             
-<<<<<<< HEAD
-            # For full document reading, use PyPDF2 only (Textract removed)
-            text_content = self._extract_text_from_pdf(file_content)
-=======
             # Full document: extract text with PyPDF2 (basic PDF parsing)
             text_content = self._extract_text_from_pdf(pdf_content)
->>>>>>> 56cebb95905230803374277eb4646d09a860044b
             
             # Analyze the content
             analysis = self._analyze_pdf_content(text_content)
@@ -233,47 +224,6 @@ class PDFReader:
             return 0
     
     def _analyze_forms_with_pypdf(self, s3_key: str) -> Dict[str, Any]:
-<<<<<<< HEAD
-        """Analyze PDF forms using PyPDF2 (Textract removed)"""
-        try:
-            # Download PDF from S3
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
-            pdf_content = response['Body'].read()
-            
-            # Extract text using PyPDF2
-            text_content = self._extract_text_from_pdf(pdf_content)
-            
-            # Basic form analysis from text content
-            # Look for common form patterns (key-value pairs, checkboxes, etc.)
-            forms = []
-            lines = text_content.split('\n')
-            
-            # Simple pattern matching for key-value pairs
-            for i, line in enumerate(lines):
-                line = line.strip()
-                if ':' in line and len(line) > 3:
-                    parts = line.split(':', 1)
-                    if len(parts) == 2:
-                        key = parts[0].strip()
-                        value = parts[1].strip()
-                        if key and value:
-                            forms.append({'key': key, 'value': value})
-            
-            return {
-                "success": True,
-                "forms": forms,
-                "form_count": len(forms),
-                "text_length": len(text_content),
-                "method": "pypdf2"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error analyzing PDF forms with PyPDF2: {str(e)}")
-            return {"success": False, "error": f"PyPDF2 error: {str(e)}"}
-    
-    # Removed all Textract-related methods - now using PyPDF2 only
-    
-=======
         """Analyze PDF forms using basic parsing (PyPDF2). Extracts text and detects key: value style lines."""
         try:
             import re
@@ -302,7 +252,6 @@ class PDFReader:
             logger.error(f"Error in basic PDF form analysis: {str(e)}")
             return {"success": False, "error": str(e), "form_count": 0, "table_count": 0, "key_value_pairs": 0, "forms": [], "tables": []}
 
->>>>>>> 56cebb95905230803374277eb4646d09a860044b
     def _extract_text_fallback(self, pdf_content: bytes) -> str:
         """Fallback method if PyPDF2 is not available"""
         try:
@@ -559,12 +508,8 @@ def analyze_pdf_content_tool(s3_key: str, analysis_type: str = "summary") -> str
 @tool
 def analyze_pdf_forms_tool(s3_key: str) -> str:
     """
-<<<<<<< HEAD
-    Tool function to analyze PDF forms using PyPDF2 (Textract removed)
-=======
     Tool function to analyze PDF forms using basic parsing (PyPDF2).
     Extracts text and detects key: value style lines.
->>>>>>> 56cebb95905230803374277eb4646d09a860044b
     
     Args:
         s3_key: S3 key of the PDF file to analyze
@@ -576,10 +521,6 @@ def analyze_pdf_forms_tool(s3_key: str) -> str:
         if not s3_key:
             return "Error: s3_key parameter is required"
         
-<<<<<<< HEAD
-        # Use PyPDF2 for form analysis (Textract removed)
-=======
->>>>>>> 56cebb95905230803374277eb4646d09a860044b
         result = pdf_reader._analyze_forms_with_pypdf(s3_key)
         
         if not result["success"]:
