@@ -1792,6 +1792,8 @@ resource "aws_iam_role_policy_attachment" "chat_agent_s3_policy" {
 
 # Chat agent: GetObject only on S3 buckets for read_s3_file_tool (single policy to stay under 10 policies/role)
 # Covers: sec_filings, congress_bills, lda_disclosures, politician_trades, stock_historical, usaspending_data
+# If this policy already exists (e.g. was created by the old api-gateway module), import it:
+#   terraform import aws_iam_policy.chat_agent_s3_read_policy arn:aws:iam::ACCOUNT_ID:policy/cosine-chat-agent-s3-read-ENVIRONMENT
 resource "aws_iam_policy" "chat_agent_s3_read_policy" {
   name        = "${var.project_name}-chat-agent-s3-read-${var.environment}"
   description = "Chat agent: GetObject only on S3 buckets for read_s3_file_tool (SEC, congress, LDA, trades, stock, usaspending)"
