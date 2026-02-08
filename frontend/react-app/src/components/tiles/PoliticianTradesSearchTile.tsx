@@ -2072,12 +2072,12 @@ const PoliticianTradesSearchTile: React.FC<PoliticianTradesSearchTileProps> = ({
                     onClick={(e) => handleTradeClick(e, trade.tradeId, index)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      if (user?.id) {
+                      if (user?.id || isDemo) {
                         openItemDetails(
                           'politician_trade',
                           trade,
                           'Trade Details',
-                          { user_id: user.id }
+                          { user_id: user?.id, constrainToDemo: isDemo }
                         );
                       }
                     }}

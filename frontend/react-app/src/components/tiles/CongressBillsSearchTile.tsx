@@ -1802,12 +1802,12 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
                     onClick={(e) => handleBillClick(e, bill.bill_id, index)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      if (user?.id) {
+                      if (user?.id || isDemo) {
                         openItemDetails(
                           'congress_bill',
                           bill,
                           bill.bill_title,
-                          { user_id: user.id }
+                          { user_id: user?.id, constrainToDemo: isDemo }
                         );
                       }
                     }}

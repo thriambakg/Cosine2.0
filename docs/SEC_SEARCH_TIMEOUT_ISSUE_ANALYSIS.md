@@ -66,3 +66,9 @@ For long-term fix: Implement Option 2 for better user experience
 
 
 
+<<<<<<< HEAD
+
+
+=======
+>>>>>>> ba70d61c88cd76e9f7598f57d72ecdf857e6c9f5
+

@@ -6,10 +6,9 @@ on:
       environment:
         description: 'Environment to clean up'
         required: true
-        default: 'development'
+        default: 'staging'
         type: choice
         options:
-          - development
           - staging
           - production
       confirm_destroy:

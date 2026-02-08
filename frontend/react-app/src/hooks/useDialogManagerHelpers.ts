@@ -40,6 +40,7 @@ export const useDialogManagerHelpers = () => {
       onNavigateToParent?: (parentAward: any) => void;
       parentAward?: any;
       item_id?: string;
+      constrainToDemo?: boolean;
     }
   ) => {
     return openDialog({
