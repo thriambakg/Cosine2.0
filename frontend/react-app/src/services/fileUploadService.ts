@@ -58,18 +58,17 @@ export class FileUploadService {
   ];
 
   /**
-   * Helper function to convert Uint8Array to base64 without stack overflow
+   * Helper function to convert Uint8Array to base64 without stack overflow.
+   * Uses chunking because String.fromCharCode.apply() has a max argument count (~65k) in some engines.
    */
   private static convertUint8ArrayToBase64(uint8Array: Uint8Array): string {
-    const chunkSize = 8192; // Process in 8KB chunks to avoid stack overflow
-    let result = '';
-    
+    const chunkSize = 8192; // Safe for apply(); larger can hit "Maximum call stack size exceeded"
+    const parts: string[] = [];
     for (let i = 0; i < uint8Array.length; i += chunkSize) {
       const chunk = uint8Array.slice(i, i + chunkSize);
-      result += btoa(String.fromCharCode.apply(null, Array.from(chunk)));
+      parts.push(btoa(String.fromCharCode.apply(null, Array.from(chunk))));
     }
-    
-    return result;
+    return parts.join('');
   }
 
   /**
@@ -242,11 +241,23 @@ export class FileUploadService {
     apiGatewayUrl: string = API_CONFIG.BASE_URL
   ): Promise<any> {
     try {
-      const filesData = files.map(file => ({
+        const filesData = files.map(file => ({
         filename: file.name,
         content_type: file.type,
         data: file.compressedData // Already base64 encoded from compression
       }));
+
+      // Log payload size to help diagnose 8KB truncation (base64 ~4/3 of decoded size)
+      const totalBase64Len = filesData.reduce((sum, f) => sum + (f.data?.length ?? 0), 0);
+      const totalFileSize = files.reduce((sum, f) => sum + f.size, 0);
+      console.log(
+        `📤 File upload: ${files.length} file(s), total base64 length=${totalBase64Len}, original bytes=${totalFileSize}`
+      );
+      if (totalFileSize > 0 && totalBase64Len < totalFileSize * 1.2) {
+        console.warn(
+          `⚠️ File upload: base64 length (${totalBase64Len}) is suspiciously small for ${totalFileSize} bytes - possible truncation`
+        );
+      }
 
       const response = await fetch(`${apiGatewayUrl}/files`, {
         method: 'POST',

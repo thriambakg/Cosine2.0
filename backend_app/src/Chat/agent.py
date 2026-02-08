@@ -146,7 +146,7 @@ from tools.financial_calculator import python_financial_calculator, EnhancedFina
 # Import our custom session database access tool
 from tools.session_database_access import get_session_files_tool, get_session_context_tool, SessionDatabaseAccess
 from tools.crypto_data_fetcher import get_crypto_data_tool, compare_crypto_tool
-from tools.pdf_reader import read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool
+from tools.pdf_tool import read_pdf_tool
 from tools.sec_edgar_api import get_company_cik, get_company_filings, get_filing_document, search_sec_filings, get_filing_exhibits, download_filing_pdf
 from tools.chart_generator import generate_chart_tool, generate_stock_chart
 from tools.excel_generator import generate_excel_with_charts_tool
@@ -905,7 +905,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 5. calculate_stock_correlation(tickers, period) - LIVE correlation matrix between stocks using yfinance data
 6. python_financial_calculator(calculation) - Advanced calculations (Fama-French, VaR, Sharpe ratios)
 7. http_request - Web requests for additional context
-8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3. Automatically decrypts .cosine encrypted context items from the filesystem. **AUTOMATICALLY detects document types (SEC filings, financial statements) and extracts structured financial data (revenue, margins, cash flow, debt). Extracted data is automatically indexed for fast retrieval.**
+8. read_s3_file_tool(s3_key, file_type) - Read and analyze files uploaded by users to S3 (including PDFs). Automatically decrypts .cosine encrypted context items. **AUTOMATICALLY detects document types (SEC filings, financial PDFs, etc.) and extracts structured financial data. Prefer this for PDFs first; use read_pdf_tool only for large PDFs when page-by-page reading is needed.**
 9. get_session_files_tool(session_id, user_id, file_type) - Retrieve uploaded files for a specific session from the database
 10. get_session_context_tool(session_id, user_id) - Get complete session context including files and context items
 11. get_chat_history_tool(session_id, user_id, limit, include_recent) - Get chat history on-demand with smart pagination
@@ -914,29 +914,27 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 14. analyze_chat_session_context_tool(session_id, user_id, context_items, analysis_type) - Analyze chat session context for insights and summaries
 15. get_crypto_data_tool(symbol, timeframe, start_date, end_date) - Get real-time cryptocurrency data for analysis with flexible timeframes
 16. compare_crypto_tool(symbols, timeframe, start_date, end_date) - Compare multiple cryptocurrencies side by side with flexible timeframes
-17. read_pdf_tool(s3_key, page_number=None) - Read and analyze PDF files from S3 storage. Use page_number parameter for large PDFs to read page-by-page and manage memory.
-18. analyze_pdf_content_tool(s3_key, analysis_type) - Perform specific analysis on PDF content
-19. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3. Requires pre-fetched data from get_financial_data or get_crypto_data_tool.
-20. generate_stock_chart(symbol, timeframe, chart_type, title, start_date, end_date) - Convenience tool: Fetch stock data and generate chart in one step. Use this for simpler stock chart requests when you don't already have the data.
-20. analyze_pdf_forms_tool(s3_key) - Analyze PDF forms using basic parsing (PyPDF2)
-21. return_session_files_wrapper(file_indices) - Return files from current session to user
-22. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
-23. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
-24. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
-25. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
-26. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
-27. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
-28. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
-29. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
-30. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
-31. search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB with various filters
-32. search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
-33. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
-34. lda_autocomplete(query, field_types, limit) - LDA autocomplete tool for finding registrants, clients, lobbyists, PACs, foreign entities
-35. lda_search(filters, limit, last_evaluated_key) - LDA search tool for searching lobbying disclosures
-36. search_autocomplete(query, list_type, limit) - Search autocomplete tool for matching natural language queries to CSV list values (policy areas, general issues, government entities, legislators)
-37. get_current_datetime() - Get current date/time for exact timeframe calculations
-38. calculate_date_range(period, start_date, end_date) - Calculate date ranges relative to current date
+17. read_pdf_tool(s3_key, page_numbers=None, s3_bucket=None) - Read text from a PDF in S3. Handles context files and user uploads; decrypts .cosine if needed. Pass page_numbers as a list of 1-indexed pages (e.g. [1, 2, 5]) or omit to read all pages. Use for any PDF (prefer read_s3_file_tool first for auto-detection and structured financials; use read_pdf_tool when you need specific pages or raw text).
+18. generate_chart_tool(symbol, data_json, chart_type, title) - Generate unified charts for both stocks and crypto using matplotlib (line, candlestick, volume, ohlc) and save directly to S3. Requires pre-fetched data from get_financial_data or get_crypto_data_tool.
+19. generate_stock_chart(symbol, timeframe, chart_type, title, start_date, end_date) - Convenience tool: Fetch stock data and generate chart in one step. Use this for simpler stock chart requests when you don't already have the data.
+20. return_session_files_wrapper(file_indices) - Return files from current session to user
+21. create_agent_file_wrapper(filename, content, file_type) - Create new files for current session
+22. generate_excel_file_tool(filename, content, template_type, include_charts) - Generate CSV files for financial analysis that can be opened in Excel (agent prepares content first)
+23. get_company_cik(symbol) - Get Central Index Key (CIK) for a company by ticker symbol
+24. get_company_filings(cik, form_type, limit) - Get recent SEC filings for a company
+25. get_filing_document(cik, accession_number, document_name) - Get full text content of SEC filing
+26. search_sec_filings(company_name, form_type, start_date, end_date, limit) - Search SEC filings by criteria
+27. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
+28. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
+29. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
+30. search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB with various filters
+31. search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
+32. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
+33. lda_autocomplete(query, field_types, limit) - LDA autocomplete tool for finding registrants, clients, lobbyists, PACs, foreign entities
+34. lda_search(filters, limit, last_evaluated_key) - LDA search tool for searching lobbying disclosures
+35. search_autocomplete(query, list_type, limit) - Search autocomplete tool for matching natural language queries to CSV list values (policy areas, general issues, government entities, legislators)
+36. get_current_datetime() - Get current date/time for exact timeframe calculations
+37. calculate_date_range(period, start_date, end_date) - Calculate date ranges relative to current date
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -1332,9 +1330,9 @@ When you encounter filesystem objects in session context (items with type "conte
 
 **FOR NON-COSINE FILES:**
 - Use read_s3_file_tool(s3_key, file_type) to read the file directly
-- The tool will automatically detect the file type and handle it appropriately
-- For PDFs: Use read_pdf_tool(s3_key) or analyze_pdf_content_tool(s3_key, analysis_type) for specialized PDF analysis
-- For other file types: Use read_s3_file_tool() and then use specialized tools as needed based on the content
+- The tool automatically detects file type (including PDFs), routes to parsers when applicable, and extracts structured data (e.g. financials for PDF financial documents)
+- For PDFs: Prefer read_s3_file_tool(s3_key) first for auto-detection and structured data. Use read_pdf_tool(s3_key, page_numbers=[1,2,...]) when you need specific pages or raw text (e.g. large PDFs: read pages incrementally)
+- For other file types: Use read_s3_file_tool() and specialized tools as needed
 
 **FOR .COSINE FILES (Encrypted Context Items):**
 - .cosine files are encrypted context items that represent tiles or other context items
@@ -1372,8 +1370,8 @@ When you encounter filesystem objects in session context (items with type "conte
    d. Use read_s3_file_tool() again with the underlying S3 key to read the actual data
 2. If it's a non-cosine file:
    a. Get the S3 key from the context item
-   b. Use read_s3_file_tool() directly to read the file
-   c. Use specialized tools (read_pdf_tool, analyze_pdf_content_tool, etc.) as needed
+   b. Use read_s3_file_tool() to read the file (for PDFs this auto-detects and extracts structured data when applicable)
+   c. For PDFs: use read_pdf_tool(s3_key, page_numbers=[...]) when you need specific pages or raw text
 3. Analyze and provide insights based on the file content
 
 **EXAMPLES:**
@@ -1390,34 +1388,12 @@ FOR CRYPTOCURRENCY QUESTIONS:
 5. Compare crypto performance against traditional assets when relevant
 
 FOR PDF FILE ANALYSIS:
-🚨 CRITICAL: MEMORY MANAGEMENT FOR LARGE PDFs
-- For large PDFs (especially from filesystem at users/user_id/filesys/), ALWAYS read page-by-page to avoid token limits
-- Start with page 1: read_pdf_tool(s3_key, page_number=1) to see the document structure
-- Read subsequent pages incrementally: read_pdf_tool(s3_key, page_number=2), then page 3, etc.
-- NEVER attempt to read the entire PDF at once if it's large - this will cause context window overflow errors
-- Use page-by-page reading to manage memory and stay within token limits
-- After reading each page, analyze it before moving to the next page
-- If you encounter a "context window overflow" error, you MUST switch to page-by-page reading immediately
-
-1. read_pdf_tool(s3_key, page_number=None) → Read full PDF (ONLY for small PDFs < 10 pages)
-   - For large PDFs, use: read_pdf_tool(s3_key, page_number=1) to read specific pages
-   - Page numbers are 1-indexed (first page is page 1, not page 0)
-   - Example workflow for large PDF:
-     a. read_pdf_tool(s3_key, page_number=1) → Get title/header
-     b. read_pdf_tool(s3_key, page_number=2) → Get next section
-     c. Continue incrementally as needed
-2. analyze_pdf_content_tool(s3_key, analysis_type) → Perform specific analysis on PDF content
-3. analyze_pdf_forms_tool(s3_key) → Analyze PDF forms using basic parsing (PyPDF2)
-4. Use analysis_type options: 'summary', 'financial', 'legal', 'technical'
-5. Extract key information like dates, monetary amounts, percentages, emails, phone numbers
-6. Detect document type (financial, legal, technical, academic, report) automatically
+- **Primary:** Use read_s3_file_tool(s3_key) for PDFs when you want auto-detection and structured financial data.
+- **When you need pages or raw text:** Use read_pdf_tool(s3_key, page_numbers=None) to read all pages, or read_pdf_tool(s3_key, page_numbers=[1, 2, 5]) for specific 1-indexed pages. Use this for large PDFs (read pages incrementally to avoid token limits), context-item PDFs, or user-uploaded PDFs. Handles .cosine decrypt automatically.
 
 📋 FILESYSTEM PDF READING (users/user_id/filesys/):
-- Filesystem PDFs are stored at: users/{user_id}/filesys/{item_id}.pdf
-- The S3 key is provided directly in context items - use it exactly as provided
-- DO NOT prepend any path - the key is already complete
-- Example: If context shows s3_key="users/abc123/filesys/file.pdf", use it directly
-- Always start with page 1 for filesystem PDFs to assess document size
+- Filesystem PDFs: users/{user_id}/filesys/{item_id}.pdf. Use the S3 key from context exactly as provided.
+- Prefer read_s3_file_tool(s3_key) first. If the PDF is large, use read_pdf_tool(s3_key, page_numbers=[1]) to assess, then read_pdf_tool(s3_key, page_numbers=[2, 3, ...]) as needed.
 
 FOR CSV FILE GENERATION (Excel-compatible):
 1. FIRST: Determine data source:
@@ -1435,8 +1411,6 @@ FOR CSV FILE GENERATION (Excel-compatible):
    - "Generate a financial analysis for AAPL" → Fetch live AAPL data → Process data → Format content → Generate CSV
    - "Create portfolio analysis with my holdings and live market data" → Read portfolio file → Fetch market data → Combine and analyze → Generate CSV
 9. IMPORTANT: Always process the actual data content, not just include the raw data or tool calls
-7. Provide comprehensive analysis including word count, page estimates, and content preview
-8. For forms and tables, use analyze_pdf_forms_tool for structured data extraction
 
 🔹 AUTOMATIC DOCUMENT PROCESSING:
 When you use read_s3_file_tool to read files, the system automatically:
@@ -1537,7 +1511,7 @@ Use your judgment to determine if the user wants the file itself or wants to ana
 - All financial analysis tools (get_financial_data, search_financial_news, etc.)
 - File handling tools (return_session_files_wrapper, create_agent_file_wrapper, read_s3_file_tool)
 - Session management tools (get_session_files_tool, get_session_context_tool)
-- PDF analysis tools (read_pdf_tool, analyze_pdf_content_tool, analyze_pdf_forms_tool)
+- read_pdf_tool(s3_key, page_numbers, s3_bucket) for PDF text from S3 (any source; decrypts .cosine)
 - Crypto tools (get_crypto_data_tool, compare_crypto_tool)
 
 FOR CONTEXT ITEMS (TILES, STOCKS, ARTICLES, SEC FILINGS, POLITICIAN TRADES):
@@ -2597,9 +2571,7 @@ enhanced_tools = [
     get_session_context_tool,  # Complete session context tool
     get_crypto_data_tool,  # Real-time cryptocurrency data tool
     compare_crypto_tool,  # Cryptocurrency comparison tool
-    read_pdf_tool,  # PDF file reader tool
-    analyze_pdf_content_tool,  # PDF content analysis tool
-    analyze_pdf_forms_tool,  # PDF forms analysis (PyPDF2)
+    read_pdf_tool,  # Single PDF reader (S3 + optional .cosine decrypt; page_numbers list)
     get_company_cik,  # Get company CIK from ticker symbol
     get_company_filings,  # Get SEC filings for a company
     get_filing_document,  # Get full text of SEC filing
