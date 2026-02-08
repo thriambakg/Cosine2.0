@@ -162,38 +162,23 @@ def get_company_filings(cik: str, form_type: str = "10-K", limit: int = 10) -> s
             filing_dates = filings.get('filingDate', [])
             primary_documents = filings.get('primaryDocument', [])
             
-            # Filter by form type and validate dates (exclude future dates/test data)
+            # Filter by form type
             matching_filings = []
-            today = datetime.now().date()
-            
             for i, form in enumerate(forms):
                 if form == form_type and len(matching_filings) < limit:
                     accession = accession_numbers[i] if i < len(accession_numbers) else 'N/A'
-                    filing_date_str = filing_dates[i] if i < len(filing_dates) else 'N/A'
+                    filing_date = filing_dates[i] if i < len(filing_dates) else 'N/A'
                     primary_doc = primary_documents[i] if i < len(primary_documents) else 'N/A'
-                    
-                    # Validate filing date - skip future dates (likely test/mock data)
-                    try:
-                        if filing_date_str and filing_date_str != 'N/A':
-                            filing_date = datetime.strptime(filing_date_str, '%Y-%m-%d').date()
-                            # Skip filings with dates in the future (test/mock data)
-                            if filing_date > today:
-                                logger.warning(f"Skipping filing with future date {filing_date_str} (likely test data): {accession}")
-                                continue
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Could not parse filing date '{filing_date_str}': {e}")
-                        # Include it anyway if date parsing fails (might be valid but in different format)
                     
                     matching_filings.append({
                         'form': form,
                         'accession_number': accession,
-                        'filing_date': filing_date_str,
+                        'filing_date': filing_date,
                         'primary_document': primary_doc
                     })
             
             if matching_filings:
                 result = f"Found {len(matching_filings)} {form_type} filings for CIK {cik_padded}:\n\n"
-                result += "⚠️ Note: Only real historical filings are shown (future-dated test filings are filtered out).\n\n"
                 for filing in matching_filings:
                     result += f"• {filing['form']} - {filing['filing_date']}\n"
                     result += f"  Accession: {filing['accession_number']}\n"
@@ -201,7 +186,7 @@ def get_company_filings(cik: str, form_type: str = "10-K", limit: int = 10) -> s
                 
                 return result
             else:
-                return f"No {form_type} filings found for CIK {cik_padded} (after filtering out test data)"
+                return f"No {form_type} filings found for CIK {cik_padded}"
         else:
             return f"Error fetching filings: HTTP {response.status_code}"
             
