@@ -53,10 +53,23 @@ def _get_pdf_bytes(
     import boto3
     bucket = _get_bucket_for_key(s3_key, s3_bucket)
     s3_client = boto3.client("s3")
+    logger.info("[PDF_TOOL] get_object: bucket=%s key=%s", bucket, s3_key)
     response = s3_client.get_object(Bucket=bucket, Key=s3_key)
     body = response.get("Body")
     content_length = response.get("ContentLength")
     content = body.read(content_length) if content_length is not None else body.read()
+    actual_len = len(content)
+    logger.info(
+        "[PDF_TOOL] S3 read: ContentLength=%s actual_bytes=%s key=%s",
+        content_length,
+        actual_len,
+        s3_key,
+    )
+    if actual_len == 8192:
+        logger.warning(
+            "[PDF_TOOL] Exactly 8192 bytes read - likely truncated (upload or S3). key=%s",
+            s3_key,
+        )
     effective_key = s3_key
 
     # .cosine or encrypted user file: decrypt and optionally follow underlying key
@@ -89,15 +102,29 @@ def _get_pdf_bytes(
             underlying = inner.get("s3_key") or data.get("s3_key")
             if underlying and isinstance(underlying, str):
                 bucket_under = _get_bucket_for_key(underlying, None)
+                logger.info("[PDF_TOOL] Following .cosine underlying key: %s", underlying)
                 resp2 = s3_client.get_object(Bucket=bucket_under, Key=underlying)
                 body2 = resp2.get("Body")
                 cl2 = resp2.get("ContentLength")
                 content = body2.read(cl2) if cl2 is not None else body2.read()
+                actual_len2 = len(content)
+                logger.info(
+                    "[PDF_TOOL] S3 read (underlying): ContentLength=%s actual_bytes=%s key=%s",
+                    cl2,
+                    actual_len2,
+                    underlying,
+                )
+                if actual_len2 == 8192:
+                    logger.warning(
+                        "[PDF_TOOL] Exactly 8192 bytes from underlying key - likely truncated. key=%s",
+                        underlying,
+                    )
                 effective_key = underlying
         except Exception as e:
             logger.warning("Decryption or follow for %s failed: %s", s3_key, e)
             raise ValueError(f"Failed to decrypt or read underlying file: {e}") from e
 
+    logger.info("[PDF_TOOL] _get_pdf_bytes returning: effective_key=%s len(content)=%s", effective_key, len(content))
     return content, effective_key
 
 
@@ -132,6 +159,7 @@ def read_pdf_tool(
     if not s3_key or not s3_key.strip():
         return "Error: s3_key is required."
 
+    logger.info("[PDF_TOOL] read_pdf_tool called: s3_key=%s page_numbers=%s s3_bucket=%s", s3_key, page_numbers, s3_bucket)
     try:
         content, effective_key = _get_pdf_bytes(s3_key, s3_bucket)
     except ValueError as e:
@@ -146,6 +174,7 @@ def read_pdf_tool(
             "Use read_s3_file_tool for other file types."
         )
 
+    logger.info("[PDF_TOOL] Calling extract_text: len(content)=%s effective_key=%s", len(content), effective_key)
     try:
         from parsers.pdf_parser import extract_text
     except ImportError:
@@ -157,6 +186,7 @@ def read_pdf_tool(
 
     result = extract_text(content, page_numbers=page_numbers)
     if not result.get("success"):
+        logger.warning("[PDF_TOOL] extract_text failed: %s", result.get("error"))
         return f"Error extracting PDF text: {result.get('error', 'Unknown error')}"
 
     total = result.get("total_pages", 0)

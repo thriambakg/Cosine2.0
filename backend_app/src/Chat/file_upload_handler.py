@@ -222,13 +222,18 @@ class FileUploadHandler:
                     file_content = base64.b64decode(data)
                     file_size = len(file_content)
                     logger.info(
-                        f"File upload decode: filename={filename}, base64_len={base64_len}, decoded_bytes={file_size}"
+                        "[FILE_UPLOAD] decode: filename=%s base64_len=%s decoded_bytes=%s s3_key=%s",
+                        filename,
+                        base64_len,
+                        file_size,
+                        f"users/{user_id}/sessions/{session_id}/files/...",
                     )
                     if file_size == 8192:
                         logger.warning(
-                            f"Uploaded file is exactly 8,192 bytes - likely truncated. "
-                            f"base64_len={base64_len} (expected ~10923 for 8KB binary). "
-                            "If base64_len is much larger, the request body may have been truncated by API Gateway or the client."
+                            "[FILE_UPLOAD] File is exactly 8,192 bytes - likely truncated. "
+                            "base64_len=%s (for 8KB binary expect ~10923). "
+                            "Check: (1) API Gateway / Lambda payload limit, (2) client sending full base64.",
+                            base64_len,
                         )
                     
                     # Upload to S3

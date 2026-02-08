@@ -45,7 +45,9 @@ def extract_text(
             "pages_read": [],
             "error": "PyPDF2 not available",
         }
-    if not pdf_content or len(pdf_content) < 100:
+    content_len = len(pdf_content) if pdf_content else 0
+    logger.info("[PDF_PARSER] extract_text: pdf_content length=%s bytes", content_len)
+    if not pdf_content or content_len < 100:
         return {
             "success": False,
             "text": "",
@@ -53,6 +55,11 @@ def extract_text(
             "pages_read": [],
             "error": "PDF content too short or empty",
         }
+    if content_len == 8192:
+        logger.warning(
+            "[PDF_PARSER] Exactly 8192 bytes - likely truncated (check upload or S3 read). "
+            "PDFs truncated at 8KB will fail with 'EOF marker not found'."
+        )
     try:
         reader = PyPDF2.PdfReader(BytesIO(pdf_content))
         total_pages = len(reader.pages)
@@ -101,10 +108,15 @@ def extract_text(
         }
     except Exception as e:
         err_msg = str(e)
-        logger.error("Error extracting text from PDF: %s", err_msg)
+        logger.error(
+            "[PDF_PARSER] Error extracting text: %s (pdf_content length=%s bytes)",
+            err_msg,
+            len(pdf_content),
+        )
         if "EOF marker not found" in err_msg or "EOF" in err_msg:
             logger.warning(
-                "PDF may be truncated or corrupted (length=%s bytes)",
+                "[PDF_PARSER] PDF may be truncated or corrupted (length=%s bytes). "
+                "If length is 8192, the file was likely truncated on upload or when reading from S3.",
                 len(pdf_content),
             )
         return {
