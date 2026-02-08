@@ -4,6 +4,7 @@ import { Box, Typography, Button, Menu, MenuItem, IconButton, Chip, Tooltip } fr
 import { Add as AddIcon, ZoomIn, ZoomOut, ZoomOutMap, PlayArrow as PlayIcon, Replay as ReplayIcon } from '@mui/icons-material';
 import GridDashboard from '../dashboard/GridDashboard';
 import DemoChatSidebar, { DEMO_CHAT_SIDEBAR_WIDTH } from '../layout/DemoChatSidebar';
+import DemoDialogRenderer from '../common/DemoDialogRenderer';
 import { DemoDashboardProvider } from '@/contexts/DemoDashboardContext';
 import { getDefaultTileSize } from '../tiles/tileConfig';
 import { UnifiedTile, GridPosition } from '@/types/dashboardTypes';
@@ -234,7 +235,7 @@ const DEMO_TILE_TYPES: { type: UnifiedTile['type']; label: string }[] = [
   { type: 'news', label: 'News' },
 ];
 
-export default function LandingDemoDashboard() {
+export default function DemoDashboard() {
   const [tiles, setTiles] = useState<UnifiedTile[]>(getInitialDemoTiles);
   const [addMenuAnchor, setAddMenuAnchor] = useState<null | HTMLElement>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -529,10 +530,16 @@ export default function LandingDemoDashboard() {
   }, [tiles]);
 
   const [zoomLevel, setZoomLevel] = useState(1.0);
+  const demoContainerRef = useRef<HTMLDivElement>(null);
+  const [demoContainerReady, setDemoContainerReady] = useState(false);
+  const setDemoContainerRef = useCallback((el: HTMLDivElement | null) => {
+    (demoContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+    setDemoContainerReady(Boolean(el));
+  }, []);
 
   return (
     <DemoDashboardProvider isDemo>
-      <Box sx={{ width: '100%', minHeight: 520, bgcolor: 'grey.900', display: 'flex', flexDirection: 'column' }}>
+      <Box ref={setDemoContainerRef} sx={{ position: 'relative', width: '100%', minHeight: 520, bgcolor: 'grey.900', display: 'flex', flexDirection: 'column' }}>
         {/* Header: title, description, zoom - full width */}
         <Box sx={{ flexShrink: 0, py: 4, px: 2 }}>
           <Box sx={{ textAlign: 'center', mb: 2 }}>
@@ -712,6 +719,9 @@ export default function LandingDemoDashboard() {
             <DemoChatSidebar />
           </Box>
         </Box>
+
+        {/* Item details dialogs opened from demo tiles: constrained to demo area, closable only */}
+        {demoContainerReady && <DemoDialogRenderer containerRef={demoContainerRef} />}
 
         {/* Simulation cursor and drag preview: portaled to body so position:fixed uses viewport coords (demo section has zoom: 0.8) */}
         {typeof document !== 'undefined' &&

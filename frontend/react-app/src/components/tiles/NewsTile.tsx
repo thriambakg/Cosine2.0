@@ -1950,12 +1950,12 @@ const NewsTile: React.FC<NewsTileProps> = ({
                     onClick={(e) => handleArticleClick(e, article.id, index)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      if (user?.id) {
+                      if (user?.id || isDemo) {
                         openItemDetails(
                           'news_article',
                           article,
                           article.title,
-                          { user_id: user.id }
+                          { user_id: user?.id, constrainToDemo: isDemo }
                         );
                       }
                     }}

@@ -8,7 +8,7 @@ import { Provider } from 'react-redux';
 import { store } from './store/store';
 
 // Import components from organized structure
-import { LandingPageMUI, AppLayout, LoadingPage } from './components';
+import { PageMUI, AppLayout, LoadingPage } from './components';
 import ChatPage from './pages/ChatPage';
 import FilesPage from './pages/FilesPage';
 import UnifiedDashboardPage from './pages/UnifiedDashboardPage';
@@ -152,7 +152,7 @@ function AppContent() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </AppLayout>
-        ) : <LandingPageMUI />
+        ) : <PageMUI />
       } />
     </Routes>
   );
