@@ -3122,12 +3122,12 @@ const SECSearchTile: React.FC<SECSearchTileProps> = memo(({
                   onClick={(e) => handleResultClick(e, result.accession, index)}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    if (user?.id) {
+                    if (user?.id || isDemo) {
                       openItemDetails(
                         'sec_filing',
                         result,
                         `Filing Details: ${result.form} - ${result.filingEntity}`,
-                        { user_id: user.id }
+                        { user_id: user?.id, constrainToDemo: isDemo }
                       );
                     }
                   }}

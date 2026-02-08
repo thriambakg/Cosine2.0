@@ -2101,15 +2101,16 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     onClick={(e) => handleAwardClick(e, award.award_id, index)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      if (user?.id) {
+                      if (user?.id || isDemo) {
                         openItemDetails(
                           'govt_contract',
                           award,
                           award.award_title || 'Award Details',
                           { 
-                            user_id: user.id,
+                            user_id: user?.id,
                             parentAward: null,
                             onEnrich: handleAwardEnrichment,
+                            constrainToDemo: isDemo,
                           }
                         );
                       }

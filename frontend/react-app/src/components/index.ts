@@ -14,7 +14,7 @@ export * from './dialogs';
 export * from './layout';
 
 // Page components
-export * from './pages';
+export * from './landing';
 
 // Tile components
 export * from './tiles';

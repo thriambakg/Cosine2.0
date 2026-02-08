@@ -20,7 +20,7 @@ import {
 import { AuthModal } from '../auth';
 import { useAuth } from '@/contexts/AuthContext';
 import { GlobalChatProvider } from '@/contexts/GlobalChatContext';
-import LandingDemoDashboard from './LandingDemoDashboard';
+import DemoDashboard from './DemoDashboard';
 
 // Screenshot block: matches screenshot size/shape, scaled to fit; click opens full-size dialog
 const ScreenshotBlock = ({
@@ -114,10 +114,10 @@ const FEATURES = [
 const FAQ_ITEMS = [
   { q: 'What is FinGov?', a: 'FinGov is a research platform that brings together government disclosures, SEC filings, lobbying data, Congress bills, politician trades, and government contracts in one workspace. You can search across these sources, save sessions and files, and use an AI assistant to summarize, compare, and answer questions about the data you select.' },
   { q: 'What data can I search?', a: 'You can search SEC filings, LDA lobbying disclosures, Congress bills, politician stock trades, and government contract awards. The platform also supports news, stock data, and your own files, so you can combine public and private sources in a single workflow.' },
-  { q: 'How does the AI chat work?', a: 'You choose what the AI sees by adding search results, filings, or documents to your session context. The assistant reads that material and can summarize it, compare entities, and answer questions—so the answers are grounded in the data you’ve selected rather than generic information.' },
+  { q: 'How does the AI chat work?', a: "You choose what the AI sees by adding search results, filings, or documents to your session context. The assistant reads that material and can summarize it, compare entities, and answer questions—so the answers are grounded in the data you've selected rather than generic information." },
 ];
 
-export default function LandingPageMUI() {
+export default function PageMUI() {
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [authModalOpen, setAuthModalOpenRaw] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -443,7 +443,7 @@ export default function LandingPageMUI() {
         {/* Demo: interactive dashboard; zoom so it fits 1080p without browser zoom */}
         <Box id="demo" sx={{ scrollMarginTop: 80, zoom: 0.67, paddingBottom: 6 }}>
           <GlobalChatProvider>
-            <LandingDemoDashboard />
+            <DemoDashboard />
           </GlobalChatProvider>
         </Box>
 

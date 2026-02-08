@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Button,
   Box,
@@ -85,6 +86,111 @@ interface ItemDetailsDialogProps {
   cachedContent?: any;
   zIndex?: number;
   onBringToFront?: () => void;
+  /** When true, hide the minimize button (e.g. demo section) */
+  disableMinimize?: boolean;
+  /** When set, render inside this container with position absolute so dialog stays within (e.g. demo area) */
+  containerElement?: HTMLElement | null;
+  /** When true, use only passed-in/mock data and do not make any API calls (for demo section) */
+  useDemoData?: boolean;
+}
+
+/** Merge passed-in data with type-specific mock defaults so demo detail view looks complete without API calls */
+function getDemoMockItemData(itemType: ItemType, data: any): any {
+  const raw = data?.data && typeof data.data === 'object' ? data.data : data;
+  if (!raw) return raw;
+  const base = { ...raw };
+  switch (itemType) {
+    case 'govt_contract':
+      return {
+        award_id: base.award_id || 'demo-award-1',
+        award_id_piid: base.award_id_piid || base.award_id?.replace('demo-award-', 'PIID-') || 'PIID-1',
+        recipient_name: base.recipient_name ?? 'Demo Recipient',
+        awarding_agency_name: base.awarding_agency_name ?? 'Demo Agency',
+        total_obligated_amount: base.total_obligated_amount ?? 0,
+        action_date: base.action_date ?? new Date().toISOString().slice(0, 10),
+        period_of_performance_start_date: base.period_of_performance_start_date ?? '2024-01-01',
+        period_of_performance_current_end_date: base.period_of_performance_current_end_date ?? '2025-12-31',
+        description: base.description ?? 'Demo contract for preview. No API calls in demo.',
+        transaction_count: base.transaction_count ?? 0,
+        subaward_count: base.subaward_count ?? 0,
+        transactions: base.transactions ?? [],
+        subawards: base.subawards ?? [],
+        child_awards: base.child_awards ?? [],
+        child_awards_details: base.child_awards_details ?? [],
+        award_type: base.award_type ?? 'contract',
+        award_type_description: base.award_type_description ?? 'Contract',
+        ...base,
+      };
+    case 'sec_filing': {
+      const mockDocumentUrls = [
+        'https://www.sec.gov/Archives/edgar/data/0000000/0000000-24-000000/10k-2024.htm',
+        'https://www.sec.gov/Archives/edgar/data/0000000/0000000-24-000000/10k-2024.pdf',
+        'https://www.sec.gov/Archives/edgar/data/0000000/0000000-24-000000/exhibit-21.htm',
+      ];
+      const mockDataFileUrls = [
+        'https://www.sec.gov/Archives/edgar/data/0000000/0000000-24-000000/financials.json',
+        'https://www.sec.gov/Archives/edgar/data/0000000/0000000-24-000000/notes-to-statements.json',
+      ];
+      return {
+        ...base,
+        form: base.form ?? '10-K',
+        filingEntity: base.filingEntity ?? base.reportingFor ?? 'Demo Entity',
+        reportingFor: base.reportingFor ?? base.filingEntity ?? 'FY 2024',
+        filingDate: base.filingDate ?? '2024-02-15',
+        accession: base.accession ?? '0000000-24-000000',
+        cik: base.cik ?? '0000000',
+        fileNumber: base.fileNumber ?? '001-00000',
+        filingPageUrl: base.filingPageUrl ?? 'https://www.sec.gov/cgi-bin/browse-edgar',
+        documentUrls: (base.documentUrls && base.documentUrls.length > 0) ? base.documentUrls : mockDocumentUrls,
+        dataFileUrls: (base.dataFileUrls && base.dataFileUrls.length > 0) ? base.dataFileUrls : mockDataFileUrls,
+      };
+    }
+    case 'congress_bill':
+      return {
+        bill_id: base.bill_id ?? 'hr-demo-1',
+        bill_title: base.bill_title ?? 'Demo Bill',
+        bill_type: base.bill_type ?? 'hr',
+        sponsor_full_name: base.sponsor_full_name ?? base.sponsor_name ?? 'Demo Sponsor',
+        introduced_date: base.introduced_date ?? '2024-01-10',
+        congress: base.congress ?? 118,
+        policy_area: base.policy_area ?? 'Demo area',
+        summary_text: base.summary_text ?? 'This is demo bill text for preview. No API calls in demo.',
+        ...base,
+      };
+    case 'politician_trade':
+      return {
+        tradeId: base.tradeId ?? base.award_id ?? 'demo-trade-1',
+        politician_name: base.politician_name ?? base.politicianName ?? 'Demo Official',
+        politicianName: base.politicianName ?? base.politician_name,
+        party: base.party ?? 'D',
+        position: base.position ?? 'Representative',
+        asset_name: base.asset_name ?? base.securitySymbol ?? 'AAPL',
+        securitySymbol: base.securitySymbol ?? base.asset_name,
+        securityName: base.securityName ?? base.asset_name,
+        transaction_type: base.transaction_type ?? base.transactionType ?? 'Purchase',
+        transactionType: base.transactionType ?? base.transaction_type,
+        transaction_date: base.transaction_date ?? base.transactionDate ?? '2024-09-01',
+        transactionDate: base.transactionDate ?? base.transaction_date,
+        amount: base.amount ?? '$1,001 - $15,000',
+        ...base,
+      };
+    case 'news_article':
+      return {
+        id: base.id ?? 'demo-news-1',
+        title: base.title ?? 'Demo Article',
+        source_name: base.source_name ?? base.source ?? 'Demo Source',
+        source_url: base.source_url ?? base.url ?? '#',
+        published_date: base.published_date ?? base.publishedDate ?? new Date().toISOString(),
+        summary: base.summary ?? 'Demo article summary for preview. No API calls in demo.',
+        url: base.url ?? base.source_url ?? '#',
+        ...base,
+      };
+    case 'lda_disclosure':
+    case 'stock_result':
+    case 'tile':
+    default:
+      return base;
+  }
 }
 
 const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
@@ -110,6 +216,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   onCacheContent,
   zIndex = 1000,
   onBringToFront,
+  disableMinimize = false,
+  containerElement = null,
+  useDemoData = false,
 }) => {
   const [enrichmentLoading, setEnrichmentLoading] = useState<boolean>(false);
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
@@ -125,8 +234,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   
   // State to track item data - updated when enrichment completes
   const [itemData, setItemData] = useState<any>(() => {
-    // Initialize from props - handle nested data structure
-    return data?.data && typeof data.data === 'object' ? data.data : data;
+    const raw = data?.data && typeof data.data === 'object' ? data.data : data;
+    return useDemoData ? getDemoMockItemData(itemType, data) : raw;
   });
   
   const { user } = useAuth();
@@ -139,6 +248,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   
   // Fetch child award details if we have child_awards but not child_awards_details
   useEffect(() => {
+    if (useDemoData) {
+      if (itemData?.child_awards_details && Array.isArray(itemData.child_awards_details)) {
+        setChildAwardsDetails(itemData.child_awards_details);
+      } else {
+        setChildAwardsDetails([]);
+      }
+      return;
+    }
     const fetchChildAwards = async () => {
       const awardId = itemData?.award_id;
       
@@ -209,14 +326,24 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     if (open && itemData) {
       fetchChildAwards();
     }
-  }, [itemData, itemType, open]);
+  }, [itemData, itemType, open, useDemoData]);
 
   // Update itemData when data prop changes (e.g., when dialog is opened with new data)
   useEffect(() => {
-    const newItemData = data?.data && typeof data.data === 'object' ? data.data : data;
+    const newItemData = useDemoData ? getDemoMockItemData(itemType, data) : (data?.data && typeof data.data === 'object' ? data.data : data);
     const awardId = newItemData?.award_id;
     
     setItemData(newItemData);
+    
+    if (useDemoData) {
+      setLoadingFullAward(false);
+      if (!open) {
+        fullAwardFetchedRef.current.clear();
+        childAwardsFetchedRef.current.clear();
+        fullFilingFetchedRef.current.clear();
+      }
+      return;
+    }
     
     // For government contracts, always fetch full award data when dialog opens
     // This ensures we have complete data including transactions and subawards
@@ -289,7 +416,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       childAwardsFetchedRef.current.clear();
       fullFilingFetchedRef.current.clear();
     }
-  }, [data, itemType, open]);
+  }, [data, itemType, open, useDemoData]);
   
   // Dialog manager for minimize functionality (only use if not already managed)
   const safeDialogManager = useSafeDialogManager();
@@ -420,6 +547,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
   // Handle refresh for Congress Bills
   const handleRefreshBill = useCallback(async () => {
+    if (useDemoData) return;
     const billId = itemData?.bill_id;
     
     if (!billId || refreshBillLoading) return;
@@ -467,10 +595,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     } finally {
       setRefreshBillLoading(false);
     }
-  }, [itemData?.bill_id, refreshBillLoading, onEnrich]);
+  }, [itemData?.bill_id, refreshBillLoading, onEnrich, useDemoData]);
 
   // Handle enrichment for Government Contracts
   const handleEnrichAward = useCallback(async () => {
+    if (useDemoData) return;
     // Get award_id from itemData state
     const awardId = itemData?.award_id;
     
@@ -558,7 +687,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       setEnrichmentError(error.message || 'An error occurred while enriching award data');
       setEnrichmentLoading(false);
     }
-  }, [data, enrichmentLoading, user_id, onEnrich]);
+  }, [data, enrichmentLoading, user_id, onEnrich, useDemoData]);
 
   // Handle adding item to context (sidebar)
   const handleAddToContext = useCallback(() => {
@@ -1697,22 +1826,29 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 Filing Page
               </Typography>
               {itemData?.filingPageUrl ? (
-                <Link
-                  href={itemData.filingPageUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{
-                    color: '#3b82f6',
-                    textDecoration: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                  }}
-                >
-                  <OpenInNewIcon sx={{ fontSize: 16 }} />
-                  View on SEC.gov
-                </Link>
+                useDemoData ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#6b7280', cursor: 'not-allowed' }}>
+                    <OpenInNewIcon sx={{ fontSize: 16, color: '#6b7280' }} />
+                    <Typography variant="body2" sx={{ color: '#6b7280' }}>View on SEC.gov (demo)</Typography>
+                  </Box>
+                ) : (
+                  <Link
+                    href={itemData.filingPageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{
+                      color: '#3b82f6',
+                      textDecoration: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                      '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                    }}
+                  >
+                    <OpenInNewIcon sx={{ fontSize: 16 }} />
+                    View on SEC.gov
+                  </Link>
+                )
               ) : (
                 <Typography variant="body2" sx={{ color: '#9ca3af' }}>Not available</Typography>
               )}
@@ -1735,6 +1871,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   {itemData.documentUrls.map((url: string, index: number) => {
                     const filename = url.split('/').pop() || `Document ${index + 1}`;
                     const s3Key = itemData.documentS3Keys?.[url];
+                    const grayed = useDemoData;
                     return (
                       <Box
                         key={index}
@@ -1746,23 +1883,40 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         }}
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
-                          <Link
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            sx={{
-                              color: '#3b82f6',
-                              textDecoration: 'none',
-                              fontSize: '0.875rem',
-                              flex: 1,
-                              '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                            }}
-                          >
-                            {filename}
-                            <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
-                          </Link>
-                          {s3Key && (
+                          <DocumentIcon sx={{ fontSize: 18, color: grayed ? '#6b7280' : '#3b82f6' }} />
+                          {grayed ? (
+                            <Typography
+                              component="span"
+                              sx={{
+                                color: '#6b7280',
+                                fontSize: '0.875rem',
+                                flex: 1,
+                                cursor: 'not-allowed',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              {filename}
+                              <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle', color: '#6b7280' }} />
+                            </Typography>
+                          ) : (
+                            <Link
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              sx={{
+                                color: '#3b82f6',
+                                textDecoration: 'none',
+                                fontSize: '0.875rem',
+                                flex: 1,
+                                '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                              }}
+                            >
+                              {filename}
+                              <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                            </Link>
+                          )}
+                          {s3Key && !grayed && (
                             <IconButton
                               size="small"
                               onClick={() => handleDownloadFile(s3Key, filename, 'SEC_FILINGS')}
@@ -1774,6 +1928,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                             >
                               <DownloadIcon fontSize="small" />
                             </IconButton>
+                          )}
+                          {grayed && (
+                            <DownloadIcon sx={{ fontSize: 18, color: '#6b7280', ml: 'auto' }} />
                           )}
                         </Box>
                       </Box>
@@ -1800,6 +1957,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   {itemData.dataFileUrls.map((url: string, index: number) => {
                     const filename = url.split('/').pop() || `Data File ${index + 1}`;
                     const s3Key = itemData.dataFileS3Keys?.[url];
+                    const grayed = useDemoData;
                     return (
                       <Box
                         key={index}
@@ -1811,23 +1969,40 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         }}
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6' }} />
-                          <Link
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            sx={{
-                              color: '#3b82f6',
-                              textDecoration: 'none',
-                              fontSize: '0.875rem',
-                              flex: 1,
-                              '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
-                            }}
-                          >
-                            {filename}
-                            <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
-                          </Link>
-                          {s3Key && (
+                          <DocumentIcon sx={{ fontSize: 18, color: grayed ? '#6b7280' : '#3b82f6' }} />
+                          {grayed ? (
+                            <Typography
+                              component="span"
+                              sx={{
+                                color: '#6b7280',
+                                fontSize: '0.875rem',
+                                flex: 1,
+                                cursor: 'not-allowed',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              {filename}
+                              <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle', color: '#6b7280' }} />
+                            </Typography>
+                          ) : (
+                            <Link
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              sx={{
+                                color: '#3b82f6',
+                                textDecoration: 'none',
+                                fontSize: '0.875rem',
+                                flex: 1,
+                                '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                              }}
+                            >
+                              {filename}
+                              <OpenInNewIcon sx={{ fontSize: 14, ml: 0.5, verticalAlign: 'middle' }} />
+                            </Link>
+                          )}
+                          {s3Key && !grayed && (
                             <IconButton
                               size="small"
                               onClick={() => handleDownloadFile(s3Key, filename, 'SEC_FILINGS')}
@@ -1839,6 +2014,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                             >
                               <DownloadIcon fontSize="small" />
                             </IconButton>
+                          )}
+                          {grayed && (
+                            <DownloadIcon sx={{ fontSize: 18, color: '#6b7280', ml: 'auto' }} />
                           )}
                         </Box>
                       </Box>
@@ -1933,7 +2111,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       onClick={async (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        
+                        if (useDemoData) return;
                         if (!itemData?.parent_idv_id || !user_id) return;
                         
                         try {
@@ -2815,7 +2993,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                     onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      
+                      if (useDemoData) return;
                       if (!childAward?.award_id || !user_id) return;
                       
                       try {
@@ -3691,7 +3869,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       <IconButton
                         size="small"
                         onClick={handleEnrichAward}
-                        disabled={enrichmentLoading || !itemDataForHeader?.award_id || !user_id}
+                        disabled={useDemoData || enrichmentLoading || !itemDataForHeader?.award_id || !user_id}
                         sx={{
                           color: '#3b82f6',
                           '&:hover': {
@@ -3763,7 +3941,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         <IconButton
                           size="small"
                           onClick={handleRefreshBill}
-                          disabled={refreshBillLoading || !itemDataForHeader?.bill_id}
+                          disabled={useDemoData || refreshBillLoading || !itemDataForHeader?.bill_id}
                           sx={{
                             color: '#3b82f6',
                             '&:hover': {
@@ -4087,17 +4265,20 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
   if (!open) return null;
 
-  return (
-    <Portal>
-      {/* Preview outline - shown during drag/resize */}
+  const isConstrained = Boolean(containerElement);
+  const positionType = isConstrained ? 'absolute' : 'fixed';
+  const paperPosition = isConstrained
+    ? { left: '5%', top: '5%', width: '90%', height: '90%', maxWidth: '100%', maxHeight: '100%' }
+    : { left: `${position.x}px`, top: `${position.y}px`, width: `${size.width}px`, height: `${size.height}px` };
+
+  const dialogContent = (
+    <>
+      {/* Preview outline - shown during drag/resize (hidden in constrained mode) */}
       <Box
         ref={previewRef}
         sx={{
-          position: 'fixed',
-          left: `${position.x}px`,
-          top: `${position.y}px`,
-          width: `${size.width}px`,
-          height: `${size.height}px`,
+          position: positionType,
+          ...(isConstrained ? { display: 'none' } : { left: `${position.x}px`, top: `${position.y}px`, width: `${size.width}px`, height: `${size.height}px` }),
           border: '2px solid #3b82f6',
           backgroundColor: 'rgba(59, 130, 246, 0.1)',
           pointerEvents: 'none',
@@ -4108,7 +4289,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       />
       <Box
         sx={{
-          position: 'fixed',
+          position: positionType,
           top: 0,
           left: 0,
           right: 0,
@@ -4117,12 +4298,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           pointerEvents: 'none',
         }}
         onMouseDown={(e) => {
-          // Bring dialog to front when clicking anywhere on the backdrop
           if (onBringToFront && e.target === e.currentTarget) {
-            // Use requestAnimationFrame to avoid blocking
-            requestAnimationFrame(() => {
-              onBringToFront();
-            });
+            requestAnimationFrame(() => onBringToFront());
           }
         }}
       >
@@ -4130,26 +4307,17 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           ref={paperRef}
           elevation={8}
           onMouseDown={(e) => {
-            // Only bring to front when clicking on the title bar or empty space, not on buttons/interactive elements
+            if (isConstrained) return;
             const target = e.target as HTMLElement;
             const isInteractiveElement = target.closest('button, a, input, select, textarea, [role="button"], [onClick]');
             const isTitleBar = target.closest('[data-title-bar]');
-            
-            // Only bring to front if clicking on title bar or non-interactive area
             if (onBringToFront && (isTitleBar || !isInteractiveElement)) {
-              // Use requestAnimationFrame to avoid blocking
-              requestAnimationFrame(() => {
-                onBringToFront();
-              });
+              requestAnimationFrame(() => onBringToFront());
             }
-            // Don't prevent default - allow drag to work
           }}
           sx={{
-            position: 'fixed',
-            left: `${position.x}px`,
-            top: `${position.y}px`,
-            width: `${size.width}px`,
-            height: `${size.height}px`,
+            position: positionType,
+            ...paperPosition,
             backgroundColor: 'rgba(15, 23, 42, 0.98)',
             border: '2px solid #374151',
             color: '#ffffff',
@@ -4157,22 +4325,22 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             flexDirection: 'column',
             overflow: 'hidden',
             pointerEvents: 'auto',
-            cursor: isDragging ? 'move' : 'default',
+            cursor: isConstrained ? 'default' : (isDragging ? 'move' : 'default'),
             zIndex: zIndex,
           }}
         >
-          {/* Title bar - draggable */}
+          {/* Title bar - draggable (disabled when constrained to container) */}
           <Box
             data-title-bar
             data-tutorial="item-details-titlebar"
-            onMouseDown={handleDragStart}
+            onMouseDown={isConstrained ? undefined : handleDragStart}
             sx={{
               color: '#ffffff',
               borderBottom: '1px solid #374151',
               pb: 2,
               px: 3,
               pt: 2,
-              cursor: 'move',
+              cursor: isConstrained ? 'default' : 'move',
               userSelect: 'none',
             }}
           >
@@ -4238,7 +4406,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       <IconButton
                         size="small"
                         onClick={handleEnrichAward}
-                        disabled={enrichmentLoading || !itemData?.award_id || !user_id}
+                        disabled={useDemoData || enrichmentLoading || !itemData?.award_id || !user_id}
                         sx={{
                           color: '#3b82f6',
                           '&:hover': {
@@ -4307,7 +4475,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       <IconButton
                         size="small"
                         onClick={handleRefreshBill}
-                        disabled={refreshBillLoading || !itemData?.bill_id}
+                        disabled={useDemoData || refreshBillLoading || !itemData?.bill_id}
                         sx={{
                           color: '#3b82f6',
                           '&:hover': {
@@ -4370,26 +4538,29 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           
           {/* Add to Files */}
           <Tooltip title="Save to Files">
-            <IconButton
-              size="small"
-              onClick={handleAddToFiles}
-              disabled={!user}
-              sx={{
-                color: '#fbbf24',
-                '&:hover': {
-                  color: '#f59e0b',
-                  backgroundColor: 'rgba(251, 191, 36, 0.1)',
-                },
-                '&:disabled': {
-                  color: '#6b7280',
-                },
-              }}
-            >
-              <FolderIcon fontSize="small" />
-            </IconButton>
+            <span>
+              <IconButton
+                size="small"
+                onClick={handleAddToFiles}
+                disabled={!user}
+                sx={{
+                  color: '#fbbf24',
+                  '&:hover': {
+                    color: '#f59e0b',
+                    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+                  },
+                  '&:disabled': {
+                    color: '#6b7280',
+                  },
+                }}
+              >
+                <FolderIcon fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
           
-          {/* Minimize Button */}
+          {/* Minimize Button - hidden when disableMinimize or constrained to container (e.g. demo) */}
+          {!disableMinimize && !containerElement && (
           <Tooltip title="Minimize">
             <IconButton
               size="small"
@@ -4427,6 +4598,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               <MinimizeIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          )}
           
           {/* Close Button */}
           <IconButton
@@ -4523,7 +4695,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Button>
           </Box>
 
-          {/* Resize handle - bottom right corner */}
+          {/* Resize handle - bottom right corner (hidden when constrained to container) */}
+          {!isConstrained && (
           <Box
             onMouseDown={handleResizeStart}
             sx={{
@@ -4539,6 +4712,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               },
             }}
           />
+          )}
         </Paper>
       </Box>
       
@@ -4550,8 +4724,20 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         allowCreateFolder={true}
         title="Save to Files"
       />
-    </Portal>
+    </>
   );
+
+  if (containerElement) {
+    return createPortal(
+      <Box sx={{ position: 'absolute', inset: 0, zIndex, pointerEvents: 'none' }}>
+        <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          {dialogContent}
+        </Box>
+      </Box>,
+      containerElement
+    );
+  }
+  return <Portal>{dialogContent}</Portal>;
 };
 
 export default ItemDetailsDialog;

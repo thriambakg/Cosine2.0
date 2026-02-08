@@ -140,6 +140,11 @@ const ManagedDialogRenderer: React.FC = () => {
           return null; // Don't render minimized dialogs
         }
 
+        // Skip dialogs constrained to demo (rendered by DemoDialogRenderer inside demo section)
+        if (dialog.data?.constrainToDemo) {
+          return null;
+        }
+
         // Skip dialogs with invalid or missing data structure
         if (!dialog.data) {
           console.warn(`Dialog ${dialog.id} has no data, skipping render`);
