@@ -163,6 +163,20 @@ class S3FileReader:
             response = self.s3_client.get_object(Bucket=bucket_name, Key=s3_key)
             content = response['Body'].read()  # This is bytes, not string
             
+            # Extract user_id for indexing (needed after .cosine handling)
+            user_id = None
+            try:
+                from utils.auth_helper import get_secure_user_id
+                user_id = get_secure_user_id({}, fallback_to_env=True)
+            except ImportError:
+                user_id = os.environ.get('USER_ID') or os.environ.get('CURRENT_USER_ID')
+            
+            # If user_id not found yet, try to extract from S3 key
+            if not user_id:
+                s3_key_parts = s3_key.split('/')
+                if len(s3_key_parts) >= 2 and s3_key_parts[0] == 'users':
+                    user_id = s3_key_parts[1]
+            
             # Handle .cosine encrypted files (context items from filesystem)
             # Check this FIRST before other file type logic
             s3_key_lower = s3_key.lower()
@@ -269,28 +283,232 @@ class S3FileReader:
                     logger.error(f"❌ Traceback: {traceback.format_exc()}")
                     return f"Error decrypting .cosine file: {str(e)}"
             
-            # Decode based on content type
+            # Document Detection and Routing (NEW)
+            # Detect document type and route to specialized parser if applicable
+            logger.info(f"📄 [DOCUMENT_PROCESSING] Starting document processing for file: {s3_key}")
+            logger.info(f"📊 [DOCUMENT_PROCESSING] File size: {len(content):,} bytes")
+            try:
+                # Import with fallback for path resolution
+                logger.info(f"📦 [DOCUMENT_PROCESSING] Attempting to import document processing modules...")
+                try:
+                    from document_detector import DocumentDetector
+                    from document_router import DocumentRouter
+                    from document_indexer import DocumentIndexer
+                    logger.info(f"✅ [DOCUMENT_PROCESSING] Successfully imported document processing modules (direct import)")
+                except ImportError as import_err:
+                    logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Direct import failed: {import_err}, trying absolute import...")
+                    # Try absolute import
+                    tools_dir = os.path.dirname(__file__)
+                    if tools_dir not in sys.path:
+                        sys.path.insert(0, tools_dir)
+                        logger.info(f"📁 [DOCUMENT_PROCESSING] Added tools directory to sys.path: {tools_dir}")
+                    try:
+                        from document_detector import DocumentDetector
+                        from document_router import DocumentRouter
+                        from document_indexer import DocumentIndexer
+                        logger.info(f"✅ [DOCUMENT_PROCESSING] Successfully imported document processing modules (absolute import)")
+                    except ImportError as abs_import_err:
+                        logger.error(f"❌ [DOCUMENT_PROCESSING] Failed to import document processing modules: {abs_import_err}")
+                        raise
+                
+                # Extract filename from S3 key
+                filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
+                logger.info(f"📝 [DOCUMENT_PROCESSING] Extracted filename: {filename} from S3 key: {s3_key}")
+                
+                # Get content preview for detection (first 2KB)
+                content_preview = content[:2048]
+                content_size = len(content)
+                logger.info(f"📊 [DOCUMENT_PROCESSING] Content size: {content_size:,} bytes, preview: {len(content_preview)} bytes")
+                
+                # Check if file is large and needs special handling (for HTML/TXT SEC filings)
+                is_large_file = content_size > 5 * 1024 * 1024  # 5MB threshold
+                file_extension = filename.lower().split('.')[-1] if '.' in filename else ''
+                is_html_or_txt = file_extension in ['htm', 'html', 'txt', 'xml']
+                
+                if is_large_file:
+                    logger.info(f"📦 [DOCUMENT_PROCESSING] Large file detected ({content_size:,} bytes, extension: {file_extension}) - will pass s3_key only to parser")
+                    logger.info(f"📦 [DOCUMENT_PROCESSING] Parser will read from S3 and process in chunks to avoid memory issues")
+                
+                # Detect document type
+                logger.info(f"🔍 [DOCUMENT_PROCESSING] Starting document type detection...")
+                detector = DocumentDetector()
+                doc_info = detector.detect_document_type(s3_key, content_preview, filename)
+                doc_type = doc_info.get("type")
+                confidence = doc_info.get("confidence", 0)
+                logger.info(f"🔍 [DOCUMENT_PROCESSING] Detection result - Type: {doc_type}, Confidence: {confidence:.2%}, Metadata: {doc_info.get('metadata', {})}")
+                
+                # If document type detected with confidence > 0.5, route to parser
+                if doc_type != "unknown" and confidence > 0.5:
+                    logger.info(f"✅ [DOCUMENT_PROCESSING] Document type detected: {doc_type} (confidence: {confidence:.2%}) for {s3_key} - proceeding to routing")
+                    
+                    try:
+                        # Route to appropriate parser
+                        logger.info(f"🔄 [DOCUMENT_PROCESSING] Routing document to parser (type: {doc_type})...")
+                        router = DocumentRouter()
+                        
+                        # For large files, pass None for content and let parser read from S3 using s3_key
+                        # This prevents context window overflow and memory issues
+                        content_to_pass = None if is_large_file else content
+                        if is_large_file:
+                            logger.info(f"📦 [DOCUMENT_PROCESSING] Large file detected ({content_size:,} bytes) - passing s3_key only, parser will read from S3")
+                        else:
+                            logger.info(f"📦 [DOCUMENT_PROCESSING] Passing full content ({content_size:,} bytes) to parser")
+                        
+                        parser_result = router.route_document(
+                            doc_type,
+                            s3_key,
+                            content_to_pass,  # Pass None for large files, full content for small files
+                            doc_info.get("metadata")
+                        )
+                        
+                        parser_success = parser_result.get("success", False)
+                        logger.info(f"{'✅' if parser_success else '❌'} [DOCUMENT_PROCESSING] Parser routing complete - Success: {parser_success}")
+                        if parser_success:
+                            extracted_data = parser_result.get("extracted_data", {})
+                            logger.info(f"📊 [DOCUMENT_PROCESSING] Extracted data keys: {list(extracted_data.keys()) if isinstance(extracted_data, dict) else 'N/A'}")
+                        
+                        # Index the extracted data if parsing was successful
+                        if parser_success and user_id:
+                            logger.info(f"💾 [DOCUMENT_PROCESSING] Starting document indexing for user: {user_id}...")
+                            try:
+                                indexer = DocumentIndexer()
+                                index_id = indexer.index_document(
+                                    user_id,
+                                    s3_key,
+                                    doc_info,
+                                    parser_result
+                                )
+                                
+                                if index_id:
+                                    logger.info(f"✅ [DOCUMENT_PROCESSING] Successfully indexed document {s3_key} with index_id: {index_id}")
+                                else:
+                                    logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Indexing returned no index_id for {s3_key}")
+                            except Exception as index_err:
+                                logger.error(f"❌ [DOCUMENT_PROCESSING] Failed to index document {s3_key}: {index_err}")
+                                import traceback
+                                logger.error(f"❌ [DOCUMENT_PROCESSING] Indexing traceback: {traceback.format_exc()}")
+                                # Continue even if indexing fails
+                        elif not parser_success:
+                            logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Skipping indexing - parser did not succeed")
+                        elif not user_id:
+                            logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Skipping indexing - user_id not available")
+                        
+                        # Format response with structured data summary (NO raw content for large files)
+                        processing_info = parser_result.get("processing_info", {})
+                        was_chunked = processing_info.get("chunked", False)
+                        chunks_count = processing_info.get("chunks_processed", 1)
+                        file_type_info = processing_info.get("file_type", "unknown")
+                        file_size_bytes = processing_info.get("file_size_bytes", content_size)
+                        text_length_chars = processing_info.get("text_length_chars", 0)
+                        
+                        logger.info(f"📊 [DOCUMENT_PROCESSING] Formatting response - Large file: {is_large_file}, Chunked: {was_chunked}, Size: {file_size_bytes:,} bytes")
+                        
+                        response_parts = [
+                            f"📄 Document Type: {doc_info.get('type').value if hasattr(doc_info.get('type'), 'value') else doc_info.get('type')}",
+                            f"📊 Confidence: {doc_info.get('confidence', 0):.0%}",
+                        ]
+                        
+                        # Add chunking info if file was chunked
+                        if was_chunked or is_large_file:
+                            response_parts.append(f"📦 Processing: Large file processed in {chunks_count} chunks (file type: {file_type_info})")
+                            response_parts.append(f"📏 File Size: {file_size_bytes:,} bytes ({text_length_chars:,} characters)")
+                            response_parts.append(f"ℹ️ Note: Raw content not included due to file size. Structured data extracted below.")
+                        
+                        # Add metadata if available
+                        metadata = doc_info.get("metadata", {})
+                        if metadata.get("company_name"):
+                            response_parts.append(f"🏢 Company: {metadata['company_name']}")
+                        if metadata.get("form_type"):
+                            response_parts.append(f"📋 Form Type: {metadata['form_type']}")
+                        if metadata.get("filing_date"):
+                            response_parts.append(f"📅 Filing Date: {metadata['filing_date']}")
+                        
+                        # Add extracted financial data summary
+                        if parser_result.get("success"):
+                            extracted = parser_result.get("extracted_data") or parser_result
+                            
+                            logger.info(f"✅ [DOCUMENT_PROCESSING] Parser succeeded - extracted keys: {list(extracted.keys()) if isinstance(extracted, dict) else 'N/A'}")
+                            
+                            # Income Statement summary
+                            income = extracted.get("income_statement", {})
+                            if income.get("revenue"):
+                                rev_val = income["revenue"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"\n💰 Revenue: ${rev_val:.2f}B")
+                            if income.get("net_income"):
+                                ni_val = income["net_income"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"💵 Net Income: ${ni_val:.2f}B")
+                            
+                            # Balance Sheet summary
+                            balance = extracted.get("balance_sheet", {})
+                            if balance.get("total_assets"):
+                                assets_val = balance["total_assets"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"📊 Total Assets: ${assets_val:.2f}B")
+                            if balance.get("equity"):
+                                equity_val = balance["equity"].get("value", 0) / 1_000_000_000
+                                response_parts.append(f"💼 Equity: ${equity_val:.2f}B")
+                            
+                            # Metrics summary
+                            metrics = extracted.get("metrics", {})
+                            if metrics.get("gross_margin"):
+                                response_parts.append(f"📈 Gross Margin: {metrics['gross_margin']:.1%}")
+                            if metrics.get("net_margin"):
+                                response_parts.append(f"📉 Net Margin: {metrics['net_margin']:.1%}")
+                            
+                            # Add structured data JSON for agent to parse
+                            response_parts.append(f"\n📋 Structured Financial Data (JSON):")
+                            structured_data_json = json.dumps({
+                                "document_type": doc_info.get('type').value if hasattr(doc_info.get('type'), 'value') else str(doc_info.get('type')),
+                                "metadata": metadata,
+                                "income_statement": income,
+                                "balance_sheet": balance,
+                                "cash_flow": extracted.get("cash_flow", {}),
+                                "metrics": metrics
+                            }, indent=2, default=str)
+                            response_parts.append(structured_data_json)
+                            
+                            # Add note about indexing
+                            response_parts.append(f"\n💾 Full structured financial data has been extracted and indexed for querying.")
+                            if index_id:
+                                response_parts.append(f"🔍 Index ID: {index_id}")
+                        else:
+                            logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Parser did not succeed - result: {parser_result}")
+                            response_parts.append(f"\n⚠️ Parsing completed but no structured data extracted.")
+                        
+                        # For large files, DO NOT include raw content preview (causes context window overflow)
+                        if not is_large_file:
+                            content_type = response.get('ContentType', '')
+                            raw_content = self._decode_content_for_type(content, content_type, file_type, s3_key)
+                            response_parts.append(f"\n📄 Raw Content Preview (first 2000 chars):\n{raw_content[:2000]}")
+                        else:
+                            logger.info(f"📦 [DOCUMENT_PROCESSING] Skipping raw content preview for large file ({file_size_bytes:,} bytes)")
+                            response_parts.append(f"\n📄 Raw content available in S3 at: {s3_key} (not included due to size)")
+                        
+                        final_response = "\n".join(response_parts)
+                        logger.info(f"✅ [DOCUMENT_PROCESSING] Response formatted - length: {len(final_response):,} characters")
+                        return final_response
+                        
+                    except Exception as parse_err:
+                        logger.error(f"❌ [DOCUMENT_PROCESSING] Error routing/parsing document {s3_key}: {parse_err}")
+                        import traceback
+                        logger.error(f"❌ [DOCUMENT_PROCESSING] Parse error traceback: {traceback.format_exc()}")
+                        # Fall through to regular file reading
+                else:
+                    logger.info(f"ℹ️ [DOCUMENT_PROCESSING] Document type '{doc_type}' has low confidence ({confidence:.2%}) or is unknown - skipping specialized processing")
+                
+            except ImportError as import_err:
+                logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Document detection/routing not available: {import_err}")
+                import traceback
+                logger.warning(f"⚠️ [DOCUMENT_PROCESSING] Import error traceback: {traceback.format_exc()}")
+                # Fall through to regular file reading
+            except Exception as detect_err:
+                logger.error(f"❌ [DOCUMENT_PROCESSING] Error in document detection: {detect_err}")
+                import traceback
+                logger.error(f"❌ [DOCUMENT_PROCESSING] Detection error traceback: {traceback.format_exc()}")
+                # Fall through to regular file reading
+            
+            # Decode based on content type (existing logic - fallback for non-detected documents)
             content_type = response.get('ContentType', '')
-            if 'json' in content_type or file_type == 'json' or s3_key.endswith('.json'):
-                # JSON file
-                try:
-                    json_data = json.loads(content.decode('utf-8'))
-                    return json.dumps(json_data, indent=2)
-                except json.JSONDecodeError as e:
-                    return f"Error parsing JSON: {str(e)}\nRaw content: {content.decode('utf-8')}"
-            elif 'csv' in content_type or file_type == 'csv' or s3_key.endswith('.csv'):
-                # CSV file
-                return content.decode('utf-8')
-            elif 'text' in content_type or file_type == 'txt' or s3_key.endswith('.txt'):
-                # Text file
-                return content.decode('utf-8')
-            else:
-                # Try to decode as UTF-8, fallback to base64 if it fails
-                try:
-                    return content.decode('utf-8')
-                except UnicodeDecodeError:
-                    import base64
-                    return f"Binary file content (base64): {base64.b64encode(content).decode('utf-8')}"
+            return self._decode_content_for_type(content, content_type, file_type, s3_key)
                     
         except ClientError as e:
             error_code = e.response['Error']['Code']
