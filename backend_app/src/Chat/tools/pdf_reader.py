@@ -66,16 +66,35 @@ class PDFReader:
         try:
             # Download file from S3
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
-            file_content = response['Body'].read()
-            
+            content_length = response.get('ContentLength')
+            body = response['Body']
+            # Read full body (use ContentLength when available to avoid incomplete reads in some runtimes)
+            if content_length is not None:
+                file_content = body.read(content_length)
+                if len(file_content) != content_length:
+                    logger.error(
+                        f"📄 [PDF_READER] Incomplete read from S3: got {len(file_content):,} bytes, expected {content_length:,} (s3_key={s3_key})"
+                    )
+            else:
+                file_content = body.read()
+
             # Detect file type from extension
             filename = s3_key.split('/')[-1] if '/' in s3_key else s3_key
             file_ext = filename.lower().split('.')[-1] if '.' in filename else ''
             is_pdf = file_ext == 'pdf'
             is_html = file_ext in ['htm', 'html']
             is_txt = file_ext == 'txt' or file_ext == 'xml'
-            
-            logger.info(f"📄 [PDF_READER] Reading file: {filename}, type: {file_ext}, size: {len(file_content):,} bytes")
+
+            size = len(file_content)
+            logger.info(
+                f"📄 [PDF_READER] Reading file: {filename}, type: {file_ext}, size: {size:,} bytes"
+                + (f" (S3 ContentLength: {content_length:,})" if content_length is not None else "")
+            )
+            if size == 8192 or size == 8 * 1024:
+                logger.warning(
+                    f"📄 [PDF_READER] File size is exactly 8,192 bytes (8 KB). "
+                    "This may indicate a truncated upload or read limit; PDF parsing may fail with 'EOF marker not found'."
+                )
             
             # Handle HTML/TXT files (not PDFs)
             if is_html or is_txt:
@@ -126,30 +145,56 @@ class PDFReader:
             if page_number is not None:
                 text_content = self._extract_text_from_pdf_page(file_content, page_number)
                 total_pages = self._get_pdf_page_count(file_content)
-                
+                size = len(file_content)
+                if (text_content or "").strip().startswith("Error extracting text"):
+                    err = text_content.strip()
+                    if size == 8192 or size == 8 * 1024:
+                        err += (
+                            " File is exactly 8,192 bytes (likely truncated). Ask the user to re-upload."
+                        )
+                    return {
+                        "success": False,
+                        "error": err,
+                        "s3_key": s3_key,
+                    }
                 return {
                     "success": True,
                     "s3_key": s3_key,
                     "text_content": text_content,
                     "page_number": page_number,
                     "total_pages": total_pages,
-                    "file_size": len(file_content),
+                    "file_size": size,
                     "text_length": len(text_content),
                     "is_partial": True
                 }
             
             # Full document: extract text with PyPDF2 (basic PDF parsing)
             text_content = self._extract_text_from_pdf(file_content)
-            
+            size = len(file_content)
+
+            # Treat extraction failure as error (so tool returns failure, not success with error as content)
+            if (text_content or "").strip().startswith("Error extracting text"):
+                err = text_content.strip()
+                if size == 8192 or size == 8 * 1024:
+                    err += (
+                        " The file is exactly 8,192 bytes (8 KB), which often indicates a truncated upload. "
+                        "Ask the user to re-upload the file or check that the full file was sent."
+                    )
+                return {
+                    "success": False,
+                    "error": err,
+                    "s3_key": s3_key,
+                }
+
             # Analyze the content
             analysis = self._analyze_pdf_content(text_content)
-            
+
             return {
                 "success": True,
                 "s3_key": s3_key,
                 "text_content": text_content,
                 "analysis": analysis,
-                "file_size": len(file_content),
+                "file_size": size,
                 "text_length": len(text_content),
                 "is_partial": False
             }
@@ -168,50 +213,61 @@ class PDFReader:
         """Extract text from PDF content using PyPDF2"""
         try:
             import PyPDF2
-            
+
             # Create PDF reader from bytes
             pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
-            
+
             # Extract text from all pages
             text_content = ""
             for page_num in range(len(pdf_reader.pages)):
                 page = pdf_reader.pages[page_num]
                 text_content += page.extract_text() + "\n"
-            
+
             return text_content.strip()
-            
+
         except ImportError:
             logger.error("PyPDF2 not available, trying alternative method")
             return self._extract_text_fallback(pdf_content)
         except Exception as e:
-            logger.error(f"Error extracting text from PDF: {str(e)}")
-            return f"Error extracting text: {str(e)}"
+            err_msg = str(e)
+            logger.error(f"Error extracting text from PDF: {err_msg}")
+            if "EOF marker not found" in err_msg or "EOF" in err_msg:
+                logger.warning(
+                    f"PDF likely truncated or corrupted: content length={len(pdf_content):,} bytes. "
+                    "If size is 8192 (8 KB), check upload/read path for truncation."
+                )
+            return f"Error extracting text: {err_msg}"
     
     def _extract_text_from_pdf_page(self, pdf_content: bytes, page_number: int) -> str:
         """Extract text from a specific page of PDF content using PyPDF2"""
         try:
             import PyPDF2
-            
+
             # Create PDF reader from bytes
             pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
             total_pages = len(pdf_reader.pages)
-            
+
             # Validate page number (1-indexed)
             if page_number < 1 or page_number > total_pages:
                 return f"Error: Page {page_number} does not exist. PDF has {total_pages} pages."
-            
+
             # Extract text from the specified page (convert to 0-indexed)
             page = pdf_reader.pages[page_number - 1]
             text_content = page.extract_text()
-            
+
             return text_content.strip()
-            
+
         except ImportError:
             logger.error("PyPDF2 not available for page extraction")
             return "Error: PyPDF2 not available for page-by-page extraction"
         except Exception as e:
-            logger.error(f"Error extracting text from PDF page {page_number}: {str(e)}")
-            return f"Error extracting text from page {page_number}: {str(e)}"
+            err_msg = str(e)
+            logger.error(f"Error extracting text from PDF page {page_number}: {err_msg}")
+            if "EOF marker not found" in err_msg or "EOF" in err_msg:
+                logger.warning(
+                    f"PDF likely truncated: content length={len(pdf_content):,} bytes (page_number={page_number})"
+                )
+            return f"Error extracting text from page {page_number}: {err_msg}"
     
     def _get_pdf_page_count(self, pdf_content: bytes) -> int:
         """Get the total number of pages in a PDF"""
@@ -220,7 +276,12 @@ class PDFReader:
             pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
             return len(pdf_reader.pages)
         except Exception as e:
-            logger.error(f"Error getting PDF page count: {str(e)}")
+            err_msg = str(e)
+            logger.error(f"Error getting PDF page count: {err_msg}")
+            if "EOF marker not found" in err_msg or "EOF" in err_msg:
+                logger.warning(
+                    f"PDF likely truncated: content length={len(pdf_content):,} bytes; cannot get page count"
+                )
             return 0
     
     def _analyze_forms_with_pypdf(self, s3_key: str) -> Dict[str, Any]:
