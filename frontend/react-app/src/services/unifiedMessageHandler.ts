@@ -835,7 +835,8 @@ class UnifiedMessageHandlerService {
   }
 
   /**
-   * Send file message: upload files via REST API, then send message via WebSocket
+   * Send file message: presigned upload (get_upload_url → S3 POST → register_uploads), then WebSocket.
+   * Matches filesystem flow: no file bytes in request body.
    */
   private async sendFileMessage(sessionId: string, messageData: UnifiedMessageData): Promise<void> {
     const ws = this.webSocketConnections.get(sessionId);
@@ -843,155 +844,136 @@ class UnifiedMessageHandlerService {
       throw new Error(`No WebSocket connection for session: ${sessionId}`);
     }
 
-    // For file messages, we need to send the files to the file handler endpoint first
-    if (messageData.files && messageData.files.length > 0) {
-      try {
-        // Step 1: Upload files via REST API
-        const filesData = messageData.files.map(file => ({
-          filename: file.name,
-          content_type: file.type,
-          data: file.compressedData
-        }));
-
-        const fileUploadRequest = {
-          user_id: messageData.userId,
-          session_id: sessionId,
-          message: {
-            id: messageData.messageId,
-            text: messageData.text,
-            timestamp: Date.now()
-          },
-          files: filesData,
-          context_items: messageData.contextItems || [],
-          model: messageData.model || 'claude-sonnet-4'
-        };
-
-        const url = `${API_CONFIG.BASE_URL}/files`;
-        const requestBody = JSON.stringify(fileUploadRequest);
-        
-        // Get authorization token
-        let authHeader: Record<string, string> = {};
-        try {
-          const { fetchAuthSession } = await import('aws-amplify/auth');
-          const session = await fetchAuthSession();
-          const idToken = session.tokens?.idToken;
-          const accessToken = session.tokens?.accessToken;
-          const token = idToken || accessToken;
-          
-          if (token) {
-            authHeader = { Authorization: `Bearer ${token.toString()}` };
-            console.log('🔒 UnifiedMessageHandler: Added Authorization header for file upload');
-          } else {
-            console.warn('⚠️ UnifiedMessageHandler: No auth token found for file upload');
-          }
-        } catch (authErr) {
-          console.warn('⚠️ UnifiedMessageHandler: Failed to get auth token for file upload:', authErr);
-        }
-        
-        console.log('📁 UnifiedMessageHandler: Uploading files via REST API:', {
-          url,
-          fileCount: filesData.length,
-          messageId: messageData.messageId,
-          sessionId: sessionId,
-          hasAuth: !!authHeader.Authorization
-        });
-        
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...authHeader
-          },
-          body: requestBody
-        });
-
-        if (!response.ok) {
-          let errorMessage = `HTTP error! status: ${response.status}`;
-          try {
-            const errorBody = await response.text();
-            console.error('📁 UnifiedMessageHandler: Error response body:', errorBody);
-            try {
-              const errorJson = JSON.parse(errorBody);
-              errorMessage = errorJson.error || errorJson.message || errorMessage;
-            } catch {
-              errorMessage = errorBody || errorMessage;
-            }
-          } catch (e) {
-            console.error('📁 UnifiedMessageHandler: Failed to read error response:', e);
-          }
-          throw new Error(errorMessage);
-        }
-
-        const uploadResult = await response.json();
-        console.log('✅ UnifiedMessageHandler: Files uploaded successfully:', uploadResult);
-
-        // Update session variables immediately from API response (if provided)
-        if (uploadResult.session_variables) {
-          console.log('📁 UnifiedMessageHandler: Updating session variables from file upload response');
-          const updateEvent = new CustomEvent('session-variables-updated', {
-            detail: {
-              sessionId: sessionId,
-              sessionVariables: uploadResult.session_variables
-            }
-          });
-          window.dispatchEvent(updateEvent);
-          console.log('✅ UnifiedMessageHandler: Dispatched session variables update from file upload response');
-        }
-
-        // Step 2: Send message via WebSocket with file attachment flag
-        // Include file metadata for frontend display
-        const uploadedFilesMetadata = messageData.files.map(file => ({
-          name: file.name,
-          size: file.size,
-          type: file.type
-        }));
-
-        const websocketMessage = {
-          action: 'chat',
-          type: 'chat_message',
-          message: messageData.text,
-          userId: messageData.userId,
-          sessionId: sessionId,
-          model: messageData.model,
-          messageId: messageData.messageId,
-          contextItems: messageData.contextItems || [],
-          context: messageData.context,
-          // Flag indicating files are attached (already uploaded)
-          hasFiles: true,
-          uploadedFiles: uploadedFilesMetadata  // File metadata for frontend display
-        };
-
-        console.log('📤 UnifiedMessageHandler: Sending message via WebSocket with file attachment flag');
-        ws.send(JSON.stringify(websocketMessage));
-        console.log('✅ UnifiedMessageHandler: File message sent via WebSocket');
-        
-        // Dispatch event to reset timeout - file upload is complete, AI processing is starting
-        // This ensures the 5-minute timeout only counts from when AI actually starts processing
-        const fileMessageSentEvent = new CustomEvent('file-message-sent', {
-          detail: {
-            sessionId: sessionId,
-            messageId: messageData.messageId
-          }
-        });
-        window.dispatchEvent(fileMessageSentEvent);
-        console.log('✅ UnifiedMessageHandler: Dispatched file-message-sent event to reset timeout');
-      } catch (error: any) {
-        console.error('❌ UnifiedMessageHandler: Error in file message flow:', error);
-        // Provide more detailed error information
-        if (error instanceof TypeError && error.message === 'Failed to fetch') {
-          console.error('❌ UnifiedMessageHandler: Network error - possible causes:');
-          console.error('   - CORS issue with API Gateway');
-          console.error('   - Network connectivity problem');
-          console.error('   - API Gateway endpoint not accessible');
-          console.error('   - Missing or invalid Authorization header');
-          console.error('   - Request blocked by browser security policy');
-          throw new Error('Failed to upload files: Network error. Please check your connection and try again.');
-        }
-        throw error;
-      }
-    } else {
-      // Regular message without files
+    if (!messageData.files || messageData.files.length === 0) {
       await this.sendWebSocketMessage(sessionId, messageData);
+      return;
+    }
+
+    const files = messageData.files;
+    const url = `${API_CONFIG.BASE_URL}/files`;
+
+    let authHeader: Record<string, string> = {};
+    try {
+      const { fetchAuthSession } = await import('aws-amplify/auth');
+      const session = await fetchAuthSession();
+      const token = session.tokens?.idToken ?? session.tokens?.accessToken;
+      if (token) authHeader = { Authorization: `Bearer ${token.toString()}` };
+    } catch (_) {}
+
+    try {
+      // Step 1: Get presigned upload URLs (deterministic, same as filesystem)
+      const getUrlBody = {
+        operation: 'get_upload_url',
+        user_id: messageData.userId,
+        session_id: sessionId,
+        files: files.map((f: any) => ({
+          filename: f.name,
+          content_type: f.type || 'application/octet-stream',
+          file_size: f.size ?? (f instanceof File ? f.size : undefined),
+        })),
+      };
+      const getUrlRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify(getUrlBody),
+      });
+      if (!getUrlRes.ok) {
+        const errText = await getUrlRes.text();
+        let msg: string;
+        try {
+          const j = JSON.parse(errText);
+          msg = j.message || j.error || errText;
+        } catch {
+          msg = errText;
+        }
+        throw new Error(msg || `get_upload_url failed: ${getUrlRes.status}`);
+      }
+      const { upload_urls } = await getUrlRes.json();
+      if (!Array.isArray(upload_urls) || upload_urls.length !== files.length) {
+        throw new Error('Invalid upload_urls response');
+      }
+
+      // Step 2: Upload each file to S3 (FormData: presigned fields + file last)
+      for (let i = 0; i < files.length; i++) {
+        const rawFile: File = (files[i] as any).file ?? files[i];
+        if (!(rawFile instanceof File)) {
+          throw new Error(`File ${i} missing .file (use FileUploadService.processFiles)`);
+        }
+        const formData = new FormData();
+        const entry = upload_urls[i];
+        Object.entries(entry.fields || {}).forEach(([k, v]) => formData.append(k, v as string));
+        formData.append('file', rawFile);
+        const s3Res = await fetch(entry.upload_url, { method: 'POST', body: formData });
+        if (!s3Res.ok) {
+          const errText = await s3Res.text();
+          throw new Error(`S3 upload failed for ${rawFile.name}: ${s3Res.status} ${errText.slice(0, 200)}`);
+        }
+      }
+
+      // Step 3: Register uploads in session (same as filesystem confirm_upload)
+      const registerBody = {
+        operation: 'register_uploads',
+        user_id: messageData.userId,
+        session_id: sessionId,
+        message: {
+          id: messageData.messageId,
+          text: messageData.text,
+          timestamp: Date.now(),
+        },
+        files: upload_urls.map((u: any, i: number) => ({
+          s3_key: u.s3_key,
+          filename: files[i].name,
+          content_type: files[i].type || 'application/octet-stream',
+        })),
+        context_items: messageData.contextItems || [],
+      };
+      const registerRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify(registerBody),
+      });
+      if (!registerRes.ok) {
+        const errText = await registerRes.text();
+        let msg: string;
+        try {
+          const j = JSON.parse(errText);
+          msg = j.message || j.error || errText;
+        } catch {
+          msg = errText;
+        }
+        throw new Error(msg || `register_uploads failed: ${registerRes.status}`);
+      }
+      const uploadResult = await registerRes.json();
+      if (uploadResult.session_variables) {
+        window.dispatchEvent(new CustomEvent('session-variables-updated', {
+          detail: { sessionId, sessionVariables: uploadResult.session_variables },
+        }));
+      }
+
+      // Step 4: Send message via WebSocket with file attachment flag
+      const websocketMessage = {
+        action: 'chat',
+        type: 'chat_message',
+        message: messageData.text,
+        userId: messageData.userId,
+        sessionId,
+        model: messageData.model,
+        messageId: messageData.messageId,
+        contextItems: messageData.contextItems || [],
+        context: messageData.context,
+        hasFiles: true,
+        uploadedFiles: files.map((f: any) => ({ name: f.name, size: f.size, type: f.type })),
+      };
+      ws.send(JSON.stringify(websocketMessage));
+      window.dispatchEvent(new CustomEvent('file-message-sent', {
+        detail: { sessionId, messageId: messageData.messageId },
+      }));
+    } catch (error: any) {
+      console.error('❌ UnifiedMessageHandler: File upload error:', error);
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        throw new Error('Failed to upload files: Network error. Please check your connection and try again.');
+      }
+      throw error;
     }
   }
 

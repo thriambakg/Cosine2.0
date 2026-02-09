@@ -10,6 +10,8 @@ export interface UploadedFile {
   name: string;
   size: number;
   type: string;
+  /** Raw file for presigned S3 upload (required for send). */
+  file: File;
   compressedData: string;
   compressedSize: number;
   compressionRatio: number;
@@ -24,6 +26,8 @@ export interface FileUploadOptions {
     timestamp: number;
   };
   contextItems?: any[];
+  /** Optional auth headers (e.g. Authorization) for /files requests */
+  headers?: Record<string, string>;
 }
 
 export class FileUploadService {
@@ -216,6 +220,7 @@ export class FileUploadService {
           name: file.name,
           size: originalSize,
           type: file.type,
+          file,
           compressedData,
           compressedSize,
           compressionRatio
@@ -233,60 +238,57 @@ export class FileUploadService {
   }
 
   /**
-   * Send files to the File Handler endpoint
+   * Send files via presigned flow (get_upload_url → S3 POST → register_uploads). Matches filesystem.
    */
   static async sendFilesToFileHandler(
-    files: UploadedFile[], 
+    files: UploadedFile[],
     options: FileUploadOptions,
     apiGatewayUrl: string = API_CONFIG.BASE_URL
   ): Promise<any> {
-    try {
-        const filesData = files.map(file => ({
-        filename: file.name,
-        content_type: file.type,
-        data: file.compressedData // Already base64 encoded from compression
-      }));
+    const baseUrl = apiGatewayUrl.replace(/\/$/, '');
+    const authHeaders = options.headers || {};
 
-      // Log payload size to help diagnose 8KB truncation (base64 ~4/3 of decoded size)
-      const totalBase64Len = filesData.reduce((sum, f) => sum + (f.data?.length ?? 0), 0);
-      const totalFileSize = files.reduce((sum, f) => sum + f.size, 0);
-      console.log(
-        `📤 File upload: ${files.length} file(s), total base64 length=${totalBase64Len}, original bytes=${totalFileSize}`
-      );
-      if (totalFileSize > 0 && totalBase64Len < totalFileSize * 1.2) {
-        console.warn(
-          `⚠️ File upload: base64 length (${totalBase64Len}) is suspiciously small for ${totalFileSize} bytes - possible truncation`
-        );
-      }
+    const getUrlRes = await fetch(`${baseUrl}/files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({
+        operation: 'get_upload_url',
+        user_id: options.userId,
+        session_id: options.sessionId,
+        files: files.map(f => ({ filename: f.name, content_type: f.type, file_size: f.size })),
+      }),
+    });
+    if (!getUrlRes.ok) throw new Error(`get_upload_url failed: ${getUrlRes.status}`);
+    const { upload_urls } = await getUrlRes.json();
+    if (!Array.isArray(upload_urls) || upload_urls.length !== files.length) throw new Error('Invalid upload_urls');
 
-      const response = await fetch(`${apiGatewayUrl}/files`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: options.userId,
-          session_id: options.sessionId,
-          message: {
-            id: options.message.id,
-            text: options.message.text,
-            timestamp: options.message.timestamp
-          },
-          files: filesData,
-          context_items: options.contextItems || [] // Include context items
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('📁 Files sent to File Handler:', result);
-      return result;
-    } catch (error) {
-      console.error('❌ Error sending files to File Handler:', error);
-      throw error;
+    for (let i = 0; i < files.length; i++) {
+      const formData = new FormData();
+      Object.entries(upload_urls[i].fields || {}).forEach(([k, v]) => formData.append(k, v as string));
+      formData.append('file', files[i].file);
+      const s3Res = await fetch(upload_urls[i].upload_url, { method: 'POST', body: formData });
+      if (!s3Res.ok) throw new Error(`S3 upload failed for ${files[i].name}: ${s3Res.status}`);
     }
+
+    const registerRes = await fetch(`${baseUrl}/files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({
+        operation: 'register_uploads',
+        user_id: options.userId,
+        session_id: options.sessionId,
+        message: options.message,
+        files: upload_urls.map((u: any, i: number) => ({
+          s3_key: u.s3_key,
+          filename: files[i].name,
+          content_type: files[i].type,
+        })),
+        context_items: options.contextItems || [],
+      }),
+    });
+    if (!registerRes.ok) throw new Error(`register_uploads failed: ${registerRes.status}`);
+    const result = await registerRes.json();
+    console.log('📁 Files sent via presigned flow:', result);
+    return result;
   }
 }

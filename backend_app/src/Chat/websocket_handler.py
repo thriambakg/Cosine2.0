@@ -477,10 +477,27 @@ class WebSocketHandler:
                     )
                     if 'Item' in session_response:
                         session_vars = session_response['Item'].get('session_variables', {})
+                        # Normalize: DynamoDB or legacy may store as JSON string (avoid "string indices must be integers")
+                        if isinstance(session_vars, str):
+                            try:
+                                session_vars = json.loads(session_vars) if session_vars.strip() else {}
+                            except (json.JSONDecodeError, TypeError):
+                                session_vars = {}
+                        if not isinstance(session_vars, dict):
+                            session_vars = {}
                         uploaded_files_from_session = session_vars.get('uploaded_files', [])
-                        if uploaded_files_from_session:
-                            # Use files from session_variables (already uploaded to S3)
+                        if isinstance(uploaded_files_from_session, list):
                             uploaded_files = uploaded_files_from_session
+                        elif isinstance(uploaded_files_from_session, str):
+                            try:
+                                uploaded_files = json.loads(uploaded_files_from_session)
+                                if not isinstance(uploaded_files, list):
+                                    uploaded_files = []
+                            except (json.JSONDecodeError, TypeError):
+                                uploaded_files = []
+                        else:
+                            uploaded_files = []
+                        if uploaded_files:
                             logger.info(f"Retrieved {len(uploaded_files)} files from session_variables")
                         else:
                             logger.warning(f"hasFiles flag set but no files found in session_variables")

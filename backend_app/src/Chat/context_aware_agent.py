@@ -450,10 +450,15 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
             formatted_context: Formatted context string
         """
         try:
-            session_id = session_context['session_id']
+            # Ensure we have a dict (avoid "string indices must be integers" if stored as JSON string)
+            if not isinstance(session_context, dict):
+                logger.warning("_format_session_context received non-dict session_context")
+                return "\n🌐 SESSION CONTEXT: Invalid session context\n"
+            session_id = session_context.get('session_id', '')
             metadata = session_context.get('metadata', {})
-            context = session_context.get('context', {})
-            session_variables = context.get('session_variables', {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            session_variables = self._get_session_variables(session_context)
             # Note: Conversation history is now available via get_chat_history_tool and search_chat_history_tool
             # No need to access conversation_history from context for efficiency
             conversation_history = []
@@ -463,7 +468,7 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
 🌐 CURRENT SESSION CONTEXT:
 ===========================
 Session ID: {session_id}
-User ID: {session_context['user_id']}
+User ID: {session_context.get('user_id', '')}
 Webpage: {metadata.get('page_url', 'Unknown')}
 Page Title: {metadata.get('page_title', 'Unknown')}
 User Intent: {metadata.get('user_intent', 'general')}
@@ -490,7 +495,7 @@ Page Type: {session_variables.get('page_type', 'unknown')}
 Based on the current webpage and user intent, focus on:
 - {self._get_focus_areas(session_variables)}
 - Maintain context of: {metadata.get('user_intent', 'general inquiry')}
-- Relevant tools for this session: {', '.join(session_variables.get('relevant_tools', []))}
+- Relevant tools for this session: {', '.join(x for x in (session_variables.get('relevant_tools') or []) if isinstance(x, str))}
 
 """
             
@@ -509,7 +514,7 @@ Based on the current webpage and user intent, focus on:
 - Reference webpage content when relevant to user questions
 - Maintain conversation continuity within this session
 - Don't mix contexts from other sessions or users
-- Use session-relevant tools: {', '.join(session_variables.get('relevant_tools', []))}
+- Use session-relevant tools: {', '.join(x for x in (session_variables.get('relevant_tools') or []) if isinstance(x, str))}
 - IMPORTANT: If user asks follow-up questions about previous responses, use get_chat_history_tool() or search_chat_history_tool()
 - If user asks about "these stocks" or "which one", use search_chat_history_tool() to find relevant previous conversations
 {context_note}- If user references earlier parts of conversation, use get_chat_history_tool() to retrieve the relevant history
@@ -525,6 +530,8 @@ Based on the current webpage and user intent, focus on:
     
     def _get_focus_areas(self, session_variables: Dict[str, Any]) -> str:
         """Get focus areas based on session variables"""
+        if not isinstance(session_variables, dict):
+            return 'general financial analysis and market insights'
         page_type = session_variables.get('page_type', 'unknown')
         user_intent = session_variables.get('user_intent', 'general')
         
@@ -538,6 +545,32 @@ Based on the current webpage and user intent, focus on:
         
         return focus_map.get(page_type, 'general financial analysis and market insights')
     
+    def _normalize_session_variables(self, raw: Any) -> Dict[str, Any]:
+        """Ensure session_variables is a dict (DynamoDB or JSON string)."""
+        if raw is None:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw) if raw.strip() else {}
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("session_variables was string but not valid JSON, using {}")
+                return {}
+        return {}
+    
+    def _get_session_variables(self, session_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Get session_variables from session context (top-level or nested), normalized to dict."""
+        # Session manager returns session_variables at top level
+        raw = session_context.get('session_variables')
+        if raw is not None:
+            return self._normalize_session_variables(raw)
+        # Fallback: nested under 'context'
+        context = session_context.get('context')
+        if isinstance(context, dict):
+            return self._normalize_session_variables(context.get('session_variables'))
+        return self._normalize_session_variables(context)
+    
     def _get_session_tools(self, session_context: Dict[str, Any]) -> List:
         """
         Get session-specific tools based on context
@@ -549,7 +582,7 @@ Based on the current webpage and user intent, focus on:
             tools: List of relevant tools for the session
         """
         try:
-            session_variables = session_context.get('context', {}).get('session_variables', {})
+            session_variables = self._get_session_variables(session_context)
             relevant_tools = session_variables.get('relevant_tools', [])
             
             # Start with base tools
@@ -589,19 +622,19 @@ Based on the current webpage and user intent, focus on:
         """
         try:
             metadata = session_context.get('metadata', {})
-            context = session_context.get('context', {})
-            session_variables = context.get('session_variables', {})
-            
+            if not isinstance(metadata, dict):
+                metadata = {}
+            session_variables = self._get_session_variables(session_context)
             return {
-                'session_id': session_context['session_id'],
-                'user_id': session_context['user_id'],
+                'session_id': session_context.get('session_id', ''),
+                'user_id': session_context.get('user_id', ''),
                 'page_type': session_variables.get('page_type', 'unknown'),
                 'user_intent': metadata.get('user_intent', 'general'),
                 'conversation_count': metadata.get('conversation_count', 0),
                 'last_activity': metadata.get('last_activity', 0),
                 'relevant_tools': session_variables.get('relevant_tools', []),
                 'webpage_url': metadata.get('page_url', ''),
-                'has_webpage_content': bool(context.get('webpage_content', ''))
+                'has_webpage_content': bool(session_context.get('webpage_content', ''))
             }
             
         except Exception as e:

@@ -1,23 +1,15 @@
 """
-File Upload Handler for Chat Agent
+File Upload Handler for Chat Agent (presigned-only, matches filesystem pattern).
 
-Flow: Client uploads file → API Gateway POST /files → Lambda (this handler) → S3.
-Agent then reads from S3 via read_pdf_tool(s3_key) / read_s3_file_tool(s3_key).
+All uploads use the same deterministic flow as the filesystem Lambda:
+1. POST /files with operation='get_upload_url', body: { user_id, session_id, files: [ { filename, content_type?, file_size? } ] }
+   → Returns upload_urls: [ { upload_url, fields, s3_key, file_id, filename [, content_type] } ]
+2. Client uploads each file directly to S3: POST to upload_url with FormData (presigned fields + file as last field).
+3. POST /files with operation='register_uploads', body: { user_id, session_id, message: { id, text [, timestamp] }, files: [ { s3_key, filename, content_type? } ] }
+   → Validates s3_key prefix, confirms object exists in S3, updates session_variables.uploaded_files.
 
-1. Client sends POST to /files with JSON body:
-   { user_id, session_id, message: { id, text, timestamp }, files: [ { filename, content_type, data: base64 } ] }
-2. Lambda receives event with event["body"] = stringified JSON (full request body from API Gateway).
-3. Handler parses body, base64-decodes each file's data, and puts to S3:
-   Bucket=CHAT_FILES_BUCKET_NAME, Key=users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}
-4. Response includes s3_key and metadata; client/WebSocket can pass s3_key to the agent.
-5. Agent uses read_pdf_tool(s3_key) or read_s3_file_tool(s3_key) to read from the same bucket/key.
-
-If the stored file is exactly 8192 bytes, the request body was truncated (e.g. API Gateway
-payload limit or client). Check [FILE_UPLOAD] logs for body length and base64_str_len.
-
-Alternative flow (ported from filesystem lambda): use direct S3 upload to avoid body limits.
-- operation='get_upload_url': body has files: [{ filename, content_type, file_size? }]. Returns presigned POST URLs.
-- operation='register_uploads': body has files: [{ s3_key, filename, content_type }] + message. Registers existing S3 objects in session (no base64).
+S3 key pattern: users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}
+Agent reads via read_pdf_tool(s3_key) / read_s3_file_tool(s3_key).
 """
 
 import json
@@ -26,7 +18,6 @@ import boto3
 import uuid
 from datetime import datetime
 import logging
-import base64
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
@@ -55,8 +46,8 @@ def convert_floats_to_decimal(obj):
 
 class FileUploadHandler:
     """
-    Handles file uploads and message processing with attached files.
-    Supports: (1) one-shot base64 upload, (2) get_upload_url + register_uploads (direct S3, no body limit).
+    Handles file uploads via presigned S3 POST only (deterministic, matches filesystem Lambda).
+    Only operations: get_upload_url, register_uploads.
     """
 
     def __init__(self):
@@ -64,11 +55,11 @@ class FileUploadHandler:
         self.chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
 
     def _generate_presigned_post(self, user_id: str, session_id: str, filename: str, file_size: int = None) -> dict:
-        """Generate presigned S3 POST for direct upload (same pattern as filesystem lambda)."""
+        """Generate presigned S3 POST (same pattern as filesystem: key, conditions, no Content-Type in Fields)."""
         file_id = str(uuid.uuid4())
         s3_key = f"users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}"
         conditions = []
-        if file_size:
+        if file_size is not None and file_size > 0:
             conditions.append(['content-length-range', 1, file_size])
         post_data = s3_client.generate_presigned_post(
             Bucket=self.bucket_name,
@@ -89,24 +80,8 @@ class FileUploadHandler:
         """
         Handle file upload requests with message orchestration via REST API.
         
-        Expected event structure:
-        {
-            "user_id": "string",
-            "session_id": "string",
-            "message": {
-                "id": "string",
-                "text": "string", 
-                "timestamp": "number"
-            },
-            "files": [
-                {
-                    "filename": "string",
-                    "content_type": "string",
-                    "data": "base64_encoded_data"
-                }
-            ],
-            "context_items": []
-        }
+        Expected body (operation=get_upload_url): user_id, session_id, files: [ { filename, content_type?, file_size? } ]
+        Expected body (operation=register_uploads): user_id, session_id, message: { id, text [, timestamp] }, files: [ { s3_key, filename, content_type? } ], context_items?: []
         
         Args:
             event: API Gateway event containing headers and body
@@ -137,14 +112,12 @@ class FileUploadHandler:
             logger.info(f"File upload request received")
             logger.debug(f"Event structure: {json.dumps({k: str(type(v).__name__) for k, v in event.items() if k != 'body'}, indent=2)}")
             
-            # Parse request body (log size to diagnose 8KB truncation)
+            # Parse request body (presigned flow: small JSON only, no file bytes)
             raw_body = event.get('body') or ''
             body_len = len(raw_body) if isinstance(raw_body, str) else 0
-            logger.info("[FILE_UPLOAD] Request body length: %s chars (truncation suspected if ~11K for 8KB decoded)", body_len)
+            logger.info("[FILE_UPLOAD] Request body length: %s chars", body_len)
             if body_len == 0:
                 logger.warning("[FILE_UPLOAD] Empty body")
-            if isinstance(raw_body, str) and body_len in (10922, 10923, 8192):
-                logger.warning("[FILE_UPLOAD] Body length is %s - likely truncated (8192 decoded base64 ~10923 chars)", body_len)
             if isinstance(event.get('body'), str):
                 try:
                     body = json.loads(event['body'])
@@ -244,7 +217,27 @@ class FileUploadHandler:
                     })
                 }
 
-            # Alternative flow: register files already uploaded to S3 via presigned URL
+            # Require presigned flow (deterministic, matches filesystem)
+            if operation not in ('get_upload_url', 'register_uploads'):
+                return {
+                    'statusCode': 400,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        **get_cors_headers(origin),
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    },
+                    'body': json.dumps({
+                        'error': 'Presigned upload required',
+                        'message': (
+                            'Use operation=get_upload_url to get presigned URLs, upload each file to S3, '
+                            'then call operation=register_uploads with the returned s3_key values.'
+                        ),
+                        'code': 'PRESIGNED_REQUIRED',
+                    }),
+                }
+
+            # Register files already uploaded to S3 via presigned URL
             if operation == 'register_uploads':
                 message = body.get('message', {})
                 reg_files = body.get('files', [])
@@ -317,207 +310,22 @@ class FileUploadHandler:
                     })
                 }
 
-            if not message.get('id') or not message.get('text'):
-                return {
-                    'statusCode': 400,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        **get_cors_headers(origin),
-                        'Access-Control-Allow-Headers': 'Content-Type',
-                        'Access-Control-Allow-Methods': 'POST, OPTIONS'
-                    },
-                    'body': json.dumps({
-                        'error': 'Missing required message fields: id and text'
-                    })
-                }
-            
-            if not files:
-                return {
-                    'statusCode': 400,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        **get_cors_headers(origin),
-                        'Access-Control-Allow-Headers': 'Content-Type',
-                        'Access-Control-Allow-Methods': 'POST, OPTIONS'
-                    },
-                    'body': json.dumps({
-                        'error': 'No files provided'
-                    })
-                }
-            
-            # Process each file
-            uploaded_files = []
-            for idx, file_data in enumerate(files):
-                filename = file_data.get('filename')
-                content_type = file_data.get('content_type', 'application/octet-stream')
-                data = file_data.get('data')
-                
-                if not filename or not data:
-                    logger.warning(f"Skipping invalid file: {filename}")
-                    continue
-                
-                base64_len = len(data) if isinstance(data, str) else 0
-                logger.info(
-                    "[FILE_UPLOAD] File[%s] before decode: filename=%s base64_str_len=%s",
-                    idx,
-                    filename,
-                    base64_len,
-                )
-                if base64_len in (10922, 10923) or (base64_len > 0 and base64_len <= 11000):
-                    logger.warning(
-                        "[FILE_UPLOAD] File[%s] base64 length %s decodes to ~8KB - likely truncated in request",
-                        idx,
-                        base64_len,
-                    )
-                try:
-                    # Generate unique file ID
-                    file_id = str(uuid.uuid4())
-                    correlation_id = str(uuid.uuid4())
-                    
-                    # Create S3 key
-                    s3_key = f"users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}"
-                    
-                    # Decode base64 data
-                    file_content = base64.b64decode(data)
-                    file_size = len(file_content)
-                    logger.info(
-                        "[FILE_UPLOAD] decode: filename=%s base64_len=%s decoded_bytes=%s s3_key=%s",
-                        filename,
-                        base64_len,
-                        file_size,
-                        f"users/{user_id}/sessions/{session_id}/files/...",
-                    )
-                    if file_size == 8192:
-                        logger.warning(
-                            "[FILE_UPLOAD] File is exactly 8,192 bytes - likely truncated. "
-                            "base64_len=%s (for 8KB binary expect ~10923). "
-                            "Check: (1) API Gateway / Lambda payload limit, (2) client sending full base64.",
-                            base64_len,
-                        )
-                    
-                    # Upload to S3
-                    s3_client.put_object(
-                        Bucket=self.bucket_name,
-                        Key=s3_key,
-                        Body=file_content,
-                        ContentType=content_type,
-                        Metadata={
-                            'user_id': user_id,
-                            'session_id': session_id,
-                            'file_id': file_id,
-                            'filename': filename,
-                            'content_type': content_type,
-                            'file_type': 'chat_upload',
-                            'correlation_id': correlation_id,
-                            'upload_timestamp': str(int(datetime.utcnow().timestamp()))
-                        }
-                    )
-                    
-                    # Create S3 URL
-                    s3_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
-                    
-                    uploaded_files.append({
-                        'file_id': file_id,
-                        'filename': filename,
-                        's3_key': s3_key,
-                        's3_url': s3_url,
-                        'content_type': content_type,
-                        'file_size': file_size,
-                        'upload_timestamp': str(int(datetime.utcnow().timestamp()))
-                    })
-                    
-                    logger.info(f"Successfully uploaded file: {filename} to {s3_key}")
-                    
-                except Exception as e:
-                    logger.error(f"Error uploading file {filename}: {str(e)}")
-                    continue
-            
-            if not uploaded_files:
-                return {
-                    'statusCode': 500,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        **get_cors_headers(origin),
-                        'Access-Control-Allow-Headers': 'Content-Type',
-                        'Access-Control-Allow-Methods': 'POST, OPTIONS'
-                    },
-                    'body': json.dumps({
-                        'error': 'Failed to upload any files'
-                    })
-                }
-            
-            # Files uploaded successfully, update session variables
-            session_variables_updated = False
-            updated_session_variables = None
-            try:
-                session_variables_updated = self._update_session_variables(
-                    user_id, session_id, uploaded_files, context_items
-                )
-                logger.info(f"Session variables update result: {session_variables_updated}")
-                
-                # Get updated session_variables to send to frontend
-                if session_variables_updated:
-                    response = self.chat_sessions_table.get_item(
-                        Key={'user_id': user_id, 'session_id': session_id}
-                    )
-                    if 'Item' in response:
-                        updated_session_variables = response['Item'].get('session_variables', {})
-            except Exception as e:
-                logger.error(f"Error updating session variables: {str(e)}")
-            
-            # Send session_update notification to frontend via WebSocket
-            if session_variables_updated and updated_session_variables:
-                try:
-                    from websocket_handler import WebSocketHandler
-                    ws_handler = WebSocketHandler()
-                    ws_handler._send_session_update_with_variables(user_id, session_id, updated_session_variables)
-                    logger.info(f"✅ Sent session_update to WebSocket for session {session_id} after file upload")
-                except Exception as ws_error:
-                    logger.warning(f"Failed to send session_update to WebSocket: {str(ws_error)}")
-                    # Non-critical - continue with response
-            
-            # Files are uploaded and session variables are updated
-            # The message will be sent via WebSocket separately by the frontend
-            # This ensures files are uploaded before message processing begins
-            logger.info(f"Files uploaded successfully. Waiting for WebSocket message to process.")
-            
-            # Prepare response body with session_variables for frontend to update immediately
-            response_body = {
-                'message': f'Successfully uploaded {len(uploaded_files)} file(s)',
-                'uploaded_files': uploaded_files
-            }
-            
-            # Include updated session_variables in response so frontend can update immediately
-            if updated_session_variables:
-                # Convert Decimal types to native Python types for JSON serialization
-                import json as json_module
-                from decimal import Decimal
-                
-                def decimal_default(obj):
-                    if isinstance(obj, Decimal):
-                        return int(obj) if obj % 1 == 0 else float(obj)
-                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-                
-                # Convert session_variables to JSON-serializable format
-                try:
-                    session_vars_json = json_module.loads(json_module.dumps(updated_session_variables, default=decimal_default))
-                    response_body['session_variables'] = session_vars_json
-                    logger.info(f"✅ Including session_variables in response for immediate frontend update")
-                except Exception as e:
-                    logger.warning(f"Failed to serialize session_variables for response: {str(e)}")
-            
-            # Return immediately - frontend will send message via WebSocket
+            # Unreachable if operation is get_upload_url or register_uploads (both return above)
             return {
-                'statusCode': 200,
+                'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
                     **get_cors_headers(origin),
                     'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
                 },
-                'body': json.dumps(response_body)
+                'body': json.dumps({
+                    'error': 'Presigned upload required',
+                    'message': 'Use operation=get_upload_url then upload to S3, then operation=register_uploads.',
+                    'code': 'PRESIGNED_REQUIRED',
+                }),
             }
-            
+
         except Exception as e:
             logger.error(f"Error in file upload handler: {str(e)}")
             return {
