@@ -14,6 +14,10 @@ Agent then reads from S3 via read_pdf_tool(s3_key) / read_s3_file_tool(s3_key).
 
 If the stored file is exactly 8192 bytes, the request body was truncated (e.g. API Gateway
 payload limit or client). Check [FILE_UPLOAD] logs for body length and base64_str_len.
+
+Alternative flow (ported from filesystem lambda): use direct S3 upload to avoid body limits.
+- operation='get_upload_url': body has files: [{ filename, content_type, file_size? }]. Returns presigned POST URLs.
+- operation='register_uploads': body has files: [{ s3_key, filename, content_type }] + message. Registers existing S3 objects in session (no base64).
 """
 
 import json
@@ -51,13 +55,36 @@ def convert_floats_to_decimal(obj):
 
 class FileUploadHandler:
     """
-    Handles file uploads and message processing with attached files
+    Handles file uploads and message processing with attached files.
+    Supports: (1) one-shot base64 upload, (2) get_upload_url + register_uploads (direct S3, no body limit).
     """
-    
+
     def __init__(self):
         self.bucket_name = os.environ['CHAT_FILES_BUCKET_NAME']
         self.chat_sessions_table = dynamodb.Table(os.environ['CHAT_SESSIONS_TABLE_NAME'])
-    
+
+    def _generate_presigned_post(self, user_id: str, session_id: str, filename: str, file_size: int = None) -> dict:
+        """Generate presigned S3 POST for direct upload (same pattern as filesystem lambda)."""
+        file_id = str(uuid.uuid4())
+        s3_key = f"users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}"
+        conditions = []
+        if file_size:
+            conditions.append(['content-length-range', 1, file_size])
+        post_data = s3_client.generate_presigned_post(
+            Bucket=self.bucket_name,
+            Key=s3_key,
+            Fields={},
+            Conditions=conditions,
+            ExpiresIn=3600,
+        )
+        return {
+            'upload_url': post_data['url'],
+            'fields': post_data['fields'],
+            's3_key': s3_key,
+            'file_id': file_id,
+            'filename': filename,
+        }
+
     def handle_file_upload(self, event: dict) -> dict:
         """
         Handle file upload requests with message orchestration via REST API.
@@ -188,7 +215,108 @@ class FileUploadHandler:
                         'error': 'Missing required fields: user_id and session_id'
                     })
                 }
-            
+
+            # Alternative flow: get presigned upload URLs (port from filesystem lambda)
+            operation = body.get('operation')
+            if operation == 'get_upload_url':
+                upload_files = body.get('files', [])
+                if not upload_files:
+                    return {
+                        'statusCode': 400,
+                        'headers': {'Content-Type': 'application/json', **get_cors_headers(origin), 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS'},
+                        'body': json.dumps({'error': 'files array required for get_upload_url'})
+                    }
+                upload_urls = []
+                for f in upload_files:
+                    fn = f.get('filename') or 'untitled'
+                    ct = f.get('content_type', 'application/octet-stream')
+                    size = f.get('file_size')
+                    one = self._generate_presigned_post(user_id, session_id, fn, size)
+                    one['content_type'] = ct
+                    upload_urls.append(one)
+                logger.info("[FILE_UPLOAD] get_upload_url: returned %s URL(s)", len(upload_urls))
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json', **get_cors_headers(origin), 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS'},
+                    'body': json.dumps({
+                        'upload_urls': upload_urls,
+                        'message': 'Use each upload_url + fields to POST the file directly to S3, then call with operation=register_uploads and s3_key.',
+                    })
+                }
+
+            # Alternative flow: register files already uploaded to S3 via presigned URL
+            if operation == 'register_uploads':
+                message = body.get('message', {})
+                reg_files = body.get('files', [])
+                context_items = body.get('context_items', [])
+                if not message.get('id') or not message.get('text'):
+                    return {
+                        'statusCode': 400,
+                        'headers': {'Content-Type': 'application/json', **get_cors_headers(origin), 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS'},
+                        'body': json.dumps({'error': 'message.id and message.text required for register_uploads'})
+                    }
+                expected_prefix = f"users/{user_id}/sessions/{session_id}/files/"
+                uploaded_files = []
+                for f in reg_files:
+                    s3_key = f.get('s3_key')
+                    fn = f.get('filename') or f.get('name') or 'untitled'
+                    ct = f.get('content_type', 'application/octet-stream')
+                    if not s3_key or not s3_key.startswith(expected_prefix):
+                        logger.warning("[FILE_UPLOAD] register_uploads: invalid s3_key %s", s3_key)
+                        continue
+                    try:
+                        head = s3_client.head_object(Bucket=self.bucket_name, Key=s3_key)
+                        file_size = head.get('ContentLength', 0)
+                    except Exception as e:
+                        logger.warning("[FILE_UPLOAD] register_uploads: head_object failed for %s: %s", s3_key, e)
+                        continue
+                    uploaded_files.append({
+                        'file_id': s3_key.split('/')[-1].split('_', 1)[0] if '_' in s3_key.split('/')[-1] else '',
+                        'filename': fn,
+                        's3_key': s3_key,
+                        's3_url': f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}",
+                        'content_type': ct,
+                        'file_size': file_size,
+                        'upload_timestamp': int(datetime.utcnow().timestamp()),
+                    })
+                if not uploaded_files:
+                    return {
+                        'statusCode': 400,
+                        'headers': {'Content-Type': 'application/json', **get_cors_headers(origin), 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS'},
+                        'body': json.dumps({'error': 'No valid s3_key files to register'})
+                    }
+                session_variables_updated = False
+                updated_session_variables = None
+                try:
+                    session_variables_updated = self._update_session_variables(user_id, session_id, uploaded_files, context_items)
+                    if session_variables_updated:
+                        resp = self.chat_sessions_table.get_item(Key={'user_id': user_id, 'session_id': session_id})
+                        if 'Item' in resp:
+                            updated_session_variables = resp['Item'].get('session_variables', {})
+                except Exception as e:
+                    logger.error("[FILE_UPLOAD] register_uploads: _update_session_variables failed: %s", e)
+                try:
+                    from websocket_handler import WebSocketHandler
+                    ws_handler = WebSocketHandler()
+                    ws_handler._send_session_update_with_variables(user_id, session_id, updated_session_variables or {})
+                except Exception:
+                    pass
+                from decimal import Decimal
+                def _decimal_default(obj):
+                    if isinstance(obj, Decimal):
+                        return int(obj) if obj % 1 == 0 else float(obj)
+                    raise TypeError(type(obj).__name__)
+                sv_json = json.loads(json.dumps(updated_session_variables or {}, default=_decimal_default)) if updated_session_variables else None
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json', **get_cors_headers(origin), 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS'},
+                    'body': json.dumps({
+                        'message': f'Registered {len(uploaded_files)} file(s)',
+                        'uploaded_files': uploaded_files,
+                        'session_variables': sv_json,
+                    })
+                }
+
             if not message.get('id') or not message.get('text'):
                 return {
                     'statusCode': 400,
