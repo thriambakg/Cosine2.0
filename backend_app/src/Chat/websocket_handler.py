@@ -468,12 +468,14 @@ class WebSocketHandler:
             uploaded_files_metadata = message_data.get('uploadedFiles', [])  # File metadata from frontend for display
             
             # If hasFiles flag is set, get files from session_variables (uploaded via REST API)
+            # Use ConsistentRead=True so we see the write from register_uploads (avoid race with eventual consistency)
             uploaded_files = []
             if has_files_flag:
                 logger.info(f"Message has files attached (uploaded via REST API), retrieving from session_variables")
                 try:
                     session_response = self.chat_sessions_table.get_item(
-                        Key={'user_id': user_id, 'session_id': session_id}
+                        Key={'user_id': user_id, 'session_id': session_id},
+                        ConsistentRead=True
                     )
                     if 'Item' in session_response:
                         session_vars = session_response['Item'].get('session_variables', {})
@@ -500,9 +502,19 @@ class WebSocketHandler:
                         if uploaded_files:
                             logger.info(f"Retrieved {len(uploaded_files)} files from session_variables")
                         else:
-                            logger.warning(f"hasFiles flag set but no files found in session_variables")
+                            # Fallback: use list from WebSocket message (register_uploads response) if DynamoDB read was stale
+                            from_ws = message_data.get('uploadedFilesWithS3Keys') or []
+                            if isinstance(from_ws, list) and len(from_ws) > 0:
+                                uploaded_files = from_ws
+                                logger.info(f"Using {len(uploaded_files)} files from WebSocket message (fallback)")
+                            else:
+                                logger.warning(f"hasFiles flag set but no files found in session_variables")
                 except Exception as e:
                     logger.error(f"Error retrieving files from session_variables: {str(e)}")
+                    from_ws = message_data.get('uploadedFilesWithS3Keys') or []
+                    if isinstance(from_ws, list) and len(from_ws) > 0:
+                        uploaded_files = from_ws
+                        logger.info(f"Using {len(uploaded_files)} files from WebSocket message after error")
             
             # Save user message to database with file metadata for display
             # Use uploadedFiles metadata from WebSocket message (has display info like name, size, type)

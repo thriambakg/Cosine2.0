@@ -949,8 +949,10 @@ class UnifiedMessageHandlerService {
           detail: { sessionId, sessionVariables: uploadResult.session_variables },
         }));
       }
+      const registeredFiles = Array.isArray(uploadResult.uploaded_files) ? uploadResult.uploaded_files : [];
 
       // Step 4: Send message via WebSocket with file attachment flag
+      // Include registered file list (s3_key, etc.) so backend can use it if DynamoDB read is stale
       const websocketMessage = {
         action: 'chat',
         type: 'chat_message',
@@ -963,6 +965,7 @@ class UnifiedMessageHandlerService {
         context: messageData.context,
         hasFiles: true,
         uploadedFiles: files.map((f: any) => ({ name: f.name, size: f.size, type: f.type })),
+        uploadedFilesWithS3Keys: registeredFiles.length > 0 ? registeredFiles : undefined,
       };
       ws.send(JSON.stringify(websocketMessage));
       window.dispatchEvent(new CustomEvent('file-message-sent', {
