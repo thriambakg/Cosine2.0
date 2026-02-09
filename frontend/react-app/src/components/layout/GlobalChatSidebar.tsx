@@ -53,6 +53,7 @@ import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext } from '../tiles/common/contextManager';
 import ContextItemRow from '../context/ContextItemRow';
 import { sessionManagementAPI, fileReturnAPI, getApiBaseUrl } from '../../services/api';
+void getApiBaseUrl; // used in sendMessageWithFilesToFileHandler for /files fetch
 // COMMENTED OUT: useMessagingService (replaced with unified architecture)
 // import { useMessagingService } from '../../hooks/useMessagingService';
 // NEW: Import unified messaging system
