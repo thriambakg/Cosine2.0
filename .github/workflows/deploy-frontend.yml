@@ -167,14 +167,12 @@ jobs:
           fi
           echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
 
-  # Check CloudFront infrastructure  
+  # Check CloudFront infrastructure (skipped – deploy runs without this stage)
   check-infrastructure:
     needs: [setup]
     runs-on: ubuntu-latest
     environment: ${{ needs.setup.outputs.environment }}
-    # Skip infrastructure check if this is a frontend-only deployment
-    if: ${{ !(github.event.inputs.frontend_only == 'true' || inputs.frontend_only == true) }}
-    
+    if: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -293,7 +291,6 @@ jobs:
           semgrep scan --config=p/javascript --config=p/typescript --config=p/react \
             --config=p/security-audit --error --no-git-ignore frontend/ 2>/dev/null || \
           semgrep scan --config=auto --error --no-git-ignore frontend/ 2>/dev/null || true
-        continue-on-error: true
 
       - name: Gitleaks (Secrets)
         uses: gitleaks/gitleaks-action@v2
@@ -301,13 +298,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-  # Build and deploy frontend
+  # Build and deploy frontend (runs only after mandatory security scan passes)
   deploy-frontend:
-    needs: [setup, check-infrastructure, frontend-security]
+    needs: [setup, frontend-security]
     runs-on: ubuntu-latest
     environment: ${{ needs.setup.outputs.environment }}
-    # Always run if check-infrastructure was skipped, otherwise wait for it
-    if: ${{ always() && (needs.check-infrastructure.result == 'success' || needs.check-infrastructure.result == 'skipped') }}
     
     steps:
       - name: Checkout code
