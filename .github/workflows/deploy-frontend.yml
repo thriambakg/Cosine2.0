@@ -256,9 +256,54 @@ jobs:
           cd ..
           echo "🎉 All CloudFront infrastructure components are ready!"
 
+  # Frontend security (SCA, SAST, secrets) — runs before build/deploy
+  frontend-security:
+    name: 'Frontend Security (SCA / SAST / Secrets)'
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: './frontend/react-app/package-lock.json'
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend/react-app
+
+      - name: npm audit (SCA – dependency vulnerabilities)
+        run: |
+          echo "🔍 Running npm audit on frontend dependencies..."
+          npm audit --audit-level=high
+        working-directory: frontend/react-app
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Semgrep (SAST – JS/TS/React)
+        run: |
+          echo "🔍 Running Semgrep on frontend (JavaScript, TypeScript, React)..."
+          semgrep scan --config=p/javascript --config=p/typescript --config=p/react \
+            --config=p/security-audit --error --no-git-ignore frontend/ 2>/dev/null || \
+          semgrep scan --config=auto --error --no-git-ignore frontend/ 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Gitleaks (Secrets)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
   # Build and deploy frontend
   deploy-frontend:
-    needs: [setup, check-infrastructure]
+    needs: [setup, check-infrastructure, frontend-security]
     runs-on: ubuntu-latest
     environment: ${{ needs.setup.outputs.environment }}
     # Always run if check-infrastructure was skipped, otherwise wait for it

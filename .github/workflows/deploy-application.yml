@@ -109,11 +109,17 @@ jobs:
         run: |
           echo "🔍 Scanning dependencies for known vulnerabilities..."
           FAILED=0
-          for req in $(find backend_app -name "requirements.txt" -type f 2>/dev/null); do
+          REQ_COUNT=0
+          while IFS= read -r -d '' req; do
             echo "--- $req ---"
             pip-audit -r "$req" || FAILED=1
-          done
-          if [ $FAILED -eq 1 ]; then
+            REQ_COUNT=$((REQ_COUNT + 1))
+          done < <(find backend_app -name "requirements.txt" -type f -print0 2>/dev/null)
+          if [ "$REQ_COUNT" -eq 0 ]; then
+            echo "✅ No requirements.txt in backend_app (dependencies via Lambda layers). Skipping pip-audit."
+            exit 0
+          fi
+          if [ "$FAILED" -eq 1 ]; then
             echo "❌ One or more requirements.txt have known vulnerabilities. Fix with pip-audit and update pins."
             exit 1
           fi
