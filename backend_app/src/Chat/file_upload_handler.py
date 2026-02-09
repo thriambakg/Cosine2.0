@@ -19,6 +19,8 @@ import uuid
 from datetime import datetime
 import logging
 import sys
+from botocore.config import Config
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cors_helper import get_cors_headers, validate_origin
 from utils.auth_helper import extract_user_id_from_event
@@ -27,8 +29,9 @@ from utils.auth_helper import extract_user_id_from_event
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Initialize AWS clients
-s3_client = boto3.client('s3')
+# S3 client with SigV4 required for KMS-encrypted buckets (presigned POST otherwise returns 400)
+_s3_config = Config(signature_version='s3v4')
+s3_client = boto3.client('s3', config=_s3_config)
 dynamodb = boto3.resource('dynamodb')
 
 def convert_floats_to_decimal(obj):
@@ -67,6 +70,11 @@ class FileUploadHandler:
             Fields={},
             Conditions=conditions,
             ExpiresIn=3600,
+        )
+        logger.info(
+            "[FILE_UPLOAD] get_upload_url: bucket=%s s3_key=%s (pattern: users/{user_id}/sessions/{session_id}/files/*)",
+            self.bucket_name,
+            s3_key,
         )
         return {
             'upload_url': post_data['url'],
@@ -285,6 +293,12 @@ class FileUploadHandler:
                         'headers': {'Content-Type': 'application/json', **get_cors_headers(origin), 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS'},
                         'body': json.dumps({'error': 'No valid s3_key files to register'})
                     }
+                logger.info(
+                    "[FILE_UPLOAD] register_uploads: bucket=%s registered %s file(s), s3_keys=%s",
+                    self.bucket_name,
+                    len(uploaded_files),
+                    [f.get('s3_key') for f in uploaded_files],
+                )
                 session_variables_updated = False
                 updated_session_variables = None
                 try:

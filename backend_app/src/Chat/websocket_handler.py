@@ -540,7 +540,11 @@ class WebSocketHandler:
             original_user_message = message_text
             
             if has_context or has_files:
-                logger.info(f"Context-aware message: {len(context_items)} context items, {len(uploaded_files)} uploaded files")
+                logger.info(
+                    f"Context-aware message: {len(context_items)} context items, {len(uploaded_files)} uploaded files; "
+                    f"s3_keys=%s",
+                    [f.get('s3_key') for f in uploaded_files] if uploaded_files else [],
+                )
                 
                 # Store context items in session_variables
                 if has_context and CONTEXT_BUILDER_AVAILABLE:
@@ -560,6 +564,11 @@ class WebSocketHandler:
             # If hasFiles flag is set, use files from session_variables (already uploaded)
             # Otherwise use files from WebSocket message (legacy support)
             files_for_handler = uploaded_files if has_files_flag and uploaded_files else files
+            if files_for_handler:
+                logger.info(
+                    f"Passing {len(files_for_handler)} file(s) to chat handler (agent will read from session context / read_pdf_tool(s3_key)); keys=%s",
+                    [f.get('s3_key') for f in files_for_handler],
+                )
             
             event_body = {
                 'action': 'chat',

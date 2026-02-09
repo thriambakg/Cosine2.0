@@ -130,30 +130,51 @@ const getAwsRegion = (): string => {
   return ENVIRONMENT_CONFIGS[env]?.awsRegion || ENVIRONMENT_CONFIGS.development.awsRegion;
 };
 
+// Returns true if URL is a placeholder (not a real endpoint)
+const isPlaceholderUrl = (url: string | undefined): boolean =>
+  !url || url.includes('{{') || url.includes('your-actual-');
+
 // Get WebSocket URL from runtime config or environment variables
 const getWebSocketUrl = (): string | undefined => {
   // Check runtime config first (highest priority)
   const runtimeConfig = getRuntimeConfig();
-  if (runtimeConfig?.websocketUrl && !runtimeConfig.websocketUrl.includes('{{')) {
+  if (runtimeConfig?.websocketUrl && !isPlaceholderUrl(runtimeConfig.websocketUrl)) {
     console.log('🔌 Using WebSocket URL from runtime config:', runtimeConfig.websocketUrl);
     return runtimeConfig.websocketUrl;
   }
-  
+
   // Check for explicit WebSocket URL
   const explicitUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || process.env.VITE_WEBSOCKET_URL;
-  if (explicitUrl && !explicitUrl.includes('your-')) {
+  if (explicitUrl && !isPlaceholderUrl(explicitUrl)) {
     console.log('🔌 Using WebSocket URL from environment variable:', explicitUrl);
     return explicitUrl;
   }
-  
+
   // Fall back to environment-specific config
   const env = getCurrentEnvironment();
-  const envUrl = ENVIRONMENT_CONFIGS[env]?.websocketUrl;
-  if (envUrl) {
+  let envUrl = ENVIRONMENT_CONFIGS[env]?.websocketUrl;
+
+  // On localhost, if resolved URL is a placeholder, use production WebSocket URL (same pattern as API Gateway)
+  if (isLocalhostEnv && isPlaceholderUrl(envUrl)) {
+    const productionWsUrl = ENVIRONMENT_CONFIGS.production?.websocketUrl;
+    if (productionWsUrl && !isPlaceholderUrl(productionWsUrl)) {
+      console.log('🏠 Localhost detected: Using production WebSocket URL for local development:', productionWsUrl);
+      return productionWsUrl;
+    }
+  }
+
+  if (envUrl && !isPlaceholderUrl(envUrl)) {
     console.log('🔌 Using WebSocket URL from environment config:', envUrl, '(environment:', env, ')');
     return envUrl;
   }
-  
+
+  // Last resort: use production WebSocket URL if nothing else is valid (e.g. staging/development placeholders)
+  const productionFallback = ENVIRONMENT_CONFIGS.production?.websocketUrl;
+  if (productionFallback && !isPlaceholderUrl(productionFallback)) {
+    console.log('🔌 Using production WebSocket URL as fallback (no valid URL for environment:', env, '):', productionFallback);
+    return productionFallback;
+  }
+
   console.log('🔌 No WebSocket URL configured for environment:', env);
   return undefined;
 };
