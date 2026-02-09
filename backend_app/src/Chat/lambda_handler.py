@@ -792,8 +792,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
             
             if is_files_endpoint:
-                logger.info(f"Processing file upload request - path: {path}, resource: {resource}")
-                logger.debug(f"Event body type: {type(event.get('body'))}, body length: {len(str(event.get('body', '')))}")
+                body_str = event.get('body') or ''
+                body_len = len(body_str) if isinstance(body_str, str) else 0
+                logger.info(
+                    "Processing file upload request - path=%s, body length=%s chars (truncation likely if ~11K)",
+                    path,
+                    body_len,
+                )
+                if body_len in (10922, 10923, 8192) or (0 < body_len <= 12000):
+                    logger.warning(
+                        "File upload body length %s - may be truncated (8KB decoded ≈ 10923 base64 chars)",
+                        body_len,
+                    )
                 try:
                     from file_upload_handler import FileUploadHandler
                     file_handler = FileUploadHandler()

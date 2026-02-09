@@ -1,7 +1,19 @@
 """
 File Upload Handler for Chat Agent
-Handles file uploads via REST API and processes messages with attached files
-Consolidated from file_upload Lambda for improved performance
+
+Flow: Client uploads file → API Gateway POST /files → Lambda (this handler) → S3.
+Agent then reads from S3 via read_pdf_tool(s3_key) / read_s3_file_tool(s3_key).
+
+1. Client sends POST to /files with JSON body:
+   { user_id, session_id, message: { id, text, timestamp }, files: [ { filename, content_type, data: base64 } ] }
+2. Lambda receives event with event["body"] = stringified JSON (full request body from API Gateway).
+3. Handler parses body, base64-decodes each file's data, and puts to S3:
+   Bucket=CHAT_FILES_BUCKET_NAME, Key=users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}
+4. Response includes s3_key and metadata; client/WebSocket can pass s3_key to the agent.
+5. Agent uses read_pdf_tool(s3_key) or read_s3_file_tool(s3_key) to read from the same bucket/key.
+
+If the stored file is exactly 8192 bytes, the request body was truncated (e.g. API Gateway
+payload limit or client). Check [FILE_UPLOAD] logs for body length and base64_str_len.
 """
 
 import json
