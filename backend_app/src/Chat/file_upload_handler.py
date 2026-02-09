@@ -219,6 +219,13 @@ class FileUploadHandler:
 
             # Require presigned flow (deterministic, matches filesystem)
             if operation not in ('get_upload_url', 'register_uploads'):
+                # Legacy client may send files with base64 data in one POST (no operation)
+                files_with_data = [f for f in body.get('files') or [] if f.get('data')]
+                if files_with_data:
+                    logger.info(
+                        "[FILE_UPLOAD] Rejected legacy base64 payload: %s file(s), no operation. Client should use presigned flow.",
+                        len(files_with_data),
+                    )
                 return {
                     'statusCode': 400,
                     'headers': {
@@ -230,8 +237,8 @@ class FileUploadHandler:
                     'body': json.dumps({
                         'error': 'Presigned upload required',
                         'message': (
-                            'Use operation=get_upload_url to get presigned URLs, upload each file to S3, '
-                            'then call operation=register_uploads with the returned s3_key values.'
+                            'File upload now uses direct S3 upload. Please refresh the page to get the latest version, '
+                            'then try uploading again.'
                         ),
                         'code': 'PRESIGNED_REQUIRED',
                     }),
