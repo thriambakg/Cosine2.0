@@ -98,7 +98,14 @@ class FileUploadHandler:
             logger.info(f"File upload request received")
             logger.debug(f"Event structure: {json.dumps({k: str(type(v).__name__) for k, v in event.items() if k != 'body'}, indent=2)}")
             
-            # Parse request body
+            # Parse request body (log size to diagnose 8KB truncation)
+            raw_body = event.get('body') or ''
+            body_len = len(raw_body) if isinstance(raw_body, str) else 0
+            logger.info("[FILE_UPLOAD] Request body length: %s chars (truncation suspected if ~11K for 8KB decoded)", body_len)
+            if body_len == 0:
+                logger.warning("[FILE_UPLOAD] Empty body")
+            if isinstance(raw_body, str) and body_len in (10922, 10923, 8192):
+                logger.warning("[FILE_UPLOAD] Body length is %s - likely truncated (8192 decoded base64 ~10923 chars)", body_len)
             if isinstance(event.get('body'), str):
                 try:
                     body = json.loads(event['body'])
@@ -200,7 +207,7 @@ class FileUploadHandler:
             
             # Process each file
             uploaded_files = []
-            for file_data in files:
+            for idx, file_data in enumerate(files):
                 filename = file_data.get('filename')
                 content_type = file_data.get('content_type', 'application/octet-stream')
                 data = file_data.get('data')
@@ -209,6 +216,19 @@ class FileUploadHandler:
                     logger.warning(f"Skipping invalid file: {filename}")
                     continue
                 
+                base64_len = len(data) if isinstance(data, str) else 0
+                logger.info(
+                    "[FILE_UPLOAD] File[%s] before decode: filename=%s base64_str_len=%s",
+                    idx,
+                    filename,
+                    base64_len,
+                )
+                if base64_len in (10922, 10923) or (base64_len > 0 and base64_len <= 11000):
+                    logger.warning(
+                        "[FILE_UPLOAD] File[%s] base64 length %s decodes to ~8KB - likely truncated in request",
+                        idx,
+                        base64_len,
+                    )
                 try:
                     # Generate unique file ID
                     file_id = str(uuid.uuid4())
@@ -218,7 +238,6 @@ class FileUploadHandler:
                     s3_key = f"users/{user_id}/sessions/{session_id}/files/{file_id}_{filename}"
                     
                     # Decode base64 data
-                    base64_len = len(data) if data else 0
                     file_content = base64.b64decode(data)
                     file_size = len(file_content)
                     logger.info(

@@ -187,7 +187,16 @@ def read_pdf_tool(
     result = extract_text(content, page_numbers=page_numbers)
     if not result.get("success"):
         logger.warning("[PDF_TOOL] extract_text failed: %s", result.get("error"))
-        return f"Error extracting PDF text: {result.get('error', 'Unknown error')}"
+        err = result.get("error", "Unknown error")
+        if len(content) == 8192 and "EOF" in (err or ""):
+            return (
+                "Error: This PDF was stored as only 8,192 bytes (8KB), so it was truncated during upload. "
+                "The original file was likely larger. Please re-upload the file; if it still fails, "
+                "the request body may be limited by API Gateway or the client. Try a smaller file or "
+                "use a different upload path (e.g. Files page) for larger documents. "
+                f"Technical: {err}"
+            )
+        return f"Error extracting PDF text: {err}"
 
     total = result.get("total_pages", 0)
     pages_read = result.get("pages_read", [])
