@@ -52,8 +52,7 @@ import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 // import { useWebSocket } from '../../contexts/WebSocketContext';
 import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext } from '../tiles/common/contextManager';
 import ContextItemRow from '../context/ContextItemRow';
-import { sessionManagementAPI, fileReturnAPI } from '../../services/api';
-import { API_CONFIG } from '../../config/api';
+import { sessionManagementAPI, fileReturnAPI, getApiBaseUrl } from '../../services/api';
 // COMMENTED OUT: useMessagingService (replaced with unified architecture)
 // import { useMessagingService } from '../../hooks/useMessagingService';
 // NEW: Import unified messaging system
@@ -2197,7 +2196,7 @@ const GlobalChatSidebar: React.FC = () => {
         data: file.compressedData // Already base64 encoded from compression
       }));
 
-      const response = await fetch(`${API_CONFIG.BASE_URL}/files`, {
+      const response = await fetch(`${getApiBaseUrl()}/files`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -8,6 +8,9 @@ import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
 
+/** Base URL for API Gateway (e.g. for fetch when not using apiRequest). */
+export const getApiBaseUrl = (): string => API_BASE_URL;
+
 // Track if we're already redirecting to prevent multiple redirects
 let isRedirectingToLogin = false;
 
