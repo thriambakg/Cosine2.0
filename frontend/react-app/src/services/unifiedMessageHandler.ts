@@ -1181,6 +1181,11 @@ class UnifiedMessageHandlerService {
       }
     }
     
+    // When this is an error response, clear any in-progress streaming so the error shows as the final message
+    if (isErrorResponse) {
+      this.stopAllStreamingForSession(sessionId);
+    }
+    
     // Valid response - add it immediately (use converted timestamp)
     this.addAIResponseToCache(sessionId, message_id, content, timestampMs);
     
@@ -1206,6 +1211,12 @@ class UnifiedMessageHandlerService {
     
     // Clear agent log when AI response arrives
     this.clearAgentLog(sessionId);
+    
+    // Force a second notify for error responses so the UI updates immediately (avoids batched update not showing until next interaction)
+    if (isErrorResponse) {
+      const messages = this.localCache.get(sessionId) || [];
+      setTimeout(() => this.notifyMessageUpdate(sessionId, messages), 0);
+    }
     
     console.log('✅ UnifiedMessageHandler: Added AI response to local cache:', message_id);
   }

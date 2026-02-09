@@ -46,6 +46,27 @@ PROJECT_NAME = os.environ.get('PROJECT_NAME', 'cosine')
 CONGRESS_BILLS_SEARCH_LAMBDA_NAME = f"{PROJECT_NAME}-congress-bills-search-{ENVIRONMENT}"
 
 
+def _normalize_filters_for_lambda(filters: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize filter types to match DynamoDB schema (BillNumberDateIndex expects bill_number as number).
+    The Lambda/GSI fails with ValidationException if bill_number is sent as string.
+    """
+    out = dict(filters)
+    if 'bill_number' in out:
+        v = out['bill_number']
+        if isinstance(v, str) and v.isdigit():
+            out['bill_number'] = int(v)
+        elif isinstance(v, (list, tuple)):
+            out['bill_number'] = [int(x) if isinstance(x, str) and str(x).isdigit() else x for x in v]
+    if 'congress' in out:
+        v = out['congress']
+        if isinstance(v, str) and v.isdigit():
+            out['congress'] = int(v)
+        elif isinstance(v, (list, tuple)):
+            out['congress'] = [int(x) if isinstance(x, str) and str(x).isdigit() else x for x in v]
+    return out
+
+
 def invoke_congress_bills_search_lambda(
     filters: Dict[str, Any],
     limit: int = 10,
@@ -63,6 +84,7 @@ def invoke_congress_bills_search_lambda(
         Search results dictionary
     """
     try:
+        filters = _normalize_filters_for_lambda(filters)
         # Prepare Lambda event (mimics API Gateway event structure)
         lambda_event = {
             'httpMethod': 'POST',

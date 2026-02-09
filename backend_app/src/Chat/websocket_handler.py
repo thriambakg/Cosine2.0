@@ -584,28 +584,30 @@ class WebSocketHandler:
                 # Log the result for debugging
                 if result is None:
                     logger.warning(f"Chat handler returned None - this should not happen")
-                    # Send error message if handler failed
                     error_timestamp_ms = int(datetime.now().timestamp() * 1000)
-                    error_message = {
+                    error_msg_id = f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}"
+                    error_content = "I apologize, but I encountered an error processing your request. Please try again."
+                    self._save_ai_response(user_id, session_id, error_msg_id, error_content)
+                    self.send_to_client(connection_id, {
                         'type': 'ai_response',
-                        'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
-                        'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                        'message_id': error_msg_id,
+                        'content': error_content,
                         'session_id': session_id,
                         'timestamp': error_timestamp_ms
-                    }
-                    self.send_to_client(connection_id, error_message)
+                    })
                 elif result.get('statusCode') != 200:
                     logger.warning(f"Chat handler returned non-200 status: {result.get('statusCode')}")
-                    # Send error message if handler failed
                     error_timestamp_ms = int(datetime.now().timestamp() * 1000)
-                    error_message = {
+                    error_msg_id = f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}"
+                    error_content = "I apologize, but I encountered an error processing your request. Please try again."
+                    self._save_ai_response(user_id, session_id, error_msg_id, error_content)
+                    self.send_to_client(connection_id, {
                         'type': 'ai_response',
-                        'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
-                        'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                        'message_id': error_msg_id,
+                        'content': error_content,
                         'session_id': session_id,
                         'timestamp': error_timestamp_ms
-                    }
-                    self.send_to_client(connection_id, error_message)
+                    })
                 else:
                     logger.info(f"✅ Chat handler processed message successfully, response sent via WebSocket")
                 
@@ -613,16 +615,17 @@ class WebSocketHandler:
                 logger.error(f"Error processing with chat agent: {str(e)}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                # Send error message to client
                 error_timestamp_ms = int(datetime.now().timestamp() * 1000)
-                error_message = {
+                error_msg_id = f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}"
+                error_content = "I apologize, but I encountered an error processing your request. Please try again."
+                self._save_ai_response(user_id, session_id, error_msg_id, error_content)
+                self.send_to_client(connection_id, {
                     'type': 'ai_response',
-                    'message_id': f"msg_{error_timestamp_ms}_{uuid.uuid4().hex[:8]}",
-                    'content': "I apologize, but I encountered an error processing your request. Please try again.",
+                    'message_id': error_msg_id,
+                    'content': error_content,
                     'session_id': session_id,
                     'timestamp': error_timestamp_ms
-                }
-                self.send_to_client(connection_id, error_message)
+                })
             
             return {
                 'statusCode': 200,
@@ -728,6 +731,37 @@ class WebSocketHandler:
                 logger.info(f"✅ Saved user message: {message_id}")
         except Exception as e:
             logger.error(f"❌ Failed to save user message: {e}")
+    
+    def _save_ai_response(self, user_id: str, session_id: str, message_id: str, content: str) -> None:
+        """Persist AI (bot) message to session so it appears on reload / next load even if WebSocket delivery failed."""
+        try:
+            session_response = self.chat_sessions_table.get_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                ConsistentRead=True
+            )
+            if 'Item' not in session_response:
+                return
+            messages = session_response['Item'].get('messages', [])
+            ai_message = {
+                'id': message_id,
+                'text': content,
+                'sender': 'bot',
+                'timestamp': int(datetime.now().timestamp()),
+                'message_type': 'text'
+            }
+            messages.append(ai_message)
+            self.chat_sessions_table.update_item(
+                Key={'user_id': user_id, 'session_id': session_id},
+                UpdateExpression='SET messages = :messages, message_count = :count, last_updated = :timestamp',
+                ExpressionAttributeValues={
+                    ':messages': messages,
+                    ':count': len(messages),
+                    ':timestamp': int(datetime.now().timestamp())
+                }
+            )
+            logger.info(f"✅ Saved AI error message to DynamoDB: {message_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save AI response: {e}")
     
     def _check_session_exists(self, user_id: str, session_id: str) -> bool:
         """Check if a session exists in DynamoDB"""
