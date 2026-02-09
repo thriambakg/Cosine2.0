@@ -7,4 +7,3 @@ PDF: use pdf_parser.extract_text() for deterministic text extraction; pdf_financ
 from .pdf_parser import extract_text, get_pdf_page_count, get_pdf_bytes_from_s3
 
 __all__ = ["extract_text", "get_pdf_page_count", "get_pdf_bytes_from_s3"]
-

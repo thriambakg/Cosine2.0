@@ -3,6 +3,7 @@
 
 name: Deploy Application Infrastructure
 
+
 on:
   push:
     branches:
