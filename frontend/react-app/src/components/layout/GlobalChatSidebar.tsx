@@ -3813,10 +3813,9 @@ const GlobalChatSidebar: React.FC = () => {
                       <IconButton size="small" className="remove-file-btn" onClick={async () => {
                         if (!activeSessionId || !user?.id) return;
                         try {
-                          const response = await fetch(`${API_CONFIG.BASE_URL}/file-download`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key }) });
-                          if (!response.ok) throw new Error(`Download request failed: ${response.status}`);
-                          const { download_url } = await response.json();
-                          const link = document.createElement('a'); link.href = download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                          const result = await fileReturnAPI.downloadFile({ user_id: user.id, session_id: activeSessionId, filename: file.filename, s3_key: file.s3_key });
+                          if (!result.success || !result.data?.download_url) throw new Error(result.error || 'Download failed');
+                          const link = document.createElement('a'); link.href = result.data.download_url; link.download = file.filename; link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
                         } catch (error) { console.error('❌ Download failed:', error); }
                       }} sx={{ opacity: 0, transition: 'opacity 0.2s', color: '#3b82f6', '&:hover': { color: '#60a5fa' } }}>
                         <DownloadIcon fontSize="small" />
