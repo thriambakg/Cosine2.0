@@ -2,6 +2,7 @@ import json
 import math
 import os
 import boto3
+import requests
 from datetime import datetime
 from typing import List, Dict, Any
 import ccxt
@@ -274,12 +275,9 @@ def fetch_historical_data(symbol: str, timeframe: str) -> List[Dict[str, Any]]:
 
 def fetch_historical_data_fallback(symbol: str, timeframe: str) -> List[Dict[str, Any]]:
     """Fallback function using direct HTTP calls to CryptoCompare API."""
-    import urllib.request
-    import urllib.parse
-    
-    # Map timeframe to API endpoint and parameters
+    headers = {"User-Agent": "Mozilla/5.0"}
+
     if timeframe == '1d':
-        # For 1 day, fetch hourly data (24 points)
         base_url = "https://min-api.cryptocompare.com/data/v2/histohour"
         params = {
             "fsym": symbol,
@@ -288,7 +286,6 @@ def fetch_historical_data_fallback(symbol: str, timeframe: str) -> List[Dict[str
             "toTs": int(datetime.now().timestamp())
         }
     else:
-        # For other timeframes, fetch daily data
         base_url = "https://min-api.cryptocompare.com/data/v2/histoday"
         days_map = {'7d': 7, '30d': 30, '1y': 365}
         days = days_map.get(timeframe, 365)
@@ -298,12 +295,10 @@ def fetch_historical_data_fallback(symbol: str, timeframe: str) -> List[Dict[str
             "limit": days,
             "toTs": int(datetime.now().timestamp())
         }
-    
-    url = f"{base_url}?{urllib.parse.urlencode(params)}"
 
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    resp = requests.get(base_url, params=params, headers=headers, timeout=10)
+    resp.raise_for_status()
+    payload = resp.json()
 
     if payload.get("Response") != "Success":
         message = payload.get("Message", "Unknown error")

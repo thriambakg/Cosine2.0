@@ -1,5 +1,5 @@
 import boto3
-import urllib.request
+import requests
 import json
 import os
 from botocore.exceptions import ClientError
@@ -32,9 +32,9 @@ def fetch_price(stock_symbol: str) -> float:
     try:
         # Use Yahoo Finance quote API
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{stock_symbol}"
-        
-        with urllib.request.urlopen(url) as response:
-            data = json.loads(response.read().decode())
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
             
         # Extract current price from response
         if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:

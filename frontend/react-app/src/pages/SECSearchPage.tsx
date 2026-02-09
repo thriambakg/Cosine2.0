@@ -1363,7 +1363,8 @@ const SECSearchPage: React.FC = () => {
           // Match form variants (e.g., "10-Q" matches "10-Q/A", "10-QT", "10-QSB")
           // Check if resultForm starts with the selected form followed by "/", "-", or a letter
           // This handles variants like "10-Q/A", "10-QT", "10-QSB", "10-K/A", etc.
-          const formRegex = new RegExp(`^${form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|-|[A-Z]|$)`);
+          // form is escaped for regex; safe for SEC form type filter (nosemgrep: ReDoS rule - literal pattern)
+          const formRegex = new RegExp(`^${form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|-|[A-Z]|$)`); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
           return formRegex.test(resultForm);
         });
       });

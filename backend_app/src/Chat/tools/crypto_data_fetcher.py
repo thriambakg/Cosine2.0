@@ -4,8 +4,8 @@ Crypto Data Fetcher tool for the chat agent to retrieve real-time cryptocurrency
 
 import json
 import os
-import urllib.request
 import urllib.parse
+import requests
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -139,10 +139,10 @@ class CryptoDataFetcher:
             # Build URL
             url = f"{endpoint}?{urllib.parse.urlencode(params)}"
             
-            # Make request
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            # Make request (requests avoids urllib file:// scheme risk)
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            resp.raise_for_status()
+            payload = resp.json()
             
             if payload.get("Response") != "Success":
                 message = payload.get("Message", "Unknown error")

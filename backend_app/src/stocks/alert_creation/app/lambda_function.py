@@ -1,8 +1,8 @@
 import json
 import boto3
 import os
-import urllib.request
 import urllib.parse
+import requests
 from uuid import uuid4
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -51,10 +51,10 @@ def validate_ticker_and_get_price(ticker: str) -> Dict[str, Any]:
         # Yahoo Finance API URL
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?period1={start_timestamp}&period2={end_timestamp}&interval=1d"
         
-        # Make request
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
+        # Make request (requests avoids urllib file:// scheme risk)
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+        response.raise_for_status()
+        data = response.json()
         
         
         # Extract current price from the response

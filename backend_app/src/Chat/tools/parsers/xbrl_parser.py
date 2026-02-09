@@ -6,8 +6,8 @@ XBRL (eXtensible Business Reporting Language) provides the most accurate structu
 import re
 import logging
 from typing import Dict, Any, Optional, List
-from xml.etree import ElementTree as ET
-from xml.etree.ElementTree import ParseError
+import defusedxml.ElementTree as ET
+from xml.etree.ElementTree import ParseError  # nosemgrep: python.lang.security.use-defused-xml.use-defused-xml -- only import exception type; parsing uses defusedxml above
 from base_parser import BaseParser
 
 logger = logging.getLogger()
@@ -34,7 +34,7 @@ class XBRLParser(BaseParser):
         try:
             xml_content = self.decode_content(content)
             
-            # Parse XML
+            # Parse XML (defusedxml prevents XXE)
             try:
                 root = ET.fromstring(xml_content)
             except ParseError:

@@ -16,5 +16,8 @@ COPY . ${LAMBDA_TASK_ROOT}
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
+# Run as non-root (Lambda base image supports UID 1000)
+USER 1000
+
 # Set the CMD to your handler
 CMD ["lambda_handler.lambda_handler"]

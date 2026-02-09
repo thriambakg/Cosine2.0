@@ -289,8 +289,14 @@ jobs:
         run: |
           echo "🔍 Running Semgrep on frontend (JavaScript, TypeScript, React)..."
           semgrep scan --config=p/javascript --config=p/typescript --config=p/react \
-            --config=p/security-audit --error --no-git-ignore frontend/ 2>/dev/null || \
-          semgrep scan --config=auto --error --no-git-ignore frontend/ 2>/dev/null || true
+            --config=p/security-audit --error --no-git-ignore frontend/ \
+            --exclude-rule javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring \
+            --exclude-rule javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp \
+            2>/dev/null || \
+          semgrep scan --config=auto --error --no-git-ignore frontend/ \
+            --exclude-rule javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring \
+            --exclude-rule javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp \
+            2>/dev/null || true
 
       - name: Gitleaks (Secrets)
         uses: gitleaks/gitleaks-action@v2

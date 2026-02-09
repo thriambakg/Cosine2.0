@@ -123,13 +123,12 @@ def get_requests_session():
     global _requests_session
     if _requests_session is None:
         _requests_session = requests.Session()
-        # Configure connection pooling
+        # Configure connection pooling (https only - no plain HTTP)
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=10,
             pool_maxsize=20,
             max_retries=3
         )
-        _requests_session.mount('http://', adapter)
         _requests_session.mount('https://', adapter)
     return _requests_session
 

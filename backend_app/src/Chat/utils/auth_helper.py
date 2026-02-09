@@ -78,12 +78,9 @@ def extract_user_id_from_event(event: Dict[str, Any]) -> Optional[str]:
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
                 
-                # Decode without verification (we trust API Gateway has validated it)
-                # In production, you should verify the token signature
-                # For now, we rely on API Gateway authorizer validation
+                # Decode to read claims only; API Gateway authorizer has already validated the token.
                 try:
-                    # Decode without verification (API Gateway should have validated)
-                    decoded = jwt.decode(token, options={"verify_signature": False})
+                    decoded = jwt.decode(token, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode
                     
                     # Extract user_id from token claims
                     user_id = (

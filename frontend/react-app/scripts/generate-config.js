@@ -92,16 +92,21 @@ function generateConfig(options = {}) {
 }
 
 function writeConfigFile(config, outputPath) {
-  const fullPath = path.resolve(outputPath);
+  // Resolve under cwd and reject path traversal (Semgrep: path-join-resolve-traversal)
+  const base = process.cwd();
+  const fullPath = path.resolve(base, path.normalize(outputPath));
+  const relative = path.relative(base, fullPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Invalid output path: must stay within project');
+  }
   const dir = path.dirname(fullPath);
-  
-  // Ensure directory exists
+
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  
+
   fs.writeFileSync(fullPath, config);
-  console.log(`✅ Runtime configuration written to: ${fullPath}`);
+  console.log('✅ Runtime configuration written to:', fullPath);
 }
 
 // CLI usage

@@ -924,17 +924,16 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
               <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
                 Summary
               </Typography>
-              <Typography 
-                variant="body1" 
-                sx={{ 
-                  color: '#e2e8f0', 
+              <Typography
+                variant="body1"
+                sx={{
+                  color: '#e2e8f0',
                   lineHeight: 1.6,
                   whiteSpace: 'pre-wrap',
                 }}
-                dangerouslySetInnerHTML={{ 
-                  __html: data.summary_text?.replace(/\n/g, '<br />') || '' 
-                }}
-              />
+              >
+                {data.summary_text ?? ''}
+              </Typography>
             </Box>
           )}
 
