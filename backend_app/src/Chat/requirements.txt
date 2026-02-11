@@ -18,9 +18,9 @@ openpyxl>=3.1.0,<4.0.0
 ccxt>=4.0.0,<5.0.0
 cryptocompare>=0.7.4,<0.8.0
 
-# Strands Agents framework
-strands-agents==1.7.1
-strands-agents-tools==0.2.6
+# Strands Agents framework (>= pins allow pip to resolve with pillow>=12.1.1)
+strands-agents>=1.7.1
+strands-agents-tools>=0.2.6
 
 # OpenTelemetry for observability
 opentelemetry-api>=1.20.0
