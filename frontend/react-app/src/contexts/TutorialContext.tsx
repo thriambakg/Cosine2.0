@@ -167,7 +167,7 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
       content: (
         <div>
           <h3 style={{ marginTop: 0, color: '#ffffff' }}>Context System</h3>
-          <p>When you interact with tiles (like viewing documents or charts), the data is automatically added to your chat context. This allows the AI to understand and help you with specific content.</p>
+          <p>Context is not added automatically—you choose what goes into the chat. Use "Add to Context" on tiles (documents, charts, etc.) to include that content in your conversation. This keeps your context window focused so the AI can help you with the content you care about.</p>
           <p style={{ fontSize: '0.9em', color: '#9ca3af', marginBottom: 0 }}>
             💡 Look for the "Add to Context" buttons throughout the app!
           </p>
