@@ -11,7 +11,7 @@ python-dotenv>=1.0.0
 yfinance>=0.2.18
 numpy>=1.24.0,<2.0.0
 pandas>=2.0.0,<3.0.0
-matplotlib>=3.7.0,<4.0.0
+matplotlib>=3.8.2,<4.0.0
 openpyxl>=3.1.0,<4.0.0
 
 # Cryptocurrency data processing
@@ -57,4 +57,4 @@ cryptography>=41.0.0
 
 # PDF processing
 PyPDF2>=3.0.1
-pdfplumber>=0.9.0
+pdfplumber>=0.11.0
