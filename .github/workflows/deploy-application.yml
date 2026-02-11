@@ -114,7 +114,7 @@ jobs:
             echo "--- $req ---"
             # Chat/requirements.txt: Pillow 12.1.1+ fixes GHSA-cfh3-3jmp-rvhc but conflicts with matplotlib/strands-agents-tools. Ignore until upstream supports Pillow 12.
             if echo "$req" | grep -q "Chat/requirements.txt"; then
-              pip-audit -r "$req" --ignore-vulnerability GHSA-cfh3-3jmp-rvhc || FAILED=1
+              pip-audit -r "$req" --ignore-vuln GHSA-cfh3-3jmp-rvhc || FAILED=1
             else
               pip-audit -r "$req" || FAILED=1
             fi
