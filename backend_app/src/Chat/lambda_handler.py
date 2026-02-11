@@ -20,9 +20,6 @@ os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
 os.environ.setdefault('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'all')
 os.environ.setdefault('OTEL_PYTHON_CONTEXT', 'contextvars_context')
 
-# Pillow workaround: restrict Image.open to safe formats (exclude PSD) before any PIL use
-import pillow_safe_open  # noqa: F401, E402
-
 # Configure logging for Lambda (fallback for early initialization)
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
