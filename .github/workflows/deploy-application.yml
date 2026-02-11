@@ -112,7 +112,12 @@ jobs:
           REQ_COUNT=0
           while IFS= read -r -d '' req; do
             echo "--- $req ---"
-            pip-audit -r "$req" || FAILED=1
+            # Chat/requirements.txt: Pillow 12.1.1+ fixes GHSA-cfh3-3jmp-rvhc but conflicts with matplotlib/strands-agents-tools. Ignore until upstream supports Pillow 12.
+            if echo "$req" | grep -q "Chat/requirements.txt"; then
+              pip-audit -r "$req" --ignore-vulnerability GHSA-cfh3-3jmp-rvhc || FAILED=1
+            else
+              pip-audit -r "$req" || FAILED=1
+            fi
             REQ_COUNT=$((REQ_COUNT + 1))
           done < <(find backend_app -name "requirements.txt" -type f -print0 2>/dev/null)
           if [ "$REQ_COUNT" -eq 0 ]; then

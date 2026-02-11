@@ -35,7 +35,8 @@ dill>=0.3.6
 
 # Text processing and formatting
 markdownify>=0.11.6
-pillow>=12.1.1
+# Pillow: 12.1.1+ fixes GHSA-cfh3-3jmp-rvhc but conflicts with matplotlib/strands-agents-tools. Use >=10.0.0 until upstream supports Pillow 12.
+pillow>=10.0.0
 prompt-toolkit>=3.0.0
 pyjwt>=2.8.0
 readabilipy>=0.2.0
