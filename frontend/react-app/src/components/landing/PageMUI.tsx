@@ -452,17 +452,14 @@ export default function PageMUI() {
           <Container maxWidth="sm">
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="h3" sx={{ fontWeight: 800, color: 'text.primary', mb: 1, fontSize: { xs: '1.75rem', md: '2rem' } }}>
-                Ready to bring your research into one place?
+                Ready to begin?
               </Typography>
               <Typography sx={{ color: 'text.secondary', mb: 3, fontSize: { xs: '1.125rem', md: '1.25rem' } }}>
-                Create a free account to build your workspace, connect your data sources, and start using the AI assistant with your own context.
+                Create your account, research financial trends with official sources, and discover the intersection of money and power.
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2 }}>
                 <Button variant="contained" size="large" onClick={handleGetStarted} endIcon={<ArrowRightIcon />} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}>
                   Start Free
-                </Button>
-                <Button variant="outlined" size="large" onClick={() => scrollTo('demo')} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 0 }}>
-                  Try Demo
                 </Button>
               </Box>
             </Box>

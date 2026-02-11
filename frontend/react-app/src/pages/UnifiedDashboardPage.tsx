@@ -62,30 +62,74 @@ import NewGroupDialog from '../components/dialogs/NewGroupDialog';
 import { useTabManagement } from '../hooks/useTabManagement';
 import { UnifiedTile, GridPosition, TileCategory } from '../types/dashboardTypes';
 
-// Hierarchical tile categories
+// Hierarchical tile categories (Government Data first, Cryptocurrency last)
 const tileCategories: TileCategory[] = [
   {
-    id: 'crypto',
-    name: 'Cryptocurrency',
-    description: 'Track and analyze cryptocurrency markets',
-    icon: <TrendingUpIcon />,
-    color: '#f59e0b',
+    id: 'government',
+    name: 'Government Data',
+    description: 'Access and analyze government financial disclosure data',
+    icon: <AccountBalanceIcon />,
+    color: '#3b82f6',
     subcategories: [
       {
-        id: 'basic',
-        name: 'Basic Tiles',
-        description: 'Simple crypto tracking tiles',
-        icon: <TrendingUpIcon />,
-        color: '#f59e0b',
+        id: 'trades',
+        name: 'Trading Disclosures',
+        description: 'Politician trading and financial disclosures',
+        icon: <AccountBalanceIcon />,
+        color: '#3b82f6',
         tiles: [
           {
-            id: 'crypto',
-            name: 'Crypto Tracker',
-            description: 'Track crypto prices, charts, and market data',
-            category: 'crypto',
-            subcategory: 'basic',
-            icon: <TrendingUpIcon />,
-            color: '#f59e0b',
+            id: 'politician_trades',
+            name: 'Politician Trades',
+            description: 'Search and analyze politician trading disclosures with advanced filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <AccountBalanceIcon />,
+            color: '#3b82f6',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'sec_search',
+            name: 'SEC Filings',
+            description: 'Search and analyze SEC filing documents with entity and form filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <DescriptionIcon />,
+            color: '#2563eb',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'govt_contracts',
+            name: 'Government Contracts',
+            description: 'Search and analyze government contract awards with agency and recipient filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <AccountBalanceIcon />,
+            color: '#059669',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'congress_bills',
+            name: 'Congress Bills',
+            description: 'Search and analyze congressional bills with sponsor and policy area filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <GavelIcon />,
+            color: '#7c3aed',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'lda_disclosures',
+            name: 'LDA Disclosures',
+            description: 'Search and analyze Lobbying Disclosure Act filings with registrant, client, and lobbyist filtering',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <GavelIcon />,
+            color: '#dc2626',
             isAvailable: true,
             placeholder: false
           }
@@ -230,71 +274,27 @@ const tileCategories: TileCategory[] = [
     ]
   },
   {
-    id: 'government',
-    name: 'Government Data',
-    description: 'Access and analyze government financial disclosure data',
-    icon: <AccountBalanceIcon />,
-    color: '#3b82f6',
+    id: 'crypto',
+    name: 'Cryptocurrency',
+    description: 'Track and analyze cryptocurrency markets',
+    icon: <TrendingUpIcon />,
+    color: '#f59e0b',
     subcategories: [
       {
-        id: 'trades',
-        name: 'Trading Disclosures',
-        description: 'Politician trading and financial disclosures',
-        icon: <AccountBalanceIcon />,
-        color: '#3b82f6',
+        id: 'basic',
+        name: 'Basic Tiles',
+        description: 'Simple crypto tracking tiles',
+        icon: <TrendingUpIcon />,
+        color: '#f59e0b',
         tiles: [
           {
-            id: 'politician_trades',
-            name: 'Politician Trades',
-            description: 'Search and analyze politician trading disclosures with advanced filtering',
-            category: 'government',
-            subcategory: 'trades',
-            icon: <AccountBalanceIcon />,
-            color: '#3b82f6',
-            isAvailable: true,
-            placeholder: false
-          },
-          {
-            id: 'sec_search',
-            name: 'SEC Filings',
-            description: 'Search and analyze SEC filing documents with entity and form filtering',
-            category: 'government',
-            subcategory: 'trades',
-            icon: <DescriptionIcon />,
-            color: '#2563eb',
-            isAvailable: true,
-            placeholder: false
-          },
-          {
-            id: 'govt_contracts',
-            name: 'Government Contracts',
-            description: 'Search and analyze government contract awards with agency and recipient filtering',
-            category: 'government',
-            subcategory: 'trades',
-            icon: <AccountBalanceIcon />,
-            color: '#059669',
-            isAvailable: true,
-            placeholder: false
-          },
-          {
-            id: 'congress_bills',
-            name: 'Congress Bills',
-            description: 'Search and analyze congressional bills with sponsor and policy area filtering',
-            category: 'government',
-            subcategory: 'trades',
-            icon: <GavelIcon />,
-            color: '#7c3aed',
-            isAvailable: true,
-            placeholder: false
-          },
-          {
-            id: 'lda_disclosures',
-            name: 'LDA Disclosures',
-            description: 'Search and analyze Lobbying Disclosure Act filings with registrant, client, and lobbyist filtering',
-            category: 'government',
-            subcategory: 'trades',
-            icon: <GavelIcon />,
-            color: '#dc2626',
+            id: 'crypto',
+            name: 'Crypto Tracker',
+            description: 'Track crypto prices, charts, and market data',
+            category: 'crypto',
+            subcategory: 'basic',
+            icon: <TrendingUpIcon />,
+            color: '#f59e0b',
             isAvailable: true,
             placeholder: false
           }
@@ -2478,6 +2478,7 @@ const UnifiedDashboardPage: React.FC = () => {
               onRemoveMultipleTiles={handleRemoveMultipleTiles}
               isDeletingTiles={isDeletingTiles}
               zoomLevel={zoomLevel}
+              onAddTileClick={handleAddTileClick}
             />
           </Box>
         )}

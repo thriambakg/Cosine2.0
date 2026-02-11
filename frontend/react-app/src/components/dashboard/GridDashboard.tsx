@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
-import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy, DeleteOutline } from '@mui/icons-material';
+import { Box, Typography, Menu, MenuItem, ListItemIcon, ListItemText, Button } from '@mui/material';
+import { Chat as SidebarChatIcon, Folder as FolderIcon, ContentCopy, DeleteOutline, Add } from '@mui/icons-material';
 import FileBrowserDialog from '../common/FileBrowserDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { filesystemAPI, GovtContractAward, CongressBill, SECSearchResult } from '@/services/api';
@@ -32,6 +32,7 @@ interface GridDashboardProps {
   onRemoveMultipleTiles?: (ids: string[]) => void;
   isDeletingTiles?: boolean;
   zoomLevel?: number;
+  onAddTileClick?: () => void;
 }
 
 interface DragState {
@@ -77,6 +78,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
   onRemoveMultipleTiles,
   isDeletingTiles = false,
   zoomLevel: zoomLevelProp = 1.0,
+  onAddTileClick,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1512,81 +1514,28 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
             Add tiles to track stocks, crypto, portfolios, and more.
           </Typography>
 
-          {/* Quick Start Options */}
-          <Box sx={{ 
-            display: 'grid', 
-            gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' },
-            gap: 3,
-            maxWidth: '600px',
-            mx: 'auto',
-            mb: 4
-          }}>
-            {[
-              { 
-                title: 'Crypto Tracker', 
-                desc: 'Monitor Bitcoin, Ethereum & more',
-                color: '#f59e0b',
-                icon: '₿'
-              },
-              { 
-                title: 'Stock Analysis', 
-                desc: 'Track your favorite stocks',
-                color: '#10b981',
-                icon: '📈'
-              },
-              { 
-                title: 'AI Insights', 
-                desc: 'Get intelligent recommendations',
-                color: '#8b5cf6',
-                icon: '🤖'
-              }
-            ].map((option) => (
-              <Box
-                key={option.title}
+          {/* Add Tile button - opens add tile menu when provided */}
+          {onAddTileClick && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={onAddTileClick}
+                startIcon={<Add />}
                 sx={{
-                  p: 3,
-                  backgroundColor: 'rgba(31, 41, 55, 0.8)',
-                  border: '2px solid #374151',
-                  borderRadius: '0px',
-                  transition: 'all 0.3s ease',
-                  cursor: 'pointer',
-                  '&:hover': {
-                    border: `2px solid ${option.color}`,
-                    transform: 'translateY(-4px)',
-                    boxShadow: `0 15px 30px ${option.color}20`
-                  }
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  borderRadius: 0,
+                  boxShadow: 'none',
+                  px: 3,
+                  py: 1.5,
+                  '&:hover': { boxShadow: 'none' }
                 }}
               >
-                <Typography 
-                  variant="h3" 
-                  sx={{ 
-                    mb: 1,
-                    fontSize: '2rem'
-                  }}
-                >
-                  {option.icon}
-                </Typography>
-                <Typography 
-                  variant="h6" 
-                  sx={{ 
-                    color: '#ffffff', 
-                    fontWeight: 600, 
-                    mb: 1,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}
-                >
-                  {option.title}
-                </Typography>
-                <Typography 
-                  variant="body2" 
-                  sx={{ color: '#9ca3af' }}
-                >
-                  {option.desc}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
+                Add Tile
+              </Button>
+            </Box>
+          )}
 
         </Box>
 
