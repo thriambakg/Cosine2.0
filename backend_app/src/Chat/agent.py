@@ -9,6 +9,9 @@ os.environ.setdefault('STRANDS_DISABLE_METRICS', 'true')
 os.environ.setdefault('STRANDS_DISABLED_TELEMETRY', 'true')
 os.environ.setdefault('STRANDS_METRICS_ENABLED', 'false')
 
+# Pillow workaround: restrict Image.open to safe formats (exclude PSD) before any PIL use
+import pillow_safe_open  # noqa: F401, E402
+
 # Configure boto3 timeouts BEFORE any boto3/Strands imports
 # This ensures the config is applied to all boto3 clients, including those created by Strands
 try:
