@@ -164,6 +164,7 @@ from tools.stock_data_fetcher import (
 )
 from tools.congress_bills_search import search_congress_bills
 from tools.govt_contracts_search import search_govt_contracts
+from tools.govt_contracts_autocomplete_tool import govt_contracts_autocomplete
 from tools.politician_trades_search import search_politician_trades
 from tools.lda_autocomplete_tool import lda_autocomplete
 from tools.lda_search_tool import lda_search
@@ -928,12 +929,13 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 29. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
 30. search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB with various filters
 31. search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
-32. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
-33. lda_autocomplete(query, field_types, limit) - LDA autocomplete tool for finding registrants, clients, lobbyists, PACs, foreign entities
-34. lda_search(filters, limit, last_evaluated_key) - LDA search tool for searching lobbying disclosures
-35. search_autocomplete(query, list_type, limit) - Search autocomplete tool for matching natural language queries to CSV list values (policy areas, general issues, government entities, legislators)
-36. get_current_datetime() - Get current date/time for exact timeframe calculations
-37. calculate_date_range(period, start_date, end_date) - Calculate date ranges relative to current date
+32. govt_contracts_autocomplete(search_text, autocomplete_type, limit) - Get exact values for search_govt_contracts filters. Types: recipient, awarding_agency, funding_agency, cfda, naics, psc, city, location, program_activity, glossary. Use before search when the user gives generic or natural-language terms for any of these fields.
+33. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
+34. lda_autocomplete(query, field_types, limit) - LDA autocomplete tool for finding registrants, clients, lobbyists, PACs, foreign entities
+35. lda_search(filters, limit, last_evaluated_key) - LDA search tool for searching lobbying disclosures
+36. search_autocomplete(query, list_type, limit) - Search autocomplete tool for matching natural language queries to CSV list values (policy areas, general issues, government entities, legislators)
+37. get_current_datetime() - Get current date/time for exact timeframe calculations
+38. calculate_date_range(period, start_date, end_date) - Calculate date ranges relative to current date
 
 🚨 CRITICAL: You have file return capabilities! When users want files, use return_session_files_wrapper()!
 
@@ -1125,6 +1127,26 @@ Transaction 3:
 - ✅ Query DynamoDB with filters={"award_id": [award_id]} - this gets the specific contract with transactions
 - ✅ Extract and display ALL transactions from the transactions array
 - ✅ Show transaction amounts (positive and negative), dates, and descriptions
+
+🏛️ GOVERNMENT CONTRACT SEARCH AND COMPARISON — USE AUTOCOMPLETE FOR EXACT VALUES:
+The search index uses exact/normalized values. **Use govt_contracts_autocomplete BEFORE search_govt_contracts** whenever the user gives a generic or natural-language term for any of these filters:
+
+- **recipient_name** → autocomplete_type "recipient" (e.g. "university", "Lockheed") — literal "UNIVERSITY" returns 0 results; get exact names first.
+- **awarding_agency_name** → autocomplete_type "awarding_agency" (e.g. "Department of Energy", "Defense").
+- **funding_agency_name** → autocomplete_type "funding_agency".
+- **cfda_number** → autocomplete_type "cfda" (program numbers).
+- **naics_code** → autocomplete_type "naics" (industry codes).
+- **psc_code** → autocomplete_type "psc" (product/service codes).
+- **Location/city** → autocomplete_type "city" or "location".
+- **program_activity**, **glossary** → use for program or term lookup.
+
+When the user asks to **compare** a contract (e.g. ASU DOE) with other schools, agencies, or "university" contracts:
+1. Call govt_contracts_autocomplete(search_text="university", autocomplete_type="recipient", limit=10) to get exact recipient names.
+2. **Pick a few comparables** (e.g. 3–5): same region/state, same type (public/private), or similar scale. For a defense contract, use autocomplete for agency or recipient as needed and pick comparable recipients.
+3. Call search_govt_contracts with **exact values** from autocomplete (recipient_name list, awarding_agency_name, etc.), plus fiscal_year as needed.
+4. **Avoid context overflow**: Prefer limit=5–10; do NOT read huge S3 JSON into context. Summarize from metadata or a small result set.
+
+**Example:** "Compare with other universities" → govt_contracts_autocomplete("university", "recipient", 10) → pick 3–5 names → search_govt_contracts(filters={"awarding_agency_name": "Department of Energy", "recipient_name": ["UNIVERSITY OF TEXAS AT AUSTIN", "STANFORD UNIVERSITY", ...], "fiscal_year": [2024, 2025]}, limit=10).
 
 🔍 TRIGGER EXAMPLES:
 - "can you see this context item?" → get_session_context_tool()
@@ -2587,6 +2609,7 @@ enhanced_tools = [
     fetch_web_content_tool,  # Fetch and extract content from web URLs (for article context items)
     search_congress_bills,  # Search congressional bills in DynamoDB
     search_govt_contracts,  # Search government contracts/awards in DynamoDB
+    govt_contracts_autocomplete,  # Get exact recipient/agency names before search_govt_contracts
     search_politician_trades,  # Search politician stock trades in DynamoDB
     lda_autocomplete,  # LDA autocomplete tool for finding registrants, clients, lobbyists, PACs
     lda_search,  # LDA search tool for searching lobbying disclosures

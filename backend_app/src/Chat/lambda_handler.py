@@ -80,6 +80,23 @@ def get_financial_agent():
     
     return _financial_agent, _analyze_stock, _financial_tools
 
+def _stream_chunk_to_text(chunk: Any) -> str:
+    """Extract display text from a stream chunk (string or Bedrock/Strands dict). Avoids 'str' object has no attribute 'get'."""
+    if chunk is None:
+        return ""
+    if isinstance(chunk, str):
+        return chunk
+    if isinstance(chunk, dict):
+        delta = chunk.get("delta") if isinstance(chunk.get("delta"), dict) else None
+        if delta and isinstance(delta.get("text"), str):
+            return delta.get("text", "")
+        if isinstance(chunk.get("text"), str):
+            return chunk.get("text", "")
+        if isinstance(chunk.get("content"), str):
+            return chunk.get("content", "")
+    return str(chunk)
+
+
 def get_session_manager():
     """Lazy load the session manager"""
     global _session_manager
@@ -274,22 +291,23 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                             raise Exception("Session has been terminated")
                                         if chunk:
                                             try:
-                                                chunk_text = str(chunk)
-                                                full_response += chunk_text
-                                                accumulated_streaming_content['value'] = full_response
-                                                
-                                                # Send incremental chunk (only new content)
-                                                if ai_message_id and ws_handler and len(full_response) > last_sent_length:
-                                                    new_chunk = full_response[last_sent_length:]
-                                                    last_sent_length = len(full_response)
-                                                    try:
-                                                        ws_handler.send_chat_response(
-                                                            user_id, session_id, new_chunk, ai_message_id,
-                                                            is_streaming=True, is_complete=False
-                                                        )
-                                                        streaming_used['value'] = True
-                                                    except Exception as e:
-                                                        logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                                                chunk_text = _stream_chunk_to_text(chunk)
+                                                if chunk_text:
+                                                    full_response += chunk_text
+                                                    accumulated_streaming_content['value'] = full_response
+                                                    
+                                                    # Send incremental chunk (only new content)
+                                                    if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                                        new_chunk = full_response[last_sent_length:]
+                                                        last_sent_length = len(full_response)
+                                                        try:
+                                                            ws_handler.send_chat_response(
+                                                                user_id, session_id, new_chunk, ai_message_id,
+                                                                is_streaming=True, is_complete=False
+                                                            )
+                                                            streaming_used['value'] = True
+                                                        except Exception as e:
+                                                            logger.warning(f"Failed to send streaming chunk: {str(e)}")
                                             except Exception as e:
                                                 logger.warning(f"Error processing chunk: {str(e)}, skipping chunk")
                                                 continue
@@ -334,22 +352,23 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                             raise Exception("Session has been terminated")
                                         if chunk:
                                             try:
-                                                chunk_text = str(chunk)
-                                                full_response += chunk_text
-                                                accumulated_streaming_content['value'] = full_response
-                                                
-                                                # Send incremental chunk (only new content)
-                                                if ai_message_id and ws_handler and len(full_response) > last_sent_length:
-                                                    new_chunk = full_response[last_sent_length:]
-                                                    last_sent_length = len(full_response)
-                                                    try:
-                                                        ws_handler.send_chat_response(
-                                                            user_id, session_id, new_chunk, ai_message_id,
-                                                            is_streaming=True, is_complete=False
-                                                        )
-                                                        streaming_used['value'] = True
-                                                    except Exception as e:
-                                                        logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                                                chunk_text = _stream_chunk_to_text(chunk)
+                                                if chunk_text:
+                                                    full_response += chunk_text
+                                                    accumulated_streaming_content['value'] = full_response
+                                                    
+                                                    # Send incremental chunk (only new content)
+                                                    if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                                        new_chunk = full_response[last_sent_length:]
+                                                        last_sent_length = len(full_response)
+                                                        try:
+                                                            ws_handler.send_chat_response(
+                                                                user_id, session_id, new_chunk, ai_message_id,
+                                                                is_streaming=True, is_complete=False
+                                                            )
+                                                            streaming_used['value'] = True
+                                                        except Exception as e:
+                                                            logger.warning(f"Failed to send streaming chunk: {str(e)}")
                                             except Exception as e:
                                                 logger.warning(f"Error processing chunk: {str(e)}, skipping chunk")
                                                 continue
@@ -398,22 +417,23 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                                 raise Exception("Session has been terminated")
                                             if chunk:
                                                 try:
-                                                    chunk_text = str(chunk)
-                                                    full_response += chunk_text
-                                                    accumulated_streaming_content['value'] = full_response
-                                                    
-                                                    # Send incremental chunk (only new content)
-                                                    if ai_message_id and ws_handler and len(full_response) > last_sent_length:
-                                                        new_chunk = full_response[last_sent_length:]
-                                                        last_sent_length = len(full_response)
-                                                        try:
-                                                            ws_handler.send_chat_response(
-                                                                user_id, session_id, new_chunk, ai_message_id,
-                                                                is_streaming=True, is_complete=False
-                                                            )
-                                                            streaming_used['value'] = True
-                                                        except Exception as e:
-                                                            logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                                                    chunk_text = _stream_chunk_to_text(chunk)
+                                                    if chunk_text:
+                                                        full_response += chunk_text
+                                                        accumulated_streaming_content['value'] = full_response
+                                                        
+                                                        # Send incremental chunk (only new content)
+                                                        if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                                            new_chunk = full_response[last_sent_length:]
+                                                            last_sent_length = len(full_response)
+                                                            try:
+                                                                ws_handler.send_chat_response(
+                                                                    user_id, session_id, new_chunk, ai_message_id,
+                                                                    is_streaming=True, is_complete=False
+                                                                )
+                                                                streaming_used['value'] = True
+                                                            except Exception as e:
+                                                                logger.warning(f"Failed to send streaming chunk: {str(e)}")
                                                 except Exception as e:
                                                     logger.warning(f"Error processing chunk: {str(e)}, skipping chunk")
                                                     continue
@@ -460,22 +480,23 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                                 raise Exception("Session has been terminated")
                                             if chunk:
                                                 try:
-                                                    chunk_text = str(chunk)
-                                                    full_response += chunk_text
-                                                    accumulated_streaming_content['value'] = full_response
-                                                    
-                                                    # Send incremental chunk (only new content)
-                                                    if ai_message_id and ws_handler and len(full_response) > last_sent_length:
-                                                        new_chunk = full_response[last_sent_length:]
-                                                        last_sent_length = len(full_response)
-                                                        try:
-                                                            ws_handler.send_chat_response(
-                                                                user_id, session_id, new_chunk, ai_message_id,
-                                                                is_streaming=True, is_complete=False
-                                                            )
-                                                            streaming_used['value'] = True
-                                                        except Exception as e:
-                                                            logger.warning(f"Failed to send streaming chunk: {str(e)}")
+                                                    chunk_text = _stream_chunk_to_text(chunk)
+                                                    if chunk_text:
+                                                        full_response += chunk_text
+                                                        accumulated_streaming_content['value'] = full_response
+                                                        
+                                                        # Send incremental chunk (only new content)
+                                                        if ai_message_id and ws_handler and len(full_response) > last_sent_length:
+                                                            new_chunk = full_response[last_sent_length:]
+                                                            last_sent_length = len(full_response)
+                                                            try:
+                                                                ws_handler.send_chat_response(
+                                                                    user_id, session_id, new_chunk, ai_message_id,
+                                                                    is_streaming=True, is_complete=False
+                                                                )
+                                                                streaming_used['value'] = True
+                                                            except Exception as e:
+                                                                logger.warning(f"Failed to send streaming chunk: {str(e)}")
                                                 except Exception as e:
                                                     logger.warning(f"Error processing chunk: {str(e)}, skipping chunk")
                                                     continue
@@ -484,9 +505,9 @@ def process_with_kill_monitoring_and_streaming(agent, enhanced_message, session_
                                         from strands.types import AgentResult, Message
                                         return AgentResult(message=Message(content=full_response))
                                     except (TypeError, AttributeError) as te:
-                                        # Handle case where stream_result is not iterable or has wrong type
+                                        # Handle case where stream_result is not iterable or chunk has wrong type (e.g. 'str' object has no attribute 'get')
                                         error_msg = str(te)
-                                        if "not iterable" in error_msg or "string indices" in error_msg or "'str' object is not iterable" in error_msg:
+                                        if "not iterable" in error_msg or "string indices" in error_msg or "'str' object is not iterable" in error_msg or "attribute 'get'" in error_msg or "has no attribute 'get'" in error_msg:
                                             logger.warning(f"Stream result is not iterable (type: {type(stream_result)}), treating as regular response: {error_msg}")
                                             from strands.types import AgentResult, Message
                                             return AgentResult(message=Message(content=str(stream_result) if stream_result else ""))

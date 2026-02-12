@@ -342,7 +342,10 @@ When get_chat_history_tool returns data:
 **AUTOCOMPLETE WORKFLOW (REQUIRED):**
 Before using search tools with generic names, ALWAYS use autocomplete first:
 1. User asks for contracts/filings on "X company" or generic name
-2. Use appropriate autocomplete tool (lda_autocomplete or search_autocomplete) with limit=10
+2. Use the appropriate autocomplete tool with limit=10:
+   - Government contracts: govt_contracts_autocomplete (types: recipient, awarding_agency, funding_agency, cfda, naics, psc, city, location, program_activity, glossary)
+   - LDA filings: lda_autocomplete
+   - Congress bills / policy: search_autocomplete (list_type: policy_area, congress_legislator, etc.)
 3. If multiple matches/types found:
    - If matches are very similar, proceed with all matches
    - If matches differ significantly, ask user to clarify which one
@@ -375,12 +378,14 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
   * Example: If search returns bill with bill_text_html_s3_key="billtext/119-HR-5789.html", 
     call read_s3_file_tool("billtext/119-HR-5789.html") to get the full bill text
   
+- govt_contracts_autocomplete(search_text, autocomplete_type, limit=10) - Get exact values for search_govt_contracts filters. autocomplete_type: recipient (recipient_name), awarding_agency (awarding_agency_name), funding_agency (funding_agency_name), cfda (cfda_number), naics (naics_code), psc (psc_code), city, location, program_activity, glossary. Use BEFORE search when the user gives generic or natural-language terms for any of these fields.
 - search_govt_contracts(filters, limit=5, last_evaluated_key) - Search government contracts/awards
   * Filters: awarding_agency_name/code, funding_agency_name/code, recipient_name, recipient_location_state/country,
     recipient_zip_code, award_type, naics_code, psc_code, cfda_number, fiscal_year, date_from/to, min/max_obligation
   * Default limit: 5 (max: 1000)
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key
+  * **Use govt_contracts_autocomplete FIRST** for any filter where the user gives a generic term: recipient_name (recipient), awarding_agency_name (awarding_agency), funding_agency_name (funding_agency), cfda_number (cfda), naics_code (naics), psc_code (psc). Use exact values from autocomplete results in the corresponding filter.
   
 - search_politician_trades(filters, page=1, page_size=5, last_evaluated_key) - Search politician stock trades
   * Filters: politicianName, position, party, security/securitySymbol/securityName, transactionType,

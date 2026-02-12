@@ -866,9 +866,10 @@ def search_govt_contracts(
     """
     Search for government contracts/awards in DynamoDB using various filters.
     
-    **IMPORTANT: Use autocomplete before searching:**
-    For recipient_name searches, consider using autocomplete if the user provides a generic name.
-    The search tool uses substring matching, but autocomplete can help find exact company names.
+    **IMPORTANT: Use govt_contracts_autocomplete before searching by recipient_name:**
+    The search index uses exact normalized recipient names. Passing recipient_name="UNIVERSITY" returns 0 results.
+    Call govt_contracts_autocomplete(search_text="university", autocomplete_type="recipient", limit=10) first,
+    then use the exact names from the results (e.g. "ARIZONA STATE UNIVERSITY") in recipient_name filter.
     
     **Pagination:**
     - Default limit is 5 results to conserve compute

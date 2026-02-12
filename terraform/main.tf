@@ -1944,10 +1944,10 @@ resource "aws_iam_role_policy_attachment" "chat_agent_kms_policy" {
   policy_arn = aws_iam_policy.lambda_kms_policy.arn
 }
 
-# Chat agent: least-privilege Lambda invoke - only lambdas it actually invokes (see tools: congress_bills_search, lda_search_tool, lda_autocomplete_tool)
+# Chat agent: least-privilege Lambda invoke - only lambdas it actually invokes (see tools: congress_bills_search, lda_search_tool, lda_autocomplete_tool, govt_contracts_autocomplete_tool)
 resource "aws_iam_policy" "chat_agent_lambda_invoke_policy" {
   name        = "${var.project_name}-chat-agent-lambda-invoke-${var.environment}"
-  description = "Chat agent may invoke only congress-bills-search, lda-search, lda-autocomplete"
+  description = "Chat agent may invoke congress-bills-search, lda-search, lda-autocomplete, usaspending-autocomplete"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1958,7 +1958,8 @@ resource "aws_iam_policy" "chat_agent_lambda_invoke_policy" {
         Resource = [
           "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-congress-bills-search-${var.environment}",
           "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-lda-search-${var.environment}",
-          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-lda-autocomplete-${var.environment}"
+          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-lda-autocomplete-${var.environment}",
+          "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-usaspending-autocomplete-${var.environment}"
         ]
       }
     ]
