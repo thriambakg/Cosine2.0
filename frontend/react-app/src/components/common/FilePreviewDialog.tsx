@@ -1740,12 +1740,13 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
 
           {/* Chart Visualization */}
           {(() => {
-            const obligatedAmount = data.combined_obligated_amount || 
-                                   data.total_obligated_amount || 
-                                   data.total_obligation || 0;
+            const obligatedAmount = Number(data.combined_obligated_amount ||
+                                   data.total_obligated_amount ||
+                                   data.total_obligation || 0);
             const outlayedAmount = parseFloat(data.total_outlayed_amount_for_overall_award as string) || 0;
             const nonFederalFunding = parseFloat(data.total_non_federal_funding_amount as string) || 0;
-            const totalFunding = obligatedAmount;
+            // Total Funding = Obligated + Non-Federal (per USAspending)
+            const totalFunding = obligatedAmount + nonFederalFunding;
             
             if (obligatedAmount > 0) {
               return (
@@ -1753,94 +1754,89 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                   <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
                     Funding Overview
                   </Typography>
-                  <Box sx={{ mb: 3, position: 'relative', width: '100%', minHeight: '400px' }}>
+                  <Box sx={{ mb: 3 }}>
                     {(() => {
-                      const chartWidth = 647;
-                      const chartHeight = 400;
-                      const barHeight = 50;
-                      const barY = 160;
-                      
-                      // Calculate widths based on obligated amount as the full bar
-                      const obligatedWidth = chartWidth;
-                      const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
-                      
+                      const chartWidth = 640;
+                      const barHeight = 32;
+                      const chartHeight = 56;
+                      const labelRowHeight = 56;
+                      const totalForChart = totalFunding > 0 ? totalFunding : 1;
+                      const obligatedWidth = (obligatedAmount / totalForChart) * chartWidth;
+                      const nonFederalWidth = (nonFederalFunding / totalForChart) * chartWidth;
+                      const outlayedWidth = (outlayedAmount / totalForChart) * chartWidth;
+                      const pct = (x: number) => (x / chartWidth) * 100;
+                      const flag = (leftPct: number, color: string, label: string, amount: number, key: string) => (
+                        <Box
+                          key={key}
+                          sx={{
+                            position: 'absolute',
+                            left: `${leftPct}%`,
+                            top: 0,
+                            transform: 'translateX(-50%)',
+                            px: 1.5,
+                            py: 0.75,
+                            borderRadius: 1.5,
+                            bgcolor: color,
+                            color: '#fff',
+                            textAlign: 'center',
+                          }}
+                        >
+                          <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>{label}:</Box>
+                          <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(amount)}</Box>
+                        </Box>
+                      );
+
                       return (
-                        <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'hidden' }}>
-                          <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth}px` }}>
-                            {/* Base rectangle (light gray background) */}
-                            <rect x="0" y={barY} width={chartWidth} height={barHeight} fill="#dce4ee" rx="5" ry="5" />
-                            
-                            {/* Obligated amount bar (blue - full width) */}
-                            <rect x="0" y={barY + 5} width={obligatedWidth} height={barHeight - 10} fill="#4773aa" rx="5" ry="5" />
-                            
-                            {/* Outlayed amount progress bar (darker blue/green overlay showing what's been paid) */}
-                            {outlayedAmount > 0 && (
-                              <rect 
-                                x="0" 
-                                y={barY + 5} 
-                                width={outlayedWidth} 
-                                height={barHeight - 10} 
-                                fill="#10b981" 
-                                rx="5" 
-                                ry="5"
-                                opacity="0.8"
-                              />
-                            )}
-                            
-                            {/* Vertical line for obligated amount */}
-                            <line 
-                              x1={obligatedWidth} 
-                              y1={90} 
-                              x2={obligatedWidth} 
-                              y2={barY + barHeight + 10} 
-                              stroke="#4773aa" 
-                              strokeWidth="4"
-                            />
-                            
-                            {/* Vertical line for outlayed amount (if different from obligated) */}
-                            {outlayedAmount > 0 && outlayedWidth < obligatedWidth && (
-                              <line 
-                                x1={outlayedWidth} 
-                                y1={barY} 
-                                x2={outlayedWidth} 
-                                y2={barY + barHeight} 
-                                stroke="#10b981" 
-                                strokeWidth="4"
-                              />
-                            )}
-                            
-                            {/* Outlayed Amount Label (if outlayed > 0) */}
-                            {outlayedAmount > 0 && outlayedWidth > 50 && (
-                              <foreignObject width={outlayedWidth} height="70" x="0" y={90}>
-                                <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px', maxWidth: `${outlayedWidth}px` }}>
-                                  <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '18px' }}>
-                                    {formatCurrency(outlayedAmount)}
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
-                                </Box>
-                              </foreignObject>
-                            )}
-                            
-                            {/* Obligated Amount Label */}
-                            <foreignObject width={chartWidth} height="70" x="-8" y={90}>
-                              <Box sx={{ float: 'right', textAlign: 'right', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
-                                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
-                                  {formatCurrency(obligatedAmount)}
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
-                              </Box>
-                            </foreignObject>
-                            
-                            {/* Total Funding Label */}
-                            <foreignObject width={chartWidth} height="60" x="0" y={300}>
-                              <Box sx={{ float: 'right', textAlign: 'right', padding: '4px 8px' }}>
-                                <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
-                                  {formatCurrency(totalFunding)}
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Total Funding</Typography>
-                              </Box>
-                            </foreignObject>
-                          </svg>
+                        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+                          <Box sx={{ width: '100%', minHeight: chartHeight }}>
+                            <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+                              {/* Track matches main chart area background; segments have no rounded corners */}
+                              <rect x="0" y={(chartHeight - barHeight) / 2} width={chartWidth} height={barHeight} fill="rgba(30, 41, 59, 0.5)" />
+                              <rect x="0" y={(chartHeight - barHeight) / 2} width={obligatedWidth} height={barHeight} fill="#4773aa" />
+                              <rect x={obligatedWidth} y={(chartHeight - barHeight) / 2} width={nonFederalWidth} height={barHeight} fill="#64748b" />
+                              {outlayedAmount > 0 && (
+                                <rect x="0" y={(chartHeight - barHeight) / 2} width={outlayedWidth} height={barHeight} fill="#10b981" />
+                              )}
+                              {/* Segment dividers: extend 25% above bar only */}
+                              {(() => {
+                                const barTop = (chartHeight - barHeight) / 2;
+                                const barBottom = barTop + barHeight;
+                                const lineTop = barTop - barHeight * 0.25;
+                                return (
+                                  <>
+                                    {outlayedAmount > 0 && outlayedWidth > 0 && (
+                                      <line x1={outlayedWidth} y1={lineTop} x2={outlayedWidth} y2={barBottom} stroke="#10b981" strokeWidth="2" />
+                                    )}
+                                    {obligatedWidth > 0 && obligatedWidth < chartWidth && (
+                                      <line x1={obligatedWidth} y1={lineTop} x2={obligatedWidth} y2={barBottom} stroke="#4773aa" strokeWidth="2" />
+                                    )}
+                                    <line x1={chartWidth} y1={lineTop} x2={chartWidth} y2={barBottom} stroke="#64748b" strokeWidth="2" />
+                                  </>
+                                );
+                              })()}
+                            </svg>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5, minHeight: labelRowHeight, width: '100%' }}>
+                            <Box sx={{ flex: '1 1 0', minWidth: 0, position: 'relative', height: '100%', minHeight: labelRowHeight }}>
+                              {outlayedAmount > 0 && outlayedWidth > 20 && flag(pct(outlayedWidth / 2), '#10b981', 'Amount paid', outlayedAmount, 'outlayed')}
+                              {flag(pct(obligatedWidth / 2), '#4773aa', 'Obligated amount', obligatedAmount, 'obligated')}
+                              {nonFederalFunding > 0 && nonFederalWidth > 20 && flag(pct(obligatedWidth + nonFederalWidth / 2), '#64748b', 'Non-Federal funding', nonFederalFunding, 'nonfed')}
+                            </Box>
+                            <Box
+                              sx={{
+                                flexShrink: 0,
+                                px: 1.5,
+                                py: 0.75,
+                                borderRadius: 1.5,
+                                bgcolor: '#64748b',
+                                color: '#fff',
+                                textAlign: 'center',
+                              }}
+                            >
+                              <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Total funding:</Box>
+                              <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(totalFunding)}</Box>
+                            </Box>
+                          </Box>
                         </Box>
                       );
                     })()}
@@ -1870,7 +1866,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                       <>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: 'rgba(71, 115, 170, 0.3)' }} />
+                            <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#64748b' }} />
                             <Typography variant="body2" sx={{ color: '#94a3b8' }}>Non-Federal Funding</Typography>
                           </Box>
                           <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>

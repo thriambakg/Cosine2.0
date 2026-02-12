@@ -2032,16 +2032,17 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
     // Government Contract - Full details page format with all sections
     if (itemType === 'govt_contract' || itemData?.award_id || itemData?.recipient_name) {
-      // Calculate amounts for chart
-      const obligatedAmount = itemData?.combined_obligated_amount || 
-                             itemData?.total_obligated_amount || 
-                             itemData?.total_obligation || 0;
+      // Calculate amounts for chart (all numeric for math)
+      const obligatedAmount = Number(itemData?.combined_obligated_amount ||
+                             itemData?.total_obligated_amount ||
+                             itemData?.total_obligation || 0);
       // Check multiple field names for outlayed amount (different API versions use different field names)
-      const outlayedAmount = parseFloat(itemData?.total_outlayed_amount_for_overall_award as string) || 
-                            parseFloat(itemData?.total_outlay as string) || 
+      const outlayedAmount = parseFloat(itemData?.total_outlayed_amount_for_overall_award as string) ||
+                            parseFloat(itemData?.total_outlay as string) ||
                             parseFloat(itemData?.total_account_outlay as string) || 0;
       const nonFederalFunding = parseFloat(itemData?.total_non_federal_funding_amount as string) || 0;
-      const totalFunding = obligatedAmount;
+      // Total Funding = Obligated + Non-Federal (per USAspending)
+      const totalFunding = obligatedAmount + nonFederalFunding;
       
       return (
         <Box>
@@ -2257,79 +2258,95 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Box>
             <Box sx={{ borderBottom: '1px solid #374151', mb: 3 }} />
             
-            {/* Chart Visualization */}
-            <Box sx={{ mb: 3, position: 'relative', width: '100%', minHeight: '400px' }}>
+            {/* Chart: simple bar + label flags (total off to the right). */}
+            <Box sx={{ mb: 3 }}>
               {(() => {
-                const chartWidth = 647;
-                const chartHeight = 400;
-                const barHeight = 50;
-                const barY = 160;
-                
-                const obligatedWidth = chartWidth;
-                const outlayedWidth = obligatedAmount > 0 ? (outlayedAmount / obligatedAmount) * chartWidth : 0;
-                
+                const chartWidth = 640;
+                const barHeight = 32;
+                const chartHeight = 56;
+                const labelRowHeight = 56;
+                const totalForChart = totalFunding > 0 ? totalFunding : 1;
+                const obligatedWidth = (obligatedAmount / totalForChart) * chartWidth;
+                const nonFederalWidth = (nonFederalFunding / totalForChart) * chartWidth;
+                const outlayedWidth = (outlayedAmount / totalForChart) * chartWidth;
+                const pct = (x: number) => (x / chartWidth) * 100;
+                const flag = (leftPct: number, color: string, label: string, amount: number, key: string) => (
+                  <Box
+                    key={key}
+                    sx={{
+                      position: 'absolute',
+                      left: `${leftPct}%`,
+                      top: 0,
+                      transform: 'translateX(-50%)',
+                      px: 1.5,
+                      py: 0.75,
+                      borderRadius: 1.5,
+                      bgcolor: color,
+                      color: '#fff',
+                      textAlign: 'center',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>
+                      {label}:
+                    </Box>
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>
+                      {formatCurrency(amount)}
+                    </Box>
+                  </Box>
+                );
+
                 return (
-                  <Box sx={{ position: 'relative', width: '100%', height: `${chartHeight}px`, overflow: 'hidden' }}>
-                    <svg width="100%" height={chartHeight} style={{ maxWidth: `${chartWidth}px` }}>
-                      <rect x="0" y={barY} width={chartWidth} height={barHeight} fill="#dce4ee" rx="5" ry="5" />
-                      <rect x="0" y={barY + 5} width={obligatedWidth} height={barHeight - 10} fill="#4773aa" rx="5" ry="5" />
-                      {outlayedAmount > 0 && (
-                        <rect 
-                          x="0" 
-                          y={barY + 5} 
-                          width={outlayedWidth} 
-                          height={barHeight - 10} 
-                          fill="#10b981" 
-                          rx="5" 
-                          ry="5"
-                          opacity="0.8"
-                        />
-                      )}
-                      <line 
-                        x1={obligatedWidth} 
-                        y1={90} 
-                        x2={obligatedWidth} 
-                        y2={barY + barHeight + 10} 
-                        stroke="#4773aa" 
-                        strokeWidth="4"
-                      />
-                      {outlayedAmount > 0 && outlayedWidth < obligatedWidth && (
-                        <line 
-                          x1={outlayedWidth} 
-                          y1={barY} 
-                          x2={outlayedWidth} 
-                          y2={barY + barHeight} 
-                          stroke="#10b981" 
-                          strokeWidth="4"
-                        />
-                      )}
-                      {outlayedAmount > 0 && outlayedWidth > 50 && (
-                        <foreignObject width={outlayedWidth} height="70" x="0" y={90}>
-                          <Box sx={{ textAlign: 'left', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px', maxWidth: `${outlayedWidth}px` }}>
-                            <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '18px' }}>
-                              {formatCurrency(outlayedAmount)}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
-                          </Box>
-                        </foreignObject>
-                      )}
-                      <foreignObject width={chartWidth} height="70" x="-8" y={90}>
-                        <Box sx={{ float: 'right', textAlign: 'right', backgroundColor: 'rgba(15, 23, 42, 0.98)', padding: '4px 8px', borderRadius: '4px' }}>
-                          <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
-                            {formatCurrency(obligatedAmount)}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
-                        </Box>
-                      </foreignObject>
-                      <foreignObject width={chartWidth} height="60" x="0" y={300}>
-                        <Box sx={{ float: 'right', textAlign: 'right', padding: '4px 8px' }}>
-                          <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600, fontSize: '20px' }}>
-                            {formatCurrency(totalFunding)}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: '#94a3b8' }}>Total Funding</Typography>
-                        </Box>
-                      </foreignObject>
-                    </svg>
+                  <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ width: '100%', minHeight: chartHeight }}>
+                      <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+                        {/* Track matches main chart area background; segments have no rounded corners */}
+                        <rect x="0" y={(chartHeight - barHeight) / 2} width={chartWidth} height={barHeight} fill="rgba(30, 41, 59, 0.5)" />
+                        <rect x="0" y={(chartHeight - barHeight) / 2} width={obligatedWidth} height={barHeight} fill="#4773aa" />
+                        <rect x={obligatedWidth} y={(chartHeight - barHeight) / 2} width={nonFederalWidth} height={barHeight} fill="#64748b" />
+                        {outlayedAmount > 0 && (
+                          <rect x="0" y={(chartHeight - barHeight) / 2} width={outlayedWidth} height={barHeight} fill="#10b981" />
+                        )}
+                        {/* Segment dividers: extend 25% above bar only */}
+                        {(() => {
+                          const barTop = (chartHeight - barHeight) / 2;
+                          const barBottom = barTop + barHeight;
+                          const lineTop = barTop - barHeight * 0.25;
+                          return (
+                            <>
+                              {outlayedAmount > 0 && outlayedWidth > 0 && (
+                                <line x1={outlayedWidth} y1={lineTop} x2={outlayedWidth} y2={barBottom} stroke="#10b981" strokeWidth="2" />
+                              )}
+                              {obligatedWidth > 0 && obligatedWidth < chartWidth && (
+                                <line x1={obligatedWidth} y1={lineTop} x2={obligatedWidth} y2={barBottom} stroke="#4773aa" strokeWidth="2" />
+                              )}
+                              <line x1={chartWidth} y1={lineTop} x2={chartWidth} y2={barBottom} stroke="#64748b" strokeWidth="2" />
+                            </>
+                          );
+                        })()}
+                      </svg>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5, minHeight: labelRowHeight, width: '100%' }}>
+                      <Box sx={{ flex: '1 1 0', minWidth: 0, position: 'relative', height: '100%', minHeight: labelRowHeight }}>
+                        {outlayedAmount > 0 && outlayedWidth > 20 && flag(pct(outlayedWidth / 2), '#10b981', 'Amount paid', outlayedAmount, 'outlayed')}
+                        {flag(pct(obligatedWidth / 2), '#4773aa', 'Obligated amount', obligatedAmount, 'obligated')}
+                        {nonFederalFunding > 0 && nonFederalWidth > 20 && flag(pct(obligatedWidth + nonFederalWidth / 2), '#64748b', 'Non-Federal funding', nonFederalFunding, 'nonfed')}
+                      </Box>
+                      <Box
+                        sx={{
+                          flexShrink: 0,
+                          px: 1.5,
+                          py: 0.75,
+                          borderRadius: 1.5,
+                          bgcolor: '#64748b',
+                          color: '#fff',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Total funding:</Box>
+                        <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(totalFunding)}</Box>
+                      </Box>
+                    </Box>
                   </Box>
                 );
               })()}
@@ -2371,7 +2388,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               </Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: 'rgba(71, 115, 170, 0.3)' }} />
+                  <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#64748b' }} />
                   <Typography variant="body2" sx={{ color: '#94a3b8' }}>Non-Federal Funding</Typography>
                   <Tooltip
                     title="Funding provided by sources other than the federal government, such as state or local governments, private organizations, or other non-federal entities."
