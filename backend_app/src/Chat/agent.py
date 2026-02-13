@@ -1519,6 +1519,10 @@ When users ask about files (e.g., "can you see this file?", "do you see any file
 - When users want to analyze or read file content → Use read_s3_file_tool()
 - When users want to create new files → Use create_agent_file_wrapper()
 
+📊 REPORT GENERATION (DEFAULT FORMAT):
+- When the user asks for a "report" or to "generate a report" (or similar) without specifying a format, default to HTML: use create_agent_file_wrapper(filename, content, "html") or generate_agent_file_tool(filename, content, "html") so the output is a .html file.
+- Use a different report type only when the user explicitly asks for it (e.g. "export as CSV", "PDF report", "Excel report", "give me a text file").
+
 Use your judgment to determine if the user wants the file itself or wants to analyze its content.
 
 🔧 AVAILABLE FILE TOOLS:

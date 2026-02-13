@@ -278,6 +278,9 @@ class ContextAwareAgent:
 - NEVER read large S3 files yourself - let generate_chart_tool handle it via s3_key parameter
 - NEVER generate HTML reports when user explicitly asks for a "chart" - use generate_chart_tool instead
 
+📊 REPORT GENERATION (DEFAULT FORMAT):
+- When generating reports, default to .html: use generate_agent_file_tool(filename, content, "html") unless the user specifically asks for a different type (e.g. CSV, Excel, PDF, "text report").
+
 📊 HTML REPORT GENERATION RULES:
 - NEVER embed all raw data points in HTML files - this causes timeouts
 - NEVER call read_s3_file_tool to read full data files when generating HTML reports
