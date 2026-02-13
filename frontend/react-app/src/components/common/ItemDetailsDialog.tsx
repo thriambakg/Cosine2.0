@@ -2287,11 +2287,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                     <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(amount)}</Box>
                   </Box>
                 );
-                const showObligatedAbove = nonFederalFunding > 0;
-
                 return (
                   <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-                    <Box sx={{ width: '100%', minHeight: chartHeight }}>
+                    {/* Amount paid bubble above the chart */}
+                    <Box sx={{ position: 'relative', minHeight: labelRowHeight, width: '100%', mb: 0.5 }}>
+                      {outlayedAmount > 0 && outlayedWidth > 0 && flagAtLine(pct(outlayedWidth), '#10b981', 'Amount paid', outlayedAmount, 'outlayed')}
+                    </Box>
+                    {/* Chart moved down slightly */}
+                    <Box sx={{ width: '100%', minHeight: chartHeight, mt: 0.5 }}>
                       <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" style={{ display: 'block' }}>
                         <rect x="0" y={(chartHeight - barHeight) / 2} width={chartWidth} height={barHeight} fill="rgba(30, 41, 59, 0.5)" />
                         <rect x="0" y={(chartHeight - barHeight) / 2} width={obligatedWidth} height={barHeight} fill="#4773aa" />
@@ -2317,34 +2320,22 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                         })()}
                       </svg>
                     </Box>
+                    {/* Obligated amount at blue line (below bar) - separate row so no overlap with amount paid above */}
                     <Box sx={{ position: 'relative', minHeight: labelRowHeight, width: '100%', mt: 0.5 }}>
-                      {outlayedAmount > 0 && outlayedWidth > 0 && flagAtLine(pct(outlayedWidth), '#10b981', 'Amount paid', outlayedAmount, 'outlayed')}
-                      {showObligatedAbove && obligatedWidth > 0 && flagAtLine(pct(obligatedWidth), '#4773aa', 'Obligated amount', obligatedAmount, 'obligated')}
+                      {obligatedWidth > 0 && flagAtLine(pct(obligatedWidth), '#4773aa', 'Obligated amount', obligatedAmount, 'obligated')}
                     </Box>
+                    {/* Non-Federal and Total at end below */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, mt: 1 }}>
-                      {nonFederalFunding > 0 ? (
-                        <>
-                          <Box sx={{ ...bubbleStyle, bgcolor: '#64748b' }}>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Non-Federal funding:</Box>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(nonFederalFunding)}</Box>
-                          </Box>
-                          <Box sx={{ ...bubbleStyle, bgcolor: '#64748b' }}>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Total funding:</Box>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(totalFunding)}</Box>
-                          </Box>
-                        </>
-                      ) : (
-                        <>
-                          <Box sx={{ ...bubbleStyle, bgcolor: '#4773aa' }}>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Obligated amount:</Box>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(obligatedAmount)}</Box>
-                          </Box>
-                          <Box sx={{ ...bubbleStyle, bgcolor: '#64748b' }}>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Total funding:</Box>
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(totalFunding)}</Box>
-                          </Box>
-                        </>
+                      {nonFederalFunding > 0 && (
+                        <Box sx={{ ...bubbleStyle, bgcolor: '#64748b' }}>
+                          <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Non-Federal funding:</Box>
+                          <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(nonFederalFunding)}</Box>
+                        </Box>
                       )}
+                      <Box sx={{ ...bubbleStyle, bgcolor: '#64748b' }}>
+                        <Box component="span" sx={{ display: 'block', fontSize: '0.8rem', opacity: 0.95, lineHeight: 1.3 }}>Total funding:</Box>
+                        <Box component="span" sx={{ display: 'block', fontSize: '0.95rem', fontWeight: 700, lineHeight: 1.35 }}>{formatCurrency(totalFunding)}</Box>
+                      </Box>
                     </Box>
                   </Box>
                 );
