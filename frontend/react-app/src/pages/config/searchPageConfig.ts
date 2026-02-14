@@ -5,7 +5,7 @@
  * 
  * Search page names match the page component names:
  * - lda_search (LDA Search Page)
- * - congress_bills (Congress Bills Search Page)
+ * - congress_bills (Congress Search Page)
  * - govt_contracts (Government Contracts Search Page)
  * - sec_search (SEC Search Page)
  * - politician_trades (Politician Trades Search Page)

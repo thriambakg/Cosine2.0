@@ -152,7 +152,7 @@ export default function AppHeader() {
         { label: 'SEC Search Tutorial', path: '/sec-search', key: 'sec-search' },
         { label: 'Politician Trades Tutorial', path: '/politician-trades-search', key: 'politician-trades' },
         { label: 'Gov Contracts Tutorial', path: '/govt-contracts-search', key: 'govt-contracts' },
-        { label: 'Congress Bills Tutorial', path: '/congress-bills-search', key: 'congress-bills' },
+        { label: 'Congress Search Tutorial', path: '/congress-bills-search', key: 'congress-bills' },
         { label: 'LDA Search Tutorial', path: '/lda-search', key: 'lda-search' },
       ],
     },

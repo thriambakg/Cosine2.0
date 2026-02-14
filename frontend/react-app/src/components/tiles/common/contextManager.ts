@@ -1026,13 +1026,22 @@ export const addBillToContext = (
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Congress Bill';
 
   const data = { ...bill };
-  if (bill.bill_text_html_s3_key) {
-    const buckets = getS3BucketNames();
+  const buckets = getS3BucketNames();
+  if (Array.isArray(bill.bill_texts) && bill.bill_texts.length > 0) {
+    data.bill_texts = bill.bill_texts;
+    const first = bill.bill_texts[0];
+    const s3Key = typeof first === 'object' && first !== null && 's3_key' in first ? (first as { s3_key: string }).s3_key : undefined;
+    if (s3Key) {
+      data.s3_bucket = buckets.congressBills;
+      data.s3_key = s3Key;
+      data.s3_uri = `${buckets.congressBills}/${s3Key}`;
+    }
+  } else if (bill.bill_text_html_s3_key) {
     data.s3_bucket = buckets.congressBills;
     data.s3_key = bill.bill_text_html_s3_key;
     data.s3_uri = `${buckets.congressBills}/${bill.bill_text_html_s3_key}`;
   }
-  
+
   const contextItem: ContextItem = {
     id: `congress_bill_${billId}_${Date.now()}`,
     type: 'congress_bill',
@@ -1096,8 +1105,17 @@ export const addMultipleBillsToContext = (
     
     const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Congress Bill';
     const data = { ...bill };
-    if (bill.bill_text_html_s3_key) {
-      const buckets = getS3BucketNames();
+    const buckets = getS3BucketNames();
+    if (Array.isArray(bill.bill_texts) && bill.bill_texts.length > 0) {
+      data.bill_texts = bill.bill_texts;
+      const first = bill.bill_texts[0];
+      const s3Key = typeof first === 'object' && first !== null && 's3_key' in first ? (first as { s3_key: string }).s3_key : undefined;
+      if (s3Key) {
+        data.s3_bucket = buckets.congressBills;
+        data.s3_key = s3Key;
+        data.s3_uri = `${buckets.congressBills}/${s3Key}`;
+      }
+    } else if (bill.bill_text_html_s3_key) {
       data.s3_bucket = buckets.congressBills;
       data.s3_key = bill.bill_text_html_s3_key;
       data.s3_uri = `${buckets.congressBills}/${bill.bill_text_html_s3_key}`;

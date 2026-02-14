@@ -6,7 +6,7 @@
  * 
  * Tile type names match the types used in DashboardTile interface:
  * - lda_disclosures (LDA Search)
- * - congress_bills (Congress Bills Search)
+ * - congress_bills (Congress Search)
  * - govt_contracts (Government Contracts Search)
  * - sec_search (SEC Search)
  * - politician_trades (Politician Trades Search)

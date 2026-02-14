@@ -27,6 +27,8 @@ import {
   Chip,
   Pagination,
   Tooltip,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -106,30 +108,34 @@ const CongressBillsSearchPage: React.FC = () => {
   const { openItemDetails } = useDialogManagerHelpers();
   const {} = useGlobalChat();
   const { isEasyMode } = useEasyMode();
-  
-  // Context menu state
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
-  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
-  
-  // Session persistence key
-  const SESSION_STORAGE_KEY = 'congress-bills-search-page-state';
 
-  // Helper function to load state from sessionStorage
+  // Session persistence: load once before any state that depends on it
+  const SESSION_STORAGE_KEY = 'congress-bills-search-page-state';
   const loadStateFromStorage = () => {
     try {
-      const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (savedState) {
-        return JSON.parse(savedState);
-      }
+      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
     } catch (error) {
       console.error('❌ Error loading state from sessionStorage:', error);
     }
     return null;
   };
-
-  // Initialize state from sessionStorage immediately
   const savedState = loadStateFromStorage();
-  
+
+  // Context menu state
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'bills' | 'rollcall'>(() => (savedState?.activeTab as 'bills' | 'rollcall') || 'bills');
+
+  // Roll Call Search tab: congress '' | '119'; sessions subset of ['1','2']. Selecting 119th auto-selects both sessions.
+  const [rollCallCongress, setRollCallCongress] = useState<string>('');
+  const [rollCallSessions, setRollCallSessions] = useState<string[]>([]);
+  const [rollCallCongressSectionExpanded, setRollCallCongressSectionExpanded] = useState<boolean>(true);
+  const [rollCallRoll, setRollCallRoll] = useState('');
+  const [rollCallPoliticianName, setRollCallPoliticianName] = useState<string[]>([]);
+  const [rollCallSearchSidebarVisible, setRollCallSearchSidebarVisible] = useState<boolean>(true);
+  const [rollCallSearchMessage, setRollCallSearchMessage] = useState<string | null>(null);
+
   // Search state
   const [searchParams, setSearchParams] = useState<CongressBillsSearchFilters>(() => {
     const saved = savedState?.searchParams;
@@ -150,6 +156,7 @@ const CongressBillsSearchPage: React.FC = () => {
       latest_action_date_to: saved?.latest_action_date_to || '',
       bipartisan: saved?.bipartisan,
       bill_number: saved?.bill_number,
+      has_roll_call: saved?.has_roll_call,
     };
   });
   
@@ -818,6 +825,7 @@ const CongressBillsSearchPage: React.FC = () => {
   useEffect(() => {
     try {
       const stateToSave = {
+        activeTab,
         searchParams,
         allSearchResults,
         currentPage,
@@ -849,6 +857,7 @@ const CongressBillsSearchPage: React.FC = () => {
           // Save state without full results if quota is exceeded
           // Only save minimal data needed to restore search state
           const stateWithoutResults = {
+            activeTab,
             searchParams,
             // Save only bill IDs and essential fields instead of full objects to reduce size
             allSearchResults: allSearchResults.map(bill => ({
@@ -883,6 +892,7 @@ const CongressBillsSearchPage: React.FC = () => {
           // Last resort: save only essential state
           try {
             const minimalState = {
+              activeTab,
               searchParams,
               currentPage,
               pageSize,
@@ -952,10 +962,291 @@ const CongressBillsSearchPage: React.FC = () => {
   return (
     <Box sx={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)', minHeight: '100vh', p: 3 }}>
       <Container maxWidth={false} sx={{ maxWidth: '95%', px: 3 }}>
-        <Typography variant="h4" sx={{ color: '#ffffff', mb: 4, fontWeight: 600 }}>
-          Congress Bills Search
+        <Typography variant="h4" sx={{ color: '#ffffff', mb: 1, fontWeight: 600 }}>
+          Congress Search
         </Typography>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v: 'bills' | 'rollcall') => setActiveTab(v)}
+          sx={{
+            mb: 3,
+            '& .MuiTab-root': { color: '#94a3b8', fontWeight: 500 },
+            '& .Mui-selected': { color: '#3b82f6' },
+            '& .MuiTabs-indicator': { backgroundColor: '#3b82f6' },
+          }}
+        >
+          <Tab label="Bills Search" value="bills" />
+          <Tab label="Roll Call Search" value="rollcall" />
+        </Tabs>
 
+        {/* Roll Call Search tab — same collapsible search UI as Bills; API to be wired later */}
+        {activeTab === 'rollcall' && (
+          <Box sx={{ display: 'flex', gap: 3 }}>
+            {/* Left Sidebar - Roll Call Search Filters (Collapsible) */}
+            {rollCallSearchSidebarVisible ? (
+              <GlassCard sx={{
+                minWidth: 320,
+                maxWidth: 380,
+                width: 320,
+                height: 'fit-content',
+                position: 'sticky',
+                top: 20,
+                alignSelf: 'flex-start',
+                transition: 'all 0.3s ease-in-out',
+              }}>
+                <Box sx={{ p: 3 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      Search Filters
+                    </Typography>
+                    <IconButton
+                      onClick={() => setRollCallSearchSidebarVisible(false)}
+                      sx={{ color: '#94a3b8' }}
+                      size="small"
+                      title="Hide search filters"
+                    >
+                      <KeyboardArrowDownIcon sx={{ transform: 'rotate(-90deg)' }} />
+                    </IconButton>
+                  </Box>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {/* Politician Name - same multiselect autocomplete as Bills */}
+                    <Box>
+                      <MultiSelectField<string>
+                        label="Politician Name"
+                        selectedItems={(() => {
+                          const names = Array.isArray(rollCallPoliticianName) ? rollCallPoliticianName : (rollCallPoliticianName ? [rollCallPoliticianName] : []);
+                          if (!isPoliticianDataLoaded) return names;
+                          return names.map(name => {
+                            const politician = politicianSuggestionsService.getAllPoliticians().find(p => p.fullName === name);
+                            return politician ? politician.displayText : name;
+                          });
+                        })()}
+                        onItemsChange={(politicians) => {
+                          const actualNames = politicians.map(politicianDisplay => {
+                            const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                            return nameMatch ? nameMatch[1].trim() : politicianDisplay;
+                          });
+                          setRollCallPoliticianName(actualNames);
+                          setRollCallSearchMessage(null);
+                        }}
+                        suggestions={isPoliticianDataLoaded ? politicianSuggestionsService.getAllPoliticians().map(p => p.fullName) : []}
+                        onSearch={sponsorNameSearch}
+                        renderItem={(politicianDisplay) => politicianDisplay}
+                        renderOptionCustom={(politicianDisplay) => {
+                          const nameMatch = politicianDisplay.match(/^([^(]+)/);
+                          const name = nameMatch ? nameMatch[1].trim() : politicianDisplay;
+                          const details = politicianDisplay.replace(name, '').trim();
+                          return (
+                            <Box sx={{ width: '100%' }}>
+                              <Typography variant="body2" sx={{ fontWeight: 600, color: '#ffffff', fontSize: '0.9rem' }}>{name}</Typography>
+                              {details && <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '0.75rem' }}>{details}</Typography>}
+                            </Box>
+                          );
+                        }}
+                        getItemKey={(politician) => politician}
+                        placeholder="Search politicians to see how they voted..."
+                        allowCustomInput={false}
+                        isLoading={!isPoliticianDataLoaded || sponsorNameLoading}
+                      />
+                    </Box>
+
+                    {/* Congress & Session — collapsible bubbles (like Advanced Search); 119th selects both sessions */}
+                    <Box sx={{ borderTop: '1px solid #334155', pt: 1.5, mt: 1.5 }}>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          cursor: 'pointer',
+                          color: '#9ca3af',
+                          '&:hover': { color: '#e2e8f0' },
+                        }}
+                        onClick={() => setRollCallCongressSectionExpanded((b) => !b)}
+                      >
+                        <Typography variant="body2" sx={{ fontSize: '0.875rem', fontWeight: 500 }}>
+                          Congress & Session
+                        </Typography>
+                        <IconButton size="small" sx={{ color: 'inherit', p: 0.25 }}>
+                          {rollCallCongressSectionExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                        </IconButton>
+                      </Box>
+                      <Collapse in={rollCallCongressSectionExpanded}>
+                        <Box sx={{ py: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                          {/* 119th Congress — selecting auto-selects both sessions */}
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              py: 0.75,
+                              px: 1,
+                              borderRadius: '4px',
+                              backgroundColor: rollCallCongress === '119' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                              border: rollCallCongress === '119' ? '1px solid #3b82f6' : '1px solid #374151',
+                              cursor: 'pointer',
+                              '&:hover': {
+                                backgroundColor: rollCallCongress === '119' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(55, 65, 81, 0.3)',
+                              },
+                            }}
+                            onClick={() => {
+                              if (rollCallCongress === '119') {
+                                setRollCallCongress('');
+                                setRollCallSessions([]);
+                              } else {
+                                setRollCallCongress('119');
+                                setRollCallSessions(['1', '2']);
+                              }
+                              setRollCallSearchMessage(null);
+                            }}
+                          >
+                            <Checkbox
+                              checked={rollCallCongress === '119'}
+                              size="small"
+                              sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' }, p: 0.5 }}
+                            />
+                            <Typography sx={{ color: '#e2e8f0', fontSize: '0.8125rem', fontWeight: 500 }}>
+                              119th Congress
+                            </Typography>
+                          </Box>
+                          {/* Session 1 & 2 — smaller toggles, only when 119th selected */}
+                          {rollCallCongress === '119' && (
+                            <Box sx={{ pl: 2.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              {(['1', '2'] as const).map((sess) => {
+                                const isSessionSelected = rollCallSessions.includes(sess);
+                                return (
+                                  <Box
+                                    key={sess}
+                                    sx={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      py: 0.5,
+                                      px: 1,
+                                      borderRadius: '4px',
+                                      backgroundColor: isSessionSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+                                      border: isSessionSelected ? '1px solid #3b82f6' : '1px solid #334155',
+                                      cursor: 'pointer',
+                                      '&:hover': {
+                                        backgroundColor: isSessionSelected ? 'rgba(59, 130, 246, 0.12)' : 'rgba(55, 65, 81, 0.2)',
+                                      },
+                                    }}
+                                    onClick={() => {
+                                      setRollCallSessions((prev) =>
+                                        isSessionSelected ? prev.filter((x) => x !== sess) : [...prev, sess].sort()
+                                      );
+                                      setRollCallSearchMessage(null);
+                                    }}
+                                  >
+                                    <Checkbox
+                                      checked={isSessionSelected}
+                                      size="small"
+                                      sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' }, p: 0.25 }}
+                                    />
+                                    <Typography sx={{ color: '#cbd5e1', fontSize: '0.75rem' }}>
+                                      Session {sess}
+                                    </Typography>
+                                  </Box>
+                                );
+                              })}
+                            </Box>
+                          )}
+                        </Box>
+                      </Collapse>
+                    </Box>
+                    {/* Roll number */}
+                    <TextField
+                      label="Roll number"
+                      placeholder="e.g. 17"
+                      value={rollCallRoll}
+                      onChange={(e) => { setRollCallRoll(e.target.value); setRollCallSearchMessage(null); }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          color: '#e2e8f0',
+                          '& fieldset': { borderColor: '#475569' },
+                          '&:hover fieldset': { borderColor: '#64748b' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      }}
+                    />
+
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
+                      <Button
+                        variant="contained"
+                        onClick={() => setRollCallSearchMessage('Roll call search API will be wired here. Query SEARCH#ROLL and SEARCH#VOTE by congress/session/roll and politician.')}
+                        fullWidth
+                        startIcon={<SearchIcon />}
+                        sx={{
+                          background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                          color: '#ffffff',
+                          '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
+                        }}
+                      >
+                        Search
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          setRollCallCongress('');
+                          setRollCallSessions([]);
+                          setRollCallRoll('');
+                          setRollCallPoliticianName([]);
+                          setRollCallSearchMessage(null);
+                        }}
+                        fullWidth
+                        sx={{
+                          borderColor: '#475569',
+                          color: '#94a3b8',
+                          '&:hover': { borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.1)' },
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    </Box>
+                  </Box>
+                </Box>
+              </GlassCard>
+            ) : (
+              <Box sx={{ position: 'sticky', top: 20, alignSelf: 'flex-start', height: 'fit-content' }}>
+                <IconButton
+                  onClick={() => setRollCallSearchSidebarVisible(true)}
+                  sx={{
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    border: '2px solid #374151',
+                    borderRadius: '50%',
+                    width: 48,
+                    height: 48,
+                    color: '#3b82f6',
+                    '&:hover': { backgroundColor: 'rgba(15, 23, 42, 0.98)', borderColor: '#3b82f6', transform: 'scale(1.05)' },
+                    transition: 'all 0.3s ease-in-out',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                  }}
+                  title="Show search filters"
+                >
+                  <SearchIcon />
+                </IconButton>
+              </Box>
+            )}
+
+            {/* Main content - placeholder until API is wired */}
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              {rollCallSearchMessage && (
+                <Alert severity="info" sx={{ mb: 2 }} onClose={() => setRollCallSearchMessage(null)}>
+                  {rollCallSearchMessage}
+                </Alert>
+              )}
+              <GlassCard sx={{ p: 4 }}>
+                <Typography sx={{ color: '#94a3b8' }}>
+                  Search roll calls by Congress, session, and roll number, and filter by politician to see how they voted. Results will show vote metadata and member-level votes once the API is connected.
+                </Typography>
+              </GlassCard>
+            </Box>
+          </Box>
+        )}
+
+        {/* Bills Search tab */}
+        {activeTab === 'bills' && (
+        <>
         {/* Main Layout: Search Filters (Left) | Results (Middle) | Client-side Filter Box (Right) */}
         <Box sx={{ display: 'flex', gap: 3 }}>
           {/* Left Sidebar - Search Filters (Collapsible) */}
@@ -1312,6 +1603,32 @@ const CongressBillsSearchPage: React.FC = () => {
                           }}
                         />
 
+                        {/* Has roll call - Advanced: only bills that have had roll call votes (GSI HasRollCallIndex: has_roll_call = 1); preserves existing intersection/union logic */}
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Checkbox
+                              checked={searchParams.has_roll_call === 1}
+                              onChange={(e) => {
+                                setSearchParams((prev) => ({
+                                  ...prev,
+                                  has_roll_call: e.target.checked ? 1 : undefined,
+                                }));
+                              }}
+                              sx={{
+                                color: '#9ca3af',
+                                '&.Mui-checked': { color: '#3b82f6' },
+                                p: 0.5,
+                              }}
+                            />
+                            <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
+                              Only bills with roll call votes
+                            </Typography>
+                          </Box>
+                          <Typography sx={{ color: '#94a3b8', fontSize: '0.75rem', pl: 3.5 }}>
+                            Filters to bills that have recorded roll call votes (uses HasRollCallIndex).
+                          </Typography>
+                        </Box>
+
                         {/* Latest Action Date From */}
                         <TextField
                           label="Latest Action Date From"
@@ -1400,8 +1717,13 @@ const CongressBillsSearchPage: React.FC = () => {
                           introduced_date_to: '',
                           policy_area: [] as string[],
                           sponsor_party: [] as string[],
+                          sponsor_state: [] as string[],
+                          congress: [] as number[],
                           latest_action_date_from: '',
                           latest_action_date_to: '',
+                          bipartisan: undefined,
+                          bill_number: undefined,
+                          has_roll_call: undefined,
                         });
                       }}
                       fullWidth
@@ -2798,6 +3120,8 @@ const CongressBillsSearchPage: React.FC = () => {
             </GlassCard>
           )}
         </Box>
+        </>
+        )}
       </Container>
 
 

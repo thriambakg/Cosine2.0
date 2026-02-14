@@ -304,9 +304,9 @@ def search_congress_bills(
         JSON string with search results. Each bill result includes:
         - bill_id: Unique bill identifier (e.g., "119-HR-5789")
         - bill_title: Title of the bill
-        - bill_text_html_s3_key: S3 key to the full HTML bill text (e.g., "billtext/119-HR-5789.html")
-          * If present, use read_s3_file_tool(bill_text_html_s3_key) to read the complete bill text
-          * The bill text is stored as HTML in S3 and contains the full legislative text
+        - bill_texts: array of { name, s3_key, type } for stored HTML bill text (e.g. billtext/119-HR-5789/1.html); empty [] if none
+        - bill_text_html_s3_key: (legacy) single S3 key when bill_texts not yet populated
+          * Use data.s3_key from context (first from bill_texts or legacy key) or read each bill_texts[].s3_key via read_s3_file_tool to get full bill text
         - summary_text: Brief summary of the bill (if available)
         - sponsor information, cosponsors, actions, etc.
         For large result sets (>50KB or >50 results), returns S3 key reference instead of results array.
@@ -318,8 +318,8 @@ def search_congress_bills(
         )
         
     To read full bill text:
-        If a bill has bill_text_html_s3_key="billtext/119-HR-5789.html", 
-        call read_s3_file_tool("billtext/119-HR-5789.html") to get the complete bill text.
+        Use data.s3_key from the context item (from bill_texts[0].s3_key or legacy bill_text_html_s3_key),
+        or read each bill_texts[].s3_key (e.g. billtext/119-HR-5789/1.html) via read_s3_file_tool.
     """
     try:
         agent_logger.info(f"🔍 search_congress_bills called with filters: {filters}, limit: {limit}")

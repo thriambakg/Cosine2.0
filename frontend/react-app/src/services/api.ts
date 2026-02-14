@@ -1582,6 +1582,8 @@ export interface CongressBillsSearchFilters {
   latest_action_date_to?: string;
   bipartisan?: number;
   bill_number?: number;
+  /** 1 = only bills that have roll call votes (uses HasRollCallIndex GSI) */
+  has_roll_call?: number;
   [key: string]: any;
 }
 
@@ -1610,6 +1612,28 @@ export interface CongressBillsSearchResponse {
   index_used?: string;
 }
 
+/** Roll call search: SEARCH#VOTE (by politician_ids) or SEARCH#ROLL (by congress/session/roll). Returns full table rows, 100 per page. */
+export interface RollCallSearchParams {
+  search_index: 'SEARCH#VOTE' | 'SEARCH#ROLL';
+  politician_ids?: string[];
+  politician_id?: string;
+  congress?: number;
+  session?: number;
+  roll?: number;
+  limit?: number;
+  last_evaluated_key?: any;
+}
+
+export interface RollCallSearchResponse {
+  success: boolean;
+  results?: any[];
+  has_more?: boolean;
+  last_evaluated_key?: any;
+  count?: number;
+  search_index?: string;
+  error?: string;
+}
+
 export const congressBillsSearchAPI = {
   search: async (params: {
     filters: CongressBillsSearchFilters;
@@ -1620,6 +1644,27 @@ export const congressBillsSearchAPI = {
     return apiRequest<CongressBillsSearchResponse>('/congress-bills-search', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+  /** Roll call search: SEARCH#VOTE or SEARCH#ROLL indices; returns full rows, up to 100 per page. */
+  rollCallSearch: async (params: RollCallSearchParams): Promise<RollCallSearchResponse> => {
+    const body: Record<string, any> = {
+      roll_call_search: {
+        search_index: params.search_index,
+        limit: Math.min(100, Math.max(1, params.limit ?? 100)),
+        last_evaluated_key: params.last_evaluated_key,
+      },
+    };
+    if (params.search_index === 'SEARCH#VOTE') {
+      body.roll_call_search.politician_ids = params.politician_ids ?? (params.politician_id ? [params.politician_id] : []);
+    } else {
+      if (params.congress != null) body.roll_call_search.congress = params.congress;
+      if (params.session != null) body.roll_call_search.session = params.session;
+      if (params.roll != null) body.roll_call_search.roll = params.roll;
+    }
+    return apiRequest<RollCallSearchResponse>('/congress-bills-search', {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   },
   getBill: async (params: { bill_id: string }): Promise<{

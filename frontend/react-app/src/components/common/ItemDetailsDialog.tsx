@@ -13,6 +13,8 @@ import {
   Tooltip,
   Paper,
   Portal,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -45,6 +47,88 @@ import {
   addLDAFilingToContext,
   addStockToContext,
 } from '../tiles/common/contextManager';
+
+/** Legislative stages for Status of Legislation tracker (per BILLSTATUS XML User Guide). */
+const LEGISLATIVE_STAGES = [
+  { label: 'Introduced', key: 'introduced' },
+  { label: 'Passed Senate', key: 'passed_senate' },
+  { label: 'Passed House', key: 'passed_house' },
+  { label: 'To President', key: 'to_president' },
+  { label: 'Became Law', key: 'became_law' },
+] as const;
+
+/** Action codes that indicate each stage (from govinfo BILLSTATUS User Guide Table 3). E30000 omitted: it can mean Signed OR Vetoed. */
+const STAGE_ACTION_CODES: Record<string, number> = {
+  '1000': 0,   // Introduced in House
+  '10000': 0,  // Introduced in Senate
+  '17000': 1,  // Passed/agreed to in Senate
+  '8000': 2,   // Passed/agreed to in House
+  '28000': 3,  // Presented to President
+  'E20000': 3, // Presented to President
+  '36000': 4,  // Became Public Law
+  'E40000': 4, // Became Public Law No: 114-47
+};
+/** LOC code 31000 = Vetoed by President (do not treat as Became Law). */
+const VETO_ACTION_CODES: Set<string> = new Set(['31000', '33000']); // 33000 = Failed of passage in House over veto
+const STAGE_TYPE_PATTERNS: { pattern: RegExp | string; stage: number }[] = [
+  { pattern: /introduced in (house|senate)/i, stage: 0 },
+  { pattern: /passed\/agreed to in senate|passed senate/i, stage: 1 },
+  { pattern: /passed\/agreed to in house|passed house/i, stage: 2 },
+  { pattern: /presented to president|actions by the president/i, stage: 3 },
+  { pattern: /became law|became public law|signed by president/i, stage: 4 },
+];
+
+function getBillLegislativeStage(itemData: Record<string, unknown> | null | undefined): { stageIndex: number; stageLabel: string; vetoed: boolean } {
+  const introducedLabel = 'Introduced';
+  if (!itemData) return { stageIndex: 0, stageLabel: introducedLabel, vetoed: false };
+
+  let maxStage = 0;
+  let vetoed = false;
+  const typeStr = (itemData.latest_action_type as string) || '';
+  const textStr = (itemData.latest_action_text as string) || '';
+
+  const checkType = (t: string) => {
+    const s = (t || '').toLowerCase();
+    for (const { pattern, stage } of STAGE_TYPE_PATTERNS) {
+      if (typeof pattern === 'string' ? s.includes(pattern.toLowerCase()) : pattern.test(s)) {
+        if (stage === 4 && /veto/i.test(s)) return;
+        maxStage = Math.max(maxStage, stage);
+        break;
+      }
+    }
+  };
+  checkType(typeStr);
+  checkType(textStr);
+
+  let actions: { actionCode?: string; type?: string; text?: string }[] = [];
+  try {
+    const raw = itemData.actions_json;
+    if (typeof raw === 'string' && raw) actions = JSON.parse(raw);
+    else if (Array.isArray(raw)) actions = raw;
+  } catch {
+    // ignore
+  }
+  for (const a of actions) {
+    const code = a.actionCode ? String(a.actionCode).trim() : '';
+    const text = (a.text || '').toLowerCase();
+    const type = (a.type || '').toLowerCase();
+    const isVeto = /veto/i.test(text) || /veto/i.test(type) || VETO_ACTION_CODES.has(code);
+    if (isVeto) vetoed = true;
+
+    if (code && !isVeto && STAGE_ACTION_CODES[code] !== undefined) {
+      maxStage = Math.max(maxStage, STAGE_ACTION_CODES[code]);
+    }
+    if (code === 'E30000' && !isVeto) {
+      maxStage = Math.max(maxStage, 4);
+    }
+    if (a.type) checkType(a.type);
+    if (a.text) checkType(a.text);
+  }
+
+  const stageIndex = Math.min(maxStage, LEGISLATIVE_STAGES.length - 1);
+  const stageLabel = LEGISLATIVE_STAGES[stageIndex].label;
+  return { stageIndex, stageLabel, vetoed: vetoed && maxStage < 4 };
+}
 
 export type ItemType = 
   | 'govt_contract' 
@@ -429,6 +513,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [isResizing, setIsResizing] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [billDetailsTab, setBillDetailsTab] = useState(0);
   const paperRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
@@ -436,6 +521,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const previewPositionRef = useRef({ x: 100, y: 100 });
   const previewSizeRef = useRef({ width: 900, height: 600 });
   const cachedDataRef = useRef<any>(null); // Track what we've cached to prevent infinite loops
+
+  // Reset bill details tab when opening a different bill
+  useEffect(() => {
+    if (itemType === 'congress_bill') setBillDetailsTab(0);
+  }, [itemType, itemData?.bill_id, data?.bill_id]);
 
   // Utility functions
   const formatDate = (dateString?: string): string => {
@@ -1140,6 +1230,121 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Box>
           )}
 
+          {/* Status of Legislation — horizontal tracker (congress.gov style) */}
+          {(() => {
+            const { stageIndex, stageLabel, vetoed } = getBillLegislativeStage(itemData ?? undefined);
+            const statusForSr = vetoed ? 'To President — Vetoed by President' : stageLabel;
+            return (
+              <Box
+                sx={{
+                  mb: 4,
+                  backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                  borderRadius: '8px',
+                  border: '1px solid #374151',
+                  overflow: 'hidden',
+                }}
+              >
+                <Box
+                  component="table"
+                  sx={{ width: '100%', borderCollapse: 'collapse', '& th, & td': { verticalAlign: 'top', py: 1.5, px: 2, borderBottom: '1px solid #374151' }, '& tr:last-child th, & tr:last-child td': { borderBottom: 0 }, '& th': { color: '#94a3b8', fontWeight: 600, fontSize: '0.875rem', whiteSpace: 'nowrap', width: 120, pr: 2 } }}
+                >
+                  <Box component="tbody">
+                    <Box component="tr">
+                      <Box component="th" scope="row" sx={{ pt: 2 }}>
+                        <Box component="span" sx={{ color: '#94a3b8' }}>
+                          Tracker:
+                        </Box>
+                        <Tooltip
+                          title={
+                            <span>
+                              The tracker indicates the progress of this legislation as it moves through the legislative process.{' '}
+                              <a href="https://www.congress.gov/legislative-process" target="_blank" rel="noopener noreferrer" style={{ color: '#93c5fd', textDecoration: 'underline' }}>
+                                The Legislative Process
+                              </a>
+                            </span>
+                          }
+                        >
+                          <Box component="span" sx={{ ml: 0.5, color: '#10b981', cursor: 'help', display: 'inline-flex', alignItems: 'center' }} aria-label="Tip">
+                            <InfoIcon sx={{ fontSize: 18 }} />
+                          </Box>
+                        </Tooltip>
+                      </Box>
+                      <Box component="td" sx={{ pt: 2, pb: 2 }}>
+                        <Box component="p" sx={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0 }} aria-live="polite">
+                          This bill has the status {statusForSr}
+                        </Box>
+                        <Box component="p" sx={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0 }}>
+                          Here are the steps for Status of Legislation:
+                        </Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                          <Box
+                            component="ol"
+                            className="bill_progress"
+                            sx={{
+                              display: 'flex',
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              margin: 0,
+                              padding: 0,
+                              listStyle: 'none',
+                              gap: 0,
+                              '& > li': {
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                color: '#9ca3af',
+                                fontSize: '0.8125rem',
+                                padding: '6px 8px',
+                                borderRadius: '4px',
+                              },
+                              '& > li.selected': {
+                                color: '#e2e8f0',
+                                fontWeight: 600,
+                                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                              },
+                              '& > li.last': {
+                                paddingRight: 0,
+                              },
+                            }}
+                          >
+                            {LEGISLATIVE_STAGES.map((step, idx) => (
+                              <React.Fragment key={step.key}>
+                                <Box
+                                  component="li"
+                                  className={[idx === stageIndex ? 'selected' : '', idx === LEGISLATIVE_STAGES.length - 1 ? 'last' : ''].filter(Boolean).join(' ') || undefined}
+                                >
+                                  {step.label}
+                                </Box>
+                                {idx < LEGISLATIVE_STAGES.length - 1 && (
+                                  <Box component="span" sx={{ color: '#4b5563', fontSize: '0.75rem', px: 0.5 }} aria-hidden="true">
+                                    ›
+                                  </Box>
+                                )}
+                              </React.Fragment>
+                            ))}
+                          </Box>
+                          {vetoed && (
+                            <Chip
+                              size="small"
+                              label="Vetoed"
+                              sx={{
+                                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                color: '#fca5a5',
+                                border: '1px solid rgba(239, 68, 68, 0.5)',
+                                fontWeight: 600,
+                              }}
+                              aria-label="Vetoed by President"
+                            />
+                          )}
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Box>
+                </Box>
+              </Box>
+            );
+          })()}
+
           {/* Bill Overview Section */}
           <Box sx={{ mb: 4, borderBottom: '1px solid #374151', pb: 3 }}>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
@@ -1227,183 +1432,362 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Box>
           </Box>
 
-          {/* Summary Section */}
-          {itemData?.summary_text && (
-            <Box sx={{ mb: 4, p: 3, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
-              <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
-                Summary
-              </Typography>
-              <Typography 
-                variant="body1" 
-                sx={{ 
-                  color: '#e2e8f0', 
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                }}
-                dangerouslySetInnerHTML={{ 
-                  __html: itemData.summary_text?.replace(/\n/g, '<br />') || '' 
-                }}
-              />
-            </Box>
-          )}
-
-          {/* Cosponsors Section */}
-          {itemData?.cosponsor_count > 0 && itemData?.cosponsors_json && (() => {
+          {/* Bill Details: tabbed section (congress.gov style) */}
+          {(() => {
+            const summaryCount = itemData?.summary_count ?? (itemData?.summary_text ? 1 : 0);
+            let textVersions: any[] = [];
             try {
-              const cosponsors = JSON.parse(itemData.cosponsors_json);
-              return (
-                <Box sx={{ mb: 4 }}>
-                  <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
-                    Cosponsors ({itemData.cosponsor_count})
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                    {Array.isArray(cosponsors) && cosponsors.map((cosponsor: any, idx: number) => (
-                      <Chip
-                        key={idx}
-                        label={`${cosponsor.fullName || cosponsor.name || 'Unknown'} (${cosponsor.party || ''}-${cosponsor.state || ''})`}
-                        sx={{
-                          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                          color: '#93c5fd',
-                          border: '1px solid #3b82f6',
-                        }}
-                      />
-                    ))}
-                  </Box>
-                </Box>
-              );
-            } catch {
-              return null;
-            }
-          })()}
-
-          {/* Actions Section */}
-          {itemData?.actions_json && (() => {
+              if (itemData?.text_versions_json) {
+                const tv = typeof itemData.text_versions_json === 'string' ? JSON.parse(itemData.text_versions_json) : itemData.text_versions_json;
+                textVersions = Array.isArray(tv) ? tv : [];
+              }
+            } catch { /* ignore */ }
+            const actionsCount = Number(itemData?.action_count) || 0;
+            let titles: any[] = [];
             try {
-              const actions = JSON.parse(itemData.actions_json);
-              if (Array.isArray(actions) && actions.length > 0) {
-                return (
-                  <Box sx={{ mb: 4 }}>
-                    <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
-                      Actions ({itemData.action_count || actions.length})
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {actions.map((action: any, idx: number) => (
-                        <Box
-                          key={idx}
-                          sx={{
-                            p: 2,
-                            backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                            borderRadius: '4px',
-                            border: '1px solid #374151',
-                          }}
-                        >
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                            <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
-                              {action.actionDate && formatDate(action.actionDate)}
-                            </Typography>
-                            {action.type && (
-                              <Chip
-                                label={action.type}
-                                size="small"
-                                sx={{
-                                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                                  color: '#93c5fd',
-                                  border: '1px solid #3b82f6',
-                                }}
-                              />
-                            )}
-                          </Box>
-                          {action.text && (
-                            <Typography variant="body1" sx={{ color: '#e2e8f0', mt: 1 }}>
-                              {action.text}
-                            </Typography>
-                          )}
-                          {action.committees && Array.isArray(action.committees) && action.committees.length > 0 && (
-                            <Box sx={{ mt: 1 }}>
-                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                                Committees:
-                              </Typography>
-                              {action.committees.map((committee: any, cIdx: number) => (
-                                <Typography key={cIdx} variant="body2" sx={{ color: '#e2e8f0', ml: 1 }}>
-                                  • {committee.name || committee.systemCode}
-                                </Typography>
-                              ))}
-                            </Box>
-                          )}
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                );
+              if (itemData?.titles_json) {
+                const t = typeof itemData.titles_json === 'string' ? JSON.parse(itemData.titles_json) : itemData.titles_json;
+                titles = Array.isArray(t) ? t : [];
               }
-            } catch (e) {
-              // If parsing fails, show the summary text
-              if (itemData?.actions_summary) {
-                return (
-                  <Box sx={{ mb: 4 }}>
-                    <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
-                      Actions Summary
-                    </Typography>
-                    <Typography variant="body1" sx={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
-                      {itemData.actions_summary}
-                    </Typography>
-                  </Box>
-                );
+            } catch { /* ignore */ }
+            const amendmentsCount = Number(itemData?.amendment_count) || 0;
+            const cosponsorsCount = Number(itemData?.cosponsor_count) || 0;
+            let committees: any[] = [];
+            try {
+              if (itemData?.committees_json) {
+                const c = typeof itemData.committees_json === 'string' ? JSON.parse(itemData.committees_json) : itemData.committees_json;
+                committees = Array.isArray(c) ? c : [];
               }
-            }
-            return null;
-          })()}
+            } catch { /* ignore */ }
+            let relatedBills: any[] = [];
+            try {
+              if (itemData?.related_bills_json) {
+                const r = typeof itemData.related_bills_json === 'string' ? JSON.parse(itemData.related_bills_json) : itemData.related_bills_json;
+                relatedBills = Array.isArray(r) ? r : [];
+              }
+            } catch { /* ignore */ }
+            let recordedVotes: any[] = [];
+            try {
+              if (itemData?.recorded_votes_json) {
+                const v = typeof itemData.recorded_votes_json === 'string' ? JSON.parse(itemData.recorded_votes_json) : itemData.recorded_votes_json;
+                recordedVotes = Array.isArray(v) ? v : [];
+              }
+            } catch { /* ignore */ }
+            const hasRollCall = Number(itemData?.has_roll_call) === 1;
+            const votesCount = recordedVotes.length;
 
-          {/* Bill Text Download */}
-          {itemData?.bill_text_html_s3_key && (
-            <Box sx={{ mt: 3, mb: 2, p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
-              <Typography variant="h6" sx={{ color: '#3b82f6', mb: 2, fontWeight: 600 }}>
-                Bill Text
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1 }}>
-                  {itemData.bill_text_html_s3_key.split('/').pop() || itemData.bill_text_html_s3_key}
+            const tabLabels: { id: string; label: string; count: number; show: boolean }[] = [
+              { id: 'summary', label: 'Summary', count: summaryCount, show: true },
+              { id: 'text', label: 'Text', count: textVersions.length, show: true },
+              { id: 'actions', label: 'Actions', count: actionsCount, show: true },
+              { id: 'titles', label: 'Titles', count: titles.length, show: true },
+              { id: 'amendments', label: 'Amendments', count: amendmentsCount, show: true },
+              { id: 'cosponsors', label: 'Cosponsors', count: cosponsorsCount, show: true },
+              { id: 'committees', label: 'Committees', count: committees.length, show: true },
+              { id: 'related_bills', label: 'Related Bills', count: relatedBills.length, show: true },
+              { id: 'votes', label: 'Votes', count: votesCount, show: hasRollCall },
+            ];
+            const visibleTabs = tabLabels.filter((t) => t.show);
+            const tabIndexToId = visibleTabs.map((t) => t.id);
+            const safeTabIndex = visibleTabs.length > 0 ? Math.max(0, Math.min(billDetailsTab, visibleTabs.length - 1)) : 0;
+            const currentTabId = tabIndexToId[safeTabIndex] ?? 'summary';
+
+            if (visibleTabs.length === 0) return null;
+
+            return (
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
+                  Bill Details:
                 </Typography>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={downloadLoading ? <CircularProgress size={16} /> : <DownloadIcon />}
-                  onClick={async () => {
-                    if (!itemData?.bill_text_html_s3_key) return;
-                    
-                    setDownloadLoading(true);
-                    try {
-                      await handleDownloadFile(
-                        itemData.bill_text_html_s3_key,
-                        itemData.bill_text_html_s3_key.split('/').pop() || 'bill.html',
-                        'CONGRESS_BILLS'
-                      );
-                    } catch (error) {
-                      console.error('❌ Download failed:', error);
-                      alert('Failed to download file. Please try again.');
-                    } finally {
-                      setDownloadLoading(false);
-                    }
-                  }}
-                  disabled={downloadLoading}
+                <Tabs
+                  value={safeTabIndex}
+                  onChange={(_, v) => setBillDetailsTab(v)}
+                  variant="scrollable"
+                  scrollButtons="auto"
                   sx={{
-                    color: '#3b82f6',
-                    borderColor: '#3b82f6',
-                    '&:hover': {
-                      borderColor: '#60a5fa',
-                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    },
-                    '&:disabled': {
-                      color: '#6b7280',
-                      borderColor: '#6b7280',
-                    },
+                    borderBottom: '1px solid #374151',
+                    minHeight: 40,
+                    '& .MuiTab-root': { minHeight: 40, py: 1, textTransform: 'none', fontWeight: 600 },
+                    '& .Mui-selected': { color: '#3b82f6' },
+                    '& .MuiTabs-indicator': { backgroundColor: '#3b82f6' },
                   }}
                 >
-                  Download
-                </Button>
+                  {visibleTabs.map((tab, idx) => (
+                    <Tab
+                      key={tab.id}
+                      label={
+                        <span>
+                          {tab.label} <span style={{ fontWeight: 400, opacity: 0.8 }}>({tab.count})</span>
+                        </span>
+                      }
+                      id={`bill-tab-${idx}`}
+                      aria-controls={`bill-tabpanel-${idx}`}
+                    />
+                  ))}
+                </Tabs>
+                <Box role="tabpanel" id={`bill-tabpanel-${safeTabIndex}`} aria-labelledby={`bill-tab-${safeTabIndex}`} sx={{ pt: 2 }}>
+                  {currentTabId === 'summary' && (
+                    <Box sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                      {itemData?.summary_text ? (
+                        <Typography
+                          variant="body1"
+                          sx={{ color: '#e2e8f0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}
+                          dangerouslySetInnerHTML={{ __html: itemData.summary_text.replace(/\n/g, '<br />') || '' }}
+                        />
+                      ) : (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>No summary available.</Typography>
+                      )}
+                    </Box>
+                  )}
+                  {currentTabId === 'text' && (() => {
+                    // Prefer bill_texts array [{ name, s3_key, type }]; fallback to legacy bill_text_versions_s3_json
+                    type BillTextEntry = { name?: string; s3_key: string; type?: string };
+                    let storedVersions: BillTextEntry[] = [];
+                    try {
+                      if (Array.isArray(itemData?.bill_texts) && itemData.bill_texts.length > 0) {
+                        storedVersions = itemData.bill_texts as BillTextEntry[];
+                      } else if (itemData?.bill_text_versions_s3_json) {
+                        const v = typeof itemData.bill_text_versions_s3_json === 'string' ? JSON.parse(itemData.bill_text_versions_s3_json) : itemData.bill_text_versions_s3_json;
+                        storedVersions = Array.isArray(v) ? v.map((x: { type?: string; s3_key: string }) => ({ name: (x as any).name ?? undefined, s3_key: x.s3_key, type: (x as any).type ?? undefined })) : [];
+                      }
+                    } catch { /* ignore */ }
+                    // Public URL for View: from text_versions_json (Congress.gov/govinfo), match by type or index. Derive HTML from govinfo XML for display.
+                    const deriveGovinfoHtmlUrl = (url: string) => {
+                      if (!url || !url.includes('govinfo.gov') || !url.includes('/xml/') || !url.endsWith('.xml')) return url;
+                      return url.replace('/xml/', '/html/').replace(/\.xml$/i, '.htm');
+                    };
+                    const getPublicViewUrl = (ver: BillTextEntry, idx: number): string | null => {
+                      if (!textVersions.length) return itemData?.bill_url || null;
+                      const byType = textVersions.find((t: any) => (t.type || '').trim() === (ver.type || '').trim());
+                      const entry = byType ?? textVersions[idx];
+                      if (!entry) return itemData?.bill_url || null;
+                      const raw = entry.url || entry.formats?.[0]?.url;
+                      if (!raw) return itemData?.bill_url || null;
+                      return deriveGovinfoHtmlUrl(raw);
+                    };
+                    if (storedVersions.length > 0) {
+                      return (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: '400px', overflowY: 'auto', ...scrollbarStyles }}>
+                          {storedVersions.map((ver: BillTextEntry, idx: number) => {
+                            const label = ver.type || ver.name || ver.s3_key.split('/').pop() || `File ${idx + 1}`;
+                            const filename = ver.name || ver.s3_key.split('/').pop() || `bill-${idx + 1}.html`;
+                            const publicViewUrl = getPublicViewUrl(ver, idx);
+                            return (
+                              <Box
+                                key={idx}
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 1.5,
+                                  p: 1.5,
+                                  backgroundColor: 'rgba(31, 41, 55, 0.5)',
+                                  border: '1px solid #374151',
+                                  borderRadius: '4px',
+                                }}
+                              >
+                                <DocumentIcon sx={{ fontSize: 18, color: '#3b82f6', flexShrink: 0 }} />
+                                <Typography variant="body2" sx={{ color: '#e2e8f0', flex: 1, minWidth: 0 }}>{label}</Typography>
+                                {publicViewUrl ? (
+                                  <Link
+                                    href={publicViewUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    sx={{
+                                      color: '#3b82f6',
+                                      textDecoration: 'none',
+                                      fontSize: '0.875rem',
+                                      flexShrink: 0,
+                                      '&:hover': { color: '#60a5fa', textDecoration: 'underline' },
+                                    }}
+                                  >
+                                    View
+                                  </Link>
+                                ) : (
+                                  <Typography component="span" variant="body2" sx={{ color: '#6b7280', fontSize: '0.875rem', flexShrink: 0 }}>View</Typography>
+                                )}
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDownloadFile(ver.s3_key, filename, 'CONGRESS_BILLS')}
+                                  disabled={downloadLoading}
+                                  sx={{
+                                    color: '#3b82f6',
+                                    flexShrink: 0,
+                                    '&:hover': { color: '#60a5fa', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                                  }}
+                                >
+                                  {downloadLoading ? <CircularProgress size={20} /> : <DownloadIcon fontSize="small" />}
+                                </IconButton>
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      );
+                    }
+                    if (textVersions.length === 0) return <Typography variant="body2" sx={{ color: '#9ca3af' }}>No text versions.</Typography>;
+                    return (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {textVersions.map((ver: any, idx: number) => (
+                          <Box key={idx} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                            <Typography variant="body2" sx={{ color: '#e2e8f0' }}>{ver.type || `Version ${idx + 1}`}</Typography>
+                            {ver.url && (
+                              <Link href={ver.url} target="_blank" rel="noopener noreferrer" sx={{ color: '#3b82f6', fontSize: '0.875rem' }}>
+                                View
+                              </Link>
+                            )}
+                          </Box>
+                        ))}
+                      </Box>
+                    );
+                  })()}
+                  {currentTabId === 'actions' && (() => {
+                    try {
+                      const actions = itemData?.actions_json ? (typeof itemData.actions_json === 'string' ? JSON.parse(itemData.actions_json) : itemData.actions_json) : [];
+                      if (!Array.isArray(actions) || actions.length === 0) {
+                        return itemData?.actions_summary ? (
+                          <Typography variant="body1" sx={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>{itemData.actions_summary}</Typography>
+                        ) : (
+                          <Typography variant="body2" sx={{ color: '#9ca3af' }}>No actions.</Typography>
+                        );
+                      }
+                      return (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {actions.map((action: any, idx: number) => (
+                            <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                                <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>{action.actionDate && formatDate(action.actionDate)}</Typography>
+                                {action.type && <Chip label={action.type} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6' }} />}
+                              </Box>
+                              {action.text && <Typography variant="body1" sx={{ color: '#e2e8f0', mt: 1 }}>{action.text}</Typography>}
+                              {action.committees && Array.isArray(action.committees) && action.committees.length > 0 && (
+                                <Box sx={{ mt: 1 }}>
+                                  <Typography variant="caption" sx={{ color: '#94a3b8' }}>Committees: </Typography>
+                                  {action.committees.map((c: any, cIdx: number) => (
+                                    <Typography key={cIdx} variant="body2" sx={{ color: '#e2e8f0', ml: 1 }}>• {c.name || c.systemCode}</Typography>
+                                  ))}
+                                </Box>
+                              )}
+                            </Box>
+                          ))}
+                        </Box>
+                      );
+                    } catch {
+                      return <Typography variant="body1" sx={{ color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>{itemData?.actions_summary || 'No actions.'}</Typography>;
+                    }
+                  })()}
+                  {currentTabId === 'titles' && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {titles.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>No titles.</Typography>
+                      ) : (
+                        titles.map((t: any, idx: number) => (
+                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                            {t.titleType && <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>{t.titleType}</Typography>}
+                            <Typography variant="body1" sx={{ color: '#e2e8f0' }}>{t.title || t.name || '—'}</Typography>
+                          </Box>
+                        ))
+                      )}
+                    </Box>
+                  )}
+                  {currentTabId === 'amendments' && (
+                    <Box>
+                      {amendmentsCount === 0 ? (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>No amendments.</Typography>
+                      ) : (
+                        <Typography variant="body1" sx={{ color: '#e2e8f0' }}>Amendments count: {amendmentsCount}. (Full amendments data can be added here if stored.)</Typography>
+                      )}
+                    </Box>
+                  )}
+                  {currentTabId === 'cosponsors' && (() => {
+                    try {
+                      const cosponsors = itemData?.cosponsors_json ? (typeof itemData.cosponsors_json === 'string' ? JSON.parse(itemData.cosponsors_json) : itemData.cosponsors_json) : [];
+                      const arr = Array.isArray(cosponsors) ? cosponsors : [];
+                      if (arr.length === 0) return <Typography variant="body2" sx={{ color: '#9ca3af' }}>No cosponsors.</Typography>;
+                      return (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {arr.map((c: any, idx: number) => (
+                            <Chip
+                              key={idx}
+                              label={`${c.fullName || c.name || 'Unknown'} (${c.party || ''}-${c.state || ''})`}
+                              sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6' }}
+                            />
+                          ))}
+                        </Box>
+                      );
+                    } catch {
+                      return <Typography variant="body2" sx={{ color: '#9ca3af' }}>No cosponsors.</Typography>;
+                    }
+                  })()}
+                  {currentTabId === 'committees' && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {committees.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>No committees.</Typography>
+                      ) : (
+                        committees.map((c: any, idx: number) => (
+                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                            <Typography variant="subtitle2" sx={{ color: '#3b82f6' }}>{c.chamber} - {c.name || c.systemCode}</Typography>
+                            {c.type && <Typography variant="caption" sx={{ color: '#94a3b8' }}>{c.type}</Typography>}
+                            {c.activities && Array.isArray(c.activities) && c.activities.length > 0 && (
+                              <Box sx={{ mt: 1 }}>
+                                {c.activities.map((a: any, aIdx: number) => (
+                                  <Typography key={aIdx} variant="body2" sx={{ color: '#e2e8f0' }}>
+                                    {a.name}{a.date ? ` (${formatDate(a.date)})` : ''}
+                                  </Typography>
+                                ))}
+                              </Box>
+                            )}
+                          </Box>
+                        ))
+                      )}
+                    </Box>
+                  )}
+                  {currentTabId === 'related_bills' && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {relatedBills.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>No related bills.</Typography>
+                      ) : (
+                        relatedBills.map((r: any, idx: number) => (
+                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                            <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                              {r.type} {r.number} - {r.latestTitle || r.title || '—'}
+                            </Typography>
+                            {r.latestAction?.text && (
+                              <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>{r.latestAction.text}</Typography>
+                            )}
+                            {r.relationshipDetails && Array.isArray(r.relationshipDetails) && (
+                              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                {r.relationshipDetails.map((rd: any, rdIdx: number) => (
+                                  <Chip key={rdIdx} label={rd.type} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd' }} />
+                                ))}
+                              </Box>
+                            )}
+                          </Box>
+                        ))
+                      )}
+                    </Box>
+                  )}
+                  {currentTabId === 'votes' && (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {recordedVotes.length === 0 ? (
+                        <Typography variant="body2" sx={{ color: '#9ca3af' }}>No roll call votes.</Typography>
+                      ) : (
+                        recordedVotes.map((v: any, idx: number) => (
+                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                            <Typography variant="subtitle2" sx={{ color: '#e2e8f0' }}>{v.chamber} - Roll #{v.rollNumber}, Session {v.sessionNumber}</Typography>
+                            {v.date && <Typography variant="caption" sx={{ color: '#94a3b8' }}>{formatDate(v.date)}</Typography>}
+                            {v.url && (
+                              <Link href={v.url} target="_blank" rel="noopener noreferrer" sx={{ display: 'block', mt: 1, color: '#3b82f6' }}>
+                                View roll call
+                              </Link>
+                            )}
+                          </Box>
+                        ))
+                      )}
+                    </Box>
+                  )}
+                </Box>
               </Box>
-            </Box>
-          )}
+            );
+          })()}
 
           {/* Bill URL */}
           {itemData?.bill_url && (

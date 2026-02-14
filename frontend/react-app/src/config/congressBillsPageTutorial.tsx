@@ -6,7 +6,7 @@ export const congressBillsPageSteps: Step[] = [
     target: 'body',
     content: (
       <div>
-        <h2 style={{ marginTop: 0, color: '#ffffff' }}>Welcome to Congress Bills Search! 🏛️</h2>
+        <h2 style={{ marginTop: 0, color: '#ffffff' }}>Welcome to Congress Search! 🏛️</h2>
         <p>Find, filter, and analyze congressional bills by sponsors, types, policy areas, dates, and advanced attributes.</p>
         <p style={{ fontSize: '0.9em', color: '#9ca3af', marginBottom: 0 }}>
           You can skip this tutorial anytime by clicking "Skip" or pressing ESC.

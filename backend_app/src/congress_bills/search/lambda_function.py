@@ -16,6 +16,8 @@ from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
 from cors_helper import get_cors_headers, validate_origin
 
+from roll_call_search_helper import search_roll_call_vote, search_roll_call_rolls
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -114,7 +116,7 @@ def query_gsi(index_name: str, hash_key_name: str, hash_key_value: Any,
         gsis_with_date_range = [
             'SponsorNameDateIndex', 'SponsorPartyDateIndex', 'BillTitleDateIndex',
             'BillTypeDateIndex', 'BillNumberDateIndex', 'BipartisanDateIndex',
-            'PolicyAreaDateIndex'
+            'PolicyAreaDateIndex', 'HasRollCallIndex'
         ]
         
         # GSIs without range keys (hash key only - no range query support)
@@ -438,6 +440,16 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'query_func': query_gsi
             })
     
+    # Bills that have roll call votes (GSI: has_roll_call = 1)
+    if filters.get('has_roll_call') is not None and filters.get('has_roll_call') != 0:
+        queries.append({
+            'filter_type': 'has_roll_call',
+            'index_name': 'HasRollCallIndex',
+            'hash_key': 'has_roll_call',
+            'hash_value': 1,
+            'query_func': query_gsi
+        })
+
     # Congress
     if filters.get('congress'):
         congresses = filters.get('congress') if isinstance(filters.get('congress'), list) else [filters.get('congress')]
@@ -992,6 +1004,67 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             body = event.get('body', {})
         
+        # Roll call search: SEARCH#VOTE or SEARCH#ROLL (returns full rows, 100 per page)
+        roll_call_search = body.get('roll_call_search')
+        if roll_call_search and bills_table:
+            search_index = (roll_call_search.get('search_index') or '').strip().upper()
+            limit = min(int(roll_call_search.get('limit', 100) or 100), 100)
+            limit = max(1, limit)
+            last_ev = roll_call_search.get('last_evaluated_key')
+            if search_index == 'SEARCH#VOTE':
+                politician_ids = roll_call_search.get('politician_ids') or roll_call_search.get('politician_id')
+                if isinstance(politician_ids, str):
+                    politician_ids = [politician_ids]
+                if not isinstance(politician_ids, list):
+                    politician_ids = []
+                result = search_roll_call_vote(
+                    table=bills_table,
+                    politician_ids=politician_ids,
+                    limit=limit,
+                    last_evaluated_key=last_ev,
+                )
+            elif search_index == 'SEARCH#ROLL':
+                congress = roll_call_search.get('congress')
+                session = roll_call_search.get('session')
+                roll = roll_call_search.get('roll')
+                if congress is not None:
+                    try:
+                        congress = int(congress)
+                    except (TypeError, ValueError):
+                        congress = None
+                if session is not None:
+                    try:
+                        session = int(session)
+                    except (TypeError, ValueError):
+                        session = None
+                if roll is not None:
+                    try:
+                        roll = int(roll)
+                    except (TypeError, ValueError):
+                        roll = None
+                result = search_roll_call_rolls(
+                    table=bills_table,
+                    congress=congress,
+                    session=session,
+                    roll=roll,
+                    limit=limit,
+                    last_evaluated_key=last_ev,
+                )
+            else:
+                result = {
+                    'success': False,
+                    'error': f'Invalid roll_call_search.search_index: use SEARCH#VOTE or SEARCH#ROLL',
+                    'results': [],
+                    'count': 0,
+                    'has_more': False,
+                    'last_evaluated_key': None,
+                }
+            return {
+                'statusCode': 200,
+                'headers': build_cors_headers(origin),
+                'body': json.dumps(result, default=str)
+            }
+
         # Check if this is a direct bill_id query (similar to getAward for contracts)
         bill_id = body.get('bill_id')
         if bill_id:

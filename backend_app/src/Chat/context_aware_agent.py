@@ -375,11 +375,9 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
   * Default limit: 5 (max: 1000)
   * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
   * Large results stored in S3 - use read_s3_file_tool to access via s3_key
-  * Each bill result includes a `bill_text_html_s3_key` field (e.g., "billtext/119-HR-5789.html")
-  * To read the FULL BILL TEXT: When a bill has a `bill_text_html_s3_key` field, use read_s3_file_tool(s3_key) 
-    to retrieve the complete HTML bill text from S3
-  * Example: If search returns bill with bill_text_html_s3_key="billtext/119-HR-5789.html", 
-    call read_s3_file_tool("billtext/119-HR-5789.html") to get the full bill text
+  * Each bill result includes bill text references: prefer `bill_texts` (array of { name, s3_key, type }); legacy single file in `bill_text_html_s3_key`
+  * To read the FULL BILL TEXT: Use data.s3_key (first entry from bill_texts or legacy bill_text_html_s3_key), or iterate bill_texts[].s3_key and call read_s3_file_tool(s3_key) for each
+  * Example: If context item has data.s3_key (or data.bill_texts[0].s3_key), call read_s3_file_tool(data.s3_key) to get bill text
   
 - govt_contracts_autocomplete(search_text, autocomplete_type, limit=10) - Get exact values for search_govt_contracts filters. autocomplete_type: recipient (recipient_name), awarding_agency (awarding_agency_name), funding_agency (funding_agency_name), cfda (cfda_number), naics (naics_code), psc (psc_code), city, location, program_activity, glossary. Use BEFORE search when the user gives generic or natural-language terms for any of these fields.
 - search_govt_contracts(filters, limit=5, last_evaluated_key) - Search government contracts/awards
@@ -405,21 +403,11 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
   call read_s3_file_tool(s3_key) to get the full results
 
 📄 READING BILL TEXT FROM S3:
-- When bills are returned from search_congress_bills, each bill includes a `bill_text_html_s3_key` field
-- This field contains the S3 key to the full HTML bill text (e.g., "billtext/119-HR-5789.html")
-- To read the COMPLETE BILL TEXT, use: read_s3_file_tool(bill_text_html_s3_key). When the context item has data.s3_bucket, pass it: read_s3_file_tool(s3_key=bill_text_html_s3_key, s3_bucket=data.s3_bucket).
-- The bill text is stored as HTML in S3 and will be returned as readable text
-- ALWAYS check for bill_text_html_s3_key when users ask about:
-  * "What does this bill do?"
-  * "What's in the bill?"
-  * "Full text of the bill"
-  * "Read the bill text"
-  * "What are the details of this bill?"
-- Example workflow:
-  1. search_congress_bills({"bill_title": "NDAA"}) → returns bills with bill_text_html_s3_key fields
-  2. For each bill with bill_text_html_s3_key, call read_s3_file_tool("billtext/119-HR-5789.html")
-  3. Analyze and summarize the full bill text for the user
-- Note: If bill_text_html_s3_key is empty or missing, the full bill text is not available in the database
+- Bills have bill text in `bill_texts` (array of { name, s3_key, type }); context items expose data.s3_key (first file) and data.bill_texts for all versions
+- To read the COMPLETE BILL TEXT: use read_s3_file_tool(data.s3_key) when data.s3_bucket is set; or iterate data.bill_texts and read each entry's s3_key for multiple versions
+- The bill text is stored as HTML in S3 (e.g. billtext/119-HR-5789/1.html)
+- ALWAYS check for data.s3_key or data.bill_texts when users ask about full bill text, "What does this bill do?", "What's in the bill?", etc.
+- Note: If bill_texts is empty and no legacy bill_text_html_s3_key, full bill text is not available
 
 ✅ ALWAYS: Use real market data, provide specific recommendations
 🔴 NEVER: Return empty responses, get stuck in tool loops, leave responses incomplete
