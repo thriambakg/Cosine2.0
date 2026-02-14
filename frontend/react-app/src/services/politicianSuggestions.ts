@@ -15,6 +15,8 @@ export interface Politician {
   searchText: string; // Combined text for searching
   displayText: string; // Enhanced display format: "John Doe (R-TX, House)"
   jurisdiction: string; // "TX-01" or "TX" for senators
+  /** Bioguide ID (e.g. C000127) - used for SEARCH#VOTE roll call lookups */
+  bioguide_id?: string;
 }
 
 class PoliticianSuggestionsService {
@@ -62,6 +64,7 @@ class PoliticianSuggestionsService {
       const stateIndex = headers.indexOf('state');
       const districtIndex = headers.indexOf('district');
       const typeIndex = headers.indexOf('type');
+      const bioguideIdIndex = headers.indexOf('bioguide_id');
 
       if (firstNameIndex === -1 || lastNameIndex === -1 || fullNameIndex === -1) {
         throw new Error('Required columns not found in CSV');
@@ -85,6 +88,7 @@ class PoliticianSuggestionsService {
           const state = values[stateIndex] || '';
           const district = values[districtIndex] || undefined;
           const type = values[typeIndex] as 'sen' | 'rep' || 'rep';
+          const bioguide_id = bioguideIdIndex >= 0 ? (values[bioguideIdIndex] || '').trim() || undefined : undefined;
 
           if (!firstName || !lastName) continue;
 
@@ -114,6 +118,7 @@ class PoliticianSuggestionsService {
             searchText,
             displayText,
             jurisdiction,
+            bioguide_id,
           });
         } catch (error) {
           console.warn(`⚠️ Error parsing line ${i + 1}:`, error);

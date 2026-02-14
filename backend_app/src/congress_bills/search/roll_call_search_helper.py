@@ -1,10 +1,12 @@
 """
 Roll call search helper: queries SEARCH#VOTE and SEARCH#ROLL indices.
 Returns full table rows, 100 items per page.
+Supports resolving bill IDs to projections (title, etc.) and computing vote summaries from members.
 """
 
 import logging
 from typing import Dict, List, Any, Optional
+from collections import defaultdict
 
 from boto3.dynamodb.conditions import Key
 
@@ -12,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 # Page size for roll call search results
 ROLL_CALL_PAGE_LIMIT = 100
+
+# Attributes to project when resolving bills (filterable/display only)
+BILL_PROJECTION_ATTRS = ['bill_id', 'bill_title', 'short_title', 'latest_action_text', 'latest_action_date']
 
 
 def _convert_decimal(obj: Any) -> Any:
@@ -24,6 +29,100 @@ def _convert_decimal(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_convert_decimal(v) for v in obj]
     return obj
+
+
+def _normalize_vote_cast(vote_cast: Any) -> str:
+    """Map Congress.gov voteCast to display bucket: Yea, Nay, Present, Not Voting."""
+    if vote_cast is None:
+        return 'Not Voting'
+    v = str(vote_cast).strip().lower()
+    if v in ('yea', 'yes'):
+        return 'Yea'
+    if v in ('nay', 'no'):
+        return 'Nay'
+    if v in ('present', 'present (not voting)'):
+        return 'Present'
+    if v in ('not voting', 'not voting (present)'):
+        return 'Not Voting'
+    # Fallback: capitalize first letter
+    return str(vote_cast).strip() or 'Not Voting'
+
+
+def compute_vote_summary(members: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Compute aggregate vote counts from a list of member vote dicts (from SEARCH#ROLL).
+    Each member can have: voteCast, voteParty/party, state/stateCode, name/firstName/lastName.
+    Returns: { total: { yea, nay, present, not_voting }, by_party: { D: { yea, nay, present, not_voting }, R: {}, I: {} } }
+    """
+    total = defaultdict(int)
+    by_party: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for m in members or []:
+        if not isinstance(m, dict):
+            continue
+        vote = _normalize_vote_cast(m.get('voteCast'))
+        party_raw = (m.get('voteParty') or m.get('party') or '').strip().upper()
+        party = party_raw[0] if party_raw else 'I'  # D, R, or I
+        if party not in ('D', 'R'):
+            party = 'I'
+        key = vote.lower().replace(' ', '_')
+        if key == 'yea':
+            total['yea'] += 1
+            by_party[party]['yea'] += 1
+        elif key == 'nay':
+            total['nay'] += 1
+            by_party[party]['nay'] += 1
+        elif key == 'present':
+            total['present'] += 1
+            by_party[party]['present'] += 1
+        else:
+            total['not_voting'] += 1
+            by_party[party]['not_voting'] += 1
+    return {
+        'total': dict(total),
+        'by_party': {p: dict(counts) for p, counts in by_party.items()},
+    }
+
+
+def fetch_bill_projections(table, bill_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Batch fetch minimal bill attributes for display/filtering.
+    Returns dict: bill_id -> { bill_id, bill_title, short_title, latest_action_text, latest_action_date }.
+    Only includes bills that exist and are not search index items.
+    """
+    if not table or not bill_ids:
+        return {}
+    unique_ids = list(dict.fromkeys(str(bid).strip() for bid in bill_ids if bid and str(bid).strip()))
+    if not unique_ids:
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    batch_size = 100
+    for i in range(0, len(unique_ids), batch_size):
+        batch = unique_ids[i:i + batch_size]
+        keys = [{'bill_id': str(bid), 'search_index_sk': str(bid)} for bid in batch]
+        try:
+            response = table.meta.client.batch_get_item(
+                RequestItems={
+                    table.name: {
+                        'Keys': keys,
+                        'ProjectionExpression': ','.join(BILL_PROJECTION_ATTRS),
+                    }
+                }
+            )
+            items = response.get('Responses', {}).get(table.name, [])
+            for item in items:
+                bid = item.get('bill_id')
+                if not bid or str(bid).startswith('SEARCH#'):
+                    continue
+                out[str(bid)] = _convert_decimal({
+                    'bill_id': bid,
+                    'bill_title': item.get('bill_title') or item.get('title') or '',
+                    'short_title': item.get('short_title') or '',
+                    'latest_action_text': item.get('latest_action_text') or item.get('latest_action') or '',
+                    'latest_action_date': item.get('latest_action_date') or '',
+                })
+        except Exception as e:
+            logger.warning(f"fetch_bill_projections batch error: {e}")
+    return out
 
 
 def search_roll_call_vote(
@@ -171,3 +270,29 @@ def search_roll_call_rolls(
             'last_evaluated_key': None,
             'search_index': 'SEARCH#ROLL',
         }
+
+
+def get_roll_call_item(
+    table,
+    congress: int,
+    session: int,
+    roll: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch a single SEARCH#ROLL item by congress, session, roll.
+    Returns the raw item (members may be in members_oversize_s3_key).
+    """
+    if not table or congress is None or session is None or roll is None:
+        return None
+    sk = f"{congress}#{session}#{roll}"
+    try:
+        response = table.get_item(
+            Key={'bill_id': 'SEARCH#ROLL', 'search_index_sk': sk}
+        )
+        item = response.get('Item')
+        if item:
+            return _convert_decimal(item)
+        return None
+    except Exception as e:
+        logger.error(f"Error in get_roll_call_item: {e}", exc_info=True)
+        return None

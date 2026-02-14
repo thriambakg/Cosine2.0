@@ -15,7 +15,6 @@ import {
   TableHead,
   TableRow,
   CircularProgress,
-  
   Checkbox,
   FormControl,
   InputLabel,
@@ -135,6 +134,12 @@ const CongressBillsSearchPage: React.FC = () => {
   const [rollCallPoliticianName, setRollCallPoliticianName] = useState<string[]>([]);
   const [rollCallSearchSidebarVisible, setRollCallSearchSidebarVisible] = useState<boolean>(true);
   const [rollCallSearchMessage, setRollCallSearchMessage] = useState<string | null>(null);
+  const [rollCallResults, setRollCallResults] = useState<any[]>([]);
+  const [rollCallLoading, setRollCallLoading] = useState<boolean>(false);
+  const [rollCallError, setRollCallError] = useState<string | null>(null);
+  const [rollCallHasMore, setRollCallHasMore] = useState<boolean>(false);
+  const [rollCallLastKey, setRollCallLastKey] = useState<any>(null);
+  const [rollCallSearchIndex, setRollCallSearchIndex] = useState<string | null>(null);
 
   // Search state
   const [searchParams, setSearchParams] = useState<CongressBillsSearchFilters>(() => {
@@ -1173,7 +1178,67 @@ const CongressBillsSearchPage: React.FC = () => {
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
                       <Button
                         variant="contained"
-                        onClick={() => setRollCallSearchMessage('Roll call search API will be wired here. Query SEARCH#ROLL and SEARCH#VOTE by congress/session/roll and politician.')}
+                        disabled={rollCallLoading}
+                        onClick={async () => {
+                          setRollCallSearchMessage(null);
+                          setRollCallError(null);
+                          const politicianNames = Array.isArray(rollCallPoliticianName) ? rollCallPoliticianName : (rollCallPoliticianName ? [rollCallPoliticianName] : []);
+                          const hasPoliticians = politicianNames.length > 0;
+                          const hasRollFilters = rollCallCongress === '119';
+                          if (!hasPoliticians && !hasRollFilters) {
+                            setRollCallSearchMessage('Select at least one politician and/or Congress & Session (and optionally a roll number) to search.');
+                            return;
+                          }
+                          setRollCallLoading(true);
+                          try {
+                            if (hasPoliticians) {
+                              const politicianIds = politicianNames.map((name) => {
+                                const p = politicianSuggestionsService.getAllPoliticians().find(x => x.fullName === name);
+                                if (p?.bioguide_id) return p.bioguide_id;
+                                return 'NAME#' + (name || '').replace(/[^A-Za-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'unknown';
+                              });
+                              const res = await congressBillsSearchAPI.rollCallSearch({
+                                search_index: 'SEARCH#VOTE',
+                                politician_ids: politicianIds,
+                                limit: 100,
+                              });
+                              if (res.success) {
+                                setRollCallResults(res.results || []);
+                                setRollCallHasMore(res.has_more || false);
+                                setRollCallLastKey(res.last_evaluated_key ?? null);
+                                setRollCallSearchIndex('SEARCH#VOTE');
+                              } else {
+                                setRollCallError(res.error || 'Vote search failed');
+                                setRollCallResults([]);
+                              }
+                            } else {
+                              const congressNum = rollCallCongress === '119' ? 119 : undefined;
+                              const sessionNum = rollCallSessions.length === 1 ? parseInt(rollCallSessions[0], 10) : undefined;
+                              const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
+                              const res = await congressBillsSearchAPI.rollCallSearch({
+                                search_index: 'SEARCH#ROLL',
+                                congress: congressNum,
+                                session: sessionNum,
+                                roll: isNaN(rollNum as number) ? undefined : rollNum,
+                                limit: 100,
+                              });
+                              if (res.success) {
+                                setRollCallResults(res.results || []);
+                                setRollCallHasMore(res.has_more || false);
+                                setRollCallLastKey(res.last_evaluated_key ?? null);
+                                setRollCallSearchIndex('SEARCH#ROLL');
+                              } else {
+                                setRollCallError(res.error || 'Roll search failed');
+                                setRollCallResults([]);
+                              }
+                            }
+                          } catch (e: any) {
+                            setRollCallError(e?.message || 'Search failed');
+                            setRollCallResults([]);
+                          } finally {
+                            setRollCallLoading(false);
+                          }
+                        }}
                         fullWidth
                         startIcon={<SearchIcon />}
                         sx={{
@@ -1182,7 +1247,7 @@ const CongressBillsSearchPage: React.FC = () => {
                           '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
                         }}
                       >
-                        Search
+                        {rollCallLoading ? 'Searching...' : 'Search'}
                       </Button>
                       <Button
                         variant="outlined"
@@ -1192,6 +1257,11 @@ const CongressBillsSearchPage: React.FC = () => {
                           setRollCallRoll('');
                           setRollCallPoliticianName([]);
                           setRollCallSearchMessage(null);
+                          setRollCallResults([]);
+                          setRollCallError(null);
+                          setRollCallLastKey(null);
+                          setRollCallHasMore(false);
+                          setRollCallSearchIndex(null);
                         }}
                         fullWidth
                         sx={{
@@ -1228,18 +1298,152 @@ const CongressBillsSearchPage: React.FC = () => {
               </Box>
             )}
 
-            {/* Main content - placeholder until API is wired */}
+            {/* Main content - roll call search results */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
               {rollCallSearchMessage && (
                 <Alert severity="info" sx={{ mb: 2 }} onClose={() => setRollCallSearchMessage(null)}>
                   {rollCallSearchMessage}
                 </Alert>
               )}
-              <GlassCard sx={{ p: 4 }}>
-                <Typography sx={{ color: '#94a3b8' }}>
-                  Search roll calls by Congress, session, and roll number, and filter by politician to see how they voted. Results will show vote metadata and member-level votes once the API is connected.
+              {rollCallError && (
+                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRollCallError(null)}>
+                  {rollCallError}
+                </Alert>
+              )}
+              {rollCallSearchIndex && (
+                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
+                  Index: {rollCallSearchIndex} · {rollCallResults.length} result(s){rollCallHasMore ? ' · Load more below' : ''}
                 </Typography>
-              </GlassCard>
+              )}
+              {rollCallResults.length > 0 && (
+                <GlassCard sx={{ p: 2 }}>
+                  {rollCallSearchIndex === 'SEARCH#ROLL' ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                      {rollCallResults.map((r: any, idx: number) => {
+                        const c = r.congress ?? r.search_index_sk?.split?.('#')?.[0];
+                        const s = r.session ?? r.search_index_sk?.split?.('#')?.[1];
+                        const rollNum = r.roll ?? r.search_index_sk?.split?.('#')?.[2];
+                        const congressNum = c != null ? Number(c) : NaN;
+                        const sessionNum = s != null ? Number(s) : NaN;
+                        const rollInt = rollNum != null ? Number(rollNum) : NaN;
+                        const canOpen = !isNaN(congressNum) && !isNaN(sessionNum) && !isNaN(rollInt);
+                        const billLabel = r.bill_associated?.bill_title || r.bill_id_associated || '—';
+                        return (
+                          <Box
+                            key={r.search_index_sk ?? idx}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: 1,
+                              py: 1,
+                              borderBottom: idx < rollCallResults.length - 1 ? '1px solid #374151' : 'none',
+                            }}
+                          >
+                            <Box>
+                              <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
+                                {r.roll_display ?? `Roll ${rollNum}`}
+                              </Typography>
+                              <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+                                {billLabel}
+                              </Typography>
+                            </Box>
+                            {canOpen && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => {
+                                  openItemDetails(
+                                    'roll_call',
+                                    { congress: congressNum, session: sessionNum, roll: rollInt },
+                                    r.roll_display ?? `Roll Call ${rollNum}`,
+                                    { user_id: user?.id }
+                                  );
+                                }}
+                              >
+                                View details
+                              </Button>
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  ) : (
+                    <Box component="pre" sx={{ color: '#e2e8f0', fontSize: '0.8125rem', overflow: 'auto', maxHeight: 480, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(rollCallResults, null, 2)}
+                    </Box>
+                  )}
+                  {rollCallHasMore && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={rollCallLoading}
+                      onClick={async () => {
+                        if (!rollCallLastKey) return;
+                        setRollCallLoading(true);
+                        setRollCallError(null);
+                        try {
+                          const politicianNames = Array.isArray(rollCallPoliticianName) ? rollCallPoliticianName : [];
+                          if (rollCallSearchIndex === 'SEARCH#VOTE' && politicianNames.length > 0) {
+                            const politicianIds = politicianNames.map((name) => {
+                              const p = politicianSuggestionsService.getAllPoliticians().find(x => x.fullName === name);
+                              if (p?.bioguide_id) return p.bioguide_id;
+                              return 'NAME#' + (name || '').replace(/[^A-Za-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'unknown';
+                            });
+                            const res = await congressBillsSearchAPI.rollCallSearch({
+                              search_index: 'SEARCH#VOTE',
+                              politician_ids: politicianIds,
+                              limit: 100,
+                              last_evaluated_key: rollCallLastKey,
+                            });
+                            if (res.success && (res.results?.length ?? 0) > 0) {
+                              setRollCallResults(prev => [...prev, ...(res.results || [])]);
+                              setRollCallHasMore(res.has_more || false);
+                              setRollCallLastKey(res.last_evaluated_key ?? null);
+                            } else {
+                              setRollCallHasMore(false);
+                            }
+                          } else if (rollCallSearchIndex === 'SEARCH#ROLL') {
+                            const congressNum = rollCallCongress === '119' ? 119 : undefined;
+                            const sessionNum = rollCallSessions.length === 1 ? parseInt(rollCallSessions[0], 10) : undefined;
+                            const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
+                            const res = await congressBillsSearchAPI.rollCallSearch({
+                              search_index: 'SEARCH#ROLL',
+                              congress: congressNum,
+                              session: sessionNum,
+                              roll: isNaN(rollNum as number) ? undefined : rollNum,
+                              limit: 100,
+                              last_evaluated_key: rollCallLastKey,
+                            });
+                            if (res.success && (res.results?.length ?? 0) > 0) {
+                              setRollCallResults(prev => [...prev, ...(res.results || [])]);
+                              setRollCallHasMore(res.has_more || false);
+                              setRollCallLastKey(res.last_evaluated_key ?? null);
+                            } else {
+                              setRollCallHasMore(false);
+                            }
+                          }
+                        } catch (e: any) {
+                          setRollCallError(e?.message || 'Load more failed');
+                        } finally {
+                          setRollCallLoading(false);
+                        }
+                      }}
+                      sx={{ mt: 2 }}
+                    >
+                      Load more
+                    </Button>
+                  )}
+                </GlassCard>
+              )}
+              {!rollCallSearchIndex && !rollCallSearchMessage && !rollCallError && (
+                <GlassCard sx={{ p: 4 }}>
+                  <Typography sx={{ color: '#94a3b8' }}>
+                    Search roll calls by Congress, session, and roll number, or by politician to see how they voted. Use the filters and click Search.
+                  </Typography>
+                </GlassCard>
+              )}
             </Box>
           </Box>
         )}

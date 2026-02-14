@@ -15,6 +15,12 @@ import {
   Portal,
   Tabs,
   Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -32,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import TutorialHelpIcon from './TutorialHelpIcon';
 import { govtContractsEnrichmentAPI, govtContractsSearchAPI, filesystemAPI, fileReturnAPI, congressBillsSearchAPI, ldaSearchAPI } from '@/services/api';
+import type { RollCallDetailsResult, RollCallMemberVote } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeDialogManager } from '../../hooks/useSafeDialogManager';
 import { useDialogManagerHelpers } from '../../hooks/useDialogManagerHelpers';
@@ -136,6 +143,7 @@ export type ItemType =
   | 'news_article' 
   | 'politician_trade' 
   | 'congress_bill' 
+  | 'roll_call'
   | 'lda_disclosure' 
   | 'stock_result' 
   | 'tile';
@@ -241,6 +249,14 @@ function getDemoMockItemData(itemType: ItemType, data: any): any {
         summary_text: base.summary_text ?? 'This is demo bill text for preview. No API calls in demo.',
         ...base,
       };
+    case 'roll_call':
+      return {
+        congress: base.congress ?? 119,
+        session: base.session ?? 2,
+        roll: base.roll ?? 70,
+        roll_display: base.roll_display ?? 'Roll no. 70',
+        ...base,
+      };
     case 'politician_trade':
       return {
         tradeId: base.tradeId ?? base.award_id ?? 'demo-trade-1',
@@ -315,6 +331,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const fullAwardFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched full award data for
   const fullFilingFetchedRef = useRef<Set<string>>(new Set()); // Track which filing IDs/PKs we've already fetched full filing data for
   const [refreshBillLoading, setRefreshBillLoading] = useState<boolean>(false);
+  const [rollCallDetails, setRollCallDetails] = useState<RollCallDetailsResult | null>(null);
+  const [rollCallDetailsLoading, setRollCallDetailsLoading] = useState<boolean>(false);
+  const [rollCallDetailsError, setRollCallDetailsError] = useState<string | null>(null);
   
   // State to track item data - updated when enrichment completes
   const [itemData, setItemData] = useState<any>(() => {
@@ -499,9 +518,50 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       fullAwardFetchedRef.current.clear();
       childAwardsFetchedRef.current.clear();
       fullFilingFetchedRef.current.clear();
+      setRollCallDetails(null);
+      setRollCallDetailsError(null);
     }
   }, [data, itemType, open, useDemoData]);
-  
+
+  // Fetch roll call details when dialog opens with roll_call item type
+  useEffect(() => {
+    if (!open || itemType !== 'roll_call' || useDemoData) return;
+    const congress = itemData?.congress != null ? Number(itemData.congress) : NaN;
+    const session = itemData?.session != null ? Number(itemData.session) : NaN;
+    const roll = itemData?.roll != null ? Number(itemData.roll) : NaN;
+    if (isNaN(congress) || isNaN(session) || isNaN(roll)) {
+      setRollCallDetailsError('Invalid congress, session, or roll.');
+      setRollCallDetailsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRollCallDetailsLoading(true);
+    setRollCallDetailsError(null);
+    setRollCallDetails(null);
+    congressBillsSearchAPI
+      .getRollCallDetails({ congress, session, roll })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.success && res.result) {
+          setRollCallDetails(res.result);
+          setRollCallDetailsError(null);
+        } else {
+          setRollCallDetailsError(res.error || 'Roll call not found.');
+          setRollCallDetails(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setRollCallDetailsError(e instanceof Error ? e.message : 'Failed to load roll call.');
+          setRollCallDetails(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRollCallDetailsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [open, itemType, useDemoData, itemData?.congress, itemData?.session, itemData?.roll]);
+
   // Dialog manager for minimize functionality (only use if not already managed)
   const safeDialogManager = useSafeDialogManager();
   const dialogManager = (!dialogId && safeDialogManager) ? safeDialogManager : undefined;
@@ -800,6 +860,12 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         case 'congress_bill':
           addBillToContext(itemData);
           break;
+        case 'roll_call':
+          // Roll call can be added as context with minimal payload (e.g. for chat)
+          if (rollCallDetails?.bill_id_associated) {
+            addBillToContext({ bill_id: rollCallDetails.bill_id_associated, ...rollCallDetails.bill_associated });
+          }
+          break;
         case 'lda_disclosure':
           addLDAFilingToContext(itemData);
           break;
@@ -817,7 +883,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     } catch (error) {
       console.error('Error adding item to context:', error);
     }
-  }, [data, itemType]);
+  }, [data, itemType, rollCallDetails]);
 
   // Handle adding item to files
   const handleAddToFiles = useCallback(() => {
@@ -858,6 +924,10 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         case 'congress_bill':
           title = itemData.title || itemData.billNumber || 'Congress Bill';
           itemTypeForFiles = 'congress_bill';
+          break;
+        case 'roll_call':
+          title = itemData.roll_display || `Roll Call ${itemData.roll ?? ''}`;
+          itemTypeForFiles = 'roll_call';
           break;
         case 'lda_disclosure':
           title = itemData.registrant_name 
@@ -1204,6 +1274,150 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               </Button>
             </Box>
           )}
+        </Box>
+      );
+    }
+
+    // Roll call (House vote) — fetch details and show associated bill, vote summary, and members table
+    if (itemType === 'roll_call') {
+      const scrollbarStyles = { scrollbarWidth: 'thin' as const, '&::-webkit-scrollbar': { width: 8 }, '&::-webkit-scrollbar-thumb': { backgroundColor: '#4b5563', borderRadius: 4 } };
+      if (rollCallDetailsLoading) {
+        return (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 280, p: 3 }}>
+            <CircularProgress sx={{ color: '#3b82f6' }} />
+          </Box>
+        );
+      }
+      if (rollCallDetailsError || !rollCallDetails) {
+        return (
+          <Box sx={{ p: 3 }}>
+            <Alert severity="error" sx={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+              {rollCallDetailsError ?? 'Roll call not found.'}
+            </Alert>
+          </Box>
+        );
+      }
+      const data = rollCallDetails;
+      const bill = data.bill_associated;
+      const voteSummary = data.vote_summary;
+      const total = voteSummary?.total ?? {};
+      const byParty = voteSummary?.by_party ?? {};
+      const members = data.members ?? [];
+      const partyOrder = ['D', 'R', 'I'];
+      const memberDisplayName = (m: RollCallMemberVote) => {
+        if (m.name) return m.name;
+        const first = (m.firstName ?? '').trim();
+        const last = (m.lastName ?? '').trim();
+        return [first, last].filter(Boolean).join(' ') || '—';
+      };
+      const memberPartyLabel = (m: RollCallMemberVote) => {
+        const p = (m.voteParty ?? m.party ?? '').trim().toUpperCase();
+        if (p.startsWith('R')) return 'Republican';
+        if (p.startsWith('D')) return 'Democratic';
+        return p || '—';
+      };
+      const memberStateLabel = (m: RollCallMemberVote) => (m.state ?? m.stateCode ?? '').trim() || '—';
+      const memberVoteLabel = (m: RollCallMemberVote) => (m.voteCast ?? '').trim() || '—';
+
+      return (
+        <Box sx={{ p: 3, maxHeight: '70vh', overflow: 'auto', ...scrollbarStyles }}>
+          <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2 }}>
+            {data.roll_display ?? `Roll Call ${data.roll}`} — Congress {data.congress}, Session {data.session}
+          </Typography>
+
+          <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
+            <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5, fontWeight: 600 }}>
+              Associated bill
+            </Typography>
+            {data.bill_id_associated ? (
+              <Box>
+                <Link
+                  component="button"
+                  variant="body1"
+                  sx={{ color: '#60a5fa', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
+                  onClick={() => {
+                    onClose();
+                    openItemDetails('congress_bill', { bill_id: data.bill_id_associated }, data.bill_id_associated);
+                  }}
+                >
+                  {data.bill_id_associated}
+                </Link>
+                {bill?.bill_title && (
+                  <Typography variant="body2" sx={{ color: '#cbd5e1', mt: 0.5 }}>{bill.bill_title}</Typography>
+                )}
+                {bill?.latest_action_text && (
+                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.5 }}>{bill.latest_action_text}</Typography>
+                )}
+              </Box>
+            ) : (
+              <Typography variant="body2" sx={{ color: '#94a3b8' }}>No associated bill</Typography>
+            )}
+          </Paper>
+
+          <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
+            <Typography variant="subtitle1" sx={{ color: '#e2e8f0', mb: 1.5 }}>Vote summary</Typography>
+            <TableContainer>
+              <Table size="small" sx={{ '& th, & td': { color: '#cbd5e1', borderColor: '#374151' } }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ borderColor: '#374151' }}>Party</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>Yea</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>Nay</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>Present</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>Not Voting</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {partyOrder.map((p) => {
+                    const counts = byParty[p] ?? {};
+                    const label = p === 'D' ? 'Democratic' : p === 'R' ? 'Republican' : 'Independent';
+                    return (
+                      <TableRow key={p}>
+                        <TableCell sx={{ borderColor: '#374151' }}>{label}</TableCell>
+                        <TableCell align="right" sx={{ borderColor: '#374151' }}>{counts.yea ?? 0}</TableCell>
+                        <TableCell align="right" sx={{ borderColor: '#374151' }}>{counts.nay ?? 0}</TableCell>
+                        <TableCell align="right" sx={{ borderColor: '#374151' }}>{counts.present ?? 0}</TableCell>
+                        <TableCell align="right" sx={{ borderColor: '#374151' }}>{counts.not_voting ?? 0}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow sx={{ fontWeight: 600 }}>
+                    <TableCell sx={{ borderColor: '#374151' }}>Total</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>{total.yea ?? 0}</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>{total.nay ?? 0}</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>{total.present ?? 0}</TableCell>
+                    <TableCell align="right" sx={{ borderColor: '#374151' }}>{total.not_voting ?? 0}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+
+          <Paper variant="outlined" sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
+            <Typography variant="subtitle1" sx={{ color: '#e2e8f0', mb: 1.5 }}>All votes ({members.length} members)</Typography>
+            <TableContainer sx={{ maxHeight: 400 }}>
+              <Table size="small" stickyHeader sx={{ '& th, & td': { color: '#cbd5e1', borderColor: '#374151' } }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ borderColor: '#374151' }}>Representative</TableCell>
+                    <TableCell sx={{ borderColor: '#374151' }}>Party</TableCell>
+                    <TableCell sx={{ borderColor: '#374151' }}>State</TableCell>
+                    <TableCell sx={{ borderColor: '#374151' }}>Vote</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {members.map((m, idx) => (
+                    <TableRow key={(m as any).bioguideID ?? idx}>
+                      <TableCell sx={{ borderColor: '#374151' }}>{memberDisplayName(m)}</TableCell>
+                      <TableCell sx={{ borderColor: '#374151' }}>{memberPartyLabel(m)}</TableCell>
+                      <TableCell sx={{ borderColor: '#374151' }}>{memberStateLabel(m)}</TableCell>
+                      <TableCell sx={{ borderColor: '#374151' }}>{memberVoteLabel(m)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
         </Box>
       );
     }

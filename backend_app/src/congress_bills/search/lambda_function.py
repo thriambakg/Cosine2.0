@@ -16,7 +16,13 @@ from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
 from cors_helper import get_cors_headers, validate_origin
 
-from roll_call_search_helper import search_roll_call_vote, search_roll_call_rolls
+from roll_call_search_helper import (
+    search_roll_call_vote,
+    search_roll_call_rolls,
+    get_roll_call_item,
+    fetch_bill_projections,
+    compute_vote_summary,
+)
 
 
 # Configure logging
@@ -77,6 +83,35 @@ def fetch_oversized_bill_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
         return json.loads(decompressed_content.decode('utf-8'))
     except Exception as e:
         logger.error(f"Error fetching oversized bill from S3 ({s3_key}): {str(e)}", exc_info=True)
+        return None
+
+
+def fetch_oversized_roll_members_from_s3(s3_key: str) -> List[Dict[str, Any]]:
+    """Fetch oversized roll call members list from S3 (gzip JSON)."""
+    try:
+        if not s3_key:
+            return []
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        gzipped_content = response['Body'].read()
+        decompressed_content = gzip.decompress(gzipped_content)
+        data = json.loads(decompressed_content.decode('utf-8'))
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.error(f"Error fetching oversized roll members from S3 ({s3_key}): {str(e)}", exc_info=True)
+        return []
+
+
+def fetch_oversized_vote_data_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
+    """Fetch SEARCH#VOTE oversize payload from S3 (gzip JSON with bill_yea, bill_nea, bill_abstained, roll_*)."""
+    try:
+        if not s3_key:
+            return None
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        gzipped_content = response['Body'].read()
+        decompressed_content = gzip.decompress(gzipped_content)
+        return json.loads(decompressed_content.decode('utf-8'))
+    except Exception as e:
+        logger.error(f"Error fetching oversized vote data from S3 ({s3_key}): {str(e)}", exc_info=True)
         return None
 
 
@@ -1004,6 +1039,118 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             body = event.get('body', {})
         
+        # Roll call details: single roll by congress/session/roll (for details page)
+        roll_call_details = body.get('roll_call_details')
+        if roll_call_details and bills_table:
+            try:
+                congress = roll_call_details.get('congress')
+                session = roll_call_details.get('session')
+                roll = roll_call_details.get('roll')
+                for key, val in [('congress', congress), ('session', session), ('roll', roll)]:
+                    if val is not None:
+                        try:
+                            roll_call_details[key] = int(val)
+                        except (TypeError, ValueError):
+                            pass
+                congress = int(congress) if congress is not None else None
+                session = int(session) if session is not None else None
+                roll = int(roll) if roll is not None else None
+                item = get_roll_call_item(bills_table, congress, session, roll)
+                if not item:
+                    return {
+                        'statusCode': 200,
+                        'headers': build_cors_headers(origin),
+                        'body': json.dumps({
+                            'success': False,
+                            'error': 'Roll call not found',
+                            'result': None,
+                        }, default=str),
+                    }
+                members = item.get('members') or []
+                if not members and item.get('members_oversize_s3_key'):
+                    members = fetch_oversized_roll_members_from_s3(item['members_oversize_s3_key'])
+                bill_id_associated = item.get('bill_id_associated')
+                bill_associated = {}
+                if bill_id_associated:
+                    bill_associated = fetch_bill_projections(bills_table, [bill_id_associated]).get(bill_id_associated, {})
+                vote_summary = compute_vote_summary(members) if members else {'total': {}, 'by_party': {}}
+                result = {
+                    'success': True,
+                    'result': {
+                        'roll_item': {k: v for k, v in item.items() if k != 'members'},
+                        'bill_associated': bill_associated,
+                        'vote_summary': vote_summary,
+                        'members': members,
+                    },
+                }
+                return {
+                    'statusCode': 200,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps(result, default=str),
+                }
+            except Exception as e:
+                logger.error(f"roll_call_details error: {e}", exc_info=True)
+                return {
+                    'statusCode': 200,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({
+                        'success': False,
+                        'error': str(e),
+                        'result': None,
+                    }, default=str),
+                }
+
+        # Roll call details: single roll by congress/session/roll (for details page; includes members + vote summary)
+        roll_call_details = body.get('roll_call_details')
+        if roll_call_details and bills_table:
+            try:
+                congress = roll_call_details.get('congress')
+                session = roll_call_details.get('session')
+                roll = roll_call_details.get('roll')
+                if congress is not None:
+                    try:
+                        congress = int(congress)
+                    except (TypeError, ValueError):
+                        congress = None
+                if session is not None:
+                    try:
+                        session = int(session)
+                    except (TypeError, ValueError):
+                        session = None
+                if roll is not None:
+                    try:
+                        roll = int(roll)
+                    except (TypeError, ValueError):
+                        roll = None
+                if congress is None or session is None or roll is None:
+                    result = {'success': False, 'error': 'roll_call_details requires congress, session, and roll'}
+                else:
+                    item = get_roll_call_item(bills_table, congress, session, roll)
+                    if not item:
+                        result = {'success': False, 'error': f'Roll call not found: {congress}#{session}#{roll}'}
+                    else:
+                        members = item.get('members') or []
+                        if not members and item.get('members_oversize_s3_key'):
+                            members = fetch_oversized_roll_members_from_s3(item['members_oversize_s3_key'])
+                        bid = item.get('bill_id_associated')
+                        bill_projs = fetch_bill_projections(bills_table, [bid]) if bid else {}
+                        result = {
+                            'success': True,
+                            'result': convert_decimal_to_float({
+                                **item,
+                                'bill_associated': bill_projs.get(bid, {}) if bid else {},
+                                'vote_summary': compute_vote_summary(members) if members else {'total': {}, 'by_party': {}},
+                                'members': members,
+                            }),
+                        }
+            except (TypeError, ValueError) as e:
+                result = {'success': False, 'error': f'Invalid roll_call_details: {e}'}
+            return {
+                'statusCode': 200,
+                'headers': build_cors_headers(origin),
+                'body': json.dumps(result, default=str),
+            }
+
         # Roll call search: SEARCH#VOTE or SEARCH#ROLL (returns full rows, 100 per page)
         roll_call_search = body.get('roll_call_search')
         if roll_call_search and bills_table:
@@ -1023,6 +1170,23 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     limit=limit,
                     last_evaluated_key=last_ev,
                 )
+                # Resolve bill IDs to projections for client-side filtering/display
+                bill_ids = []
+                for r in result.get('results') or []:
+                    if r.get('vote_data_oversize_s3_key'):
+                        vote_data = fetch_oversized_vote_data_from_s3(r['vote_data_oversize_s3_key'])
+                        if isinstance(vote_data, dict):
+                            for key in ('bill_yea', 'bill_nea', 'bill_abstained'):
+                                for bid in (vote_data.get(key) or []):
+                                    if bid and not str(bid).startswith('SEARCH#'):
+                                        bill_ids.append(bid)
+                    else:
+                        for key in ('bill_yea', 'bill_nea', 'bill_abstained'):
+                            for bid in (r.get(key) or []):
+                                if bid and not str(bid).startswith('SEARCH#'):
+                                    bill_ids.append(bid)
+                if bill_ids:
+                    result['bill_details'] = fetch_bill_projections(bills_table, bill_ids)
             elif search_index == 'SEARCH#ROLL':
                 congress = roll_call_search.get('congress')
                 session = roll_call_search.get('session')
@@ -1050,6 +1214,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     limit=limit,
                     last_evaluated_key=last_ev,
                 )
+                # Resolve bill_associated and compute vote_summary for each roll
+                roll_results = result.get('results') or []
+                bill_ids_roll = list(dict.fromkeys(
+                    r.get('bill_id_associated') for r in roll_results if r.get('bill_id_associated')
+                ))
+                bill_projs = fetch_bill_projections(bills_table, bill_ids_roll) if bill_ids_roll else {}
+                for r in roll_results:
+                    bid = r.get('bill_id_associated')
+                    r['bill_associated'] = bill_projs.get(bid, {}) if bid else {}
+                    members = r.get('members') or []
+                    if not members and r.get('members_oversize_s3_key'):
+                        members = fetch_oversized_roll_members_from_s3(r['members_oversize_s3_key'])
+                    r['vote_summary'] = compute_vote_summary(members) if members else {'total': {}, 'by_party': {}}
+                    # Omit full members list from list response; details page uses roll_call_details for full data
+                    r.pop('members', None)
             else:
                 result = {
                     'success': False,

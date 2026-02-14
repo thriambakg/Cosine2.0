@@ -1679,7 +1679,62 @@ export const congressBillsSearchAPI = {
       body: JSON.stringify({ bill_id: params.bill_id }),
     });
   },
+  /** Single roll call details for details page (congress, session, roll). Returns roll item + bill_associated + vote_summary + members. */
+  getRollCallDetails: async (params: {
+    congress: number;
+    session: number;
+    roll: number;
+  }): Promise<{
+    success: boolean;
+    result?: RollCallDetailsResult;
+    error?: string;
+  }> => {
+    return apiRequest('/congress-bills-search', {
+      method: 'POST',
+      body: JSON.stringify({
+        roll_call_details: {
+          congress: params.congress,
+          session: params.session,
+          roll: params.roll,
+        },
+      }),
+    });
+  },
 };
+
+/** Single roll call details: roll item with bill_associated, vote_summary, and members list. */
+export interface RollCallDetailsResult {
+  congress: number;
+  session: number;
+  roll: number;
+  search_index_sk: string;
+  bill_id_associated?: string;
+  roll_display?: string;
+  bill_associated?: {
+    bill_id?: string;
+    bill_title?: string;
+    short_title?: string;
+    latest_action_text?: string;
+    latest_action_date?: string;
+  };
+  vote_summary?: {
+    total?: { yea?: number; nay?: number; present?: number; not_voting?: number };
+    by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }>;
+  };
+  members?: RollCallMemberVote[];
+}
+
+export interface RollCallMemberVote {
+  voteCast?: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  voteParty?: string;
+  party?: string;
+  state?: string;
+  stateCode?: string;
+  bioguideID?: string;
+}
 
 export const congressBillsAutocompleteAPI = {
   autocomplete: async (params: {

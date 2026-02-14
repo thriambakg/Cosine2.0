@@ -2909,6 +2909,8 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           itemType = 'politician_trade';
         } else if (itemData?.bill_id || itemData?.bill_type || itemData?.bill_number) {
           itemType = 'congress_bill';
+        } else if (itemData?.congress != null && itemData?.session != null && itemData?.roll != null) {
+          itemType = 'roll_call';
         } else if (itemData?.filing_uuid || itemData?.registrant_name || itemData?.client_name) {
           itemType = 'lda_disclosure';
         } else if (itemData?.symbol || itemData?.ticker) {
