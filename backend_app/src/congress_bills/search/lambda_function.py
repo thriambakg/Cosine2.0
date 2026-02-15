@@ -126,7 +126,7 @@ def fetch_oversized_roll_members_from_s3(s3_key: str) -> List[Dict[str, Any]]:
 
 
 def fetch_oversized_vote_data_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
-    """Fetch SEARCH#VOTE oversize payload from S3 (gzip JSON with bill_yea, bill_nea, bill_present, bill_not_voting, roll_*, or legacy bill_abstained/roll_abstained)."""
+    """Fetch SEARCH#VOTE oversize payload from S3 (gzip JSON with bill_yea, bill_nea, bill_present, bill_not_voting, roll_*)."""
     try:
         if not s3_key:
             return None
@@ -1206,9 +1206,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     limit=limit,
                     last_evaluated_key=last_ev,
                 )
-                # Resolve bill IDs and collect roll keys for date lookup (bill/roll: yea, nea, present, not_voting; legacy abstained)
-                bill_keys = ('bill_yea', 'bill_nea', 'bill_present', 'bill_not_voting', 'bill_abstained')
-                roll_keys = ('roll_yea', 'roll_nea', 'roll_present', 'roll_not_voting', 'roll_abstained')
+                # Resolve bill IDs and collect roll keys for date lookup (bill/roll: yea, nea, present, not_voting)
+                bill_keys = ('bill_yea', 'bill_nea', 'bill_present', 'bill_not_voting')
+                roll_keys = ('roll_yea', 'roll_nea', 'roll_present', 'roll_not_voting')
                 bill_ids = []
                 roll_keys_set = set()
                 for r in result.get('results') or []:
