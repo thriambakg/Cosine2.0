@@ -23,6 +23,7 @@ from roll_call_search_helper import (
     get_roll_call_dates_for_keys,
     fetch_bill_projections,
     compute_vote_summary,
+    _parse_roll_sort_key_date,
 )
 
 
@@ -1063,13 +1064,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             body = event.get('body', {})
         
-        # Roll call details: single roll by congress/session/roll (for details page)
+        # Roll call details: single roll by congress/session/roll or by search_index_sk (SK = congress#date#session#roll)
         roll_call_details = body.get('roll_call_details')
         if roll_call_details and bills_table:
             try:
                 congress = roll_call_details.get('congress')
                 session = roll_call_details.get('session')
                 roll = roll_call_details.get('roll')
+                search_index_sk = (roll_call_details.get('search_index_sk') or '').strip() or None
                 for key, val in [('congress', congress), ('session', session), ('roll', roll)]:
                     if val is not None:
                         try:
@@ -1079,7 +1081,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 congress = int(congress) if congress is not None else None
                 session = int(session) if session is not None else None
                 roll = int(roll) if roll is not None else None
-                item = get_roll_call_item(bills_table, congress, session, roll)
+                # When SK is provided (e.g. from context item), direct get_item; else query by congress/session/roll
+                item = None
+                if search_index_sk:
+                    get_resp = bills_table.get_item(Key={'bill_id': 'SEARCH#ROLL', 'search_index_sk': search_index_sk})
+                    if get_resp.get('Item'):
+                        item = convert_decimal_to_float(get_resp['Item'])
+                        date_val = item.get('latest_action_date') or _parse_roll_sort_key_date(item.get('search_index_sk')) or ''
+                        item['latest_action_date'] = date_val
+                        item['project_update_date'] = date_val
+                if not item:
+                    item = get_roll_call_item(bills_table, congress, session, roll)
                 if not item:
                     return {
                         'statusCode': 200,

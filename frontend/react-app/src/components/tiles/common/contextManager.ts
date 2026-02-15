@@ -1152,15 +1152,20 @@ export const addMultipleBillsToContext = (
 
 /**
  * Add a roll call to the context window (congress, session, roll).
+ * Optional roll_display, bill_id_associated, and search_index_sk (DynamoDB SK) are included when provided.
+ * search_index_sk allows the backend to fetch full vote details with a direct get_item (PK=SEARCH#ROLL, SK=search_index_sk).
  */
-export const addRollCallToContext = (rollCall: { congress: number; session: number; roll: number }, title?: string): void => {
-  const { congress, session, roll } = rollCall;
+export const addRollCallToContext = (
+  rollCall: { congress: number; session: number; roll: number; roll_display?: string; bill_id_associated?: string; search_index_sk?: string },
+  title?: string
+): void => {
+  const { congress, session, roll, roll_display, bill_id_associated, search_index_sk } = rollCall;
   const contextItem: ContextItem = {
     id: `roll_call_${congress}_${session}_${roll}_${Date.now()}`,
     type: 'roll_call',
-    title: title || `Roll Call ${congress}-${session}-${roll}`,
+    title: title || roll_display || `Roll Call ${congress}-${session}-${roll}`,
     subtitle: `Congress ${congress}, Session ${session}`,
-    data: { congress, session, roll },
+    data: { congress, session, roll, ...(roll_display != null && { roll_display }), ...(bill_id_associated != null && { bill_id_associated }), ...(search_index_sk != null && { search_index_sk }) },
     timestamp: Date.now(),
   };
   addToContext(contextItem);
@@ -1168,14 +1173,24 @@ export const addRollCallToContext = (rollCall: { congress: number; session: numb
 
 /**
  * Add multiple roll calls to the context window.
+ * Includes roll_display, bill_id_associated, and search_index_sk (DynamoDB SK) when available.
  */
-export const addMultipleRollCallsToContext = (rollCalls: Array<{ congress: number; session: number; roll: number; roll_display?: string }>): void => {
+export const addMultipleRollCallsToContext = (
+  rollCalls: Array<{ congress: number; session: number; roll: number; roll_display?: string; bill_id_associated?: string; search_index_sk?: string }>
+): void => {
   const contextItems: ContextItem[] = rollCalls.map(rc => ({
     id: `roll_call_${rc.congress}_${rc.session}_${rc.roll}_${Date.now()}_${Math.random()}`,
     type: 'roll_call' as const,
     title: rc.roll_display || `Roll Call ${rc.congress}-${rc.session}-${rc.roll}`,
     subtitle: `Congress ${rc.congress}, Session ${rc.session}`,
-    data: { congress: rc.congress, session: rc.session, roll: rc.roll },
+    data: {
+      congress: rc.congress,
+      session: rc.session,
+      roll: rc.roll,
+      ...(rc.roll_display != null && { roll_display: rc.roll_display }),
+      ...(rc.bill_id_associated != null && { bill_id_associated: rc.bill_id_associated }),
+      ...(rc.search_index_sk != null && { search_index_sk: rc.search_index_sk }),
+    },
     timestamp: Date.now(),
   }));
   if (contextItems.length === 0) return;

@@ -111,6 +111,20 @@ def invoke_congress_bills_search_lambda(
         }
 
 
+def invoke_roll_call_details_lambda(roll_call_details: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Invoke the Congress Bills Search Lambda with roll_call_details to fetch full vote data for one roll call.
+    When search_index_sk (DynamoDB SK) is provided, the Lambda does a direct get_item (PK=SEARCH#ROLL, SK=search_index_sk).
+    Otherwise uses congress, session, roll to query. Returns result with roll_item, bill_associated, vote_summary, members.
+    """
+    try:
+        body = {'roll_call_details': roll_call_details}
+        return _invoke_lambda_with_body(body)
+    except Exception as e:
+        logger.error(f"Error invoking roll call details Lambda: {str(e)}", exc_info=True)
+        return {'success': False, 'error': str(e), 'result': None}
+
+
 def invoke_roll_call_search_lambda(roll_call_search: Dict[str, Any]) -> Dict[str, Any]:
     """
     Invoke the Congress Bills Search Lambda with roll_call_search body (SEARCH#VOTE or SEARCH#ROLL).
@@ -281,14 +295,16 @@ def search_congress_bills(
     limit: int = 5,
     last_evaluated_key: str = None,
     roll_call_search: str = None,
-    question_date: str = None
+    question_date: str = None,
+    roll_call_details: str = None
 ) -> str:
     """
-    Search for congressional bills OR roll call votes by invoking the Congress Bills Search Lambda.
+    Search for congressional bills OR roll call votes, OR fetch full details for one roll call by invoking the Congress Bills Search Lambda.
     
-    **Two modes:**
-    1. **Bill search** (default): Pass filters (and optionally limit, last_evaluated_key). Use for bills by sponsor, policy area, congress, etc.
-    2. **Roll call search**: Pass roll_call_search (JSON) to search roll call votes. Use question_date to default congress to the most recent congress for that date (e.g. question date "2025-02-01" -> congress 119).
+    **Three modes:**
+    1. **Roll call details** (single roll): Pass roll_call_details (JSON) to get full vote data for ONE roll call (members, vote_summary, bill_associated). When the user has a roll call in context, use this with the context item's data. **Always include search_index_sk when the context item has it** (e.g. "119#2026-01-15#1#40") so the backend does a direct lookup (PK=SEARCH#ROLL, SK=search_index_sk). Otherwise pass congress, session, roll. Example: roll_call_details = '{"search_index_sk": "119#2026-01-15#1#40"}' or '{"congress": 119, "session": 1, "roll": 40}'.
+    2. **Bill search** (default): Pass filters (and optionally limit, last_evaluated_key). Use for bills by sponsor, policy area, congress, etc.
+    3. **Roll call search** (list): Pass roll_call_search (JSON) to search roll call votes (SEARCH#VOTE or SEARCH#ROLL). Use question_date to default congress when needed.
     
     **Roll call search (roll_call_search parameter):**
     - **SEARCH#VOTE** (by politician): Use when the user asks for a politician's votes or roll call record.
@@ -314,13 +330,24 @@ def search_congress_bills(
         filters: JSON string of filter fields for BILL search (ignored if roll_call_search is provided). Supported: sponsor_name, politician_name, cosponsor_name, politician_role, bill_title, bill_type, sponsor_party, sponsor_state, policy_area, bipartisan, bill_number, congress, introduced_date_from/to, latest_action_date_from/to.
         limit: Max results for bill search (default 5, max 1000). For roll call search, limit is inside roll_call_search JSON.
         last_evaluated_key: Pagination token for bill search (optional).
-        roll_call_search: Optional JSON string for roll call search. Must include "search_index": "SEARCH#VOTE" or "SEARCH#ROLL". For SEARCH#VOTE include "politician_ids" (list of bioguide_id from search_autocomplete). For SEARCH#ROLL include "congress" (optional if question_date set), optional "session", "roll", "limit", "last_evaluated_key".
+        roll_call_search: Optional JSON string for roll call search (list). Must include "search_index": "SEARCH#VOTE" or "SEARCH#ROLL". For SEARCH#VOTE include "politician_ids". For SEARCH#ROLL include "congress" (optional if question_date set), optional "session", "roll", "limit", "last_evaluated_key".
+        roll_call_details: Optional JSON for full details of ONE roll call. When user has roll call in context, pass context item data; include "search_index_sk" when present for exact lookup.
         question_date: Optional YYYY-MM-DD. Used to default roll call congress when not specified (most recent congress for that date).
+        roll_call_details: Optional JSON string to fetch full details for ONE roll call (members, vote_summary, bill_associated). Include search_index_sk from context when present for direct lookup; otherwise congress, session, roll. Example: '{"search_index_sk": "119#2026-01-15#1#40"}' or '{"congress": 119, "session": 1, "roll": 40}'.
     
     Returns:
-        JSON string: bill search returns results/s3_key; roll call search returns results array with vote/roll data, bill_details, roll_dates when applicable.
+        JSON string: roll_call_details returns result with roll_item, vote_summary, members, bill_associated; bill search returns results/s3_key; roll call search returns results array.
     """
     try:
+        # --- Roll call details path (single roll: use PK/SK when available from context) ---
+        if roll_call_details:
+            if isinstance(roll_call_details, str):
+                rcd = json.loads(roll_call_details)
+            else:
+                rcd = dict(roll_call_details)
+            agent_logger.info(f"🔍 search_congress_bills roll_call_details: has_sk={bool(rcd.get('search_index_sk'))}, congress={rcd.get('congress')}, session={rcd.get('session')}, roll={rcd.get('roll')}")
+            result = invoke_roll_call_details_lambda(rcd)
+            return json.dumps(result, default=str)
         # --- Roll call search path ---
         if roll_call_search:
             if isinstance(roll_call_search, str):

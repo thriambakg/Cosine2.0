@@ -927,7 +927,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 27. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
 28. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
 29. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
-30. search_congress_bills(filters, limit, last_evaluated_key, roll_call_search, question_date) - Search congressional bills OR roll call votes. For bills use filters; for roll call use roll_call_search (SEARCH#VOTE by politician_ids from search_autocomplete, or SEARCH#ROLL by congress/session). Use question_date (YYYY-MM-DD) to default congress to the most recent for that date. For politician votes always use search_autocomplete first to get politician_id, then roll_call_search with politician_ids.
+30. search_congress_bills(filters, limit, last_evaluated_key, roll_call_search, question_date, roll_call_details) - Search congressional bills, roll call lists, OR fetch full details for one roll call. For full details of a single roll call (e.g. when user has roll call in context), use roll_call_details: pass the context item's data as JSON; **always include search_index_sk when the context item has it** (exact PK/SK lookup). Example: roll_call_details='{"search_index_sk": "119#2026-01-15#1#40"}' or '{"congress": 119, "session": 1, "roll": 40}'. For bill search use filters; for roll call list use roll_call_search (SEARCH#VOTE or SEARCH#ROLL). Use question_date to default congress when needed.
 31. search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
 32. govt_contracts_autocomplete(search_text, autocomplete_type, limit) - Get exact values for search_govt_contracts filters. Types: recipient, awarding_agency, funding_agency, cfda, naics, psc, city, location, program_activity, glossary. Use before search when the user gives generic or natural-language terms for any of these fields.
 33. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
@@ -1017,9 +1017,11 @@ When users ask for searches (e.g., "recent bills about renewable energy", "clean
 - Don't fetch all results upfront - fetch incrementally as needed
 - The tool will return has_more=true if more results are available
 
-**Roll call search (search_congress_bills with roll_call_search):**
+**Roll call details (single roll, e.g. from context):**
+- When the user has a roll call in context or asks for full vote details for a specific roll call, use search_congress_bills(roll_call_details=<JSON>). **If the context item has search_index_sk in data, include it in the JSON** so the backend does an exact lookup (e.g. roll_call_details='{"search_index_sk": "119#2026-01-15#1#40"}'). Otherwise use congress, session, roll from context (e.g. roll_call_details='{"congress": 119, "session": 1, "roll": 40}').
+**Roll call search (list):**
 - When the user asks about a politician's votes or "roll call" record: (1) search_autocomplete("politician name", "congress_legislator") to get politician_id from matches, (2) search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["<politician_id>"], "limit": 50}').
-- When the user asks for "recent roll calls" or "current congress roll calls" without a date: use get_current_datetime("date") and pass it as question_date so congress defaults to the most recent (e.g. 2025-02-14 -> 119th Congress). Call search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today>).
+- When the user asks for "recent roll calls" or "current congress roll calls" without a date: use get_current_datetime("date") and pass it as question_date so congress defaults to the most recent. Call search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today>).
 - Roll call searches should always use autocomplete for politician names to get correct politician_id (bioguide_id).
 
 🔥 FILE DISCOVERY IS MANDATORY - READ THIS CAREFULLY:

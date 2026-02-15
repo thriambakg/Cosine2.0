@@ -146,7 +146,7 @@ const CongressBillsSearchPage: React.FC = () => {
   const [rollCallRollDates, setRollCallRollDates] = useState<Record<string, string>>({});
   const [rollCallResultView, setRollCallResultView] = useState<'rollcalls' | 'bills'>('rollcalls');
   // Roll call table: flattened rows and client-side filters (voteType for SEARCH#VOTE: Yea/Nay/Abstained)
-  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; voteType?: 'Yea' | 'Nay' | 'Abstained'; latest_action_date?: string; rowKey: string };
+  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; voteType?: 'Yea' | 'Nay' | 'Abstained'; latest_action_date?: string; rowKey: string; search_index_sk?: string };
   const rollCallFlattenedRows = React.useMemo((): RollCallTableRow[] => {
     if (!rollCallResults.length) return [];
     if (rollCallSearchIndex === 'SEARCH#VOTE') {
@@ -217,6 +217,7 @@ const CongressBillsSearchPage: React.FC = () => {
         const c = r.congress ?? r.search_index_sk?.split?.('#')?.[0];
         const s = r.session ?? r.search_index_sk?.split?.('#')?.[1];
         const rollNum = r.roll ?? r.search_index_sk?.split?.('#')?.[2];
+        const sk = r.search_index_sk ?? undefined;
         return {
           congress: c != null ? Number(c) : 0,
           session: s != null ? Number(s) : 0,
@@ -225,7 +226,8 @@ const CongressBillsSearchPage: React.FC = () => {
           bill_id_associated: r.bill_id_associated,
           bill_title: r.bill_associated?.bill_title,
           latest_action_date: r.latest_action_date ?? r.project_update_date ?? '',
-          rowKey: r.search_index_sk ?? `roll-${idx}`,
+          rowKey: sk ?? `roll-${idx}`,
+          search_index_sk: sk,
         };
       });
     }
@@ -449,9 +451,20 @@ const CongressBillsSearchPage: React.FC = () => {
 
   const handleVoteBillAddToContext = () => {
     const rows = voteBillFilteredRows.filter((r) => selectedVoteBills.has(r.bill_id));
+    // Use full bill data from rollCallBillDetails (same shape as bill search) so context shows "HR 7147" + subtitle
     const bills = rows.map((r) => {
-      const d = rollCallBillDetails[r.bill_id];
-      return { bill_id: r.bill_id, bill_title: d?.bill_title, congress: r.congress, latest_action_text: d?.latest_action_text, latest_action_date: d?.latest_action_date };
+      const detail = rollCallBillDetails[r.bill_id];
+      if (detail && typeof detail === 'object') {
+        return { ...detail, bill_id: detail.bill_id || r.bill_id };
+      }
+      const d = detail as CongressBill | undefined;
+      return {
+        bill_id: r.bill_id,
+        bill_title: d?.bill_title,
+        congress: r.congress,
+        latest_action_text: d?.latest_action_text,
+        latest_action_date: d?.latest_action_date,
+      };
     });
     if (bills.length === 0) return;
     if (bills.length === 1) addBillToContext(bills[0]);
@@ -470,10 +483,26 @@ const CongressBillsSearchPage: React.FC = () => {
   const handleVoteBillFileBrowserSelect = async (folderPath: string) => {
     if (!user || selectedVoteBills.size === 0) return;
     const rows = voteBillFilteredRows.filter((r) => selectedVoteBills.has(r.bill_id));
+    // Use full bill data and same title/subtitle mechanics as bill search page (HR 7147 + sponsor • party • policy_area • Introduced)
     const items = rows.map((r) => {
-      const d = rollCallBillDetails[r.bill_id];
-      const bill = { bill_id: r.bill_id, bill_title: d?.bill_title, congress: r.congress, latest_action_text: d?.latest_action_text, latest_action_date: d?.latest_action_date };
-      const title = (d?.bill_title || r.bill_id).trim() || r.bill_id;
+      const detail = rollCallBillDetails[r.bill_id];
+      const bill =
+        detail && typeof detail === 'object'
+          ? { ...detail, bill_id: detail.bill_id || r.bill_id }
+          : (() => {
+              const d = detail as CongressBill | undefined;
+              return {
+                bill_id: r.bill_id,
+                bill_title: d?.bill_title,
+                congress: r.congress,
+                latest_action_text: d?.latest_action_text,
+                latest_action_date: d?.latest_action_date,
+              };
+            })();
+      const title =
+        detail?.bill_type != null || detail?.bill_number != null
+          ? `${detail?.bill_type || 'Bill'} ${detail?.bill_number ?? ''}`.trim() || (detail?.bill_title || r.bill_id)
+          : (detail?.bill_title || r.bill_id).trim() || r.bill_id;
       return { context_data: bill, title, item_type: 'congress_bill' as const };
     });
     try {
@@ -614,7 +643,14 @@ const CongressBillsSearchPage: React.FC = () => {
 
   const handleRollCallAddToContext = () => {
     const rows = rollCallFilteredRows.filter((r) => selectedRollCalls.has(r.rowKey));
-    const rollCalls = rows.map((r) => ({ congress: r.congress, session: r.session, roll: r.roll, roll_display: r.roll_display }));
+    const rollCalls = rows.map((r) => ({
+      congress: r.congress,
+      session: r.session,
+      roll: r.roll,
+      roll_display: r.roll_display,
+      bill_id_associated: r.bill_id_associated,
+      search_index_sk: r.search_index_sk,
+    }));
     if (rollCalls.length === 0) return;
     if (rollCalls.length === 1) addRollCallToContext(rollCalls[0], rollCalls[0].roll_display);
     else addMultipleRollCallsToContext(rollCalls);
@@ -633,7 +669,14 @@ const CongressBillsSearchPage: React.FC = () => {
     if (!user || selectedRollCalls.size === 0) return;
     const rows = rollCallFilteredRows.filter((r) => selectedRollCalls.has(r.rowKey));
     const items = rows.map((r) => ({
-      context_data: { congress: r.congress, session: r.session, roll: r.roll },
+      context_data: {
+        congress: r.congress,
+        session: r.session,
+        roll: r.roll,
+        ...(r.roll_display != null && { roll_display: r.roll_display }),
+        ...(r.bill_id_associated != null && { bill_id_associated: r.bill_id_associated }),
+        ...(r.search_index_sk != null && { search_index_sk: r.search_index_sk }),
+      },
       title: r.roll_display || `Roll Call ${r.congress}-${r.session}-${r.roll}`,
       item_type: 'roll_call' as const,
     }));
