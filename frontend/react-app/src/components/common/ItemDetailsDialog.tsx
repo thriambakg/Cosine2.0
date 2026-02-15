@@ -330,6 +330,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const childAwardsFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched child awards for
   const fullAwardFetchedRef = useRef<Set<string>>(new Set()); // Track which award IDs we've already fetched full award data for
   const fullFilingFetchedRef = useRef<Set<string>>(new Set()); // Track which filing IDs/PKs we've already fetched full filing data for
+  const fullBillFetchedRef = useRef<Set<string>>(new Set()); // Track which bill IDs we've already fetched full bill data for
   const [refreshBillLoading, setRefreshBillLoading] = useState<boolean>(false);
   const [rollCallDetails, setRollCallDetails] = useState<RollCallDetailsResult | null>(null);
   const [rollCallDetailsLoading, setRollCallDetailsLoading] = useState<boolean>(false);
@@ -470,6 +471,27 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         });
     }
     
+    // For congress bills, fetch full bill data when dialog opens (bill text URLs, voter links, etc.)
+    // Search results only include projected attributes for filtering/table; full details loaded on view
+    const billId = newItemData?.bill_id;
+    if (itemType === 'congress_bill' && billId && open && !fullBillFetchedRef.current.has(billId)) {
+      fullBillFetchedRef.current.add(billId);
+      setRefreshBillLoading(true);
+      congressBillsSearchAPI.getBill({ bill_id: billId })
+        .then((response) => {
+          if (response.success && response.result) {
+            setItemData(response.result);
+          }
+        })
+        .catch((error) => {
+          console.error('Error fetching full bill data:', error);
+          fullBillFetchedRef.current.delete(billId);
+        })
+        .finally(() => {
+          setRefreshBillLoading(false);
+        });
+    }
+    
     // For LDA disclosures, always fetch full filing data when dialog opens
     // This ensures we have complete data structure
     // Only fetch if we haven't already fetched for this filing ID/PK
@@ -518,6 +540,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       fullAwardFetchedRef.current.clear();
       childAwardsFetchedRef.current.clear();
       fullFilingFetchedRef.current.clear();
+      fullBillFetchedRef.current.clear();
       setRollCallDetails(null);
       setRollCallDetailsError(null);
     }
