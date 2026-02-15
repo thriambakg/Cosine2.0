@@ -1606,17 +1606,10 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       );
     }
 
-    // Congress Bill
+    // Congress Bill — no inner scroll; content scrolls with main dialog area
     if (itemType === 'congress_bill' || itemData?.bill_id || itemData?.bill_type || itemData?.bill_number) {
       return (
-        <Box 
-          sx={{ 
-            p: 3,
-            maxHeight: '70vh',
-            overflow: 'auto',
-            ...scrollbarStyles,
-          }}
-        >
+        <Box sx={{ p: 3 }}>
           {itemData?.bill_title && (
             <Box sx={{ mb: 3 }}>
               <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 1, fontWeight: 600, fontSize: '12px' }}>
