@@ -1225,6 +1225,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             elif search_index == 'SEARCH#ROLL':
                 congress = roll_call_search.get('congress')
                 roll = roll_call_search.get('roll')
+                logger.info(f"SEARCH#ROLL request: congress={congress!r}, roll={roll!r}, table={BILLS_TABLE_NAME}")
                 if congress is not None:
                     try:
                         congress = int(congress)
@@ -1245,6 +1246,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 )
                 # Resolve bill_associated and compute vote_summary for each roll
                 roll_results = result.get('results') or []
+                logger.info(f"SEARCH#ROLL result: count={result.get('count', 0)}, success={result.get('success')}")
                 bill_ids_roll = list(dict.fromkeys(
                     r.get('bill_id_associated') for r in roll_results if r.get('bill_id_associated')
                 ))

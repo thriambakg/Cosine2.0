@@ -283,9 +283,11 @@ def search_roll_call_rolls(
         congress = _default_roll_congress()
 
     key_condition = Key('bill_id').eq('SEARCH#ROLL')
+    sk_prefix = None
     if congress is not None and session is not None and roll is not None:
         sk = f"{congress}#{session}#{roll}"
         key_condition = key_condition & Key('search_index_sk').eq(sk)
+        sk_prefix = sk
     elif congress is not None and session is not None:
         sk_prefix = f"{congress}#{session}#"
         key_condition = key_condition & Key('search_index_sk').begins_with(sk_prefix)
@@ -293,15 +295,18 @@ def search_roll_call_rolls(
         sk_prefix = f"{congress}#"
         key_condition = key_condition & Key('search_index_sk').begins_with(sk_prefix)
 
+    logger.info(f"search_roll_call_rolls: congress={congress}, session={session}, roll={roll}, sk_prefix={sk_prefix!r}")
     all_items: List[Dict[str, Any]] = []
     next_key = None  # fetch all from start; ignore client cursor
     # Use fixed page size for fetch-all so we get all items (client limit is for display, not query chunk size)
     page_size = 500
+    # ScanIndexForward=False so DynamoDB returns SK descending (newest first when SK = congress#session#date#roll)
     try:
         while len(all_items) < ROLL_CALL_ROLLS_MAX_ITEMS:
             params = {
                 'KeyConditionExpression': key_condition,
                 'Limit': min(page_size, ROLL_CALL_ROLLS_MAX_ITEMS - len(all_items)),
+                'ScanIndexForward': False,
             }
             if next_key:
                 params['ExclusiveStartKey'] = next_key
