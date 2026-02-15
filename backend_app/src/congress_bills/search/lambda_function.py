@@ -20,6 +20,7 @@ from roll_call_search_helper import (
     search_roll_call_vote,
     search_roll_call_rolls,
     get_roll_call_item,
+    get_roll_call_dates_for_keys,
     fetch_bill_projections,
     compute_vote_summary,
 )
@@ -1190,8 +1191,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     limit=limit,
                     last_evaluated_key=last_ev,
                 )
-                # Resolve bill IDs to projections for client-side filtering/display
+                # Resolve bill IDs and collect roll keys for date lookup
                 bill_ids = []
+                roll_keys_set = set()
                 for r in result.get('results') or []:
                     if r.get('vote_data_oversize_s3_key'):
                         vote_data = fetch_oversized_vote_data_from_s3(r['vote_data_oversize_s3_key'])
@@ -1200,13 +1202,23 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                                 for bid in (vote_data.get(key) or []):
                                     if bid and not str(bid).startswith('SEARCH#'):
                                         bill_ids.append(bid)
+                            for key in ('roll_yea', 'roll_nea', 'roll_abstained'):
+                                for rk in (vote_data.get(key) or []):
+                                    if rk and '#' in str(rk):
+                                        roll_keys_set.add(str(rk).strip())
                     else:
                         for key in ('bill_yea', 'bill_nea', 'bill_abstained'):
                             for bid in (r.get(key) or []):
                                 if bid and not str(bid).startswith('SEARCH#'):
                                     bill_ids.append(bid)
+                        for key in ('roll_yea', 'roll_nea', 'roll_abstained'):
+                            for rk in (r.get(key) or []):
+                                if rk and '#' in str(rk):
+                                    roll_keys_set.add(str(rk).strip())
                 if bill_ids:
                     result['bill_details'] = fetch_bill_projections(bills_table, bill_ids)
+                if roll_keys_set:
+                    result['roll_dates'] = get_roll_call_dates_for_keys(bills_table, list(roll_keys_set))
             elif search_index == 'SEARCH#ROLL':
                 congress = roll_call_search.get('congress')
                 session = roll_call_search.get('session')

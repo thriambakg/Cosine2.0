@@ -27,7 +27,7 @@ export function getS3BucketNames(): {
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'lda_filing' | 'custom' | 'filesystem';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'roll_call' | 'lda_filing' | 'custom' | 'filesystem';
   title: string;
   subtitle?: string;
   data: any;
@@ -1148,6 +1148,45 @@ export const addMultipleBillsToContext = (
   } else {
     contextItems.forEach(item => addToContext(item));
   }
+};
+
+/**
+ * Add a roll call to the context window (congress, session, roll).
+ */
+export const addRollCallToContext = (rollCall: { congress: number; session: number; roll: number }, title?: string): void => {
+  const { congress, session, roll } = rollCall;
+  const contextItem: ContextItem = {
+    id: `roll_call_${congress}_${session}_${roll}_${Date.now()}`,
+    type: 'roll_call',
+    title: title || `Roll Call ${congress}-${session}-${roll}`,
+    subtitle: `Congress ${congress}, Session ${session}`,
+    data: { congress, session, roll },
+    timestamp: Date.now(),
+  };
+  addToContext(contextItem);
+};
+
+/**
+ * Add multiple roll calls to the context window.
+ */
+export const addMultipleRollCallsToContext = (rollCalls: Array<{ congress: number; session: number; roll: number; roll_display?: string }>): void => {
+  const contextItems: ContextItem[] = rollCalls.map(rc => ({
+    id: `roll_call_${rc.congress}_${rc.session}_${rc.roll}_${Date.now()}_${Math.random()}`,
+    type: 'roll_call' as const,
+    title: rc.roll_display || `Roll Call ${rc.congress}-${rc.session}-${rc.roll}`,
+    subtitle: `Congress ${rc.congress}, Session ${rc.session}`,
+    data: { congress: rc.congress, session: rc.session, roll: rc.roll },
+    timestamp: Date.now(),
+  }));
+  if (contextItems.length === 0) return;
+  const event = new CustomEvent('add-multiple-to-sidebar-context', { detail: contextItems });
+  window.dispatchEvent(event);
+  const handleSidebarError = () => {
+    contextItems.forEach(item => addToContext(item));
+    window.removeEventListener('sidebar-context-error', handleSidebarError);
+  };
+  window.addEventListener('sidebar-context-error', handleSidebarError);
+  setTimeout(() => window.removeEventListener('sidebar-context-error', handleSidebarError), 1000);
 };
 
 /**

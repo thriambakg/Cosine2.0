@@ -1,6 +1,6 @@
 """
 Roll call search helper: queries SEARCH#VOTE and SEARCH#ROLL indices.
-Returns full table rows, 100 items per page.
+Fetches all matching roll calls in one response (no pagination / load more).
 Supports resolving bill IDs to projections (title, etc.) and computing vote summaries from members.
 """
 
@@ -12,8 +12,15 @@ from boto3.dynamodb.conditions import Key, Attr
 
 logger = logging.getLogger(__name__)
 
-# Page size for roll call search results
+# Page size for roll call search results (used when resolving bill projections; roll call search fetches all)
 ROLL_CALL_PAGE_LIMIT = 100
+
+# Batch size for DynamoDB batch_get_item (max 100)
+BATCH_GET_SIZE = 100
+
+# Max items to fetch in one roll call search (fetch-all; avoid timeouts)
+ROLL_CALL_VOTE_MAX_IDS = 5000
+ROLL_CALL_ROLLS_MAX_ITEMS = 10000
 
 # Attributes to project when resolving bills (match main bill search: filterable + display)
 # Must include partition/sort keys; rest used by Refine filters and table columns
@@ -45,6 +52,24 @@ def _convert_decimal(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_convert_decimal(v) for v in obj]
     return obj
+
+
+def _parse_roll_sort_key_date(search_index_sk: Any) -> Optional[str]:
+    """
+    Parse latest_action_date from SEARCH#ROLL sort key when present.
+    SK formats: {congress}#{session}#{roll} (legacy, 3 parts) or
+    {congress}#{session}#{latest_action_date}#{roll} (4 parts; date is YYYY-MM-DD).
+    Returns the date string or None.
+    """
+    if not search_index_sk:
+        return None
+    parts = str(search_index_sk).strip().split("#")
+    if len(parts) != 4:
+        return None
+    candidate = parts[2].strip()
+    if len(candidate) >= 10 and candidate.replace("-", "").isdigit():
+        return candidate[:10]
+    return None
 
 
 def _normalize_vote_cast(vote_cast: Any) -> str:
@@ -157,11 +182,9 @@ def search_roll_call_vote(
     last_evaluated_key: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch SEARCH#VOTE items for the given politician IDs.
+    Fetch all SEARCH#VOTE items for the given politician IDs (batch get in chunks of 100).
     Each item is PK=SEARCH#VOTE#<politician_id>, SK=VOTE.
-    Returns full item per row, up to `limit` (default 100) per page.
-
-    Pagination: pass offset in last_evaluated_key as {'offset': N} to skip first N ids.
+    Returns all matching items in one response; no pagination / load more.
     """
     if not table or not politician_ids:
         return {
@@ -173,16 +196,9 @@ def search_roll_call_vote(
             'search_index': 'SEARCH#VOTE',
         }
 
-    offset = 0
-    if last_evaluated_key and isinstance(last_evaluated_key, dict):
-        offset = last_evaluated_key.get('offset', 0)
-        if not isinstance(offset, int) or offset < 0:
-            offset = 0
-
-    # Deduplicate and order
-    ids_ordered = list(dict.fromkeys(str(p).strip() for p in politician_ids if p and str(p).strip()))
-    slice_ids = ids_ordered[offset:offset + limit]
-    if not slice_ids:
+    # Deduplicate and order; cap to avoid timeouts
+    ids_ordered = list(dict.fromkeys(str(p).strip() for p in politician_ids if p and str(p).strip()))[:ROLL_CALL_VOTE_MAX_IDS]
+    if not ids_ordered:
         return {
             'success': True,
             'results': [],
@@ -192,30 +208,30 @@ def search_roll_call_vote(
             'search_index': 'SEARCH#VOTE',
         }
 
-    keys = [{'bill_id': f'SEARCH#VOTE#{pid}', 'search_index_sk': 'VOTE'} for pid in slice_ids]
+    by_key: Dict[tuple, Dict[str, Any]] = {}
     try:
-        response = table.meta.client.batch_get_item(
-            RequestItems={
-                table.name: {'Keys': keys}
-            }
-        )
-        items = response.get('Responses', {}).get(table.name, [])
+        for i in range(0, len(ids_ordered), BATCH_GET_SIZE):
+            batch_ids = ids_ordered[i:i + BATCH_GET_SIZE]
+            keys = [{'bill_id': f'SEARCH#VOTE#{pid}', 'search_index_sk': 'VOTE'} for pid in batch_ids]
+            response = table.meta.client.batch_get_item(
+                RequestItems={table.name: {'Keys': keys}}
+            )
+            items = response.get('Responses', {}).get(table.name, [])
+            for item in items:
+                k = (item.get('bill_id'), item.get('search_index_sk'))
+                by_key[k] = item
         # Preserve order by politician_id
-        by_key = {(item.get('bill_id'), item.get('search_index_sk')): item for item in items}
         results = []
-        for pid in slice_ids:
+        for pid in ids_ordered:
             key = (f'SEARCH#VOTE#{pid}', 'VOTE')
             if key in by_key:
                 results.append(_convert_decimal(by_key[key]))
-        next_offset = offset + len(slice_ids)
-        has_more = next_offset < len(ids_ordered)
-        next_key = {'offset': next_offset} if has_more else None
         return {
             'success': True,
             'results': results,
             'count': len(results),
-            'has_more': has_more,
-            'last_evaluated_key': next_key,
+            'has_more': False,
+            'last_evaluated_key': None,
             'search_index': 'SEARCH#VOTE',
         }
     except Exception as e:
@@ -240,9 +256,10 @@ def search_roll_call_rolls(
     last_evaluated_key: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
-    Query SEARCH#ROLL index. PK=SEARCH#ROLL, SK={congress}#{session}#{roll} or {congress}#{session}#{date}#{roll}.
-    Optional filters: congress, session, roll (exact SK for legacy format; otherwise prefix). Results sorted by SK (date then roll when using date format).
-    Returns full item per row, up to `limit` (default 100) per page.
+    Query SEARCH#ROLL index and return all matching items (paginates internally until done).
+    PK=SEARCH#ROLL, SK={congress}#{session}#{roll} or {congress}#{session}#{date}#{roll}.
+    Optional filters: congress, session, roll. Results sorted by SK.
+    Returns all items in one response; no pagination / load more. Capped at ROLL_CALL_ROLLS_MAX_ITEMS.
     """
     if not table:
         return {
@@ -265,23 +282,36 @@ def search_roll_call_rolls(
         sk_prefix = f"{congress}#"
         key_condition = key_condition & Key('search_index_sk').begins_with(sk_prefix)
 
-    params = {
-        'KeyConditionExpression': key_condition,
-        'Limit': limit,
-    }
-    if last_evaluated_key and isinstance(last_evaluated_key, dict) and last_evaluated_key.get('search_index_sk'):
-        params['ExclusiveStartKey'] = last_evaluated_key
-
+    all_items: List[Dict[str, Any]] = []
+    next_key = None  # fetch all from start; ignore client cursor
+    page_size = min(limit, 500)  # fetch 500 per query to reduce round-trips
     try:
-        response = table.query(**params)
-        items = response.get('Items', [])
-        lek = response.get('LastEvaluatedKey')
+        while len(all_items) < ROLL_CALL_ROLLS_MAX_ITEMS:
+            params = {
+                'KeyConditionExpression': key_condition,
+                'Limit': min(page_size, ROLL_CALL_ROLLS_MAX_ITEMS - len(all_items)),
+            }
+            if next_key:
+                params['ExclusiveStartKey'] = next_key
+            response = table.query(**params)
+            items = response.get('Items', [])
+            all_items.extend(items)
+            next_key = response.get('LastEvaluatedKey')
+            if not next_key or not items:
+                break
+        results = []
+        for item in all_items:
+            r = _convert_decimal(item)
+            date_val = r.get('latest_action_date') or _parse_roll_sort_key_date(r.get('search_index_sk')) or ''
+            r['latest_action_date'] = date_val
+            r['project_update_date'] = date_val
+            results.append(r)
         return {
             'success': True,
-            'results': [_convert_decimal(item) for item in items],
-            'count': len(items),
-            'has_more': bool(lek),
-            'last_evaluated_key': _convert_decimal(lek) if lek else None,
+            'results': results,
+            'count': len(all_items),
+            'has_more': False,
+            'last_evaluated_key': None,
             'search_index': 'SEARCH#ROLL',
         }
     except Exception as e:
@@ -318,18 +348,103 @@ def get_roll_call_item(
         )
         item = response.get('Item')
         if item:
-            return _convert_decimal(item)
-        # New format: SK = congress#session#date#roll; query and filter by roll
+            out = _convert_decimal(item)
+            date_val = out.get('latest_action_date') or _parse_roll_sort_key_date(out.get('search_index_sk')) or ''
+            out['latest_action_date'] = date_val
+            out['project_update_date'] = date_val
+            return out
+        # New format: SK = congress#session#date#roll; paginate to find roll (small projection first, then get_item for full row)
         sk_prefix = f"{congress}#{session}#"
-        resp = table.query(
-            KeyConditionExpression=Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(sk_prefix),
-            FilterExpression=Attr('roll').eq(roll),
-            Limit=1,
-        )
-        items = resp.get('Items', [])
-        if items:
-            return _convert_decimal(items[0])
+        next_key = None
+        max_pages = 10  # cap to avoid Lambda timeout
+        page_limit = 1000  # DynamoDB max per query
+        for _ in range(max_pages):
+            params = {
+                'KeyConditionExpression': Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(sk_prefix),
+                'Limit': page_limit,
+                'ProjectionExpression': 'bill_id, search_index_sk, #r',
+                'ExpressionAttributeNames': {'#r': 'roll'},
+            }
+            if next_key:
+                params['ExclusiveStartKey'] = next_key
+            resp = table.query(**params)
+            page = resp.get('Items', [])
+            for it in page:
+                r = it.get('roll')
+                if r is not None and int(r) == int(roll):
+                    # Fetch full item with one get_item
+                    found_sk = it.get('search_index_sk')
+                    if not found_sk:
+                        continue
+                    full = table.get_item(Key={'bill_id': 'SEARCH#ROLL', 'search_index_sk': found_sk})
+                    full_item = full.get('Item')
+                    if not full_item:
+                        continue
+                    out = _convert_decimal(full_item)
+                    date_val = out.get('latest_action_date') or _parse_roll_sort_key_date(out.get('search_index_sk')) or ''
+                    out['latest_action_date'] = date_val
+                    out['project_update_date'] = date_val
+                    return out
+            next_key = resp.get('LastEvaluatedKey')
+            if not next_key:
+                break
         return None
     except Exception as e:
         logger.error(f"Error in get_roll_call_item: {e}", exc_info=True)
         return None
+
+
+def get_roll_call_dates_for_keys(table, roll_keys: List[str]) -> Dict[str, str]:
+    """
+    Given roll keys in format "congress#session#roll", return a map key -> latest_action_date (YYYY-MM-DD).
+    Used to attach update dates to SEARCH#VOTE flattened results. Queries SEARCH#ROLL by (congress, session).
+    """
+    if not table or not roll_keys:
+        return {}
+    seen: Dict[tuple, set] = {}  # (congress, session) -> set of roll numbers
+    for raw in roll_keys[:2000]:  # cap
+        parts = str(raw).strip().split("#")
+        if len(parts) >= 3:
+            try:
+                c, s, r = int(parts[0]), int(parts[1]), int(parts[2])
+                key = (c, s)
+                if key not in seen:
+                    seen[key] = set()
+                seen[key].add(r)
+            except (ValueError, TypeError):
+                pass
+    if not seen:
+        return {}
+    out: Dict[str, str] = {}
+    for (congress, session), rolls in list(seen.items())[:80]:  # cap (congress, session) groups
+        sk_prefix = f"{congress}#{session}#"
+        next_key = None
+        for _ in range(20):  # pages per group
+            params = {
+                'KeyConditionExpression': Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(sk_prefix),
+                'Limit': 500,
+                'ProjectionExpression': 'search_index_sk, #r',
+                'ExpressionAttributeNames': {'#r': 'roll'},
+            }
+            if next_key:
+                params['ExclusiveStartKey'] = next_key
+            try:
+                resp = table.query(**params)
+            except Exception as e:
+                logger.warning(f"get_roll_call_dates_for_keys query error: {e}")
+                break
+            for it in resp.get('Items', []):
+                r = it.get('roll')
+                if r is None:
+                    continue
+                rint = int(r)
+                if rint not in rolls:
+                    continue
+                roll_key = f"{congress}#{session}#{rint}"
+                date_val = _parse_roll_sort_key_date(it.get('search_index_sk')) or it.get('latest_action_date') or ''
+                if date_val:
+                    out[roll_key] = date_val[:10] if len(str(date_val)) >= 10 else str(date_val)
+            next_key = resp.get('LastEvaluatedKey')
+            if not next_key:
+                break
+    return out
