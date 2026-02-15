@@ -21,6 +21,10 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Select,
+  FormControl,
+  InputLabel,
+  MenuItem,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -335,6 +339,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [rollCallDetails, setRollCallDetails] = useState<RollCallDetailsResult | null>(null);
   const [rollCallDetailsLoading, setRollCallDetailsLoading] = useState<boolean>(false);
   const [rollCallDetailsError, setRollCallDetailsError] = useState<string | null>(null);
+  const [rollCallVoteFilterParty, setRollCallVoteFilterParty] = useState<string>('');
+  const [rollCallVoteFilterState, setRollCallVoteFilterState] = useState<string>('');
+  const [rollCallVoteFilterVote, setRollCallVoteFilterVote] = useState<string>('');
+  /** Vote summary by roll key (congress#session#roll) for bill Votes tab when we fetch roll call details */
+  const [billVoteResultsByKey, setBillVoteResultsByKey] = useState<Record<string, { total?: { yea?: number; nay?: number; present?: number; not_voting?: number }; by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }> }>>({});
   
   // State to track item data - updated when enrichment completes
   const [itemData, setItemData] = useState<any>(() => {
@@ -580,6 +589,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             : raw;
           setRollCallDetails(normalized);
           setRollCallDetailsError(null);
+          setRollCallVoteFilterParty('');
+          setRollCallVoteFilterState('');
+          setRollCallVoteFilterVote('');
         } else {
           setRollCallDetailsError(res.error || 'Roll call not found.');
           setRollCallDetails(null);
@@ -621,6 +633,51 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   useEffect(() => {
     if (itemType === 'congress_bill') setBillDetailsTab(0);
   }, [itemType, itemData?.bill_id, data?.bill_id]);
+
+  const billVoteFetchRequestedRef = useRef<{ billId: string; keys: Set<string> } | null>(null);
+  // Fetch roll call vote summaries for bill Votes tab so we can show result (Passed/Failed, counts) per vote
+  useEffect(() => {
+    if (!open || itemType !== 'congress_bill' || useDemoData || !itemData?.recorded_votes_json) return;
+    const billId = String(itemData?.bill_id ?? '');
+    if (!billId) return;
+    let recordedVotes: any[] = [];
+    try {
+      const v = typeof itemData.recorded_votes_json === 'string' ? JSON.parse(itemData.recorded_votes_json) : itemData.recorded_votes_json;
+      recordedVotes = Array.isArray(v) ? v : [];
+    } catch { return; }
+    const congress = itemData?.congress ?? (itemData?.bill_id ? parseInt(String(itemData.bill_id).split('-')[0], 10) : undefined);
+    if (typeof congress !== 'number') return;
+    if (!billVoteFetchRequestedRef.current || billVoteFetchRequestedRef.current.billId !== billId) {
+      billVoteFetchRequestedRef.current = { billId, keys: new Set() };
+      setBillVoteResultsByKey({}); // clear so we don't show previous bill's results
+    }
+    const requested = billVoteFetchRequestedRef.current;
+    const toFetch: { key: string; session: number; roll: number }[] = [];
+    for (const rv of recordedVotes) {
+      const session = rv.sessionNumber ?? rv.session;
+      const roll = rv.rollNumber ?? rv.roll;
+      if (session == null || roll == null) continue;
+      const key = `${congress}#${session}#${roll}`;
+      if (!requested.keys.has(key)) {
+        requested.keys.add(key);
+        toFetch.push({ key, session: Number(session), roll: Number(roll) });
+      }
+    }
+    if (toFetch.length === 0) return;
+    let cancelled = false;
+    const run = async () => {
+      for (const { key, session, roll } of toFetch) {
+        if (cancelled) break;
+        try {
+          const res = await congressBillsSearchAPI.getRollCallDetails({ congress, session, roll });
+          if (cancelled || !res?.result?.vote_summary) continue;
+          setBillVoteResultsByKey((prev) => ({ ...prev, [key]: res.result!.vote_summary! }));
+        } catch { /* ignore */ }
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [open, itemType, itemData?.bill_id, itemData?.congress, itemData?.recorded_votes_json, useDemoData]);
 
   // Utility functions
   const formatDate = (dateString?: string): string => {
@@ -1313,9 +1370,15 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       );
     }
 
-    // Roll call (House vote) — fetch details and show associated bill, vote summary, and members table
+    // Roll call (House vote) — no inner scroll; content scrolls with main dialog area. Only votes table has its own scroll.
     if (itemType === 'roll_call') {
-      const scrollbarStyles = { scrollbarWidth: 'thin' as const, '&::-webkit-scrollbar': { width: 8 }, '&::-webkit-scrollbar-thumb': { backgroundColor: '#4b5563', borderRadius: 4 } };
+      const rollCallTableScrollbarSx = {
+        scrollbarColor: '#3b82f6 rgba(55, 65, 81, 0.3)',
+        '&::-webkit-scrollbar': { width: '8px' },
+        '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px' },
+        '&::-webkit-scrollbar-thumb': { backgroundColor: '#3b82f6', borderRadius: '4px' },
+        '&::-webkit-scrollbar-thumb:hover': { backgroundColor: '#2563eb' },
+      };
       if (rollCallDetailsLoading) {
         return (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 280, p: 3 }}>
@@ -1354,11 +1417,43 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       const memberStateLabel = (m: RollCallMemberVote) => (m.state ?? m.stateCode ?? m.voteState ?? '').trim() || '—';
       const memberVoteLabel = (m: RollCallMemberVote) => (m.voteCast ?? '').trim() || '—';
 
+      // Unique values for filter dropdowns
+      const partyOptions = Array.from(new Set(members.map((m) => memberPartyLabel(m)))).filter(Boolean).sort();
+      const stateOptions = Array.from(new Set(members.map((m) => memberStateLabel(m)))).filter((s) => s && s !== '—').sort();
+      const voteOptions = Array.from(new Set(members.map((m) => memberVoteLabel(m)))).filter((v) => v && v !== '—').sort();
+      const filteredMembers = members.filter((m) => {
+        if (rollCallVoteFilterParty && memberPartyLabel(m) !== rollCallVoteFilterParty) return false;
+        if (rollCallVoteFilterState && memberStateLabel(m) !== rollCallVoteFilterState) return false;
+        if (rollCallVoteFilterVote && memberVoteLabel(m) !== rollCallVoteFilterVote) return false;
+        return true;
+      });
+
+      const rollCallCongressGovUrl = `https://www.congress.gov/votes/${((data as any).chamber ?? 'house').toLowerCase()}/${data.congress}-${data.session}/${data.roll}`;
       return (
-        <Box sx={{ p: 3, maxHeight: '70vh', overflow: 'auto', ...scrollbarStyles }}>
-          <Typography variant="h6" sx={{ color: '#e2e8f0', mb: 2 }}>
-            {data.roll_display ?? `Roll Call ${data.roll}`} — Congress {data.congress}, Session {data.session}
-          </Typography>
+        <Box sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
+            <Typography variant="h6" sx={{ color: '#e2e8f0' }}>
+              {data.roll_display ?? `Roll Call ${data.roll}`} — Congress {data.congress}, Session {data.session}
+            </Typography>
+            <Tooltip title="View voter data on Congress.gov">
+              <IconButton
+                size="small"
+                component="a"
+                href={rollCallCongressGovUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  color: '#9ca3af',
+                  '&:hover': {
+                    color: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  },
+                }}
+              >
+                <OpenInNewIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
 
           <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
             <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5, fontWeight: 600 }}>
@@ -1366,16 +1461,19 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Typography>
             {data.bill_id_associated ? (
               <Box>
+                <Typography component="span" variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                  {data.bill_id_associated}
+                </Typography>
+                {' · '}
                 <Link
                   component="button"
-                  variant="body1"
-                  sx={{ color: '#60a5fa', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
+                  variant="body2"
+                  sx={{ color: '#60a5fa', cursor: 'pointer', textTransform: 'none', '&:hover': { textDecoration: 'underline' } }}
                   onClick={() => {
-                    onClose();
-                    openItemDetails('congress_bill', { bill_id: data.bill_id_associated }, data.bill_id_associated);
+                    openItemDetails('congress_bill', { bill_id: data.bill_id_associated }, data.bill_id_associated, { user_id: user_id || user?.id });
                   }}
                 >
-                  {data.bill_id_associated}
+                  View
                 </Link>
                 {bill?.bill_title && (
                   <Typography variant="body2" sx={{ color: '#cbd5e1', mt: 0.5 }}>{bill.bill_title}</Typography>
@@ -1429,8 +1527,57 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           </Paper>
 
           <Paper variant="outlined" sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
-            <Typography variant="subtitle1" sx={{ color: '#e2e8f0', mb: 1.5 }}>All votes ({members.length} members)</Typography>
-            <TableContainer sx={{ maxHeight: 400 }}>
+            <Typography variant="subtitle1" sx={{ color: '#e2e8f0', mb: 1.5 }}>
+              All votes ({filteredMembers.length}{filteredMembers.length !== members.length ? ` of ${members.length}` : ''} members)
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1.5 }}>
+              <FormControl size="small" sx={{ minWidth: 140 }}>
+                <InputLabel id="roll-call-filter-party" sx={{ color: '#94a3b8' }}>Party</InputLabel>
+                <Select
+                  labelId="roll-call-filter-party"
+                  value={rollCallVoteFilterParty}
+                  label="Party"
+                  onChange={(e) => setRollCallVoteFilterParty(e.target.value)}
+                  sx={{ color: '#e2e8f0', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' } }}
+                >
+                  <MenuItem value="">All</MenuItem>
+                  {partyOptions.map((p) => (
+                    <MenuItem key={p} value={p}>{p}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 100 }}>
+                <InputLabel id="roll-call-filter-state" sx={{ color: '#94a3b8' }}>State</InputLabel>
+                <Select
+                  labelId="roll-call-filter-state"
+                  value={rollCallVoteFilterState}
+                  label="State"
+                  onChange={(e) => setRollCallVoteFilterState(e.target.value)}
+                  sx={{ color: '#e2e8f0', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' } }}
+                >
+                  <MenuItem value="">All</MenuItem>
+                  {stateOptions.map((s) => (
+                    <MenuItem key={s} value={s}>{s}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel id="roll-call-filter-vote" sx={{ color: '#94a3b8' }}>Vote</InputLabel>
+                <Select
+                  labelId="roll-call-filter-vote"
+                  value={rollCallVoteFilterVote}
+                  label="Vote"
+                  onChange={(e) => setRollCallVoteFilterVote(e.target.value)}
+                  sx={{ color: '#e2e8f0', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' }, '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#3b82f6' } }}
+                >
+                  <MenuItem value="">All</MenuItem>
+                  {voteOptions.map((v) => (
+                    <MenuItem key={v} value={v}>{v}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+            <TableContainer sx={{ maxHeight: 400, overflow: 'auto', ...rollCallTableScrollbarSx }}>
               <Table size="small" stickyHeader sx={{ '& th, & td': { color: '#cbd5e1', borderColor: '#374151' } }}>
                 <TableHead>
                   <TableRow>
@@ -1441,7 +1588,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {members.map((m, idx) => (
+                  {filteredMembers.map((m, idx) => (
                     <TableRow key={(m as any).bioguideID ?? idx}>
                       <TableCell sx={{ borderColor: '#374151' }}>{memberDisplayName(m)}</TableCell>
                       <TableCell sx={{ borderColor: '#374151' }}>{memberPartyLabel(m)}</TableCell>
@@ -1724,6 +1871,30 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             } catch { /* ignore */ }
             const hasRollCall = Number(itemData?.has_roll_call) === 1;
             const votesCount = recordedVotes.length;
+
+            const formatVoteResult = (v: any): string | null => {
+              if (v?.result && typeof v.result === 'string') return v.result;
+              const yea = Number(v?.yea) || 0;
+              const nay = Number(v?.nay) || 0;
+              const present = Number(v?.present) || 0;
+              const notVoting = Number(v?.not_voting) ?? Number(v?.notVoting) ?? 0;
+              if (yea === 0 && nay === 0 && present === 0 && notVoting === 0) return null;
+              const outcome = yea > nay ? 'Passed' : nay > yea ? 'Failed' : 'Tied';
+              let s = `${outcome} - Yea: ${yea} | Nay: ${nay}`;
+              const byParty = v?.by_party ?? v?.byParty;
+              if (byParty && typeof byParty === 'object') {
+                const parts: string[] = [];
+                for (const [party, counts] of Object.entries(byParty as Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }>)) {
+                  const y = counts?.yea ?? 0;
+                  const n = counts?.nay ?? 0;
+                  const p = counts?.present ?? 0;
+                  const nv = counts?.not_voting ?? 0;
+                  parts.push(`${party} ${y}-${n} Pres=${p} NV=${nv}`);
+                }
+                if (parts.length) s += ` (${parts.join(', ')})`;
+              }
+              return s;
+            };
 
             const tabLabels: { id: string; label: string; count: number; show: boolean }[] = [
               { id: 'summary', label: 'Summary', count: summaryCount, show: true },
@@ -2019,17 +2190,74 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       {recordedVotes.length === 0 ? (
                         <Typography variant="body2" sx={{ color: '#9ca3af' }}>No roll call votes.</Typography>
                       ) : (
-                        recordedVotes.map((v: any, idx: number) => (
-                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
-                            <Typography variant="subtitle2" sx={{ color: '#e2e8f0' }}>{v.chamber} - Roll #{v.rollNumber}, Session {v.sessionNumber}</Typography>
-                            {v.date && <Typography variant="caption" sx={{ color: '#94a3b8' }}>{formatDate(v.date)}</Typography>}
-                            {v.url && (
-                              <Link href={v.url} target="_blank" rel="noopener noreferrer" sx={{ display: 'block', mt: 1, color: '#3b82f6' }}>
-                                View roll call
-                              </Link>
-                            )}
-                          </Box>
-                        ))
+                        recordedVotes.map((v: any, idx: number) => {
+                          const congress = itemData?.congress ?? (itemData?.bill_id ? parseInt(String(itemData.bill_id).split('-')[0], 10) : undefined);
+                          const session = v.sessionNumber ?? v.session;
+                          const roll = v.rollNumber ?? v.roll;
+                          const rollDisplay = v.roll_display ?? `Roll no. ${roll}`;
+                          const chamber = (v.chamber ?? 'House').toLowerCase();
+                          const congressGovVoteUrl = typeof congress === 'number' && session != null && roll != null
+                            ? `https://www.congress.gov/votes/${chamber}/${congress}-${session}/${roll}`
+                            : v.url || null;
+                          const rollKey = typeof congress === 'number' && session != null && roll != null ? `${congress}#${session}#${roll}` : '';
+                          const voteSummary = rollKey ? billVoteResultsByKey[rollKey] : null;
+                          const resultText = voteSummary
+                            ? formatVoteResult({
+                                yea: voteSummary.total?.yea,
+                                nay: voteSummary.total?.nay,
+                                present: voteSummary.total?.present,
+                                not_voting: voteSummary.total?.not_voting,
+                                by_party: voteSummary.by_party,
+                              })
+                            : formatVoteResult(v);
+                          return (
+                            <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, mb: resultText ? 1 : 0 }}>
+                                <Box>
+                                  <Typography variant="subtitle2" sx={{ color: '#e2e8f0' }}>{v.chamber ?? 'House'} — {rollDisplay}</Typography>
+                                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block' }}>
+                                    Congress {congress ?? '—'} · Session {session ?? '—'} · Roll #{roll ?? '—'}
+                                    {v.date ? ` · ${formatDate(v.date)}` : ''}
+                                  </Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                  {typeof congress === 'number' && session != null && roll != null && (
+                                    <Link
+                                      component="button"
+                                      variant="body2"
+                                      sx={{ color: '#3b82f6', cursor: 'pointer', textTransform: 'none', '&:hover': { textDecoration: 'underline' } }}
+                                      onClick={() => openItemDetails('roll_call', { congress, session: Number(session), roll: Number(roll) }, rollDisplay, { user_id: user_id || user?.id })}
+                                    >
+                                      View
+                                    </Link>
+                                  )}
+                                  {(congressGovVoteUrl || v.url) && (
+                                    <Tooltip title="View voter data on Congress.gov">
+                                      <IconButton
+                                        size="small"
+                                        component="a"
+                                        href={congressGovVoteUrl || v.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        sx={{
+                                          color: '#9ca3af',
+                                          '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                                        }}
+                                      >
+                                        <OpenInNewIcon sx={{ fontSize: 18 }} />
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+                                </Box>
+                              </Box>
+                              {resultText && (
+                                <Typography variant="body2" sx={{ color: '#cbd5e1', fontFamily: 'monospace', fontSize: '0.8125rem' }}>
+                                  {resultText}
+                                </Typography>
+                              )}
+                            </Box>
+                          );
+                        })
                       )}
                     </Box>
                   )}
@@ -4547,6 +4775,50 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           </Box>
         )}
         
+        {/* Header for Roll Call in contentOnly mode (filesystem preview) */}
+        {itemType === 'roll_call' && (
+          <Box sx={{ mb: 3, pb: 2, borderBottom: '1px solid #374151' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <Typography variant="body2" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}>
+                {itemDataForHeader?.roll_display ?? `Roll Call ${itemDataForHeader?.roll ?? '—'}`} · Congress {itemDataForHeader?.congress ?? '—'}, Session {itemDataForHeader?.session ?? '—'}
+              </Typography>
+              {itemDataForHeader?.bill_id_associated && (
+                <>
+                  <Typography component="span" sx={{ color: '#64748b' }}>·</Typography>
+                  <Link
+                    component="button"
+                    variant="body2"
+                    sx={{ color: '#60a5fa', cursor: 'pointer', textTransform: 'none', '&:hover': { textDecoration: 'underline' } }}
+                    onClick={() => {
+                      openItemDetails('congress_bill', { bill_id: itemDataForHeader.bill_id_associated }, itemDataForHeader.bill_id_associated, { user_id: user_id || user?.id });
+                    }}
+                  >
+                    View
+                  </Link>
+                  <Typography component="span" sx={{ color: '#94a3b8', fontFamily: 'monospace' }}> {itemDataForHeader.bill_id_associated}</Typography>
+                </>
+              )}
+              {itemDataForHeader?.congress != null && itemDataForHeader?.session != null && itemDataForHeader?.roll != null && (
+                <Tooltip title="View voter data on Congress.gov">
+                  <IconButton
+                    size="small"
+                    component="a"
+                    href={`https://www.congress.gov/votes/${((itemDataForHeader as any).chamber ?? 'house').toLowerCase()}/${itemDataForHeader.congress}-${itemDataForHeader.session}/${itemDataForHeader.roll}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{
+                      color: '#9ca3af',
+                      '&:hover': { color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)' },
+                    }}
+                  >
+                    <OpenInNewIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+          </Box>
+        )}
+
         {/* Header for Congress Bills in contentOnly mode */}
         {itemType === 'congress_bill' && (
           <Box sx={{ mb: 3, pb: 2, borderBottom: '1px solid #374151' }}>

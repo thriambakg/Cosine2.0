@@ -1224,13 +1224,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     result['roll_dates'] = get_roll_call_dates_for_keys(bills_table, list(roll_keys_set))
             elif search_index == 'SEARCH#ROLL':
                 congress = roll_call_search.get('congress')
+                session = roll_call_search.get('session')
                 roll = roll_call_search.get('roll')
-                logger.info(f"SEARCH#ROLL request: congress={congress!r}, roll={roll!r}, table={BILLS_TABLE_NAME}")
+                logger.info(f"SEARCH#ROLL request: congress={congress!r}, session={session!r}, roll={roll!r}, table={BILLS_TABLE_NAME}")
                 if congress is not None:
                     try:
                         congress = int(congress)
                     except (TypeError, ValueError):
                         congress = None
+                if session is not None:
+                    try:
+                        session = int(session)
+                    except (TypeError, ValueError):
+                        session = None
                 if roll is not None:
                     try:
                         roll = int(roll)
@@ -1239,7 +1245,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 result = search_roll_call_rolls(
                     table=bills_table,
                     congress=congress,
-                    session=None,  # session not in search; filter by session client-side after results
+                    session=session,
                     roll=roll,
                     limit=limit,
                     last_evaluated_key=last_ev,

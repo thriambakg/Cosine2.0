@@ -927,7 +927,7 @@ When users ask ANY question about files (e.g., "can you see this file?", "do you
 27. get_filing_exhibits(cik, accession_number) - Get all exhibits for a specific SEC filing
 28. download_filing_pdf(cik, accession_number, document_name, save_to_s3) - Download SEC filing as PDF
 29. fetch_web_content_tool(url) - Fetch and extract content from web URLs, especially for article context items. Use this when context items have type "article" and contain URLs.
-30. search_congress_bills(filters, limit, last_evaluated_key) - Search congressional bills in DynamoDB with various filters
+30. search_congress_bills(filters, limit, last_evaluated_key, roll_call_search, question_date) - Search congressional bills OR roll call votes. For bills use filters; for roll call use roll_call_search (SEARCH#VOTE by politician_ids from search_autocomplete, or SEARCH#ROLL by congress/session). Use question_date (YYYY-MM-DD) to default congress to the most recent for that date. For politician votes always use search_autocomplete first to get politician_id, then roll_call_search with politician_ids.
 31. search_govt_contracts(filters, limit, last_evaluated_key) - Search government contracts/awards in DynamoDB
 32. govt_contracts_autocomplete(search_text, autocomplete_type, limit) - Get exact values for search_govt_contracts filters. Types: recipient, awarding_agency, funding_agency, cfda, naics, psc, city, location, program_activity, glossary. Use before search when the user gives generic or natural-language terms for any of these fields.
 33. search_politician_trades(filters, page, page_size, last_evaluated_key) - Search politician stock trades in DynamoDB
@@ -977,6 +977,10 @@ When users ask about searching for bills, LDA filings, or other data using natur
   → search_autocomplete("healthcare", "general_issue") → "HCR" → lda_search(general_issue_code=["HCR"])
 - User: "Show me bills sponsored by Senator Smith"
   → search_autocomplete("Senator Smith", "congress_legislator") → "John Smith" → search_congress_bills(sponsor_name=["John Smith"])
+- User: "How did Senator X vote on recent roll calls?" or "Show roll call votes for Maria Cantwell"
+  → search_autocomplete("Maria Cantwell", "congress_legislator") → get politician_id (e.g. "C000127") from matches → search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["C000127"], "limit": 50}')
+- User: "What were the recent roll calls in the current congress?"
+  → search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today YYYY-MM-DD>) so congress defaults to most recent
 - User: "Search for lobbying related to the Energy Department"
   → search_autocomplete("Energy Department", "government_entity") → "Energy, Dept of" → lda_search(government_entity=["Energy, Dept of"])
 
@@ -1012,6 +1016,11 @@ When users ask for searches (e.g., "recent bills about renewable energy", "clean
 - Use last_evaluated_key from previous search to get next batch
 - Don't fetch all results upfront - fetch incrementally as needed
 - The tool will return has_more=true if more results are available
+
+**Roll call search (search_congress_bills with roll_call_search):**
+- When the user asks about a politician's votes or "roll call" record: (1) search_autocomplete("politician name", "congress_legislator") to get politician_id from matches, (2) search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["<politician_id>"], "limit": 50}').
+- When the user asks for "recent roll calls" or "current congress roll calls" without a date: use get_current_datetime("date") and pass it as question_date so congress defaults to the most recent (e.g. 2025-02-14 -> 119th Congress). Call search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today>).
+- Roll call searches should always use autocomplete for politician names to get correct politician_id (bioguide_id).
 
 🔥 FILE DISCOVERY IS MANDATORY - READ THIS CAREFULLY:
 When users ask about files (ANY file-related question), you MUST:

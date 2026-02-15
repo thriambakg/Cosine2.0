@@ -367,17 +367,13 @@ Before using search tools with generic names, ALWAYS use autocomplete first:
   * Default limit: 5 (max: 1000)
   * Use last_evaluated_key for pagination (fetch next 5)
   
-- search_congress_bills(filters, limit=5, last_evaluated_key) - Search congressional bills
-  * Use search_autocomplete(query, "congress_legislator", limit=10) for sponsor_name
-  * Use search_autocomplete(query, "policy_area", limit=10) for policy_area
-  * Filters: sponsor_name, bill_title, bill_type, sponsor_party, sponsor_state, policy_area, bipartisan, 
-    bill_number, congress, introduced_date_from/to, latest_action_date_from/to
-  * Default limit: 5 (max: 1000)
-  * Returns: JSON with results array or S3 key for large datasets (>50KB or >50 results)
-  * Large results stored in S3 - use read_s3_file_tool to access via s3_key
-  * Each bill result includes bill text references: prefer `bill_texts` (array of { name, s3_key, type }); legacy single file in `bill_text_html_s3_key`
-  * To read the FULL BILL TEXT: Use data.s3_key (first entry from bill_texts or legacy bill_text_html_s3_key), or iterate bill_texts[].s3_key and call read_s3_file_tool(s3_key) for each
-  * Example: If context item has data.s3_key (or data.bill_texts[0].s3_key), call read_s3_file_tool(data.s3_key) to get bill text
+- search_congress_bills(filters, limit=5, last_evaluated_key, roll_call_search, question_date) - Search congressional bills OR roll call votes
+  * **Bill search**: Use filters (sponsor_name, policy_area, etc.). Use search_autocomplete for sponsor_name and policy_area.
+  * **Roll call search**: Use roll_call_search (JSON). ALWAYS autocomplete when searching by politician: search_autocomplete("Name", "congress_legislator") returns politician_id (bioguide_id); then call search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["<politician_id>"], "limit": 50}').
+  * **Default congress for roll calls**: When user asks for "current" or "recent" roll calls without specifying congress, pass question_date=get_current_datetime("date") so congress defaults to the most recent for that date (e.g. 2025 -> 119th).
+  * SEARCH#ROLL: roll_call_search='{"search_index": "SEARCH#ROLL", "congress": 119, "session": 1, "limit": 20}' or omit congress and set question_date to default it.
+  * Filters (bill search): sponsor_name, bill_title, bill_type, sponsor_party, sponsor_state, policy_area, bipartisan, bill_number, congress, introduced_date_from/to, latest_action_date_from/to
+  * Returns: Bill search returns results or S3 key; roll call search returns results array with vote/roll data, bill_details, roll_dates
   
 - govt_contracts_autocomplete(search_text, autocomplete_type, limit=10) - Get exact values for search_govt_contracts filters. autocomplete_type: recipient (recipient_name), awarding_agency (awarding_agency_name), funding_agency (funding_agency_name), cfda (cfda_number), naics (naics_code), psc (psc_code), city, location, program_activity, glossary. Use BEFORE search when the user gives generic or natural-language terms for any of these fields.
 - search_govt_contracts(filters, limit=5, last_evaluated_key) - Search government contracts/awards

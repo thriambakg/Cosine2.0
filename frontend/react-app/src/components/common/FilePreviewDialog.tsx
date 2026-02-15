@@ -2898,7 +2898,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           itemData = content.data;
         }
         
-        // Determine item type from data
+        // Determine item type from data (roll_call before congress_bill so saved roll calls are recognized)
         if (itemData?.award_id || itemData?.recipient_name) {
           itemType = 'govt_contract';
         } else if (itemData?.form || itemData?.filingEntity || itemData?.accession) {
@@ -2907,6 +2907,8 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
           itemType = 'news_article';
         } else if (itemData?.tradeId || itemData?.politicianName || itemData?.transactionType) {
           itemType = 'politician_trade';
+        } else if (itemData?.roll != null && itemData?.congress != null && itemData?.session != null) {
+          itemType = 'roll_call';
         } else if (itemData?.bill_id || itemData?.bill_type || itemData?.bill_number) {
           itemType = 'congress_bill';
         } else if (itemData?.filing_uuid || itemData?.registrant_name || itemData?.client_name) {

@@ -46,6 +46,26 @@ PROJECT_NAME = os.environ.get('PROJECT_NAME', 'cosine')
 CONGRESS_BILLS_SEARCH_LAMBDA_NAME = f"{PROJECT_NAME}-congress-bills-search-{ENVIRONMENT}"
 
 
+def _congress_for_date(date_str: Optional[str]) -> Optional[int]:
+    """
+    Return the Congress number (e.g. 119) that was in session on the given date.
+    date_str: YYYY-MM-DD. Uses current date if None or invalid.
+    Formula: Congress N runs from year 1789+2*(N-1) through 1789+2*N-1; congress = ((year - 1789) // 2) + 1.
+    """
+    if date_str:
+        try:
+            parts = str(date_str).strip()[:10].split('-')
+            if len(parts) >= 1 and parts[0].isdigit():
+                year = int(parts[0])
+                if 1789 <= year <= 2100:
+                    return ((year - 1789) // 2) + 1
+        except (ValueError, TypeError):
+            pass
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return ((now.year - 1789) // 2) + 1
+
+
 def _normalize_filters_for_lambda(filters: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize filter types to match DynamoDB schema (BillNumberDateIndex expects bill_number as number).
@@ -73,43 +93,57 @@ def invoke_congress_bills_search_lambda(
     last_evaluated_key: Optional[Dict] = None
 ) -> Dict[str, Any]:
     """
-    Invoke the Congress Bills Search Lambda function directly
-    
-    Args:
-        filters: Search filters dictionary
-        limit: Maximum number of results
-        last_evaluated_key: Pagination token
-    
-    Returns:
-        Search results dictionary
+    Invoke the Congress Bills Search Lambda function directly (bill search).
     """
     try:
         filters = _normalize_filters_for_lambda(filters)
-        # Prepare Lambda event (mimics API Gateway event structure)
+        body = {
+            'filters': filters,
+            'limit': limit,
+            'last_evaluated_key': last_evaluated_key
+        }
+        return _invoke_lambda_with_body(body)
+    except Exception as e:
+        logger.error(f"Error invoking Congress Bills Search Lambda: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': f"Failed to invoke search Lambda: {str(e)}"
+        }
+
+
+def invoke_roll_call_search_lambda(roll_call_search: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Invoke the Congress Bills Search Lambda with roll_call_search body (SEARCH#VOTE or SEARCH#ROLL).
+    """
+    try:
+        body = {'roll_call_search': roll_call_search}
+        return _invoke_lambda_with_body(body)
+    except Exception as e:
+        logger.error(f"Error invoking roll call search Lambda: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'results': [],
+            'count': 0,
+            'has_more': False,
+        }
+
+
+def _invoke_lambda_with_body(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Send POST body to Congress Bills Search Lambda and return parsed response."""
+    try:
         lambda_event = {
             'httpMethod': 'POST',
-            'body': json.dumps({
-                'filters': filters,
-                'limit': limit,
-                'last_evaluated_key': last_evaluated_key
-            }),
+            'body': json.dumps(body),
             'headers': {},
-            'requestContext': {
-                'http': {
-                    'method': 'POST'
-                }
-            }
+            'requestContext': {'http': {'method': 'POST'}},
         }
-        
-        # Invoke Lambda function
         logger.info(f"Invoking Congress Bills Search Lambda: {CONGRESS_BILLS_SEARCH_LAMBDA_NAME}")
         response = lambda_client.invoke(
             FunctionName=CONGRESS_BILLS_SEARCH_LAMBDA_NAME,
-            InvocationType='RequestResponse',  # Synchronous invocation
+            InvocationType='RequestResponse',
             Payload=json.dumps(lambda_event)
         )
-        
-        # Check for Lambda errors
         if 'FunctionError' in response:
             error_payload = json.loads(response['Payload'].read())
             logger.error(f"Lambda function error: {error_payload}")
@@ -117,30 +151,20 @@ def invoke_congress_bills_search_lambda(
                 'success': False,
                 'error': error_payload.get('errorMessage', 'Lambda function error')
             }
-        
-        # Parse response
         response_payload = json.loads(response['Payload'].read())
-        
-        # Lambda returns API Gateway-style response with statusCode and body
         if response_payload.get('statusCode') == 200:
-            body = json.loads(response_payload.get('body', '{}'))
-            logger.info(f"Lambda search completed: {body.get('count', 0)} results, has_more={body.get('has_more', False)}")
-            return body
-        else:
-            # Error response
-            error_body = json.loads(response_payload.get('body', '{}'))
-            logger.error(f"Lambda returned error status {response_payload.get('statusCode')}: {error_body}")
-            return {
-                'success': False,
-                'error': error_body.get('error', f"Lambda returned status {response_payload.get('statusCode')}")
-            }
-            
-    except Exception as e:
-        logger.error(f"Error invoking Congress Bills Search Lambda: {str(e)}", exc_info=True)
+            result = json.loads(response_payload.get('body', '{}'))
+            logger.info(f"Lambda completed: count={result.get('count', 0)}, has_more={result.get('has_more', False)}")
+            return result
+        error_body = json.loads(response_payload.get('body', '{}'))
+        logger.error(f"Lambda error status {response_payload.get('statusCode')}: {error_body}")
         return {
             'success': False,
-            'error': f"Failed to invoke search Lambda: {str(e)}"
+            'error': error_body.get('error', f"Lambda returned status {response_payload.get('statusCode')}")
         }
+    except Exception as e:
+        logger.error(f"Error invoking Lambda: {str(e)}", exc_info=True)
+        return {'success': False, 'error': str(e)}
 
 
 class CongressBillsSearcher:
@@ -255,124 +279,100 @@ class CongressBillsSearcher:
 def search_congress_bills(
     filters: str,
     limit: int = 5,
-    last_evaluated_key: str = None
+    last_evaluated_key: str = None,
+    roll_call_search: str = None,
+    question_date: str = None
 ) -> str:
     """
-    Search for congressional bills by invoking the Congress Bills Search Lambda function.
-    The Lambda handles all DynamoDB queries, filtering, and pagination.
+    Search for congressional bills OR roll call votes by invoking the Congress Bills Search Lambda.
     
-    **IMPORTANT: Use autocomplete before searching:**
-    For sponsor_name, cosponsor_name, and policy_area searches, use search_autocomplete to find exact values.
-    - For sponsor_name: Use search_autocomplete(query, "congress_legislator", limit=10)
-    - For cosponsor_name: Use search_autocomplete(query, "congress_legislator", limit=10)
-    - For policy_area: Use search_autocomplete(query, "policy_area", limit=10)
-    If multiple matches, ask user to clarify OR if very similar, run searches for all matches.
+    **Two modes:**
+    1. **Bill search** (default): Pass filters (and optionally limit, last_evaluated_key). Use for bills by sponsor, policy area, congress, etc.
+    2. **Roll call search**: Pass roll_call_search (JSON) to search roll call votes. Use question_date to default congress to the most recent congress for that date (e.g. question date "2025-02-01" -> congress 119).
     
-    **Politician Role Filter:**
-    - Use politician_role filter with sponsor_name to search both sponsor and cosponsor roles
-    - politician_role can be: "sponsor", "cosponsor", or "both" (default: "both")
-    - When politician_role is "both", searches both SponsorNameDateIndex (sponsor) and cosponsor search index, then unions results
+    **Roll call search (roll_call_search parameter):**
+    - **SEARCH#VOTE** (by politician): Use when the user asks for a politician's votes or roll call record.
+      - ALWAYS use search_autocomplete(query, "congress_legislator", limit=10) first to get politician_id (bioguide_id).
+      - Pass politician_ids from the autocomplete result (use the "politician_id" field from matches).
+      - Example: roll_call_search = '{"search_index": "SEARCH#VOTE", "politician_ids": ["C000127", "K000367"], "limit": 50}'
+    - **SEARCH#ROLL** (by congress/session/roll): Use when listing roll calls for a congress or looking up a specific roll.
+      - If congress is omitted, it is defaulted from question_date (or today). Pass question_date (YYYY-MM-DD) so "current" or "recent" means the congress in session on that date.
+      - Example: roll_call_search = '{"search_index": "SEARCH#ROLL", "congress": 119, "session": 1, "limit": 20}' or omit congress and set question_date to default it.
     
-    **Pagination:**
-    - Default limit is 5 results to conserve compute
-    - For "most recent" queries, returns 5 most recent results
-    - For "more" queries, use last_evaluated_key from previous response to fetch next 5
-    - For specific items, if within first 5 results, return as-is
+    **Autocomplete for roll call (politician votes):**
+    - Call search_autocomplete("Senator Name", "congress_legislator", limit=10) first.
+    - Use the returned "politician_id" (bioguide_id) from matches in roll_call_search.politician_ids.
+    
+    **Default congress for roll calls:**
+    - When question_date is provided and roll_call_search does not include congress (SEARCH#ROLL), congress is set to the congress in session on question_date (e.g. 2025-02-14 -> 119).
+    
+    **IMPORTANT: Use autocomplete before bill searches:**
+    For sponsor_name, cosponsor_name, and policy_area, use search_autocomplete to find exact values.
+    For roll call by politician, use search_autocomplete to get politician_id for roll_call_search.politician_ids.
     
     Args:
-        filters: JSON string containing filter fields. Supported filters:
-            - sponsor_name: List or string of sponsor names (use autocomplete first for exact match)
-            - politician_name: Alias for sponsor_name (use autocomplete first)
-            - cosponsor_name: List or string of cosponsor names (use autocomplete first for exact match)
-            - politician_role: "sponsor", "cosponsor", or "both" (default: "both") - used with sponsor_name/politician_name
-            - bill_title: List or string of bill titles (exact match required via BillTitleDateIndex GSI)
-            - bill_type: List or string of bill types (e.g., "HR", "S", "HJR", "SJR")
-            - sponsor_party: List or string of sponsor parties (e.g., "R", "D", "I")
-            - sponsor_state: List or string of sponsor states (2-letter codes)
-            - policy_area: List or string of policy areas (use autocomplete first for exact match)
-            - bipartisan: Integer (1 for bipartisan, 0 for non-bipartisan)
-            - bill_number: Exact bill number
-            - congress: Congress number (e.g., 118, 119)
-            - introduced_date_from: Start date in YYYY-MM-DD format
-            - introduced_date_to: End date in YYYY-MM-DD format
-            - latest_action_date_from: Start date in YYYY-MM-DD format
-            - latest_action_date_to: End date in YYYY-MM-DD format
-        limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)
-        last_evaluated_key: JSON string of pagination token from previous request (optional)
+        filters: JSON string of filter fields for BILL search (ignored if roll_call_search is provided). Supported: sponsor_name, politician_name, cosponsor_name, politician_role, bill_title, bill_type, sponsor_party, sponsor_state, policy_area, bipartisan, bill_number, congress, introduced_date_from/to, latest_action_date_from/to.
+        limit: Max results for bill search (default 5, max 1000). For roll call search, limit is inside roll_call_search JSON.
+        last_evaluated_key: Pagination token for bill search (optional).
+        roll_call_search: Optional JSON string for roll call search. Must include "search_index": "SEARCH#VOTE" or "SEARCH#ROLL". For SEARCH#VOTE include "politician_ids" (list of bioguide_id from search_autocomplete). For SEARCH#ROLL include "congress" (optional if question_date set), optional "session", "roll", "limit", "last_evaluated_key".
+        question_date: Optional YYYY-MM-DD. Used to default roll call congress when not specified (most recent congress for that date).
     
     Returns:
-        JSON string with search results. Each bill result includes:
-        - bill_id: Unique bill identifier (e.g., "119-HR-5789")
-        - bill_title: Title of the bill
-        - bill_texts: array of { name, s3_key, type } for stored HTML bill text (e.g. billtext/119-HR-5789/1.html); empty [] if none
-        - bill_text_html_s3_key: (legacy) single S3 key when bill_texts not yet populated
-          * Use data.s3_key from context (first from bill_texts or legacy key) or read each bill_texts[].s3_key via read_s3_file_tool to get full bill text
-        - summary_text: Brief summary of the bill (if available)
-        - sponsor information, cosponsors, actions, etc.
-        For large result sets (>50KB or >50 results), returns S3 key reference instead of results array.
-        
-    Example:
-        search_congress_bills(
-            '{"bipartisan": 1, "bill_title": "Defense Authorization", "congress": 119}',
-            limit=50
-        )
-        
-    To read full bill text:
-        Use data.s3_key from the context item (from bill_texts[0].s3_key or legacy bill_text_html_s3_key),
-        or read each bill_texts[].s3_key (e.g. billtext/119-HR-5789/1.html) via read_s3_file_tool.
+        JSON string: bill search returns results/s3_key; roll call search returns results array with vote/roll data, bill_details, roll_dates when applicable.
     """
     try:
-        agent_logger.info(f"🔍 search_congress_bills called with filters: {filters}, limit: {limit}")
+        # --- Roll call search path ---
+        if roll_call_search:
+            if isinstance(roll_call_search, str):
+                rcs = json.loads(roll_call_search)
+            else:
+                rcs = dict(roll_call_search)
+            search_index = (rcs.get('search_index') or '').strip().upper()
+            if search_index not in ('SEARCH#VOTE', 'SEARCH#ROLL'):
+                return json.dumps({
+                    'success': False,
+                    'error': 'roll_call_search must include "search_index": "SEARCH#VOTE" or "SEARCH#ROLL"',
+                    'results': [], 'count': 0, 'has_more': False
+                })
+            # Default congress from question_date when doing SEARCH#ROLL and congress not set
+            if search_index == 'SEARCH#ROLL' and rcs.get('congress') is None and (question_date or True):
+                congress_val = _congress_for_date(question_date)
+                if congress_val is not None:
+                    rcs['congress'] = congress_val
+                    agent_logger.info(f"Defaulted roll call congress to {congress_val} from question_date={question_date}")
+            limit_rc = rcs.get('limit', 100)
+            limit_rc = max(1, min(int(limit_rc) if limit_rc else 100, 100))
+            rcs['limit'] = limit_rc
+            agent_logger.info(f"🔍 search_congress_bills roll_call_search: search_index={search_index}, question_date={question_date}")
+            result = invoke_roll_call_search_lambda(rcs)
+            return json.dumps(result, default=str)
         
-        # Parse filters JSON
+        # --- Bill search path ---
+        agent_logger.info(f"🔍 search_congress_bills called with filters: {filters}, limit: {limit}")
         if isinstance(filters, str):
             filters_dict = json.loads(filters)
         else:
             filters_dict = filters
-        
         agent_logger.info(f"📋 Parsed filters: {filters_dict}")
-        agent_logger.info(f"🔑 Filter keys: {list(filters_dict.keys())}")
-        
-        # Parse last_evaluated_key if provided
         last_key = None
         if last_evaluated_key:
-            if isinstance(last_evaluated_key, str):
-                last_key = json.loads(last_evaluated_key)
-            else:
-                last_key = last_evaluated_key
-            agent_logger.info(f"📄 Pagination: Using last_evaluated_key for continuation")
-        
-        # Validate limit
+            last_key = json.loads(last_evaluated_key) if isinstance(last_evaluated_key, str) else last_evaluated_key
         if limit > 1000:
             limit = 1000
         if limit < 1:
-            limit = 5  # Default to 5 for compute efficiency
-        
-        agent_logger.info(f"📊 Search parameters: limit={limit}, pagination={'enabled' if last_key else 'disabled'}")
-        
-        # Perform search
+            limit = 5
         result = CongressBillsSearcher.search_bills_with_s3_passthrough(
             filters=filters_dict,
             limit=limit,
             last_evaluated_key=last_key
         )
-        
         agent_logger.info(f"✅ Search completed: success={result.get('success')}, count={result.get('count', 0)}, method={result.get('method', 'unknown')}")
-        
-        # Return as JSON string
         return json.dumps(result, default=str)
-        
     except json.JSONDecodeError as e:
-        error_msg = f"Invalid JSON in filters: {str(e)}"
+        error_msg = f"Invalid JSON: {str(e)}"
         logger.error(error_msg)
-        return json.dumps({
-            "success": False,
-            "error": error_msg
-        })
+        return json.dumps({"success": False, "error": error_msg})
     except Exception as e:
         error_msg = f"Error searching congress bills: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return json.dumps({
-            "success": False,
-            "error": error_msg
-        })
+        return json.dumps({"success": False, "error": error_msg})

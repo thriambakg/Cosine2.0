@@ -64,6 +64,8 @@ LIST_TYPE_TO_SEARCH_TYPE = {
 
 # Cache for CSV data (in-memory, per Lambda instance)
 _csv_cache: Dict[str, List[str]] = {}
+# Congress legislators with bioguide_id (for roll call search politician_ids)
+_legislators_cache: Optional[List[Dict[str, str]]] = None
 
 
 def load_csv_from_local(list_type: str) -> List[str]:
@@ -97,7 +99,7 @@ def load_csv_from_local(list_type: str) -> List[str]:
         values = []
         with open(csv_path, 'r', encoding='utf-8') as f:
             if list_type == 'congress_legislator':
-                # For congress-legislators.csv, use DictReader to get 'full_name' column
+                # For congress-legislators.csv, use full_name for display and cache; bioguide_id loaded in load_legislators_with_ids()
                 reader = csv.DictReader(f)
                 row_count = 0
                 for row in reader:
@@ -135,6 +137,37 @@ def load_csv_from_local(list_type: str) -> List[str]:
         
     except Exception as e:
         logger.error(f"Error loading CSV file ({csv_path}): {str(e)}", exc_info=True)
+        return []
+
+
+def load_legislators_with_ids() -> List[Dict[str, str]]:
+    """
+    Load congress-legislators.csv with full_name and bioguide_id.
+    Used for congress_legislator autocomplete so roll call search can use politician_ids (bioguide_id).
+    """
+    global _legislators_cache
+    if _legislators_cache is not None:
+        return _legislators_cache
+    csv_file = LIST_TYPE_TO_FILE.get('congress_legislator')
+    if not csv_file:
+        return []
+    csv_path = os.path.join(CSV_FILES_DIR, csv_file)
+    try:
+        if not os.path.exists(csv_path):
+            return []
+        result = []
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                full_name = (row.get('full_name') or '').strip()
+                bioguide_id = (row.get('bioguide_id') or '').strip()
+                if full_name and bioguide_id:
+                    result.append({'full_name': full_name, 'bioguide_id': bioguide_id})
+        _legislators_cache = result
+        logger.info(f"Loaded {len(result)} legislators with bioguide_id from {csv_path}")
+        return result
+    except Exception as e:
+        logger.error(f"Error loading legislators: {e}", exc_info=True)
         return []
 
 
@@ -223,7 +256,7 @@ def search_autocomplete(
     - 'policy_area': Policy areas for Congress Bills (e.g., "Energy", "Health", "Education")
     - 'general_issue': General issue codes for LDA (e.g., "ENG", "HCR", "EDU")
     - 'government_entity': Government entities for LDA (e.g., "Energy, Dept of", "Health & Human Services, Dept of")
-    - 'congress_legislator': Active Congress legislators for Congress Bills (sponsor/cosponsor names)
+    - 'congress_legislator': Active Congress legislators for Congress Bills (sponsor/cosponsor names). Returns politician_id (bioguide_id) for each match; use politician_id in search_congress_bills(roll_call_search={"search_index": "SEARCH#VOTE", "politician_ids": [politician_id]}) for roll call vote search.
     
     **Fuzzy Matching Examples:**
     - "renewable energy" → matches "Energy" (policy_area)
@@ -242,25 +275,17 @@ def search_autocomplete(
         limit: Maximum number of results to return (default: 10, max: 20)
     
     Returns:
-        JSON string with search results including matched values and similarity scores.
+        JSON string with search results. For congress_legislator, each match includes "politician_id" (bioguide_id) for roll call search.
         Format:
         {
             "success": true,
             "list_type": "policy_area",
             "search_type": "congress_bills",
             "query": "renewable energy",
-            "matches": [
-                {
-                    "value": "Energy",
-                    "score": 0.85,
-                    "match_type": "word_match"
-                }
-            ],
-            "best_match": {
-                "value": "Energy",
-                "score": 0.85
-            }
+            "matches": [{"value": "Energy", "score": 0.85, "match_type": "word_match"}],
+            "best_match": {"value": "Energy", "score": 0.85}
         }
+        For list_type congress_legislator, matches also have "politician_id"; use in roll_call_search.politician_ids.
     
     Example:
         # Match "renewable energy" to policy area for Congress Bills search
@@ -292,8 +317,14 @@ def search_autocomplete(
         if limit < 1:
             limit = 10
         
-        # Load CSV values
-        values = load_csv_from_local(list_type)
+        # Load CSV values (for congress_legislator we also need bioguide_id for roll call search)
+        if list_type == 'congress_legislator':
+            legislators = load_legislators_with_ids()
+            values = [r['full_name'] for r in legislators]
+            name_to_id = {r['full_name']: r['bioguide_id'] for r in legislators}
+        else:
+            values = load_csv_from_local(list_type)
+            name_to_id = {}
         
         if not values:
             logger.warning(f"No values loaded for list_type={list_type}")
@@ -307,6 +338,17 @@ def search_autocomplete(
         
         # Perform fuzzy matching
         matches = fuzzy_match_query(query, values, limit)
+        
+        # For congress_legislator, add politician_id (bioguide_id) for roll call search
+        if list_type == 'congress_legislator' and name_to_id:
+            for m in matches:
+                m['politician_id'] = name_to_id.get(m['value'], '')
+            if matches and matches[0].get('politician_id'):
+                response_recommendation_extra = f" For roll call votes use politician_ids=[\"{matches[0]['politician_id']}\"] in search_congress_bills(roll_call_search=...)."
+            else:
+                response_recommendation_extra = ""
+        else:
+            response_recommendation_extra = ""
         
         logger.info(f"Found {len(matches)} matches for list_type={list_type}")
         
@@ -327,7 +369,9 @@ def search_autocomplete(
                 "score": matches[0]["score"],
                 "match_type": matches[0].get("match_type", "unknown")
             }
-            response["recommendation"] = f"Use '{matches[0]['value']}' for {list_type} filter in {LIST_TYPE_TO_SEARCH_TYPE.get(list_type)} search"
+            if list_type == 'congress_legislator' and matches[0].get('politician_id'):
+                response["best_match"]["politician_id"] = matches[0]["politician_id"]
+            response["recommendation"] = f"Use '{matches[0]['value']}' for {list_type} filter in {LIST_TYPE_TO_SEARCH_TYPE.get(list_type)} search.{response_recommendation_extra}"
         else:
             response["best_match"] = None
             response["recommendation"] = f"No matches found for '{query}' in {list_type}. Try a different query or check the available values."
