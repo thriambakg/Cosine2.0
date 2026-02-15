@@ -317,7 +317,11 @@ def search_roll_call_rolls(
             items = response.get('Items', [])
             all_items.extend(items)
             next_key = response.get('LastEvaluatedKey')
-            if not next_key or not items:
+            # When filtering (e.g. by roll), the filter is applied per page; a matching item may be on a later page.
+            # Only stop when we have enough results or there are no more pages (not next_key).
+            if not next_key:
+                break
+            if not filter_expr and not items:
                 break
         # Return exactly one page; preserve DynamoDB order (no sort)
         page = all_items[:limit]
