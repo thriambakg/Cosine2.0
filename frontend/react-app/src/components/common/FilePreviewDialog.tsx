@@ -226,7 +226,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
         // Check if it's a tile
         const tileType = item.metadata.data.tileType || item.metadata.data.type;
         const isTileData = ['crypto', 'stock', 'stock_screener', 'news', 'portfolio',
-          'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures'].includes(tileType);
+          'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'congress_roll_calls', 'lda_disclosures'].includes(tileType);
         
         if (isTileData) {
           // For tiles, pass the full data object
@@ -486,7 +486,7 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
     const tileType = content.tileType || content.type;
     const validTileTypes = [
       'crypto', 'stock', 'stock_screener', 'news', 'portfolio',
-      'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'lda_disclosures', 'folder'
+      'politician_trades', 'sec_search', 'govt_contracts', 'congress_bills', 'congress_roll_calls', 'lda_disclosures', 'folder'
     ];
     
     return validTileTypes.includes(tileType);

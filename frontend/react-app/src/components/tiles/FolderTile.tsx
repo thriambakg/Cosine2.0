@@ -1104,6 +1104,15 @@ const FolderTile: React.FC<FolderTileProps> = ({
             item_type: 'congress_bill' as const,
           };
         });
+      } else if (data.type === 'roll_calls' && data.rollCalls && Array.isArray(data.rollCalls)) {
+        items = data.rollCalls.map((r: any) => {
+          const title = r.roll_display || `Roll ${r.congress}-${r.session}-${r.roll}`;
+          return {
+            context_data: r,
+            title: title,
+            item_type: 'roll_call' as const,
+          };
+        });
       } else if (data.type === 'politician_trades' && data.trades && Array.isArray(data.trades)) {
         items = data.trades.map((trade: any) => {
           const title = `${trade.politicianName || 'Unknown'} - ${trade.securitySymbol || trade.securityName || 'Trade'}`;

@@ -135,6 +135,20 @@ const TileInfoDialog: React.FC<TileInfoDialogProps> = ({ open, onClose, tile }) 
           { name: 'Bill Type', description: 'Filter by bill type', example: 'House Bill, Senate Bill' },
         ],
       },
+      'congress_roll_calls': {
+        description: 'Search roll call votes by politician or by congress, session, and roll number.',
+        features: [
+          'Search by politician (votes by member)',
+          'Filter by congress and optional roll number',
+          'View associated bill and roll details',
+          'Add to context or save to files',
+        ],
+        searchParams: [
+          { name: 'Politician', description: 'Filter by politician (SEARCH#VOTE)', example: 'Nancy Pelosi, Ted Cruz' },
+          { name: 'Congress', description: 'Filter by congress (e.g. 119)', example: '119' },
+          { name: 'Roll #', description: 'Optional specific roll number', example: '123' },
+        ],
+      },
       'lda_disclosures': {
         description: 'Search and analyze Lobbying Disclosure Act filings with registrant, client, and lobbyist filtering.',
         features: [

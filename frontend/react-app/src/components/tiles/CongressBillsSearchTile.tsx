@@ -1461,7 +1461,7 @@ const CongressBillsSearchTile: React.FC<CongressBillsSearchTileProps> = ({
           {(() => {
             const TileIcon = getIconByName(customIcon, getDefaultIconForTileType('congress_bills'));
             const iconColor = customColor || '#3b82f6';
-            const displayTitle = customTitle || 'Congress Bills';
+            const displayTitle = customTitle || 'Congress Search';
             return (
               <>
                 <TileIcon sx={{ color: iconColor, fontSize: '1.5rem', mr: 1 }} />

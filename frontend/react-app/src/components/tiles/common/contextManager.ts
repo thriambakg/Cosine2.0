@@ -1407,7 +1407,7 @@ export const extractTileData = (tile: any): TileContextData => {
   }
 
   // Add search params and filter settings for politician trades, SEC, government contracts, congress bills, and LDA disclosures tiles
-  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills' || tile.type === 'lda_disclosures') {
+  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills' || tile.type === 'congress_roll_calls' || tile.type === 'lda_disclosures') {
     return {
       ...baseData,
       searchParams: tile.searchParams, // Search parameters (politicians, securities, dates, etc.)

@@ -722,7 +722,7 @@ export const handleAPIError = (error: any, endpoint: string): never => {
 
 export interface DashboardTile {
   id?: string;
-  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder' | 'stock_screener' | 'news' | 'portfolio' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'lda_disclosures';
+  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder' | 'stock_screener' | 'news' | 'portfolio' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'congress_roll_calls' | 'lda_disclosures';
   symbol?: string;
   timeframe?: string;
   title: string;

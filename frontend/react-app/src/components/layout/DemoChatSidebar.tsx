@@ -52,6 +52,16 @@ function parseDropDataToContextItems(data: any): ContextItem[] {
       timestamp: ts,
     }));
   }
+  if (data.type === 'roll_calls' && data.rollCalls && Array.isArray(data.rollCalls)) {
+    return data.rollCalls.map((r: any) => ({
+      id: id(),
+      type: 'roll_call' as const,
+      title: r.roll_display || `Roll ${r.congress}-${r.session}-${r.roll}`,
+      subtitle: r.bill_id_associated ? `Bill: ${r.bill_id_associated}` : undefined,
+      data: r,
+      timestamp: ts,
+    }));
+  }
   if (data.type === 'govt_contracts' && data.awards && Array.isArray(data.awards)) {
     return data.awards.map((a: any) => ({
       id: id(),

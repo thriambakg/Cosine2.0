@@ -13,6 +13,7 @@ import PoliticianTradesSearchTile from '../tiles/PoliticianTradesSearchTile';
 import SECSearchTile from '../tiles/SECSearchTile';
 import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
+import RollCallSearchTile from '../tiles/RollCallSearchTile';
 import LDASearchTile from '../tiles/LDASearchTile';
 import FolderTile from '../tiles/FolderTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
@@ -815,7 +816,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         
         // For search tiles, ensure searchParams are always included (even if empty)
         // This ensures the tile can be restored with its search configuration AND exact results
-        if (['lda_disclosures', 'congress_bills', 'news', 'sec_search', 'govt_contracts', 'politician_trades'].includes(tile.type)) {
+        if (['lda_disclosures', 'congress_bills', 'congress_roll_calls', 'news', 'sec_search', 'govt_contracts', 'politician_trades'].includes(tile.type)) {
           if (tile.searchParams !== undefined) {
             fullTileData.searchParams = tile.searchParams;
           }
@@ -1294,6 +1295,32 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
+    // Restore paginationState and results for roll call tile
+    let sessionPaginationStateRollCall = tile.paginationState;
+    let sessionResultsRollCall = tile.results;
+    try {
+      const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (parsed.paginationState) sessionPaginationStateRollCall = parsed.paginationState;
+        if (parsed.results) sessionResultsRollCall = parsed.results;
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    const rollCallProps = {
+      ...commonProps,
+      onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
+      searchParams: tile.searchParams,
+      paginationState: sessionPaginationStateRollCall as { last_evaluated_key?: any; has_more?: boolean } | undefined,
+      results: sessionResultsRollCall,
+      isPinned: tile.isPinned,
+      customTitle: tile.customTitle,
+      customColor: tile.customColor,
+      customIcon: tile.customIcon,
+    };
+
     const folderProps = {
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
@@ -1338,6 +1365,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <GovtContractsSearchTile key={tile.id} {...govtContractsProps} />
         ) : tile.type === 'congress_bills' ? (
           <CongressBillsSearchTile key={tile.id} {...congressBillsProps} />
+        ) : tile.type === 'congress_roll_calls' ? (
+          <RollCallSearchTile key={tile.id} {...rollCallProps} />
         ) : tile.type === 'lda_disclosures' ? (
           <LDASearchTile key={tile.id} {...ldaSearchProps} />
         ) : tile.type === 'folder' ? (

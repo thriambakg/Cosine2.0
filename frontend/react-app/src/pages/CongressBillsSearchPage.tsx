@@ -1553,7 +1553,7 @@ const CongressBillsSearchPage: React.FC = () => {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                     <Typography variant="h6" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
                       Search Filters
-                    </Typography>
+            </Typography>
                     <IconButton
                       onClick={() => setRollCallSearchSidebarVisible(false)}
                       sx={{ color: '#94a3b8' }}
@@ -2887,6 +2887,29 @@ const CongressBillsSearchPage: React.FC = () => {
                   </Box>
                   )}
 
+                  {/* Only bills with roll call votes - Hidden in easy mode */}
+                  {!isEasyMode && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Checkbox
+                      checked={searchParams.has_roll_call === 1}
+                      onChange={(e) => {
+                        setSearchParams((prev) => ({
+                          ...prev,
+                          has_roll_call: e.target.checked ? 1 : undefined,
+                        }));
+                      }}
+                      sx={{
+                        color: '#9ca3af',
+                        '&.Mui-checked': { color: '#3b82f6' },
+                        p: 0.5,
+                      }}
+                    />
+                    <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
+                      Only bills with roll call votes
+                    </Typography>
+                  </Box>
+                  )}
+
                   {/* Advanced Search Section - Hidden in easy mode */}
                   {!isEasyMode && (
                   <Box data-tutorial="advanced-search" sx={{ mt: 2, pt: 2, borderTop: '1px solid #374151' }}>
@@ -3058,32 +3081,6 @@ const CongressBillsSearchPage: React.FC = () => {
                             '& .MuiInputLabel-root': { color: '#94a3b8' },
                           }}
                         />
-
-                        {/* Has roll call - Advanced: only bills that have had roll call votes (GSI HasRollCallIndex: has_roll_call = 1); preserves existing intersection/union logic */}
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Checkbox
-                            checked={searchParams.has_roll_call === 1}
-                            onChange={(e) => {
-                              setSearchParams((prev) => ({
-                                ...prev,
-                                has_roll_call: e.target.checked ? 1 : undefined,
-                              }));
-                            }}
-                            sx={{
-                              color: '#9ca3af',
-                              '&.Mui-checked': { color: '#3b82f6' },
-                              p: 0.5,
-                            }}
-                          />
-                          <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                            Only bills with roll call votes
-                            </Typography>
-                          </Box>
-                          <Typography sx={{ color: '#94a3b8', fontSize: '0.75rem', pl: 3.5 }}>
-                            Filters to bills that have recorded roll call votes (uses HasRollCallIndex).
-                          </Typography>
-                        </Box>
 
                         {/* Latest Action Date From */}
                         <TextField

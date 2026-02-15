@@ -78,6 +78,10 @@ export const TILE_CONFIGS: Record<string, TileConfig> = {
     pagination: SEARCH_TILE_PAGINATION,
     size: DEFAULT_TILE_SIZE,
   },
+  'congress_roll_calls': {
+    pagination: SEARCH_TILE_PAGINATION,
+    size: DEFAULT_TILE_SIZE,
+  },
   'govt_contracts': {
     pagination: SEARCH_TILE_PAGINATION,
     size: DEFAULT_TILE_SIZE,

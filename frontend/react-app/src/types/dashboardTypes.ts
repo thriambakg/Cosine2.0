@@ -58,7 +58,7 @@ export interface TileSizeConstraints {
 
 export interface UnifiedTile {
   id: string;
-  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'lda_disclosures' | 'folder';
+  type: 'crypto' | 'stock' | 'portfolio' | 'custom' | 'chat_generated' | 'stock_screener' | 'news' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'congress_roll_calls' | 'lda_disclosures' | 'folder';
   title: string;
   customTitle?: string; // Custom tile name set by user
   customColor?: string; // Custom tile color (for header/icon)

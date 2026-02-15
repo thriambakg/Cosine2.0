@@ -33,6 +33,7 @@ import {
   Assessment as AssessmentIcon,
   Description as DescriptionIcon,
   Gavel as GavelIcon,
+  HowToVote as HowToVoteIcon,
   Folder as FolderIcon,
   ZoomIn,
   ZoomOut,
@@ -119,6 +120,17 @@ const tileCategories: TileCategory[] = [
             subcategory: 'trades',
             icon: <GavelIcon />,
             color: '#7c3aed',
+            isAvailable: true,
+            placeholder: false
+          },
+          {
+            id: 'congress_roll_calls',
+            name: 'Roll Call Search',
+            description: 'Search roll call votes by politician or by congress and roll number',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <HowToVoteIcon />,
+            color: '#6366f1',
             isAvailable: true,
             placeholder: false
           },
@@ -924,6 +936,8 @@ const UnifiedDashboardPage: React.FC = () => {
         await handleCreateGovtContractsTile();
       } else if (tileId === 'congress_bills') {
         await handleCreateCongressBillsTile();
+      } else if (tileId === 'congress_roll_calls') {
+        await handleCreateRollCallTile();
       } else if (tileId === 'lda_disclosures') {
         await handleCreateLDASearchTile();
       } else if (tileId === 'folder') {
@@ -1324,6 +1338,35 @@ const UnifiedDashboardPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to create government contracts tile:', error);
+    }
+  };
+
+  // Roll call search tile creation handler
+  const handleCreateRollCallTile = async () => {
+    if (!activeTab || !user?.id) return;
+
+    const newTile = {
+      type: 'congress_roll_calls' as const,
+      title: 'Roll Call Search',
+      autoRefresh: false,
+      isPinned: false,
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      searchParams: {
+        politician_names: [],
+        congress: 119,
+        session: undefined,
+        roll: undefined,
+      },
+    };
+
+    try {
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
+    } catch (error) {
+      console.error('Failed to create roll call tile:', error);
     }
   };
 

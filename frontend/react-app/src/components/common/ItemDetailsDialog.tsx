@@ -1105,7 +1105,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
     if (!content || typeof content !== 'object') return null;
     
     // Check if it has tile-like properties
-    if (content.tileType || content.type === 'tile' || (content.type && ['stock', 'news', 'sec', 'lda', 'congress_bills', 'govt_contracts', 'politician_trades'].includes(content.type))) {
+    if (content.tileType || content.type === 'tile' || (content.type && ['stock', 'news', 'sec', 'lda', 'congress_bills', 'congress_roll_calls', 'govt_contracts', 'politician_trades'].includes(content.type))) {
       return content as UnifiedTile;
     }
     
@@ -1842,6 +1842,13 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
               }
             } catch { /* ignore */ }
             const amendmentsCount = Number(itemData?.amendment_count) || 0;
+            let amendments: any[] = [];
+            try {
+              if (itemData?.amendments_json) {
+                const a = typeof itemData.amendments_json === 'string' ? JSON.parse(itemData.amendments_json) : itemData.amendments_json;
+                amendments = Array.isArray(a) ? a : [];
+              }
+            } catch { /* ignore */ }
             const cosponsorsCount = Number(itemData?.cosponsor_count) || 0;
             let committees: any[] = [];
             try {
@@ -2104,11 +2111,55 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                     </Box>
                   )}
                   {currentTabId === 'amendments' && (
-                    <Box>
-                      {amendmentsCount === 0 ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {amendments.length === 0 ? (
                         <Typography variant="body2" sx={{ color: '#9ca3af' }}>No amendments.</Typography>
                       ) : (
-                        <Typography variant="body1" sx={{ color: '#e2e8f0' }}>Amendments count: {amendmentsCount}. (Full amendments data can be added here if stored.)</Typography>
+                        amendments.map((amdt: any, idx: number) => (
+                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                              <Typography variant="subtitle1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                                {amdt.type || 'Amendment'} {amdt.number != null ? `#${amdt.number}` : ''}
+                                {amdt.amendedBill?.title ? ` — ${amdt.amendedBill.title}` : ''}
+                              </Typography>
+                              {amdt.congress_gov_url && (
+                                <Link href={amdt.congress_gov_url} target="_blank" rel="noopener noreferrer" sx={{ color: '#3b82f6', fontSize: '0.875rem' }}>
+                                  View on Congress.gov
+                                </Link>
+                              )}
+                            </Box>
+                            {amdt.description && (
+                              <Typography variant="body2" sx={{ color: '#94a3b8', mb: 1 }}>{amdt.description}</Typography>
+                            )}
+                            {amdt.sponsors && Array.isArray(amdt.sponsors) && amdt.sponsors.length > 0 && (
+                              <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mb: 0.5 }}>
+                                Sponsor(s): {amdt.sponsors.map((s: any) => s.name || '').filter(Boolean).join(', ') || '—'}
+                              </Typography>
+                            )}
+                            {amdt.latestAction?.text && (
+                              <Typography variant="body2" sx={{ color: '#e2e8f0', mt: 1 }}>
+                                Latest: {amdt.latestAction.actionDate ? `${amdt.latestAction.actionDate} — ` : ''}{amdt.latestAction.text}
+                              </Typography>
+                            )}
+                            {amdt.actions && Array.isArray(amdt.actions) && amdt.actions.length > 0 && (
+                              <Box sx={{ mt: 1.5 }}>
+                                <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600 }}>Actions ({amdt.actions.length})</Typography>
+                                <Box component="ul" sx={{ m: 0, pl: 2.5, mt: 0.5 }}>
+                                  {amdt.actions.slice(0, 10).map((act: any, aIdx: number) => (
+                                    <li key={aIdx}>
+                                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
+                                        {act.actionDate ? `${act.actionDate} — ` : ''}{act.text || act.actionCode || '—'}
+                                      </Typography>
+                                    </li>
+                                  ))}
+                                  {amdt.actions.length > 10 && (
+                                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>… and {amdt.actions.length - 10} more</Typography>
+                                  )}
+                                </Box>
+                              </Box>
+                            )}
+                          </Box>
+                        ))
                       )}
                     </Box>
                   )}

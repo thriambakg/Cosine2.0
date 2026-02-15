@@ -9,6 +9,7 @@ import PoliticianTradesSearchTile from '../tiles/PoliticianTradesSearchTile';
 import SECSearchTile from '../tiles/SECSearchTile';
 import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
+import RollCallSearchTile from '../tiles/RollCallSearchTile';
 import LDASearchTile from '../tiles/LDASearchTile';
 import { UnifiedTile } from '../../types/dashboardTypes';
 import { filesystemAPI } from '@/services/api';
@@ -415,6 +416,18 @@ const TilePreview: React.FC<TilePreviewProps> = ({
     customIcon: currentTile.customIcon,
   }), [commonProps, currentTile]);
 
+  const rollCallProps = useMemo(() => ({
+    ...commonProps,
+    onSelectionChange: () => {},
+    searchParams: currentTile.searchParams,
+    results: currentTile.results as any,
+    paginationState: currentTile.paginationState,
+    isPinned: currentTile.isPinned,
+    customTitle: currentTile.customTitle,
+    customColor: currentTile.customColor,
+    customIcon: currentTile.customIcon,
+  }), [commonProps, currentTile]);
+
   const ldaSearchProps = useMemo(() => ({
     ...commonProps,
     onSelectionChange: () => {},
@@ -495,6 +508,8 @@ const TilePreview: React.FC<TilePreviewProps> = ({
             <GovtContractsSearchTile key={currentTile.id} {...govtContractsProps} />
           ) : currentTile.type === 'congress_bills' ? (
             <CongressBillsSearchTile key={currentTile.id} {...congressBillsProps} />
+          ) : currentTile.type === 'congress_roll_calls' ? (
+            <RollCallSearchTile key={currentTile.id} {...rollCallProps} />
           ) : currentTile.type === 'lda_disclosures' ? (
             <LDASearchTile key={currentTile.id} {...ldaSearchProps} />
           ) : null}

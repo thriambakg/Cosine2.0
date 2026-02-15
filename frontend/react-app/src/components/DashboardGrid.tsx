@@ -5,6 +5,7 @@ import StockTile from './tiles/StockTile';
 import SECSearchTile from './tiles/SECSearchTile';
 import GovtContractsSearchTile from './tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from './tiles/CongressBillsSearchTile';
+import RollCallSearchTile from './tiles/RollCallSearchTile';
 import PlaceholderTile from './tiles/PlaceholderTile';
 import { UnifiedTile } from '../types/dashboardTypes';
 
@@ -129,6 +130,21 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
             results={tile.results as any}
             displayOptions={tile.displayOptions as any}
             autoRefresh={tile.autoRefresh}
+            isPinned={tile.isPinned}
+          />
+        );
+      case 'congress_roll_calls':
+        return (
+          <RollCallSearchTile
+            key={tile.id}
+            id={tile.id}
+            size={tile.size}
+            onRemove={onRemoveTile}
+            onUpdate={onUpdateTile}
+            onSettingsChange={onSettingsChange}
+            searchParams={tile.searchParams}
+            results={tile.results as any}
+            paginationState={tile.paginationState}
             isPinned={tile.isPinned}
           />
         );
