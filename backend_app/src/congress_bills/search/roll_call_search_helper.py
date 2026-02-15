@@ -15,8 +15,24 @@ logger = logging.getLogger(__name__)
 # Page size for roll call search results
 ROLL_CALL_PAGE_LIMIT = 100
 
-# Attributes to project when resolving bills (filterable/display only)
-BILL_PROJECTION_ATTRS = ['bill_id', 'bill_title', 'short_title', 'latest_action_text', 'latest_action_date']
+# Attributes to project when resolving bills (match main bill search: filterable + display)
+# Must include partition/sort keys; rest used by Refine filters and table columns
+BILL_PROJECTION_ATTRS = [
+    'bill_id',
+    'search_index_sk',
+    'bill_title',
+    'bill_type',
+    'bill_number',
+    'sponsor_full_name',
+    'sponsor_party',
+    'sponsor_state',
+    'introduced_date',
+    'latest_action_date',
+    'latest_action_text',
+    'congress',
+    'bipartisan',
+    'policy_area',
+]
 
 
 def _convert_decimal(obj: Any) -> Any:
@@ -85,8 +101,8 @@ def compute_vote_summary(members: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def fetch_bill_projections(table, bill_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     """
-    Batch fetch minimal bill attributes for display/filtering.
-    Returns dict: bill_id -> { bill_id, bill_title, short_title, latest_action_text, latest_action_date }.
+    Batch fetch bill attributes for display and Refine filtering (same set as main bill search).
+    Returns dict: bill_id -> { bill_id, bill_title, bill_type, bill_number, sponsor_full_name, ... }.
     Only includes bills that exist and are not search index items.
     """
     if not table or not bill_ids:
@@ -119,6 +135,15 @@ def fetch_bill_projections(table, bill_ids: List[str]) -> Dict[str, Dict[str, An
                     'short_title': item.get('short_title') or '',
                     'latest_action_text': item.get('latest_action_text') or item.get('latest_action') or '',
                     'latest_action_date': item.get('latest_action_date') or '',
+                    'bill_type': item.get('bill_type'),
+                    'bill_number': item.get('bill_number'),
+                    'sponsor_full_name': item.get('sponsor_full_name'),
+                    'sponsor_party': item.get('sponsor_party'),
+                    'sponsor_state': item.get('sponsor_state'),
+                    'introduced_date': item.get('introduced_date'),
+                    'congress': item.get('congress'),
+                    'bipartisan': item.get('bipartisan'),
+                    'policy_area': item.get('policy_area'),
                 })
         except Exception as e:
             logger.warning(f"fetch_bill_projections batch error: {e}")

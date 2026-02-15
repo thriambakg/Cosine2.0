@@ -124,6 +124,7 @@ const CongressBillsSearchPage: React.FC = () => {
   // Context menu state
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [fileBrowserFor, setFileBrowserFor] = useState<'bills' | 'vote_bills' | null>(null);
   const [activeTab, setActiveTab] = useState<'bills' | 'rollcall'>(() => (savedState?.activeTab as 'bills' | 'rollcall') || 'bills');
 
   // Roll Call Search tab: congress '' | '119'; sessions subset of ['1','2']. Selecting 119th auto-selects both sessions.
@@ -140,7 +141,8 @@ const CongressBillsSearchPage: React.FC = () => {
   const [rollCallHasMore, setRollCallHasMore] = useState<boolean>(false);
   const [rollCallLastKey, setRollCallLastKey] = useState<any>(null);
   const [rollCallSearchIndex, setRollCallSearchIndex] = useState<string | null>(null);
-  const [rollCallBillDetails, setRollCallBillDetails] = useState<Record<string, { bill_id: string; bill_title?: string; short_title?: string; latest_action_text?: string; latest_action_date?: string }>>({});
+  /** Bill details from roll call search (same projection as main bill search for Refine + table) */
+  const [rollCallBillDetails, setRollCallBillDetails] = useState<Record<string, CongressBill>>({});
   const [rollCallResultView, setRollCallResultView] = useState<'rollcalls' | 'bills'>('rollcalls');
 
   // Roll call table: flattened rows and client-side filters (voteType for SEARCH#VOTE: Yea/Nay/Abstained)
@@ -255,24 +257,60 @@ const CongressBillsSearchPage: React.FC = () => {
   }, [rollCallResults, rollCallSearchIndex]);
 
   const [billSelectedFilters, setBillSelectedFilters] = useState<{
-    congresses: Set<number>; voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
-  }>({ congresses: new Set(), voteTypes: new Set() });
+    congresses: Set<number>;
+    voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
+    bill_types: Set<string>;
+    sponsor_parties: Set<string>;
+    sponsor_states: Set<string>;
+    policy_areas: Set<string>;
+    bipartisan: Set<number>;
+  }>({
+    congresses: new Set(),
+    voteTypes: new Set(),
+    bill_types: new Set(),
+    sponsor_parties: new Set(),
+    sponsor_states: new Set(),
+    policy_areas: new Set(),
+    bipartisan: new Set(),
+  });
   const [billExpandedFilters, setBillExpandedFilters] = useState<{
-    congresses: boolean; voteTypes: boolean;
-  }>({ congresses: false, voteTypes: false });
+    congresses: boolean;
+    voteTypes: boolean;
+    billTypes: boolean;
+    sponsorParties: boolean;
+    sponsorStates: boolean;
+    policyAreas: boolean;
+    bipartisan: boolean;
+  }>({ congresses: false, voteTypes: false, billTypes: false, sponsorParties: false, sponsorStates: false, policyAreas: false, bipartisan: false });
 
   const billAvailableFilters = React.useMemo(() => {
     const congressMap = new Map<number, number>();
     const voteTypeMap = new Map<string, number>();
+    const billTypeMap = new Map<string, number>();
+    const sponsorPartyMap = new Map<string, number>();
+    const sponsorStateMap = new Map<string, number>();
+    const policyAreaMap = new Map<string, number>();
+    const bipartisanMap = new Map<number, number>();
     voteBillFlattenedRows.forEach((row) => {
       congressMap.set(row.congress, (congressMap.get(row.congress) || 0) + 1);
       if (row.voteType) voteTypeMap.set(row.voteType, (voteTypeMap.get(row.voteType) || 0) + 1);
+      const d = rollCallBillDetails[row.bill_id];
+      if (d?.bill_type) billTypeMap.set(d.bill_type, (billTypeMap.get(d.bill_type) || 0) + 1);
+      if (d?.sponsor_party) sponsorPartyMap.set(d.sponsor_party, (sponsorPartyMap.get(d.sponsor_party) || 0) + 1);
+      if (d?.sponsor_state) sponsorStateMap.set(d.sponsor_state, (sponsorStateMap.get(d.sponsor_state) || 0) + 1);
+      if (d?.policy_area) policyAreaMap.set(d.policy_area, (policyAreaMap.get(d.policy_area) || 0) + 1);
+      if (d?.bipartisan !== undefined && d?.bipartisan !== null) bipartisanMap.set(d.bipartisan, (bipartisanMap.get(d.bipartisan) || 0) + 1);
     });
     return {
       congress_filters: Array.from(congressMap.entries()).map(([c, count]) => ({ congress: c, count })).sort((a, b) => b.congress - a.congress),
       vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Abstained', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
+      bill_type_filters: Array.from(billTypeMap.entries()).map(([billType, count]) => ({ billType, count })).sort((a, b) => (a.billType || '').localeCompare(b.billType || '')),
+      sponsor_party_filters: Array.from(sponsorPartyMap.entries()).map(([party, count]) => ({ party, count })).sort((a, b) => (a.party || '').localeCompare(b.party || '')),
+      sponsor_state_filters: Array.from(sponsorStateMap.entries()).map(([state, count]) => ({ state, count })).sort((a, b) => (a.state || '').localeCompare(b.state || '')),
+      policy_area_filters: Array.from(policyAreaMap.entries()).map(([area, count]) => ({ area, count })).sort((a, b) => (a.area || '').localeCompare(b.area || '')),
+      bipartisan_filters: Array.from(bipartisanMap.entries()).map(([bipartisan, count]) => ({ bipartisan, count })).sort((a, b) => a.bipartisan - b.bipartisan),
     };
-  }, [voteBillFlattenedRows]);
+  }, [voteBillFlattenedRows, rollCallBillDetails]);
 
   const voteBillFilteredRows = React.useMemo(() => {
     let rows = [...voteBillFlattenedRows];
@@ -282,8 +320,166 @@ const CongressBillsSearchPage: React.FC = () => {
     if (billSelectedFilters.voteTypes.size > 0) {
       rows = rows.filter((r) => r.voteType && billSelectedFilters.voteTypes.has(r.voteType));
     }
+    if (billSelectedFilters.bill_types.size > 0) {
+      rows = rows.filter((r) => {
+        const d = rollCallBillDetails[r.bill_id];
+        return d?.bill_type && billSelectedFilters.bill_types.has(d.bill_type);
+      });
+    }
+    if (billSelectedFilters.sponsor_parties.size > 0) {
+      rows = rows.filter((r) => {
+        const d = rollCallBillDetails[r.bill_id];
+        return d?.sponsor_party && billSelectedFilters.sponsor_parties.has(d.sponsor_party);
+      });
+    }
+    if (billSelectedFilters.sponsor_states.size > 0) {
+      rows = rows.filter((r) => {
+        const d = rollCallBillDetails[r.bill_id];
+        return d?.sponsor_state && billSelectedFilters.sponsor_states.has(d.sponsor_state);
+      });
+    }
+    if (billSelectedFilters.policy_areas.size > 0) {
+      rows = rows.filter((r) => {
+        const d = rollCallBillDetails[r.bill_id];
+        return d?.policy_area && billSelectedFilters.policy_areas.has(d.policy_area);
+      });
+    }
+    if (billSelectedFilters.bipartisan.size > 0) {
+      rows = rows.filter((r) => {
+        const d = rollCallBillDetails[r.bill_id];
+        return d?.bipartisan !== undefined && d?.bipartisan !== null && billSelectedFilters.bipartisan.has(d.bipartisan);
+      });
+    }
     return rows;
-  }, [voteBillFlattenedRows, billSelectedFilters]);
+  }, [voteBillFlattenedRows, billSelectedFilters, rollCallBillDetails]);
+
+  const AVAILABLE_VOTE_BILL_COLUMNS = [
+    'bill_title', 'bill_type', 'bill_number', 'sponsor_name', 'sponsor_party', 'sponsor_state',
+    'introduced_date', 'latest_action_date', 'congress', 'bipartisan', 'policy_area',
+    'bill_id', 'vote', 'latest_action',
+  ] as const;
+  const DEFAULT_VOTE_BILL_COLUMNS = ['bill_title', 'bill_type', 'congress', 'bill_id', 'vote', 'latest_action'];
+  const [visibleVoteBillColumns, setVisibleVoteBillColumns] = useState<string[]>(DEFAULT_VOTE_BILL_COLUMNS);
+  const [voteBillColumnMenuAnchor, setVoteBillColumnMenuAnchor] = useState<null | HTMLElement>(null);
+  const voteBillColumnMenuOpen = Boolean(voteBillColumnMenuAnchor);
+  const [selectedVoteBills, setSelectedVoteBills] = useState<Set<string>>(new Set());
+  const [lastSelectedVoteBillIndex, setLastSelectedVoteBillIndex] = useState<number | null>(null);
+  const [voteBillContextMenuPosition, setVoteBillContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [voteBillPageSize, setVoteBillPageSize] = useState(25);
+  const [voteBillCurrentPage, setVoteBillCurrentPage] = useState(1);
+
+  const voteBillTotalPages = Math.max(1, Math.ceil(voteBillFilteredRows.length / voteBillPageSize));
+  const voteBillStartIndex = (voteBillCurrentPage - 1) * voteBillPageSize;
+  const voteBillEndIndex = Math.min(voteBillStartIndex + voteBillPageSize, voteBillFilteredRows.length);
+  const voteBillPaginatedRows = React.useMemo(() => {
+    return voteBillFilteredRows.slice(voteBillStartIndex, voteBillEndIndex);
+  }, [voteBillFilteredRows, voteBillStartIndex, voteBillEndIndex]);
+
+  const handleVoteBillClick = (e: React.MouseEvent, billId: string, index: number) => {
+    e.stopPropagation();
+    const isCtrlClick = e.ctrlKey || e.metaKey;
+    const isShiftClick = e.shiftKey;
+    setSelectedVoteBills((prev) => {
+      const newSelected = new Set(prev);
+      if (isShiftClick && lastSelectedVoteBillIndex !== null) {
+        const start = Math.min(lastSelectedVoteBillIndex, index);
+        const end = Math.max(lastSelectedVoteBillIndex, index);
+        const rows = voteBillFilteredRows.slice(start, end + 1);
+        rows.forEach((r) => newSelected.add(r.bill_id));
+      } else if (isCtrlClick) {
+        if (newSelected.has(billId)) newSelected.delete(billId);
+        else newSelected.add(billId);
+        setLastSelectedVoteBillIndex(index);
+      } else {
+        if (newSelected.has(billId)) newSelected.delete(billId);
+        else { newSelected.clear(); newSelected.add(billId); }
+        setLastSelectedVoteBillIndex(index);
+      }
+      return newSelected;
+    });
+  };
+
+  const handleVoteBillDragStart = (e: React.DragEvent, billId: string) => {
+    e.stopPropagation();
+    const toDrag = selectedVoteBills.has(billId) ? selectedVoteBills : new Set([billId]);
+    const rows = voteBillFilteredRows.filter((r) => toDrag.has(r.bill_id));
+    const bills = rows.map((r) => {
+      const d = rollCallBillDetails[r.bill_id];
+      return {
+        bill_id: r.bill_id,
+        bill_title: d?.bill_title,
+        congress: r.congress,
+        latest_action_text: d?.latest_action_text,
+        latest_action_date: d?.latest_action_date,
+      };
+    });
+    if (bills.length > 0) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'congress_bills', bills }));
+      const dragImage = document.createElement('div');
+      dragImage.textContent = `${bills.length} bill${bills.length !== 1 ? 's' : ''}`;
+      dragImage.style.position = 'absolute';
+      dragImage.style.top = '-1000px';
+      dragImage.style.padding = '8px 12px';
+      dragImage.style.backgroundColor = '#3b82f6';
+      dragImage.style.color = '#ffffff';
+      dragImage.style.borderRadius = '4px';
+      dragImage.style.fontSize = '14px';
+      document.body.appendChild(dragImage);
+      e.dataTransfer.setDragImage(dragImage, 0, 0);
+      setTimeout(() => document.body.removeChild(dragImage), 0);
+    }
+  };
+
+  const handleVoteBillRowContextMenu = (e: React.MouseEvent, billId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectedVoteBills.has(billId)) setSelectedVoteBills(new Set([billId]));
+    setVoteBillContextMenuPosition({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleVoteBillContextMenuClose = () => {
+    setVoteBillContextMenuPosition(null);
+  };
+
+  const handleVoteBillAddToContext = () => {
+    const rows = voteBillFilteredRows.filter((r) => selectedVoteBills.has(r.bill_id));
+    const bills = rows.map((r) => {
+      const d = rollCallBillDetails[r.bill_id];
+      return { bill_id: r.bill_id, bill_title: d?.bill_title, congress: r.congress, latest_action_text: d?.latest_action_text, latest_action_date: d?.latest_action_date };
+    });
+    if (bills.length === 0) return;
+    if (bills.length === 1) addBillToContext(bills[0]);
+    else addMultipleBillsToContext(bills);
+    setSelectedVoteBills(new Set());
+    handleVoteBillContextMenuClose();
+  };
+
+  const handleVoteBillAddToFiles = () => {
+    if (selectedVoteBills.size === 0 || !user) return;
+    setFileBrowserFor('vote_bills');
+    setFileBrowserOpen(true);
+    handleVoteBillContextMenuClose();
+  };
+
+  const handleVoteBillFileBrowserSelect = async (folderPath: string) => {
+    if (!user || selectedVoteBills.size === 0) return;
+    const rows = voteBillFilteredRows.filter((r) => selectedVoteBills.has(r.bill_id));
+    const items = rows.map((r) => {
+      const d = rollCallBillDetails[r.bill_id];
+      const bill = { bill_id: r.bill_id, bill_title: d?.bill_title, congress: r.congress, latest_action_text: d?.latest_action_text, latest_action_date: d?.latest_action_date };
+      const title = (d?.bill_title || r.bill_id).trim() || r.bill_id;
+      return { context_data: bill, title, item_type: 'congress_bill' as const };
+    });
+    try {
+      const response = await filesystemAPI.addBulkContextItems({ user_id: user.id, folder_path: folderPath, items });
+      if (response.success) setSelectedVoteBills(new Set());
+    } catch (err) {
+      console.error(err);
+    }
+    setFileBrowserOpen(false);
+    setFileBrowserFor(null);
+  };
 
   const [rollCallSelectedFilters, setRollCallSelectedFilters] = useState<{
     congresses: Set<number>; sessions: Set<number>; politicians: Set<string>; voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
@@ -845,6 +1041,7 @@ const CongressBillsSearchPage: React.FC = () => {
 
   const handleAddToFiles = () => {
     if (selectedBills.size === 0 || !user) return;
+    setFileBrowserFor('bills');
     setFileBrowserOpen(true);
     handleContextMenuClose();
   };
@@ -1780,152 +1977,276 @@ const CongressBillsSearchPage: React.FC = () => {
                 </Box>
                   )}
                   {rollCallSearchIndex === 'SEARCH#VOTE' && rollCallResultView === 'bills' && voteBillFlattenedRows.length > 0 && (
-                    <Box sx={{ display: 'flex', gap: 2, flex: 1, minWidth: 0 }}>
+                    <Box sx={{ display: 'flex', gap: 3, flex: 1, minWidth: 0 }}>
                     {voteBillFilteredRows.length > 0 ? (
-                    <TableContainer
-                      component={Box}
-                      sx={{
-                        flex: 1,
-                        overflow: 'auto',
-                        '&::-webkit-scrollbar': { width: 6 },
-                        '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 },
-                      }}
-                    >
-                      <Table size="small" stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Congress</TableCell>
-                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill ID</TableCell>
-                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill Title</TableCell>
-                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Vote</TableCell>
-                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Latest Action</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {voteBillFilteredRows.map((row) => {
-                            const details = rollCallBillDetails[row.bill_id];
-                            const billForDialog = { bill_id: row.bill_id, bill_title: details?.bill_title, congress: row.congress, latest_action_text: details?.latest_action_text, latest_action_date: details?.latest_action_date };
-                            return (
-                              <TableRow
-                                key={row.rowKey}
-                                onClick={() => {
-                                  if (user?.id) {
-                                    openItemDetails(
-                                      'congress_bill',
-                                      billForDialog,
-                                      details?.bill_title || row.bill_id,
-                                      { user_id: user.id }
-                                    );
-                                  }
-                                }}
-                                sx={{
-                                  cursor: 'pointer',
-                                  '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.08)' },
-                                }}
+                    <GlassCard sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      <Box sx={{ p: 3 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Tooltip title="Select columns to display">
+                              <IconButton onClick={(e) => setVoteBillColumnMenuAnchor(e.currentTarget)} sx={{ color: '#94a3b8' }} size="small">
+                                <ViewColumnIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                            <Tooltip title={selectedVoteBills.size > 0 ? `Add ${selectedVoteBills.size} bill(s) to context` : 'Select bills to add to context'}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => { if (selectedVoteBills.size > 0) handleVoteBillAddToContext(); else alert('Please select at least one bill'); }}
+                                  disabled={selectedVoteBills.size === 0}
+                                  sx={{ color: selectedVoteBills.size > 0 ? '#10b981' : '#9ca3af', '&:hover': { color: '#10b981' }, '&:disabled': { color: '#4b5563' } }}
+                                >
+                                  <AddToContextIcon sx={{ fontSize: 18 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Chip
+                              label={`${voteBillFilteredRows.length} bill${voteBillFilteredRows.length !== 1 ? 's' : ''} found`}
+                              sx={{ backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#86efac', border: '1px solid #22c55e', fontWeight: 600 }}
+                            />
+                            <FormControl size="small" sx={{ minWidth: 120, ml: 1 }}>
+                              <InputLabel id="vote-bill-per-page-label" sx={{ color: '#9ca3af' }}>Per Page</InputLabel>
+                              <Select
+                                labelId="vote-bill-per-page-label"
+                                value={voteBillPageSize}
+                                label="Per Page"
+                                onChange={(e) => { setVoteBillPageSize(Number(e.target.value)); setVoteBillCurrentPage(1); }}
+                                sx={{ color: '#ffffff', '& .MuiOutlinedInput-notchedOutline': { borderColor: '#374151' }, '& .MuiSelect-icon': { color: '#9ca3af' } }}
+                                MenuProps={{ PaperProps: { sx: { bgcolor: '#1f2937', border: '1px solid #374151' } } }}
                               >
-                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.congress}</TableCell>
-                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.bill_id}</TableCell>
-                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151', maxWidth: 360 }}>
-                                  <Tooltip title={details?.bill_title || row.bill_id} disableHoverListener={!details?.bill_title}>
-                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                                      {details?.bill_title || row.bill_id}
-                                    </span>
-                                  </Tooltip>
-                                </TableCell>
-                                <TableCell sx={{ borderColor: '#374151' }}>
-                                  <Chip
+                                <MenuItem value={10}>10</MenuItem>
+                                <MenuItem value={25}>25</MenuItem>
+                                <MenuItem value={50}>50</MenuItem>
+                                <MenuItem value={100}>100</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Box>
+                        </Box>
+                        <Menu
+                          anchorEl={voteBillColumnMenuAnchor}
+                          open={voteBillColumnMenuOpen}
+                          onClose={() => setVoteBillColumnMenuAnchor(null)}
+                          PaperProps={{ sx: { backgroundColor: 'rgba(15, 23, 42, 0.98)', border: '2px solid #374151', color: '#ffffff' } }}
+                        >
+                          {AVAILABLE_VOTE_BILL_COLUMNS.map((col) => (
+                            <MenuItem
+                              key={col}
+                              onClick={() => setVisibleVoteBillColumns((prev) => prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col])}
+                              sx={{ color: visibleVoteBillColumns.includes(col) ? '#3b82f6' : '#94a3b8' }}
+                            >
+                              <Checkbox checked={visibleVoteBillColumns.includes(col)} sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }} />
+                              {col.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                            </MenuItem>
+                          ))}
+                        </Menu>
+                        <TableContainer
+                          sx={{
+                            '&::-webkit-scrollbar': { width: 6 },
+                            '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' },
+                            '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 },
+                            '&::-webkit-scrollbar-thumb:hover': { backgroundColor: 'rgba(59, 130, 246, 0.7)' },
+                          }}
+                        >
+                          <Table size="small" stickyHeader>
+                            <TableHead>
+                              <TableRow>
+                                <TableCell padding="none" sx={{ width: 40, padding: '8px 4px', color: '#94a3b8', borderColor: '#374151' }}>
+                                  <Checkbox
                                     size="small"
-                                    label={row.voteType}
-                                    sx={{
-                                      backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(156, 163, 175, 0.2)',
-                                      color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : '#d1d5db',
-                                      fontWeight: 600,
-                                      fontSize: '0.75rem',
+                                    indeterminate={selectedVoteBills.size > 0 && selectedVoteBills.size < voteBillPaginatedRows.length}
+                                    checked={voteBillPaginatedRows.length > 0 && voteBillPaginatedRows.every((r) => selectedVoteBills.has(r.bill_id))}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedVoteBills((prev) => {
+                                          const next = new Set(prev);
+                                          voteBillPaginatedRows.forEach((r) => next.add(r.bill_id));
+                                          return next;
+                                        });
+                                      } else {
+                                        setSelectedVoteBills((prev) => {
+                                          const next = new Set(prev);
+                                          voteBillPaginatedRows.forEach((r) => next.delete(r.bill_id));
+                                          return next;
+                                        });
+                                      }
                                     }}
+                                    sx={{ color: '#64748b', '&.Mui-checked': { color: '#3b82f6' } }}
                                   />
                                 </TableCell>
-                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
-                                  {details?.latest_action_date ? new Date(details.latest_action_date).toLocaleDateString() : (details?.latest_action_text ? details.latest_action_text.slice(0, 50) + (details.latest_action_text.length > 50 ? '…' : '') : '—')}
-                                </TableCell>
+                                {visibleVoteBillColumns.includes('bill_title') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill Title</TableCell>}
+                                {visibleVoteBillColumns.includes('bill_type') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill Type</TableCell>}
+                                {visibleVoteBillColumns.includes('bill_number') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill Number</TableCell>}
+                                {visibleVoteBillColumns.includes('sponsor_name') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Sponsor</TableCell>}
+                                {visibleVoteBillColumns.includes('sponsor_party') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Party</TableCell>}
+                                {visibleVoteBillColumns.includes('sponsor_state') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>State</TableCell>}
+                                {visibleVoteBillColumns.includes('introduced_date') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Introduced Date</TableCell>}
+                                {visibleVoteBillColumns.includes('latest_action_date') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Latest Action</TableCell>}
+                                {visibleVoteBillColumns.includes('congress') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Congress</TableCell>}
+                                {visibleVoteBillColumns.includes('bipartisan') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bipartisan</TableCell>}
+                                {visibleVoteBillColumns.includes('policy_area') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Policy Area</TableCell>}
+                                {visibleVoteBillColumns.includes('bill_id') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill ID</TableCell>}
+                                {visibleVoteBillColumns.includes('vote') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Vote</TableCell>}
+                                {visibleVoteBillColumns.includes('latest_action') && <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Latest Action</TableCell>}
                               </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                            </TableHead>
+                            <TableBody>
+                              {voteBillPaginatedRows.map((row, idx) => {
+                                const details = rollCallBillDetails[row.bill_id];
+                                const billForDialog = { bill_id: row.bill_id, bill_title: details?.bill_title, congress: row.congress, latest_action_text: details?.latest_action_text, latest_action_date: details?.latest_action_date };
+                                const globalIndex = voteBillStartIndex + idx;
+                                const isSelected = selectedVoteBills.has(row.bill_id);
+                                return (
+                                  <TableRow
+                                    key={row.rowKey}
+                                    onClick={(e) => handleVoteBillClick(e, row.bill_id, globalIndex)}
+                                    onContextMenu={(e) => handleVoteBillRowContextMenu(e, row.bill_id)}
+                                    draggable={isSelected}
+                                    onDragStart={(e) => handleVoteBillDragStart(e, row.bill_id)}
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation();
+                                      if (user?.id) openItemDetails('congress_bill', billForDialog, details?.bill_title || row.bill_id, { user_id: user.id });
+                                    }}
+                                    sx={{
+                                      backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                                      '&:hover': { backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.05)' },
+                                      cursor: 'pointer',
+                                      userSelect: 'none',
+                                    }}
+                                  >
+                                    <TableCell sx={{ width: 40, padding: '8px 4px', borderColor: '#374151' }} />
+                                    {visibleVoteBillColumns.includes('bill_title') && (
+                                      <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151', maxWidth: 360 }}>
+                                        <Tooltip title={details?.bill_title || row.bill_id} disableHoverListener={!details?.bill_title}>
+                                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{details?.bill_title || row.bill_id}</span>
+                                        </Tooltip>
+                                      </TableCell>
+                                    )}
+                                    {visibleVoteBillColumns.includes('bill_type') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.bill_type ?? '—'}</TableCell>}
+                                    {visibleVoteBillColumns.includes('bill_number') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.bill_number ?? '—'}</TableCell>}
+                                    {visibleVoteBillColumns.includes('sponsor_name') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.sponsor_full_name ?? '—'}</TableCell>}
+                                    {visibleVoteBillColumns.includes('sponsor_party') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.sponsor_party ?? '—'}</TableCell>}
+                                    {visibleVoteBillColumns.includes('sponsor_state') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.sponsor_state ?? '—'}</TableCell>}
+                                    {visibleVoteBillColumns.includes('introduced_date') && (
+                                      <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{formatDate(details?.introduced_date != null ? String(details.introduced_date) : undefined)}</TableCell>
+                                    )}
+                                    {visibleVoteBillColumns.includes('latest_action_date') && (
+                                      <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{formatDate(details?.latest_action_date != null ? String(details.latest_action_date) : undefined) || (details?.latest_action_text ? details.latest_action_text.slice(0, 50) + (details.latest_action_text.length > 50 ? '…' : '') : '—')}</TableCell>
+                                    )}
+                                    {visibleVoteBillColumns.includes('congress') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.congress}</TableCell>}
+                                    {visibleVoteBillColumns.includes('bipartisan') && (
+                                      <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.bipartisan === 1 ? 'Yes' : details?.bipartisan === 0 ? 'No' : '—'}</TableCell>
+                                    )}
+                                    {visibleVoteBillColumns.includes('policy_area') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{details?.policy_area ?? '—'}</TableCell>}
+                                    {visibleVoteBillColumns.includes('bill_id') && <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.bill_id}</TableCell>}
+                                    {visibleVoteBillColumns.includes('vote') && (
+                                      <TableCell sx={{ borderColor: '#374151' }}>
+                                        <Chip
+                                          size="small"
+                                          label={row.voteType}
+                                          sx={{
+                                            backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(156, 163, 175, 0.2)',
+                                            color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : '#d1d5db',
+                                            fontWeight: 600,
+                                            fontSize: '0.75rem',
+                                          }}
+                                        />
+                                      </TableCell>
+                                    )}
+                                    {visibleVoteBillColumns.includes('latest_action') && (
+                                      <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                        {details?.latest_action_date ? new Date(details.latest_action_date).toLocaleDateString() : (details?.latest_action_text ? details.latest_action_text.slice(0, 50) + (details.latest_action_text.length > 50 ? '…' : '') : '—')}
+                                      </TableCell>
+                                    )}
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                        {voteBillTotalPages > 1 && (
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
+                            <Typography sx={{ color: '#94a3b8' }}>
+                              Showing {voteBillStartIndex + 1}-{voteBillEndIndex} of {voteBillFilteredRows.length} results
+                            </Typography>
+                            <Pagination
+                              count={voteBillTotalPages}
+                              page={voteBillCurrentPage}
+                              onChange={(_, p) => setVoteBillCurrentPage(p)}
+                              sx={{
+                                '& .MuiPaginationItem-root': { color: '#94a3b8' },
+                                '& .MuiPaginationItem-root.Mui-selected': { backgroundColor: '#3b82f6', color: '#fff' },
+                              }}
+                            />
+                          </Box>
+                        )}
+                      </Box>
+                    </GlassCard>
                     ) : (
                       <Typography sx={{ color: '#94a3b8', py: 2, flex: 1 }}>No bills match the selected filters.</Typography>
                     )}
-                    <GlassCard sx={{ p: 2, minWidth: 260, maxWidth: 300, height: 'fit-content', alignSelf: 'flex-start' }}>
-                      <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 1.5, fontWeight: 600 }}>Refine results</Typography>
-                      {(billAvailableFilters.congress_filters.length > 0 || billAvailableFilters.vote_type_filters.length > 0) && (
+                    {/* Vote bills Refine - match main bills Refine styling */}
+                    <GlassCard sx={{ p: 2, minWidth: 280, maxWidth: 320, height: 'fit-content', alignSelf: 'flex-start' }}>
+                      <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600, mb: 2, fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Refine search results by:
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#9ca3af', mb: 2, display: 'block', fontSize: '0.75rem' }}>
+                        Click headings to show top filters.
+                        <br />
+                        Bill counts shown in <Chip label="#" size="small" sx={{ height: 18, fontSize: '0.7rem', backgroundColor: 'rgba(107, 114, 128, 0.3)', color: '#9ca3af', border: '1px solid #6b7280' }} />
+                      </Typography>
+                      {(billSelectedFilters.congresses.size > 0 || billSelectedFilters.voteTypes.size > 0 ||
+                        billSelectedFilters.bill_types.size > 0 || billSelectedFilters.sponsor_parties.size > 0 ||
+                        billSelectedFilters.sponsor_states.size > 0 || billSelectedFilters.policy_areas.size > 0 ||
+                        billSelectedFilters.bipartisan.size > 0) && (
+                        <Box sx={{ mb: 2, p: 2, backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', borderRadius: '4px' }}>
+                          <Typography variant="subtitle2" sx={{ color: '#93c5fd', mb: 1.5, fontWeight: 600 }}>Selected Filters:</Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
+                            {Array.from(billSelectedFilters.voteTypes).map((vt) => (
+                              <Chip key={vt} label={vt} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.voteTypes); n.delete(vt); return { ...prev, voteTypes: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                            {Array.from(billSelectedFilters.congresses).map((c) => (
+                              <Chip key={c} label={`Congress ${c}`} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.congresses); n.delete(c); return { ...prev, congresses: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                            {Array.from(billSelectedFilters.bill_types).map((bt) => (
+                              <Chip key={bt} label={bt} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.bill_types); n.delete(bt); return { ...prev, bill_types: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                            {Array.from(billSelectedFilters.sponsor_parties).map((p) => (
+                              <Chip key={p} label={p} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.sponsor_parties); n.delete(p); return { ...prev, sponsor_parties: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                            {Array.from(billSelectedFilters.sponsor_states).map((s) => (
+                              <Chip key={s} label={s} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.sponsor_states); n.delete(s); return { ...prev, sponsor_states: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                            {Array.from(billSelectedFilters.policy_areas).map((a) => (
+                              <Chip key={a} label={a} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.policy_areas); n.delete(a); return { ...prev, policy_areas: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                            {Array.from(billSelectedFilters.bipartisan).map((b) => (
+                              <Chip key={b} label={b === 1 ? 'Bipartisan' : 'Not bipartisan'} onDelete={() => setBillSelectedFilters((prev) => { const n = new Set(prev.bipartisan); n.delete(b); return { ...prev, bipartisan: n }; })} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', border: '1px solid #3b82f6', '& .MuiChip-deleteIcon': { color: '#93c5fd' } }} />
+                            ))}
+                          </Box>
+                          <Button size="small" onClick={() => setBillSelectedFilters({ congresses: new Set(), voteTypes: new Set(), bill_types: new Set(), sponsor_parties: new Set(), sponsor_states: new Set(), policy_areas: new Set(), bipartisan: new Set() })} sx={{ color: '#94a3b8', fontSize: '0.75rem' }}>Clear All Filters</Button>
+                        </Box>
+                      )}
+                      {(billAvailableFilters.congress_filters.length > 0 || billAvailableFilters.vote_type_filters.length > 0 ||
+                        billAvailableFilters.bill_type_filters.length > 0 || billAvailableFilters.sponsor_party_filters.length > 0 ||
+                        billAvailableFilters.sponsor_state_filters.length > 0 || billAvailableFilters.policy_area_filters.length > 0 ||
+                        billAvailableFilters.bipartisan_filters.length > 0) && (
                         <>
                           {billAvailableFilters.vote_type_filters.length > 0 && (
-                            <Box sx={{ mb: 1.5 }}>
-                              <Box
-                                onClick={() => setBillExpandedFilters((p) => ({ ...p, voteTypes: !p.voteTypes }))}
-                                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
-                              >
-                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Vote</Typography>
-                                {billExpandedFilters.voteTypes ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, voteTypes: !p.voteTypes }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Vote</Typography>
+                                {billExpandedFilters.voteTypes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
                               </Box>
                               <Collapse in={billExpandedFilters.voteTypes}>
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
                                   {billAvailableFilters.vote_type_filters.map((f) => {
                                     const isSelected = billSelectedFilters.voteTypes.has(f.voteType);
                                     return (
-                                      <Chip
-                                        key={f.voteType}
-                                        size="small"
-                                        label={`${f.voteType} (${f.count})`}
-                                        onClick={() => setBillSelectedFilters((prev) => {
-                                          const next = new Set(prev.voteTypes);
-                                          if (next.has(f.voteType)) next.delete(f.voteType); else next.add(f.voteType);
-                                          return { ...prev, voteTypes: next };
-                                        })}
-                                        sx={{
-                                          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.25)' : 'rgba(55, 65, 81, 0.4)',
-                                          color: isSelected ? '#93c5fd' : '#9ca3af',
-                                          border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
-                                          cursor: 'pointer',
-                                          fontSize: '0.7rem',
-                                        }}
-                                      />
-                                    );
-                                  })}
-                                </Box>
-                              </Collapse>
-                            </Box>
-                          )}
-                          {billAvailableFilters.congress_filters.length > 0 && (
-                            <Box sx={{ mb: 1.5 }}>
-                              <Box
-                                onClick={() => setBillExpandedFilters((p) => ({ ...p, congresses: !p.congresses }))}
-                                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
-                              >
-                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Congress</Typography>
-                                {billExpandedFilters.congresses ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
-                              </Box>
-                              <Collapse in={billExpandedFilters.congresses}>
-                                <Box sx={{ maxHeight: 200, overflowY: 'auto', mt: 0.5 }}>
-                                  {billAvailableFilters.congress_filters.map((f) => {
-                                    const isSelected = billSelectedFilters.congresses.has(f.congress);
-                                    return (
-                                      <Box
-                                        key={f.congress}
-                                        onClick={() => setBillSelectedFilters((prev) => {
-                                          const next = new Set(prev.congresses);
-                                          if (next.has(f.congress)) next.delete(f.congress); else next.add(f.congress);
-                                          return { ...prev, congresses: next };
-                                        })}
-                                        sx={{
-                                          display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5, px: 1, cursor: 'pointer',
-                                          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
-                                          borderRadius: 1,
-                                        }}
-                                      >
-                                        <Typography variant="body2" sx={{ color: '#e2e8f0' }}>{f.congress}</Typography>
-                                        <Chip size="small" label={f.count} sx={{ height: 20, fontSize: '0.7rem' }} />
+                                      <Box key={f.voteType} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.voteTypes); if (n.has(f.voteType)) n.delete(f.voteType); else n.add(f.voteType); return { ...prev, voteTypes: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.voteType}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
                                       </Box>
                                     );
                                   })}
@@ -1933,13 +2254,132 @@ const CongressBillsSearchPage: React.FC = () => {
                               </Collapse>
                             </Box>
                           )}
-                          <Button
-                            size="small"
-                            onClick={() => setBillSelectedFilters({ congresses: new Set(), voteTypes: new Set() })}
-                            sx={{ mt: 1, color: '#94a3b8', fontSize: '0.75rem' }}
-                          >
-                            Clear filters
-                          </Button>
+                          {billAvailableFilters.bill_type_filters.length > 0 && (
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, billTypes: !p.billTypes }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Bill Types</Typography>
+                                {billExpandedFilters.billTypes ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.billTypes}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
+                                  {billAvailableFilters.bill_type_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.bill_types.has(f.billType);
+                                    return (
+                                      <Box key={f.billType} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.bill_types); if (n.has(f.billType)) n.delete(f.billType); else n.add(f.billType); return { ...prev, bill_types: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.billType}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          {billAvailableFilters.sponsor_party_filters.length > 0 && (
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, sponsorParties: !p.sponsorParties }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Sponsor Parties</Typography>
+                                {billExpandedFilters.sponsorParties ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.sponsorParties}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
+                                  {billAvailableFilters.sponsor_party_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.sponsor_parties.has(f.party);
+                                    return (
+                                      <Box key={f.party} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.sponsor_parties); if (n.has(f.party)) n.delete(f.party); else n.add(f.party); return { ...prev, sponsor_parties: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.party}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          {billAvailableFilters.sponsor_state_filters.length > 0 && (
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, sponsorStates: !p.sponsorStates }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Sponsor States</Typography>
+                                {billExpandedFilters.sponsorStates ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.sponsorStates}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
+                                  {billAvailableFilters.sponsor_state_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.sponsor_states.has(f.state);
+                                    return (
+                                      <Box key={f.state} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.sponsor_states); if (n.has(f.state)) n.delete(f.state); else n.add(f.state); return { ...prev, sponsor_states: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.state}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          {billAvailableFilters.policy_area_filters.length > 0 && (
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, policyAreas: !p.policyAreas }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Policy Areas</Typography>
+                                {billExpandedFilters.policyAreas ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.policyAreas}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
+                                  {billAvailableFilters.policy_area_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.policy_areas.has(f.area);
+                                    return (
+                                      <Box key={f.area} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.policy_areas); if (n.has(f.area)) n.delete(f.area); else n.add(f.area); return { ...prev, policy_areas: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.area}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          {billAvailableFilters.congress_filters.length > 0 && (
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, congresses: !p.congresses }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Congress</Typography>
+                                {billExpandedFilters.congresses ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.congresses}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
+                                  {billAvailableFilters.congress_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.congresses.has(f.congress);
+                                    return (
+                                      <Box key={f.congress} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.congresses); if (n.has(f.congress)) n.delete(f.congress); else n.add(f.congress); return { ...prev, congresses: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.congress}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          {billAvailableFilters.bipartisan_filters.length > 0 && (
+                            <Box sx={{ mb: 2 }}>
+                              <Box onClick={() => setBillExpandedFilters((p) => ({ ...p, bipartisan: !p.bipartisan }))} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', p: 1.5, backgroundColor: 'rgba(55, 65, 81, 0.3)', borderRadius: '4px', '&:hover': { backgroundColor: 'rgba(55, 65, 81, 0.5)' } }}>
+                                <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>Bipartisan</Typography>
+                                {billExpandedFilters.bipartisan ? <KeyboardArrowUpIcon sx={{ color: '#9ca3af' }} /> : <KeyboardArrowDownIcon sx={{ color: '#9ca3af' }} />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.bipartisan}>
+                                <Box sx={{ mt: 1, maxHeight: 300, overflowY: 'auto', '&::-webkit-scrollbar': { width: 6 }, '&::-webkit-scrollbar-track': { backgroundColor: 'rgba(55, 65, 81, 0.3)' }, '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 } }}>
+                                  {billAvailableFilters.bipartisan_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.bipartisan.has(f.bipartisan);
+                                    return (
+                                      <Box key={f.bipartisan} onClick={() => setBillSelectedFilters((prev) => { const n = new Set(prev.bipartisan); if (n.has(f.bipartisan)) n.delete(f.bipartisan); else n.add(f.bipartisan); return { ...prev, bipartisan: n }; })} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: '4px', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'transparent', border: isSelected ? '1px solid #3b82f6' : '1px solid transparent', '&:hover': { backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.1)' } }}>
+                                        <Typography variant="body2" sx={{ color: isSelected ? '#93c5fd' : '#ffffff', flex: 1, fontWeight: isSelected ? 600 : 400 }}>{f.bipartisan === 1 ? 'Yes' : 'No'}</Typography>
+                                        <Chip label={f.count} size="small" sx={{ height: 20, fontSize: '0.7rem', backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(107, 114, 128, 0.3)', color: isSelected ? '#93c5fd' : '#9ca3af', border: isSelected ? '1px solid #3b82f6' : '1px solid #6b7280' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
                         </>
                       )}
                     </GlassCard>
@@ -3907,7 +4347,7 @@ const CongressBillsSearchPage: React.FC = () => {
       </Container>
 
 
-      {/* Context Menu */}
+      {/* Context Menu (main bills) */}
       <Menu
         anchorEl={contextMenuAnchor}
         anchorPosition={contextMenuPosition ? { top: contextMenuPosition.y, left: contextMenuPosition.x } : undefined}
@@ -3938,11 +4378,45 @@ const CongressBillsSearchPage: React.FC = () => {
           Add to Files {selectedBills.size > 0 ? `(${selectedBills.size} item${selectedBills.size > 1 ? 's' : ''})` : ''}
         </MenuItem>
       </Menu>
+
+      {/* Context Menu (vote bills sub-tab) */}
+      <Menu
+        anchorPosition={voteBillContextMenuPosition ? { top: voteBillContextMenuPosition.y, left: voteBillContextMenuPosition.x } : undefined}
+        anchorReference="anchorPosition"
+        open={Boolean(voteBillContextMenuPosition)}
+        onClose={handleVoteBillContextMenuClose}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid #374151',
+          }
+        }}
+      >
+        <MenuItem
+          onClick={handleVoteBillAddToContext}
+          disabled={selectedVoteBills.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <SidebarChatIcon sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+          Add to Context {selectedVoteBills.size > 0 ? `(${selectedVoteBills.size} item${selectedVoteBills.size > 1 ? 's' : ''})` : ''}
+        </MenuItem>
+        <MenuItem
+          onClick={handleVoteBillAddToFiles}
+          disabled={selectedVoteBills.size === 0}
+          sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.2)' } }}
+        >
+          <FolderIcon sx={{ mr: 1, fontSize: 18, color: '#fbbf24' }} />
+          Add to Files {selectedVoteBills.size > 0 ? `(${selectedVoteBills.size} item${selectedVoteBills.size > 1 ? 's' : ''})` : ''}
+        </MenuItem>
+      </Menu>
       
       <FileBrowserDialog
         open={fileBrowserOpen}
-        onClose={() => setFileBrowserOpen(false)}
-        onSelect={handleFileBrowserSelect}
+        onClose={() => { setFileBrowserOpen(false); setFileBrowserFor(null); }}
+        onSelect={(folderPath) => {
+          if (fileBrowserFor === 'vote_bills') handleVoteBillFileBrowserSelect(folderPath);
+          else handleFileBrowserSelect(folderPath);
+        }}
         allowCreateFolder={true}
         title="Save to Files"
       />
