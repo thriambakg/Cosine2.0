@@ -1594,8 +1594,10 @@ export interface CongressBill {
   bill_number?: number;
   sponsor_full_name?: string;
   sponsor_party?: string;
+  sponsor_state?: string;
   introduced_date?: string;
   latest_action_date?: string;
+  latest_action_text?: string;
   congress?: number;
   bipartisan?: number;
   policy_area?: string;
@@ -1733,6 +1735,7 @@ export interface RollCallMemberVote {
   party?: string;
   state?: string;
   stateCode?: string;
+  voteState?: string;
   bioguideID?: string;
 }
 

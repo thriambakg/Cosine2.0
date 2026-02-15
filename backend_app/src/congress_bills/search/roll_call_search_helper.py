@@ -8,7 +8,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 logger = logging.getLogger(__name__)
 
@@ -215,8 +215,8 @@ def search_roll_call_rolls(
     last_evaluated_key: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
-    Query SEARCH#ROLL index. PK=SEARCH#ROLL, SK={congress}#{session}#{roll}.
-    Optional filters: congress, session, roll (exact SK if all three given; otherwise prefix).
+    Query SEARCH#ROLL index. PK=SEARCH#ROLL, SK={congress}#{session}#{roll} or {congress}#{session}#{date}#{roll}.
+    Optional filters: congress, session, roll (exact SK for legacy format; otherwise prefix). Results sorted by SK (date then roll when using date format).
     Returns full item per row, up to `limit` (default 100) per page.
     """
     if not table:
@@ -280,18 +280,30 @@ def get_roll_call_item(
 ) -> Optional[Dict[str, Any]]:
     """
     Fetch a single SEARCH#ROLL item by congress, session, roll.
+    Supports both SK formats: {congress}#{session}#{roll} (legacy) and
+    {congress}#{session}#{latest_action_date}#{roll} (sort by date).
     Returns the raw item (members may be in members_oversize_s3_key).
     """
     if not table or congress is None or session is None or roll is None:
         return None
-    sk = f"{congress}#{session}#{roll}"
+    sk_legacy = f"{congress}#{session}#{roll}"
     try:
         response = table.get_item(
-            Key={'bill_id': 'SEARCH#ROLL', 'search_index_sk': sk}
+            Key={'bill_id': 'SEARCH#ROLL', 'search_index_sk': sk_legacy}
         )
         item = response.get('Item')
         if item:
             return _convert_decimal(item)
+        # New format: SK = congress#session#date#roll; query and filter by roll
+        sk_prefix = f"{congress}#{session}#"
+        resp = table.query(
+            KeyConditionExpression=Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(sk_prefix),
+            FilterExpression=Attr('roll').eq(roll),
+            Limit=1,
+        )
+        items = resp.get('Items', [])
+        if items:
+            return _convert_decimal(items[0])
         return None
     except Exception as e:
         logger.error(f"Error in get_roll_call_item: {e}", exc_info=True)

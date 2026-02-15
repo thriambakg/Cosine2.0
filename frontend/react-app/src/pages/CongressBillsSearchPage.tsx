@@ -140,6 +140,193 @@ const CongressBillsSearchPage: React.FC = () => {
   const [rollCallHasMore, setRollCallHasMore] = useState<boolean>(false);
   const [rollCallLastKey, setRollCallLastKey] = useState<any>(null);
   const [rollCallSearchIndex, setRollCallSearchIndex] = useState<string | null>(null);
+  const [rollCallBillDetails, setRollCallBillDetails] = useState<Record<string, { bill_id: string; bill_title?: string; short_title?: string; latest_action_text?: string; latest_action_date?: string }>>({});
+  const [rollCallResultView, setRollCallResultView] = useState<'rollcalls' | 'bills'>('rollcalls');
+
+  // Roll call table: flattened rows and client-side filters (voteType for SEARCH#VOTE: Yea/Nay/Abstained)
+  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; voteType?: 'Yea' | 'Nay' | 'Abstained'; rowKey: string };
+  const rollCallFlattenedRows = React.useMemo((): RollCallTableRow[] => {
+    if (!rollCallResults.length) return [];
+    if (rollCallSearchIndex === 'SEARCH#VOTE') {
+      const rows: RollCallTableRow[] = [];
+      const parseRollKey = (key: string) => {
+        const parts = String(key).split('#');
+        return {
+          congress: parts[0] != null ? parseInt(parts[0], 10) : NaN,
+          session: parts[1] != null ? parseInt(parts[1], 10) : NaN,
+          roll: parts[2] != null ? parseInt(parts[2], 10) : NaN,
+        };
+      };
+      rollCallResults.forEach((r: any, idx) => {
+        const displayName = r.display_name || r.search_value || '';
+        const pushRows = (rollArr: string[], voteType: 'Yea' | 'Nay' | 'Abstained', billArr?: string[]) => {
+          (rollArr || []).forEach((key: string, i: number) => {
+            const { congress, session, roll } = parseRollKey(key);
+            if (!isNaN(congress) && !isNaN(session) && !isNaN(roll)) {
+              const billId = Array.isArray(billArr) && billArr[i] ? billArr[i] : undefined;
+              rows.push({
+                politician: displayName,
+                congress,
+                session,
+                roll,
+                roll_display: `Roll no. ${roll}`,
+                voteType,
+                bill_id: billId,
+                rowKey: `vote-${idx}-${voteType}-${key}-${i}`,
+              });
+            }
+          });
+        };
+        pushRows(Array.isArray(r.roll_yea) ? r.roll_yea : [], 'Yea', Array.isArray(r.bill_yea) ? r.bill_yea : undefined);
+        pushRows(Array.isArray(r.roll_nea) ? r.roll_nea : [], 'Nay', Array.isArray(r.bill_nea) ? r.bill_nea : undefined);
+        pushRows(Array.isArray(r.roll_abstained) ? r.roll_abstained : [], 'Abstained', Array.isArray(r.bill_abstained) ? r.bill_abstained : undefined);
+      });
+      if (rows.length === 0) {
+        rollCallResults.forEach((r: any, idx: number) => {
+          const displayName = r.display_name || r.search_value || '';
+          const rollNea = Array.isArray(r.roll_nea) ? r.roll_nea : [];
+          rollNea.forEach((key: string, i: number) => {
+            const parts = String(key).split('#');
+            const congress = parts[0] != null ? parseInt(parts[0], 10) : NaN;
+            const session = parts[1] != null ? parseInt(parts[1], 10) : NaN;
+            const roll = parts[2] != null ? parseInt(parts[2], 10) : NaN;
+            if (!isNaN(congress) && !isNaN(session) && !isNaN(roll)) {
+              rows.push({
+                politician: displayName,
+                congress,
+                session,
+                roll,
+                roll_display: `Roll no. ${roll}`,
+                voteType: 'Nay' as const,
+                rowKey: `vote-legacy-${r.bill_id || idx}-${i}-${key}`,
+              });
+            }
+          });
+        });
+      }
+      return rows;
+    }
+    if (rollCallSearchIndex === 'SEARCH#ROLL') {
+      return rollCallResults.map((r: any, idx: number) => {
+        const c = r.congress ?? r.search_index_sk?.split?.('#')?.[0];
+        const s = r.session ?? r.search_index_sk?.split?.('#')?.[1];
+        const rollNum = r.roll ?? r.search_index_sk?.split?.('#')?.[2];
+        return {
+          congress: c != null ? Number(c) : 0,
+          session: s != null ? Number(s) : 0,
+          roll: rollNum != null ? Number(rollNum) : 0,
+          roll_display: r.roll_display ?? `Roll no. ${rollNum}`,
+          bill_id_associated: r.bill_id_associated,
+          bill_title: r.bill_associated?.bill_title,
+          rowKey: r.search_index_sk ?? `roll-${idx}`,
+        };
+      });
+    }
+    return [];
+  }, [rollCallResults, rollCallSearchIndex]);
+
+  // Bills from SEARCH#VOTE: one row per bill with voteType (for "Bills" sub-tab)
+  type VoteBillRow = { bill_id: string; politician?: string; voteType: 'Yea' | 'Nay' | 'Abstained'; congress: number; rowKey: string };
+  const voteBillFlattenedRows = React.useMemo((): VoteBillRow[] => {
+    if (!rollCallResults.length || rollCallSearchIndex !== 'SEARCH#VOTE') return [];
+    const rows: VoteBillRow[] = [];
+    const seen = new Set<string>();
+    rollCallResults.forEach((r: any, idx: number) => {
+      const displayName = r.display_name || r.search_value || '';
+      const push = (billArr: string[], voteType: 'Yea' | 'Nay' | 'Abstained') => {
+        (billArr || []).forEach((billId: string, i: number) => {
+          if (!billId || seen.has(billId)) return;
+          seen.add(billId);
+          const congress = parseInt(String(billId).split('-')[0], 10) || 0;
+          rows.push({
+            bill_id: billId,
+            politician: displayName,
+            voteType,
+            congress: isNaN(congress) ? 0 : congress,
+            rowKey: `bill-${idx}-${voteType}-${billId}-${i}`,
+          });
+        });
+      };
+      push(Array.isArray(r.bill_yea) ? r.bill_yea : [], 'Yea');
+      push(Array.isArray(r.bill_nea) ? r.bill_nea : [], 'Nay');
+      push(Array.isArray(r.bill_abstained) ? r.bill_abstained : [], 'Abstained');
+    });
+    return rows;
+  }, [rollCallResults, rollCallSearchIndex]);
+
+  const [billSelectedFilters, setBillSelectedFilters] = useState<{
+    congresses: Set<number>; voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
+  }>({ congresses: new Set(), voteTypes: new Set() });
+  const [billExpandedFilters, setBillExpandedFilters] = useState<{
+    congresses: boolean; voteTypes: boolean;
+  }>({ congresses: false, voteTypes: false });
+
+  const billAvailableFilters = React.useMemo(() => {
+    const congressMap = new Map<number, number>();
+    const voteTypeMap = new Map<string, number>();
+    voteBillFlattenedRows.forEach((row) => {
+      congressMap.set(row.congress, (congressMap.get(row.congress) || 0) + 1);
+      if (row.voteType) voteTypeMap.set(row.voteType, (voteTypeMap.get(row.voteType) || 0) + 1);
+    });
+    return {
+      congress_filters: Array.from(congressMap.entries()).map(([c, count]) => ({ congress: c, count })).sort((a, b) => b.congress - a.congress),
+      vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Abstained', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
+    };
+  }, [voteBillFlattenedRows]);
+
+  const voteBillFilteredRows = React.useMemo(() => {
+    let rows = [...voteBillFlattenedRows];
+    if (billSelectedFilters.congresses.size > 0) {
+      rows = rows.filter((r) => billSelectedFilters.congresses.has(r.congress));
+    }
+    if (billSelectedFilters.voteTypes.size > 0) {
+      rows = rows.filter((r) => r.voteType && billSelectedFilters.voteTypes.has(r.voteType));
+    }
+    return rows;
+  }, [voteBillFlattenedRows, billSelectedFilters]);
+
+  const [rollCallSelectedFilters, setRollCallSelectedFilters] = useState<{
+    congresses: Set<number>; sessions: Set<number>; politicians: Set<string>; voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
+  }>({ congresses: new Set(), sessions: new Set(), politicians: new Set(), voteTypes: new Set() });
+  const [rollCallExpandedFilters, setRollCallExpandedFilters] = useState<{
+    congresses: boolean; sessions: boolean; politicians: boolean; voteTypes: boolean;
+  }>({ congresses: false, sessions: false, politicians: false, voteTypes: false });
+
+  const rollCallAvailableFilters = React.useMemo(() => {
+    const congressMap = new Map<number, number>();
+    const sessionMap = new Map<number, number>();
+    const politicianMap = new Map<string, number>();
+    const voteTypeMap = new Map<string, number>();
+    rollCallFlattenedRows.forEach((row) => {
+      congressMap.set(row.congress, (congressMap.get(row.congress) || 0) + 1);
+      sessionMap.set(row.session, (sessionMap.get(row.session) || 0) + 1);
+      if (row.politician) politicianMap.set(row.politician, (politicianMap.get(row.politician) || 0) + 1);
+      if (row.voteType) voteTypeMap.set(row.voteType, (voteTypeMap.get(row.voteType) || 0) + 1);
+    });
+    return {
+      congress_filters: Array.from(congressMap.entries()).map(([c, count]) => ({ congress: c, count })).sort((a, b) => b.congress - a.congress),
+      session_filters: Array.from(sessionMap.entries()).map(([s, count]) => ({ session: s, count })).sort((a, b) => a.session - b.session),
+      politician_filters: Array.from(politicianMap.entries()).map(([p, count]) => ({ politician: p, count })).sort((a, b) => b.count - a.count),
+      vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Abstained', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
+    };
+  }, [rollCallFlattenedRows]);
+
+  const rollCallFilteredRows = React.useMemo(() => {
+    let rows = [...rollCallFlattenedRows];
+    if (rollCallSelectedFilters.congresses.size > 0) {
+      rows = rows.filter((r) => rollCallSelectedFilters.congresses.has(r.congress));
+    }
+    if (rollCallSelectedFilters.sessions.size > 0) {
+      rows = rows.filter((r) => rollCallSelectedFilters.sessions.has(r.session));
+    }
+    if (rollCallSelectedFilters.politicians.size > 0) {
+      rows = rows.filter((r) => r.politician && rollCallSelectedFilters.politicians.has(r.politician));
+    }
+    if (rollCallSelectedFilters.voteTypes.size > 0) {
+      rows = rows.filter((r) => r.voteType && rollCallSelectedFilters.voteTypes.has(r.voteType));
+    }
+    return rows;
+  }, [rollCallFlattenedRows, rollCallSelectedFilters]);
 
   // Search state
   const [searchParams, setSearchParams] = useState<CongressBillsSearchFilters>(() => {
@@ -1207,6 +1394,10 @@ const CongressBillsSearchPage: React.FC = () => {
                                 setRollCallHasMore(res.has_more || false);
                                 setRollCallLastKey(res.last_evaluated_key ?? null);
                                 setRollCallSearchIndex('SEARCH#VOTE');
+                                const details = (res as any).bill_details;
+                                if (details && typeof details === 'object') {
+                                  setRollCallBillDetails(prev => ({ ...prev, ...details }));
+                                }
                               } else {
                                 setRollCallError(res.error || 'Vote search failed');
                                 setRollCallResults([]);
@@ -1262,6 +1453,7 @@ const CongressBillsSearchPage: React.FC = () => {
                           setRollCallLastKey(null);
                           setRollCallHasMore(false);
                           setRollCallSearchIndex(null);
+                          setRollCallBillDetails({});
                         }}
                         fullWidth
                         sx={{
@@ -1312,69 +1504,453 @@ const CongressBillsSearchPage: React.FC = () => {
               )}
               {rollCallSearchIndex && (
                 <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
-                  Index: {rollCallSearchIndex} · {rollCallResults.length} result(s){rollCallHasMore ? ' · Load more below' : ''}
+                  Index: {rollCallSearchIndex}
+                  {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                    <> · {rollCallFilteredRows.length} roll call(s){rollCallResultView === 'rollcalls' && rollCallFlattenedRows.length !== rollCallFilteredRows.length ? ` (filtered from ${rollCallFlattenedRows.length})` : ''} · {rollCallResultView === 'bills' ? voteBillFilteredRows.length : voteBillFlattenedRows.length} bill(s){rollCallResultView === 'bills' && voteBillFlattenedRows.length !== voteBillFilteredRows.length ? ` (filtered from ${voteBillFlattenedRows.length})` : ''}</>
+                  )}
+                  {rollCallSearchIndex === 'SEARCH#ROLL' && (
+                    <> · {rollCallFilteredRows.length} roll call(s)</>
+                  )}
+                  {rollCallHasMore ? ' · Load more below' : ''}
                 </Typography>
               )}
-              {rollCallResults.length > 0 && (
-                <GlassCard sx={{ p: 2 }}>
-                  {rollCallSearchIndex === 'SEARCH#ROLL' ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                      {rollCallResults.map((r: any, idx: number) => {
-                        const c = r.congress ?? r.search_index_sk?.split?.('#')?.[0];
-                        const s = r.session ?? r.search_index_sk?.split?.('#')?.[1];
-                        const rollNum = r.roll ?? r.search_index_sk?.split?.('#')?.[2];
-                        const congressNum = c != null ? Number(c) : NaN;
-                        const sessionNum = s != null ? Number(s) : NaN;
-                        const rollInt = rollNum != null ? Number(rollNum) : NaN;
-                        const canOpen = !isNaN(congressNum) && !isNaN(sessionNum) && !isNaN(rollInt);
-                        const billLabel = r.bill_associated?.bill_title || r.bill_id_associated || '—';
-                        return (
-                          <Box
-                            key={r.search_index_sk ?? idx}
+              {(rollCallSearchIndex === 'SEARCH#VOTE' && (rollCallFilteredRows.length > 0 || voteBillFlattenedRows.length > 0)) || (rollCallSearchIndex === 'SEARCH#ROLL' && rollCallFilteredRows.length > 0) ? (
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                    <Tabs
+                      value={rollCallResultView}
+                      onChange={(_, v: 'rollcalls' | 'bills') => setRollCallResultView(v)}
+                      sx={{ mb: 2, '& .MuiTab-root': { color: '#94a3b8' }, '& .Mui-selected': { color: '#3b82f6' }, '& .MuiTabs-indicator': { backgroundColor: '#3b82f6' } }}
+                    >
+                      <Tab label="Roll calls" value="rollcalls" />
+                      <Tab label="Bills" value="bills" />
+                    </Tabs>
+                  )}
+                  {((rollCallSearchIndex === 'SEARCH#VOTE' && rollCallResultView === 'rollcalls') || rollCallSearchIndex === 'SEARCH#ROLL') && rollCallFilteredRows.length > 0 && (
+                <Box sx={{ display: 'flex', gap: 2, flex: 1, minWidth: 0 }}>
+                  <TableContainer
+                    component={Box}
+                    sx={{
+                      flex: 1,
+                      overflow: 'auto',
+                      '&::-webkit-scrollbar': { width: 6 },
+                      '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 },
+                    }}
+                  >
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Politician</TableCell>
+                          )}
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Congress</TableCell>
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Session</TableCell>
+                          <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Roll</TableCell>
+                          {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Vote</TableCell>
+                          )}
+                          {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill</TableCell>
+                          )}
+                          {rollCallSearchIndex === 'SEARCH#ROLL' && (
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Associated Bill</TableCell>
+                          )}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {rollCallFilteredRows.map((row) => (
+                          <TableRow
+                            key={row.rowKey}
+                            onClick={() => {
+                              if (user?.id) {
+                                openItemDetails(
+                                  'roll_call',
+                                  { congress: row.congress, session: row.session, roll: row.roll },
+                                  row.roll_display ?? `Roll Call ${row.roll}`,
+                                  { user_id: user.id }
+                                );
+                              }
+                            }}
                             sx={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              flexWrap: 'wrap',
-                              gap: 1,
-                              py: 1,
-                              borderBottom: idx < rollCallResults.length - 1 ? '1px solid #374151' : 'none',
+                              cursor: 'pointer',
+                              '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.08)' },
                             }}
                           >
-                            <Box>
-                              <Typography variant="body1" sx={{ color: '#e2e8f0' }}>
-                                {r.roll_display ?? `Roll ${rollNum}`}
-                              </Typography>
-                              <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-                                {billLabel}
-                              </Typography>
+                            {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.politician ?? '—'}</TableCell>
+                            )}
+                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.congress}</TableCell>
+                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.session}</TableCell>
+                            <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.roll}</TableCell>
+                            {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                              <TableCell sx={{ borderColor: '#374151' }}>
+                                <Chip
+                                  size="small"
+                                  label={row.voteType ?? '—'}
+                                  sx={{
+                                    backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : row.voteType === 'Abstained' ? 'rgba(156, 163, 175, 0.2)' : 'transparent',
+                                    color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : row.voteType === 'Abstained' ? '#d1d5db' : '#94a3b8',
+                                    fontWeight: 600,
+                                    fontSize: '0.75rem',
+                                  }}
+                                />
+                              </TableCell>
+                            )}
+                            {rollCallSearchIndex === 'SEARCH#VOTE' && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151', maxWidth: 280 }}>
+                                {row.bill_id ? (
+                                  <Tooltip title={rollCallBillDetails[row.bill_id]?.bill_title ?? row.bill_id} disableHoverListener={!rollCallBillDetails[row.bill_id]?.bill_title}>
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                                      {rollCallBillDetails[row.bill_id]?.bill_title ?? row.bill_id}
+                                    </span>
+                                  </Tooltip>
+                                ) : (
+                                  <span>—</span>
+                                )}
+                              </TableCell>
+                            )}
+                            {rollCallSearchIndex === 'SEARCH#ROLL' && (
+                              <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.bill_title || row.bill_id_associated || '—'}</TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  {/* Roll call client-side filters */}
+                  <GlassCard sx={{ p: 2, minWidth: 260, maxWidth: 300, height: 'fit-content', alignSelf: 'flex-start' }}>
+                    <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 1.5, fontWeight: 600 }}>Refine results</Typography>
+                    {(rollCallAvailableFilters.congress_filters.length > 0 || rollCallAvailableFilters.session_filters.length > 0 || rollCallAvailableFilters.politician_filters.length > 0 || rollCallAvailableFilters.vote_type_filters.length > 0) && (
+                      <>
+                        {rollCallSearchIndex === 'SEARCH#VOTE' && rollCallAvailableFilters.vote_type_filters.length > 0 && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Box
+                              onClick={() => setRollCallExpandedFilters((p) => ({ ...p, voteTypes: !p.voteTypes }))}
+                              sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
+                            >
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>Vote</Typography>
+                              {rollCallExpandedFilters.voteTypes ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
                             </Box>
-                            {canOpen && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => {
-                                  openItemDetails(
-                                    'roll_call',
-                                    { congress: congressNum, session: sessionNum, roll: rollInt },
-                                    r.roll_display ?? `Roll Call ${rollNum}`,
-                                    { user_id: user?.id }
+                            <Collapse in={rollCallExpandedFilters.voteTypes}>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                {rollCallAvailableFilters.vote_type_filters.map((f) => {
+                                  const isSelected = rollCallSelectedFilters.voteTypes.has(f.voteType);
+                                  return (
+                                    <Chip
+                                      key={f.voteType}
+                                      size="small"
+                                      label={`${f.voteType} (${f.count})`}
+                                      onClick={() => setRollCallSelectedFilters((prev) => {
+                                        const next = new Set(prev.voteTypes);
+                                        if (next.has(f.voteType)) next.delete(f.voteType); else next.add(f.voteType);
+                                        return { ...prev, voteTypes: next };
+                                      })}
+                                      sx={{
+                                        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.25)' : 'rgba(55, 65, 81, 0.4)',
+                                        color: isSelected ? '#93c5fd' : '#9ca3af',
+                                        border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                        cursor: 'pointer',
+                                        fontSize: '0.7rem',
+                                      }}
+                                    />
                                   );
+                                })}
+                              </Box>
+                            </Collapse>
+                          </Box>
+                        )}
+                        {rollCallAvailableFilters.congress_filters.length > 0 && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Box
+                              onClick={() => setRollCallExpandedFilters((p) => ({ ...p, congresses: !p.congresses }))}
+                              sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
+                            >
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>Congress</Typography>
+                              {rollCallExpandedFilters.congresses ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                            </Box>
+                            <Collapse in={rollCallExpandedFilters.congresses}>
+                              <Box sx={{ maxHeight: 180, overflowY: 'auto' }}>
+                                {rollCallAvailableFilters.congress_filters.map((f) => {
+                                  const isSelected = rollCallSelectedFilters.congresses.has(f.congress);
+                                  return (
+                                    <Box
+                                      key={f.congress}
+                                      onClick={() => setRollCallSelectedFilters((prev) => {
+                                        const next = new Set(prev.congresses);
+                                        if (next.has(f.congress)) next.delete(f.congress); else next.add(f.congress);
+                                        return { ...prev, congresses: next };
+                                      })}
+                                      sx={{
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5, px: 1, cursor: 'pointer',
+                                        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                                        borderRadius: 1,
+                                      }}
+                                    >
+                                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>{f.congress}</Typography>
+                                      <Chip size="small" label={f.count} sx={{ height: 20, fontSize: '0.7rem' }} />
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+                            </Collapse>
+                          </Box>
+                        )}
+                        {rollCallAvailableFilters.session_filters.length > 0 && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Box
+                              onClick={() => setRollCallExpandedFilters((p) => ({ ...p, sessions: !p.sessions }))}
+                              sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
+                            >
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>Session</Typography>
+                              {rollCallExpandedFilters.sessions ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                            </Box>
+                            <Collapse in={rollCallExpandedFilters.sessions}>
+                              <Box sx={{ maxHeight: 120, overflowY: 'auto' }}>
+                                {rollCallAvailableFilters.session_filters.map((f) => {
+                                  const isSelected = rollCallSelectedFilters.sessions.has(f.session);
+                                  return (
+                                    <Box
+                                      key={f.session}
+                                      onClick={() => setRollCallSelectedFilters((prev) => {
+                                        const next = new Set(prev.sessions);
+                                        if (next.has(f.session)) next.delete(f.session); else next.add(f.session);
+                                        return { ...prev, sessions: next };
+                                      })}
+                                      sx={{
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5, px: 1, cursor: 'pointer',
+                                        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                                        borderRadius: 1,
+                                      }}
+                                    >
+                                      <Typography variant="body2" sx={{ color: '#e2e8f0' }}>{f.session}</Typography>
+                                      <Chip size="small" label={f.count} sx={{ height: 20, fontSize: '0.7rem' }} />
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+                            </Collapse>
+                          </Box>
+                        )}
+                        {rollCallSearchIndex === 'SEARCH#VOTE' && rollCallAvailableFilters.politician_filters.length > 0 && (
+                          <Box sx={{ mb: 1.5 }}>
+                            <Box
+                              onClick={() => setRollCallExpandedFilters((p) => ({ ...p, politicians: !p.politicians }))}
+                              sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
+                            >
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>Politician</Typography>
+                              {rollCallExpandedFilters.politicians ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                            </Box>
+                            <Collapse in={rollCallExpandedFilters.politicians}>
+                              <Box sx={{ maxHeight: 180, overflowY: 'auto' }}>
+                                {rollCallAvailableFilters.politician_filters.slice(0, 30).map((f) => {
+                                  const isSelected = rollCallSelectedFilters.politicians.has(f.politician);
+                                  return (
+                                    <Box
+                                      key={f.politician}
+                                      onClick={() => setRollCallSelectedFilters((prev) => {
+                                        const next = new Set(prev.politicians);
+                                        if (next.has(f.politician)) next.delete(f.politician); else next.add(f.politician);
+                                        return { ...prev, politicians: next };
+                                      })}
+                                      sx={{
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5, px: 1, cursor: 'pointer',
+                                        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                                        borderRadius: 1,
+                                      }}
+                                    >
+                                      <Typography variant="body2" sx={{ color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{f.politician}</Typography>
+                                      <Chip size="small" label={f.count} sx={{ height: 20, fontSize: '0.7rem' }} />
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+                            </Collapse>
+                          </Box>
+                        )}
+                        <Button
+                          size="small"
+                          onClick={() => setRollCallSelectedFilters({ congresses: new Set(), sessions: new Set(), politicians: new Set(), voteTypes: new Set() })}
+                          sx={{ mt: 1, color: '#94a3b8', fontSize: '0.75rem' }}
+                        >
+                          Clear filters
+                        </Button>
+                      </>
+                    )}
+                  </GlassCard>
+                </Box>
+                  )}
+                  {rollCallSearchIndex === 'SEARCH#VOTE' && rollCallResultView === 'bills' && voteBillFlattenedRows.length > 0 && (
+                    <Box sx={{ display: 'flex', gap: 2, flex: 1, minWidth: 0 }}>
+                    {voteBillFilteredRows.length > 0 ? (
+                    <TableContainer
+                      component={Box}
+                      sx={{
+                        flex: 1,
+                        overflow: 'auto',
+                        '&::-webkit-scrollbar': { width: 6 },
+                        '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(59, 130, 246, 0.5)', borderRadius: 3 },
+                      }}
+                    >
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Congress</TableCell>
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill ID</TableCell>
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Bill Title</TableCell>
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Vote</TableCell>
+                            <TableCell sx={{ color: '#94a3b8', borderColor: '#374151', fontWeight: 600 }}>Latest Action</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {voteBillFilteredRows.map((row) => {
+                            const details = rollCallBillDetails[row.bill_id];
+                            const billForDialog = { bill_id: row.bill_id, bill_title: details?.bill_title, congress: row.congress, latest_action_text: details?.latest_action_text, latest_action_date: details?.latest_action_date };
+                            return (
+                              <TableRow
+                                key={row.rowKey}
+                                onClick={() => {
+                                  if (user?.id) {
+                                    openItemDetails(
+                                      'congress_bill',
+                                      billForDialog,
+                                      details?.bill_title || row.bill_id,
+                                      { user_id: user.id }
+                                    );
+                                  }
+                                }}
+                                sx={{
+                                  cursor: 'pointer',
+                                  '&:hover': { backgroundColor: 'rgba(59, 130, 246, 0.08)' },
                                 }}
                               >
-                                View details
-                              </Button>
-                            )}
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  ) : (
-                    <Box component="pre" sx={{ color: '#e2e8f0', fontSize: '0.8125rem', overflow: 'auto', maxHeight: 480, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {JSON.stringify(rollCallResults, null, 2)}
+                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.congress}</TableCell>
+                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>{row.bill_id}</TableCell>
+                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151', maxWidth: 360 }}>
+                                  <Tooltip title={details?.bill_title || row.bill_id} disableHoverListener={!details?.bill_title}>
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                                      {details?.bill_title || row.bill_id}
+                                    </span>
+                                  </Tooltip>
+                                </TableCell>
+                                <TableCell sx={{ borderColor: '#374151' }}>
+                                  <Chip
+                                    size="small"
+                                    label={row.voteType}
+                                    sx={{
+                                      backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(156, 163, 175, 0.2)',
+                                      color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : '#d1d5db',
+                                      fontWeight: 600,
+                                      fontSize: '0.75rem',
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151' }}>
+                                  {details?.latest_action_date ? new Date(details.latest_action_date).toLocaleDateString() : (details?.latest_action_text ? details.latest_action_text.slice(0, 50) + (details.latest_action_text.length > 50 ? '…' : '') : '—')}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    ) : (
+                      <Typography sx={{ color: '#94a3b8', py: 2, flex: 1 }}>No bills match the selected filters.</Typography>
+                    )}
+                    <GlassCard sx={{ p: 2, minWidth: 260, maxWidth: 300, height: 'fit-content', alignSelf: 'flex-start' }}>
+                      <Typography variant="subtitle2" sx={{ color: '#e2e8f0', mb: 1.5, fontWeight: 600 }}>Refine results</Typography>
+                      {(billAvailableFilters.congress_filters.length > 0 || billAvailableFilters.vote_type_filters.length > 0) && (
+                        <>
+                          {billAvailableFilters.vote_type_filters.length > 0 && (
+                            <Box sx={{ mb: 1.5 }}>
+                              <Box
+                                onClick={() => setBillExpandedFilters((p) => ({ ...p, voteTypes: !p.voteTypes }))}
+                                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
+                              >
+                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Vote</Typography>
+                                {billExpandedFilters.voteTypes ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.voteTypes}>
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                  {billAvailableFilters.vote_type_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.voteTypes.has(f.voteType);
+                                    return (
+                                      <Chip
+                                        key={f.voteType}
+                                        size="small"
+                                        label={`${f.voteType} (${f.count})`}
+                                        onClick={() => setBillSelectedFilters((prev) => {
+                                          const next = new Set(prev.voteTypes);
+                                          if (next.has(f.voteType)) next.delete(f.voteType); else next.add(f.voteType);
+                                          return { ...prev, voteTypes: next };
+                                        })}
+                                        sx={{
+                                          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.25)' : 'rgba(55, 65, 81, 0.4)',
+                                          color: isSelected ? '#93c5fd' : '#9ca3af',
+                                          border: isSelected ? '1px solid #3b82f6' : '1px solid transparent',
+                                          cursor: 'pointer',
+                                          fontSize: '0.7rem',
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          {billAvailableFilters.congress_filters.length > 0 && (
+                            <Box sx={{ mb: 1.5 }}>
+                              <Box
+                                onClick={() => setBillExpandedFilters((p) => ({ ...p, congresses: !p.congresses }))}
+                                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', py: 0.5 }}
+                              >
+                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Congress</Typography>
+                                {billExpandedFilters.congresses ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                              </Box>
+                              <Collapse in={billExpandedFilters.congresses}>
+                                <Box sx={{ maxHeight: 200, overflowY: 'auto', mt: 0.5 }}>
+                                  {billAvailableFilters.congress_filters.map((f) => {
+                                    const isSelected = billSelectedFilters.congresses.has(f.congress);
+                                    return (
+                                      <Box
+                                        key={f.congress}
+                                        onClick={() => setBillSelectedFilters((prev) => {
+                                          const next = new Set(prev.congresses);
+                                          if (next.has(f.congress)) next.delete(f.congress); else next.add(f.congress);
+                                          return { ...prev, congresses: next };
+                                        })}
+                                        sx={{
+                                          display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.5, px: 1, cursor: 'pointer',
+                                          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                                          borderRadius: 1,
+                                        }}
+                                      >
+                                        <Typography variant="body2" sx={{ color: '#e2e8f0' }}>{f.congress}</Typography>
+                                        <Chip size="small" label={f.count} sx={{ height: 20, fontSize: '0.7rem' }} />
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Collapse>
+                            </Box>
+                          )}
+                          <Button
+                            size="small"
+                            onClick={() => setBillSelectedFilters({ congresses: new Set(), voteTypes: new Set() })}
+                            sx={{ mt: 1, color: '#94a3b8', fontSize: '0.75rem' }}
+                          >
+                            Clear filters
+                          </Button>
+                        </>
+                      )}
+                    </GlassCard>
                     </Box>
                   )}
-                  {rollCallHasMore && (
+                </Box>
+              ) : null}
+              {rollCallFlattenedRows.length > 0 && rollCallFilteredRows.length === 0 && (
+                <Typography sx={{ color: '#94a3b8', py: 2 }}>No roll calls match the selected filters.</Typography>
+              )}
+              {rollCallResults.length > 0 && rollCallFilteredRows.length > 0 && rollCallHasMore && (
                     <Button
                       variant="outlined"
                       size="small"
@@ -1401,6 +1977,10 @@ const CongressBillsSearchPage: React.FC = () => {
                               setRollCallResults(prev => [...prev, ...(res.results || [])]);
                               setRollCallHasMore(res.has_more || false);
                               setRollCallLastKey(res.last_evaluated_key ?? null);
+                              const details = (res as any).bill_details;
+                              if (details && typeof details === 'object') {
+                                setRollCallBillDetails(prev => ({ ...prev, ...details }));
+                              }
                             } else {
                               setRollCallHasMore(false);
                             }
@@ -1435,8 +2015,6 @@ const CongressBillsSearchPage: React.FC = () => {
                       Load more
                     </Button>
                   )}
-                </GlassCard>
-              )}
               {!rollCallSearchIndex && !rollCallSearchMessage && !rollCallError && (
                 <GlassCard sx={{ p: 4 }}>
                   <Typography sx={{ color: '#94a3b8' }}>

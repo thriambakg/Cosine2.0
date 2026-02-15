@@ -543,7 +543,19 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       .then((res) => {
         if (cancelled) return;
         if (res.success && res.result) {
-          setRollCallDetails(res.result);
+          const raw = res.result as any;
+          // API may return nested shape: { roll_item, bill_associated, vote_summary, members }
+          const normalized: RollCallDetailsResult = raw.roll_item
+            ? {
+                ...raw.roll_item,
+                bill_id_associated: raw.roll_item.bill_id_associated ?? raw.bill_id_associated,
+                roll_display: raw.roll_item.roll_display ?? raw.roll_display,
+                bill_associated: raw.bill_associated ?? raw.roll_item.bill_associated,
+                vote_summary: raw.vote_summary ?? raw.roll_item.vote_summary,
+                members: raw.members ?? raw.roll_item.members,
+              }
+            : raw;
+          setRollCallDetails(normalized);
           setRollCallDetailsError(null);
         } else {
           setRollCallDetailsError(res.error || 'Roll call not found.');
@@ -1316,7 +1328,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         if (p.startsWith('D')) return 'Democratic';
         return p || '—';
       };
-      const memberStateLabel = (m: RollCallMemberVote) => (m.state ?? m.stateCode ?? '').trim() || '—';
+      const memberStateLabel = (m: RollCallMemberVote) => (m.state ?? m.stateCode ?? m.voteState ?? '').trim() || '—';
       const memberVoteLabel = (m: RollCallMemberVote) => (m.voteCast ?? '').trim() || '—';
 
       return (

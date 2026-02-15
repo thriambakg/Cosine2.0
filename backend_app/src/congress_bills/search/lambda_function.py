@@ -41,6 +41,25 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-pr
 # Get DynamoDB table
 bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
 
+# Attributes to return for bill search results (client-side filtering and table display)
+# Must include partition/sort keys; rest are used by Refine filters and visible columns
+BILL_SEARCH_PROJECTION_ATTRS = [
+    'bill_id',
+    'search_index_sk',
+    'bill_title',
+    'bill_type',
+    'bill_number',
+    'sponsor_full_name',
+    'sponsor_party',
+    'sponsor_state',
+    'introduced_date',
+    'latest_action_date',
+    'latest_action_text',
+    'congress',
+    'bipartisan',
+    'policy_area',
+]
+
 
 def build_cors_headers(origin: str = None):
     """Build CORS headers for API responses"""
@@ -580,7 +599,8 @@ def fetch_full_bills_batch(bill_ids: List[str]) -> List[Dict[str, Any]]:
                             'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk equals bill_id
                         }
                         for bid in batch_ids
-                    ]
+                    ],
+                    'ProjectionExpression': ', '.join(BILL_SEARCH_PROJECTION_ATTRS),
                 }
             }
             batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
