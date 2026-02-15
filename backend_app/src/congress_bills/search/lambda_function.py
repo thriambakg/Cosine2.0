@@ -42,6 +42,9 @@ S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-pr
 # Get DynamoDB table
 bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
 
+# Cap bill IDs we fetch full items for (avoids Lambda timeout on broad/empty search)
+MAX_BILL_IDS_FETCH = int(os.environ.get('MAX_BILL_IDS_FETCH', '3000'))
+
 # Attributes to return for bill search results (client-side filtering and table display)
 # Must include partition/sort keys; rest are used by Refine filters and visible columns
 BILL_SEARCH_PROJECTION_ATTRS = [
@@ -898,7 +901,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
                         cosponsor_name=query['cosponsor_name'],
                         date_from=date_from,
                         date_to=date_to,
-                        limit=50000
+                        limit=MAX_BILL_IDS_FETCH
                     )
                     logger.info(f"    Cosponsor query returned {len(bill_ids)} bill_ids")
                 else:
@@ -908,7 +911,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
                         hash_key_value=query['hash_value'],
                         date_from=date_from,
                         date_to=date_to,
-                        limit=50000
+                        limit=MAX_BILL_IDS_FETCH
                     )
                     logger.info(f"    Sponsor query returned {len(bill_ids)} bill_ids")
                 
@@ -934,7 +937,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
                     cosponsor_name=query['cosponsor_name'],
                     date_from=date_from,
                     date_to=date_to,
-                    limit=50000
+                    limit=MAX_BILL_IDS_FETCH
                 )
             else:
                 bill_ids, _ = query_func(
@@ -943,7 +946,7 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
                     hash_key_value=query['hash_value'],
                     date_from=date_from,
                     date_to=date_to,
-                    limit=50000
+                    limit=MAX_BILL_IDS_FETCH
                 )
             
             field_bill_ids.update(bill_ids)  # UNION within field
@@ -974,14 +977,15 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
     
     # Step 2: Convert to sorted list for consistent pagination
     # IMPORTANT: Sort bill_ids consistently (by bill_id string) so pagination works correctly
-    # This ensures the same bill_ids appear in the same order across page requests
     bill_ids_list = sorted(list(all_bill_ids))
-    logger.info(f"Sorted bill_ids list: {len(bill_ids_list)} total bill_ids (offset: {offset}, limit: {limit})")
+    # Cap how many we fetch to avoid Lambda timeout (e.g. empty/broad search returning 50k+ IDs)
+    bill_ids_to_fetch = bill_ids_list[:MAX_BILL_IDS_FETCH]
+    if len(bill_ids_list) > MAX_BILL_IDS_FETCH:
+        logger.info(f"Capping fetch to first {MAX_BILL_IDS_FETCH} bill_ids (total was {len(bill_ids_list)})")
+    logger.info(f"Fetching full items for {len(bill_ids_to_fetch)} bill_ids (offset: {offset}, limit: {limit})")
     
-    # Step 3: Fetch full items for ALL bill_ids (we need to filter and sort before pagination)
-    # Fetch in batches to avoid memory issues, but we need all items for consistent sorting
-    logger.info(f"Fetching full items for all {len(bill_ids_list)} bill_ids")
-    full_items = fetch_full_bills_batch(bill_ids_list)
+    # Step 3: Fetch full items for capped bill_ids (batch get in chunks of 100)
+    full_items = fetch_full_bills_batch(bill_ids_to_fetch)
     
     logger.info(f"Fetched {len(full_items)} full items from DynamoDB")
     
@@ -992,10 +996,9 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
     # Step 5: Create a mapping of bill_id -> item for consistent lookup
     bill_id_to_item = {item.get('bill_id'): item for item in filtered_items}
     
-    # Step 6: Build result list in the same order as bill_ids_list (consistent sorting)
-    # This ensures pagination works correctly across page requests
+    # Step 6: Build result list in the same order as bill_ids_to_fetch (consistent sorting)
     ordered_results = []
-    for bill_id in bill_ids_list:
+    for bill_id in bill_ids_to_fetch:
         if bill_id in bill_id_to_item:
             ordered_results.append(bill_id_to_item[bill_id])
     
@@ -1024,11 +1027,11 @@ def search_bills(filters: Dict[str, Any], limit: int = 100,
     if has_more:
         next_last_evaluated_key = {
             'offset': next_offset,
-            'total_items': len(all_bill_ids),
+            'total_items': len(ordered_results),
             'method': 'query'
         }
     
-    logger.info(f"Returning {len(results)} results, offset: {offset}, next_offset: {next_offset}, total: {len(all_bill_ids)}, has_more: {has_more}")
+    logger.info(f"Returning {len(results)} results, offset: {offset}, next_offset: {next_offset}, total: {len(ordered_results)}, has_more: {has_more}")
     
     return {
         'success': True,
@@ -1221,18 +1224,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     result['roll_dates'] = get_roll_call_dates_for_keys(bills_table, list(roll_keys_set))
             elif search_index == 'SEARCH#ROLL':
                 congress = roll_call_search.get('congress')
-                session = roll_call_search.get('session')
                 roll = roll_call_search.get('roll')
                 if congress is not None:
                     try:
                         congress = int(congress)
                     except (TypeError, ValueError):
                         congress = None
-                if session is not None:
-                    try:
-                        session = int(session)
-                    except (TypeError, ValueError):
-                        session = None
                 if roll is not None:
                     try:
                         roll = int(roll)
@@ -1241,7 +1238,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 result = search_roll_call_rolls(
                     table=bills_table,
                     congress=congress,
-                    session=session,
+                    session=None,  # session not in search; filter by session client-side after results
                     roll=roll,
                     limit=limit,
                     last_evaluated_key=last_ev,

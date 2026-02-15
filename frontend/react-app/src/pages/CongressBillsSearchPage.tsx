@@ -129,7 +129,6 @@ const CongressBillsSearchPage: React.FC = () => {
 
   // Roll Call Search tab: congress '' | '119'; sessions subset of ['1','2']. Selecting 119th auto-selects both sessions.
   const [rollCallCongress, setRollCallCongress] = useState<string>('');
-  const [rollCallSessions, setRollCallSessions] = useState<string[]>([]);
   const [rollCallCongressSectionExpanded, setRollCallCongressSectionExpanded] = useState<boolean>(true);
   const [rollCallRoll, setRollCallRoll] = useState('');
   const [rollCallPoliticianName, setRollCallPoliticianName] = useState<string[]>([]);
@@ -1603,10 +1602,8 @@ const CongressBillsSearchPage: React.FC = () => {
                             onClick={() => {
                               if (rollCallCongress === '119') {
                                 setRollCallCongress('');
-                                setRollCallSessions([]);
                               } else {
                                 setRollCallCongress('119');
-                                setRollCallSessions(['1', '2']);
                               }
                               setRollCallSearchMessage(null);
                             }}
@@ -1620,47 +1617,6 @@ const CongressBillsSearchPage: React.FC = () => {
                               119th Congress
                             </Typography>
                           </Box>
-                          {/* Session 1 & 2 — smaller toggles, only when 119th selected */}
-                          {rollCallCongress === '119' && (
-                            <Box sx={{ pl: 2.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                              {(['1', '2'] as const).map((sess) => {
-                                const isSessionSelected = rollCallSessions.includes(sess);
-                                return (
-                                  <Box
-                                    key={sess}
-                                    sx={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      py: 0.5,
-                                      px: 1,
-                                      borderRadius: '4px',
-                                      backgroundColor: isSessionSelected ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
-                                      border: isSessionSelected ? '1px solid #3b82f6' : '1px solid #334155',
-                                      cursor: 'pointer',
-                                      '&:hover': {
-                                        backgroundColor: isSessionSelected ? 'rgba(59, 130, 246, 0.12)' : 'rgba(55, 65, 81, 0.2)',
-                                      },
-                                    }}
-                                    onClick={() => {
-                                      setRollCallSessions((prev) =>
-                                        isSessionSelected ? prev.filter((x) => x !== sess) : [...prev, sess].sort()
-                                      );
-                                      setRollCallSearchMessage(null);
-                                    }}
-                                  >
-                                    <Checkbox
-                                      checked={isSessionSelected}
-                                      size="small"
-                                      sx={{ color: '#9ca3af', '&.Mui-checked': { color: '#3b82f6' }, p: 0.25 }}
-                                    />
-                                    <Typography sx={{ color: '#cbd5e1', fontSize: '0.75rem' }}>
-                                      Session {sess}
-                                    </Typography>
-                                  </Box>
-                                );
-                              })}
-                            </Box>
-                          )}
                         </Box>
                       </Collapse>
                     </Box>
@@ -1722,12 +1678,10 @@ const CongressBillsSearchPage: React.FC = () => {
                               }
                             } else if (hasRollFilters) {
                               const congressNum = rollCallCongress === '119' ? 119 : undefined;
-                              const sessionNum = rollCallSessions.length === 1 ? parseInt(rollCallSessions[0], 10) : undefined;
                               const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
                               const res = await congressBillsSearchAPI.rollCallSearch({
                                 search_index: 'SEARCH#ROLL',
                                 congress: congressNum,
-                                session: sessionNum,
                                 roll: isNaN(rollNum as number) ? undefined : rollNum,
                                 limit: 100,
                               });
@@ -1741,9 +1695,10 @@ const CongressBillsSearchPage: React.FC = () => {
                                 setRollCallResults([]);
                               }
                             } else {
-                              // Empty search / default: SEARCH#ROLL only — sorted list of roll calls, no bill search
+                              // Empty search: SEARCH#ROLL for most recent Congress (119) only — roll calls, no bills
                               const res = await congressBillsSearchAPI.rollCallSearch({
                                 search_index: 'SEARCH#ROLL',
+                                congress: 119,
                                 limit: 100,
                               });
                               if (res.success) {
@@ -1777,7 +1732,6 @@ const CongressBillsSearchPage: React.FC = () => {
                         variant="outlined"
                         onClick={() => {
                           setRollCallCongress('');
-                          setRollCallSessions([]);
                           setRollCallRoll('');
                           setRollCallPoliticianName([]);
                           setRollCallSearchMessage(null);
@@ -2662,12 +2616,10 @@ const CongressBillsSearchPage: React.FC = () => {
                             }
                           } else if (rollCallSearchIndex === 'SEARCH#ROLL') {
                             const congressNum = rollCallCongress === '119' ? 119 : undefined;
-                            const sessionNum = rollCallSessions.length === 1 ? parseInt(rollCallSessions[0], 10) : undefined;
                             const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
                             const res = await congressBillsSearchAPI.rollCallSearch({
                               search_index: 'SEARCH#ROLL',
                               congress: congressNum,
-                              session: sessionNum,
                               roll: isNaN(rollNum as number) ? undefined : rollNum,
                               limit: 100,
                               last_evaluated_key: rollCallLastKey,

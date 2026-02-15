@@ -247,6 +247,13 @@ def search_roll_call_vote(
         }
 
 
+# Default congress when none provided (most recent); avoid querying entire SEARCH#ROLL partition
+def _default_roll_congress() -> int:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return ((now.year - 1789) // 2) + 1
+
+
 def search_roll_call_rolls(
     table,
     congress: Optional[int] = None,
@@ -258,7 +265,7 @@ def search_roll_call_rolls(
     """
     Query SEARCH#ROLL index and return all matching items (paginates internally until done).
     PK=SEARCH#ROLL, SK={congress}#{session}#{roll} or {congress}#{session}#{date}#{roll}.
-    Optional filters: congress, session, roll. Results sorted by SK.
+    If no congress/session/roll provided, defaults to current congress only (SK begins_with "{congress}#").
     Returns all items in one response; no pagination / load more. Capped at ROLL_CALL_ROLLS_MAX_ITEMS.
     """
     if not table:
@@ -270,6 +277,10 @@ def search_roll_call_rolls(
             'last_evaluated_key': None,
             'search_index': 'SEARCH#ROLL',
         }
+
+    # Only roll calls, scoped to at least current congress (never query entire partition)
+    if congress is None:
+        congress = _default_roll_congress()
 
     key_condition = Key('bill_id').eq('SEARCH#ROLL')
     if congress is not None and session is not None and roll is not None:
@@ -284,7 +295,8 @@ def search_roll_call_rolls(
 
     all_items: List[Dict[str, Any]] = []
     next_key = None  # fetch all from start; ignore client cursor
-    page_size = min(limit, 500)  # fetch 500 per query to reduce round-trips
+    # Use fixed page size for fetch-all so we get all items (client limit is for display, not query chunk size)
+    page_size = 500
     try:
         while len(all_items) < ROLL_CALL_ROLLS_MAX_ITEMS:
             params = {
