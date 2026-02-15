@@ -57,18 +57,19 @@ def _convert_decimal(obj: Any) -> Any:
 def _parse_roll_sort_key_date(search_index_sk: Any) -> Optional[str]:
     """
     Parse latest_action_date from SEARCH#ROLL sort key when present.
-    SK formats: {congress}#{session}#{roll} (legacy, 3 parts) or
-    {congress}#{session}#{latest_action_date}#{roll} (4 parts; date is YYYY-MM-DD).
-    Returns the date string or None.
+    SK formats: {congress}#{date}#{session}#{roll} (4 parts; date at index 1) or legacy
+    {congress}#{session}#{date}#{roll} (date at index 2). Returns YYYY-MM-DD or None.
     """
     if not search_index_sk:
         return None
     parts = str(search_index_sk).strip().split("#")
-    if len(parts) != 4:
+    if len(parts) < 4:
         return None
-    candidate = parts[2].strip()
-    if len(candidate) >= 10 and candidate.replace("-", "").isdigit():
-        return candidate[:10]
+    for idx in (1, 2):
+        if idx < len(parts):
+            candidate = parts[idx].strip()
+            if len(candidate) >= 10 and candidate.replace("-", "").isdigit():
+                return candidate[:10]
     return None
 
 
@@ -282,25 +283,18 @@ def search_roll_call_rolls(
     if congress is None:
         congress = _default_roll_congress()
 
-    key_condition = Key('bill_id').eq('SEARCH#ROLL')
-    sk_prefix = None
-    if congress is not None and session is not None and roll is not None:
-        sk = f"{congress}#{session}#{roll}"
-        key_condition = key_condition & Key('search_index_sk').eq(sk)
-        sk_prefix = sk
-    elif congress is not None and session is not None:
-        sk_prefix = f"{congress}#{session}#"
-        key_condition = key_condition & Key('search_index_sk').begins_with(sk_prefix)
-    elif congress is not None:
-        sk_prefix = f"{congress}#"
-        key_condition = key_condition & Key('search_index_sk').begins_with(sk_prefix)
+    # SK = congress#date#session#roll so begins_with("119#") + ScanIndexForward=False = newest first
+    key_condition = Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(f"{congress}#")
+    filter_expr = None
+    if session is not None:
+        filter_expr = Attr('session').eq(session) if filter_expr is None else filter_expr & Attr('session').eq(session)
+    if roll is not None:
+        filter_expr = Attr('roll').eq(roll) if filter_expr is None else filter_expr & Attr('roll').eq(roll)
 
-    logger.info(f"search_roll_call_rolls: congress={congress}, session={session}, roll={roll}, sk_prefix={sk_prefix!r}")
+    logger.info(f"search_roll_call_rolls: congress={congress}, session={session}, roll={roll}, sk_prefix={congress!r}#")
     all_items: List[Dict[str, Any]] = []
-    next_key = None  # fetch all from start; ignore client cursor
-    # Use fixed page size for fetch-all so we get all items (client limit is for display, not query chunk size)
+    next_key = None
     page_size = 500
-    # ScanIndexForward=False so DynamoDB returns SK descending (newest first when SK = congress#session#date#roll)
     try:
         while len(all_items) < ROLL_CALL_ROLLS_MAX_ITEMS:
             params = {
@@ -308,6 +302,8 @@ def search_roll_call_rolls(
                 'Limit': min(page_size, ROLL_CALL_ROLLS_MAX_ITEMS - len(all_items)),
                 'ScanIndexForward': False,
             }
+            if filter_expr is not None:
+                params['FilterExpression'] = filter_expr
             if next_key:
                 params['ExclusiveStartKey'] = next_key
             response = table.query(**params)
@@ -352,44 +348,28 @@ def get_roll_call_item(
 ) -> Optional[Dict[str, Any]]:
     """
     Fetch a single SEARCH#ROLL item by congress, session, roll.
-    Supports both SK formats: {congress}#{session}#{roll} (legacy) and
-    {congress}#{session}#{latest_action_date}#{roll} (sort by date).
+    SK = congress#date#session#roll; query begins_with(congress#) with FilterExpression session+roll.
     Returns the raw item (members may be in members_oversize_s3_key).
     """
     if not table or congress is None or session is None or roll is None:
         return None
-    sk_legacy = f"{congress}#{session}#{roll}"
     try:
-        response = table.get_item(
-            Key={'bill_id': 'SEARCH#ROLL', 'search_index_sk': sk_legacy}
-        )
-        item = response.get('Item')
-        if item:
-            out = _convert_decimal(item)
-            date_val = out.get('latest_action_date') or _parse_roll_sort_key_date(out.get('search_index_sk')) or ''
-            out['latest_action_date'] = date_val
-            out['project_update_date'] = date_val
-            return out
-        # New format: SK = congress#session#date#roll; paginate to find roll (small projection first, then get_item for full row)
-        sk_prefix = f"{congress}#{session}#"
+        key_condition = Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(f"{congress}#")
+        filter_expr = Attr('session').eq(session) & Attr('roll').eq(roll)
         next_key = None
-        max_pages = 10  # cap to avoid Lambda timeout
-        page_limit = 1000  # DynamoDB max per query
-        for _ in range(max_pages):
+        for _ in range(10):
             params = {
-                'KeyConditionExpression': Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(sk_prefix),
-                'Limit': page_limit,
+                'KeyConditionExpression': key_condition,
+                'FilterExpression': filter_expr,
+                'Limit': 500,
                 'ProjectionExpression': 'bill_id, search_index_sk, #r',
                 'ExpressionAttributeNames': {'#r': 'roll'},
             }
             if next_key:
                 params['ExclusiveStartKey'] = next_key
             resp = table.query(**params)
-            page = resp.get('Items', [])
-            for it in page:
-                r = it.get('roll')
-                if r is not None and int(r) == int(roll):
-                    # Fetch full item with one get_item
+            for it in resp.get('Items', []):
+                if it.get('roll') is not None and int(it.get('roll')) == int(roll):
                     found_sk = it.get('search_index_sk')
                     if not found_sk:
                         continue
@@ -434,11 +414,13 @@ def get_roll_call_dates_for_keys(table, roll_keys: List[str]) -> Dict[str, str]:
         return {}
     out: Dict[str, str] = {}
     for (congress, session), rolls in list(seen.items())[:80]:  # cap (congress, session) groups
-        sk_prefix = f"{congress}#{session}#"
+        key_condition = Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(f"{congress}#")
+        filter_expr = Attr('session').eq(session)
         next_key = None
         for _ in range(20):  # pages per group
             params = {
-                'KeyConditionExpression': Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(sk_prefix),
+                'KeyConditionExpression': key_condition,
+                'FilterExpression': filter_expr,
                 'Limit': 500,
                 'ProjectionExpression': 'search_index_sk, #r',
                 'ExpressionAttributeNames': {'#r': 'roll'},
