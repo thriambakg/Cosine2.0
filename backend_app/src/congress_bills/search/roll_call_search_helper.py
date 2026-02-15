@@ -265,8 +265,10 @@ def search_roll_call_rolls(
 ) -> Dict[str, Any]:
     """
     Query SEARCH#ROLL. PK=SEARCH#ROLL, SK=congress#date#session#roll (date-desc = newest first).
-    DynamoDB returns items in sort-key order; no in-memory sort. Respects limit and last_evaluated_key
-    for pagination: returns one page of results and has_more + last_evaluated_key when more exist.
+    Use congress + optional session and roll to narrow results; roll is applied as a filter.
+    Schema choice: keeping a single partition (PK=SEARCH#ROLL) allows one query to list all roll
+    calls for a congress; filtering by roll is done in-app. PK=SEARCH#ROLL#<roll> would require
+    querying every roll partition to list a full congress, so we keep the current design.
     """
     if not table:
         return {
@@ -285,12 +287,13 @@ def search_roll_call_rolls(
     key_condition = Key('bill_id').eq('SEARCH#ROLL') & Key('search_index_sk').begins_with(f"{congress}#")
     filter_expr = None
     filter_attr_names: Dict[str, str] = {}
+    # Use literal attribute names so the generated FilterExpression matches; avoid unused ExpressionAttributeNames.
+    # Match roll as number or string (DynamoDB is type-sensitive; backfill writes int but legacy may use string).
     if session is not None:
-        filter_attr_names['#s'] = 'session'
-        filter_expr = Attr('#s').eq(session)
+        filter_expr = Attr('session').eq(session)
     if roll is not None:
-        filter_attr_names['#r'] = 'roll'
-        filter_expr = Attr('#r').eq(roll) if filter_expr is None else filter_expr & Attr('#r').eq(roll)
+        roll_cond = Attr('roll').eq(roll) | Attr('roll').eq(str(roll))
+        filter_expr = roll_cond if filter_expr is None else filter_expr & roll_cond
 
     limit = max(1, min(int(limit), 500))  # batch size cap
     logger.info(f"search_roll_call_rolls: congress={congress}, session={session}, roll={roll}, limit={limit}, sk_prefix={congress!r}#")
@@ -306,7 +309,8 @@ def search_roll_call_rolls(
             }
             if filter_expr is not None:
                 params['FilterExpression'] = filter_expr
-                params['ExpressionAttributeNames'] = filter_attr_names
+                if filter_attr_names:
+                    params['ExpressionAttributeNames'] = filter_attr_names
             if next_key:
                 params['ExclusiveStartKey'] = next_key
             response = table.query(**params)
@@ -318,11 +322,17 @@ def search_roll_call_rolls(
         # Return exactly one page; preserve DynamoDB order (no sort)
         page = all_items[:limit]
         results = []
+        seen_roll_key: set = set()  # (congress, session, roll) to deduplicate
         for item in page:
             r = _convert_decimal(item)
             date_val = r.get('latest_action_date') or _parse_roll_sort_key_date(r.get('search_index_sk')) or ''
             r['latest_action_date'] = date_val
             r['project_update_date'] = date_val
+            c, s, roll_val = r.get('congress'), r.get('session'), r.get('roll')
+            key = (c, s, roll_val)
+            if key in seen_roll_key:
+                continue
+            seen_roll_key.add(key)
             results.append(r)
         has_more = bool(next_key) or len(all_items) > limit
         last_key = None

@@ -1400,22 +1400,24 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       const voteSummary = data.vote_summary;
       const total = voteSummary?.total ?? {};
       const byParty = voteSummary?.by_party ?? {};
-      const members = data.members ?? [];
+      const members = (data.members ?? []).filter((m): m is RollCallMemberVote => m != null && typeof m === 'object');
       const partyOrder = ['D', 'R', 'I'];
-      const memberDisplayName = (m: RollCallMemberVote) => {
+      const memberDisplayName = (m: RollCallMemberVote | null | undefined) => {
+        if (m == null) return '—';
         if (m.name) return m.name;
         const first = (m.firstName ?? '').trim();
         const last = (m.lastName ?? '').trim();
         return [first, last].filter(Boolean).join(' ') || '—';
       };
-      const memberPartyLabel = (m: RollCallMemberVote) => {
+      const memberPartyLabel = (m: RollCallMemberVote | null | undefined) => {
+        if (m == null) return '—';
         const p = (m.voteParty ?? m.party ?? '').trim().toUpperCase();
         if (p.startsWith('R')) return 'Republican';
         if (p.startsWith('D')) return 'Democratic';
         return p || '—';
       };
-      const memberStateLabel = (m: RollCallMemberVote) => (m.state ?? m.stateCode ?? m.voteState ?? '').trim() || '—';
-      const memberVoteLabel = (m: RollCallMemberVote) => (m.voteCast ?? '').trim() || '—';
+      const memberStateLabel = (m: RollCallMemberVote | null | undefined) => (m != null ? (m.state ?? m.stateCode ?? m.voteState ?? '').trim() || '—' : '—');
+      const memberVoteLabel = (m: RollCallMemberVote | null | undefined) => (m != null ? (m.voteCast ?? '').trim() || '—' : '—');
 
       // Unique values for filter dropdowns
       const partyOptions = Array.from(new Set(members.map((m) => memberPartyLabel(m)))).filter(Boolean).sort();

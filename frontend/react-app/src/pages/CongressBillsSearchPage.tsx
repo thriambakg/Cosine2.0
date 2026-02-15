@@ -120,7 +120,7 @@ const CongressBillsSearchPage: React.FC = () => {
     return null;
   };
   const savedState = loadStateFromStorage();
-
+  
   // Context menu state
   const [contextMenuAnchor, setContextMenuAnchor] = useState<null | HTMLElement>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
@@ -561,8 +561,8 @@ const CongressBillsSearchPage: React.FC = () => {
   const getRollCallColumnsForIndex = () =>
     rollCallSearchIndex === 'SEARCH#VOTE'
       ? ['politician', 'congress', 'session', 'roll', 'vote', 'bill', 'latest_action_date']
-      : ['congress', 'session', 'roll', 'associated_bill', 'latest_action_date'];
-  const [visibleRollCallColumns, setVisibleRollCallColumns] = useState<string[]>(['congress', 'session', 'roll', 'associated_bill', 'latest_action_date']);
+      : ['congress', 'session', 'roll', 'associated_bill'];
+  const [visibleRollCallColumns, setVisibleRollCallColumns] = useState<string[]>(['congress', 'session', 'roll', 'associated_bill']);
   React.useEffect(() => {
     setVisibleRollCallColumns((prev) => {
       const forIndex = getRollCallColumnsForIndex();
@@ -689,7 +689,7 @@ const CongressBillsSearchPage: React.FC = () => {
     setFileBrowserOpen(false);
     setFileBrowserFor(null);
   };
-
+  
   // Search state
   const [searchParams, setSearchParams] = useState<CongressBillsSearchFilters>(() => {
     const saved = savedState?.searchParams;
@@ -1608,7 +1608,7 @@ const CongressBillsSearchPage: React.FC = () => {
                     {/* Congress & Session — collapsible bubbles (like Advanced Search); 119th selects both sessions */}
                     <Box sx={{ borderTop: '1px solid #334155', pt: 1.5, mt: 1.5 }}>
                       <Box
-                        sx={{
+                sx={{
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
@@ -1664,34 +1664,37 @@ const CongressBillsSearchPage: React.FC = () => {
                       </Collapse>
                     </Box>
                     {/* Roll number */}
-                    <TextField
-                      label="Roll number"
-                      placeholder="e.g. 17"
+              <TextField
+                label="Roll number"
+                placeholder="e.g. 17"
                       value={rollCallRoll}
                       onChange={(e) => { setRollCallRoll(e.target.value); setRollCallSearchMessage(null); }}
                       fullWidth
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
-                          color: '#e2e8f0',
-                          '& fieldset': { borderColor: '#475569' },
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                    color: '#e2e8f0',
+                    '& fieldset': { borderColor: '#475569' },
                           '&:hover fieldset': { borderColor: '#64748b' },
                           '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
-                        },
-                        '& .MuiInputLabel-root': { color: '#94a3b8' },
-                      }}
-                    />
+                  },
+                  '& .MuiInputLabel-root': { color: '#94a3b8' },
+                }}
+              />
 
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 3 }}>
-                      <Button
-                        variant="contained"
+              <Button
+                variant="contained"
                         disabled={rollCallLoading}
                         onClick={async () => {
                           setRollCallSearchMessage(null);
                           setRollCallError(null);
                           const politicianNames = Array.isArray(rollCallPoliticianName) ? rollCallPoliticianName : (rollCallPoliticianName ? [rollCallPoliticianName] : []);
                           const hasPoliticians = politicianNames.length > 0;
-                          const hasRollFilters = rollCallCongress === '119';
+                          const hasRollNumber = rollCallRoll.trim().length > 0;
+                          const congressNum = rollCallCongress === '119' ? 119 : undefined;
+                          const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
+                          const validRoll = typeof rollNum === 'number' && !isNaN(rollNum);
                           setRollCallLoading(true);
                           try {
                             if (hasPoliticians) {
@@ -1719,13 +1722,12 @@ const CongressBillsSearchPage: React.FC = () => {
                                 setRollCallError(res.error || 'Vote search failed');
                                 setRollCallResults([]);
                               }
-                            } else if (hasRollFilters) {
-                              const congressNum = rollCallCongress === '119' ? 119 : undefined;
-                              const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
+                            } else if (hasRollNumber || congressNum !== undefined) {
+                              // SEARCH#ROLL: by congress and/or specific roll number (always send congress when we have it or default 119)
                               const res = await congressBillsSearchAPI.rollCallSearch({
                                 search_index: 'SEARCH#ROLL',
-                                congress: congressNum,
-                                roll: isNaN(rollNum as number) ? undefined : rollNum,
+                                congress: congressNum ?? 119,
+                                roll: validRoll ? rollNum : undefined,
                                 limit: 100,
                               });
                               if (res.success) {
@@ -1738,7 +1740,7 @@ const CongressBillsSearchPage: React.FC = () => {
                                 setRollCallResults([]);
                               }
                             } else {
-                              // Empty search: SEARCH#ROLL for most recent Congress (119) only — roll calls, no bills
+                              // Empty search: SEARCH#ROLL for most recent Congress (119) only
                               const res = await congressBillsSearchAPI.rollCallSearch({
                                 search_index: 'SEARCH#ROLL',
                                 congress: 119,
@@ -1763,9 +1765,9 @@ const CongressBillsSearchPage: React.FC = () => {
                         }}
                         fullWidth
                         startIcon={<SearchIcon />}
-                        sx={{
-                          background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                          color: '#ffffff',
+                sx={{
+                  background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                  color: '#ffffff',
                           '&:hover': { background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)' },
                         }}
                       >
@@ -1793,11 +1795,11 @@ const CongressBillsSearchPage: React.FC = () => {
                         }}
                       >
                         Clear
-                      </Button>
+              </Button>
                     </Box>
                   </Box>
-                </Box>
-              </GlassCard>
+            </Box>
+          </GlassCard>
             ) : (
               <Box sx={{ position: 'sticky', top: 20, alignSelf: 'flex-start', height: 'fit-content' }}>
                 <IconButton
@@ -2658,12 +2660,13 @@ const CongressBillsSearchPage: React.FC = () => {
                               setRollCallHasMore(false);
                             }
                           } else if (rollCallSearchIndex === 'SEARCH#ROLL') {
-                            const congressNum = rollCallCongress === '119' ? 119 : undefined;
+                            const congressNum = rollCallCongress === '119' ? 119 : 119;
                             const rollNum = rollCallRoll.trim() ? parseInt(rollCallRoll.trim(), 10) : undefined;
+                            const validRoll = typeof rollNum === 'number' && !isNaN(rollNum);
                             const res = await congressBillsSearchAPI.rollCallSearch({
                               search_index: 'SEARCH#ROLL',
                               congress: congressNum,
-                              roll: isNaN(rollNum as number) ? undefined : rollNum,
+                              roll: validRoll ? rollNum : undefined,
                               limit: 100,
                               last_evaluated_key: rollCallLastKey,
                             });
@@ -3058,23 +3061,23 @@ const CongressBillsSearchPage: React.FC = () => {
 
                         {/* Has roll call - Advanced: only bills that have had roll call votes (GSI HasRollCallIndex: has_roll_call = 1); preserves existing intersection/union logic */}
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Checkbox
-                              checked={searchParams.has_roll_call === 1}
-                              onChange={(e) => {
-                                setSearchParams((prev) => ({
-                                  ...prev,
-                                  has_roll_call: e.target.checked ? 1 : undefined,
-                                }));
-                              }}
-                              sx={{
-                                color: '#9ca3af',
-                                '&.Mui-checked': { color: '#3b82f6' },
-                                p: 0.5,
-                              }}
-                            />
-                            <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
-                              Only bills with roll call votes
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Checkbox
+                            checked={searchParams.has_roll_call === 1}
+                            onChange={(e) => {
+                              setSearchParams((prev) => ({
+                                ...prev,
+                                has_roll_call: e.target.checked ? 1 : undefined,
+                              }));
+                            }}
+                            sx={{
+                              color: '#9ca3af',
+                              '&.Mui-checked': { color: '#3b82f6' },
+                              p: 0.5,
+                            }}
+                          />
+                          <Typography sx={{ color: '#e2e8f0', fontSize: '0.875rem' }}>
+                            Only bills with roll call votes
                             </Typography>
                           </Box>
                           <Typography sx={{ color: '#94a3b8', fontSize: '0.75rem', pl: 3.5 }}>
