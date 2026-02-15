@@ -82,7 +82,7 @@ export type RollCallResultRow = {
   bill_id_associated?: string;
   search_index_sk?: string;
   politician?: string;
-  voteType?: 'Yea' | 'Nay' | 'Abstained' | 'Present' | 'Not Voting';
+  voteType?: 'Yea' | 'Nay' | 'Present' | 'Not Voting';
   bill_id?: string;
   rowKey: string;
   latest_action_date?: string;
@@ -92,7 +92,7 @@ export type RollCallResultRow = {
 export type VoteBillRow = {
   bill_id: string;
   politician?: string;
-  voteType?: 'Yea' | 'Nay' | 'Abstained' | 'Present' | 'Not Voting';
+  voteType?: 'Yea' | 'Nay' | 'Present' | 'Not Voting';
   congress: number;
   rowKey: string;
 };
@@ -142,7 +142,6 @@ function flattenVoteResults(
   const voteTypes = [
     { rollKey: 'roll_yea', billKey: 'bill_yea', voteType: 'Yea' as const },
     { rollKey: 'roll_nea', billKey: 'bill_nea', voteType: 'Nay' as const },
-    { rollKey: 'roll_abstained', billKey: 'bill_abstained', voteType: 'Abstained' as const },
     { rollKey: 'roll_present', billKey: 'bill_present', voteType: 'Present' as const },
     { rollKey: 'roll_not_voting', billKey: 'bill_not_voting', voteType: 'Not Voting' as const },
   ];
@@ -1122,8 +1121,8 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
                                 size="small"
                                 label={row.voteType}
                                 sx={{
-                                  backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(156, 163, 175, 0.2)',
-                                  color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : '#d1d5db',
+                                  backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : row.voteType === 'Present' ? 'rgba(245, 158, 11, 0.2)' : row.voteType === 'Not Voting' ? 'rgba(100, 116, 139, 0.2)' : 'rgba(156, 163, 175, 0.2)',
+                                  color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : row.voteType === 'Present' ? '#fcd34d' : row.voteType === 'Not Voting' ? '#94a3b8' : '#d1d5db',
                                   fontWeight: 600,
                                   fontSize: '0.75rem',
                                 }}
@@ -1167,8 +1166,8 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
                                 size="small"
                                 label={row.voteType}
                                 sx={{
-                                  backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(156, 163, 175, 0.2)',
-                                  color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : '#d1d5db',
+                                  backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : row.voteType === 'Present' ? 'rgba(245, 158, 11, 0.2)' : row.voteType === 'Not Voting' ? 'rgba(100, 116, 139, 0.2)' : 'rgba(156, 163, 175, 0.2)',
+                                  color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : row.voteType === 'Present' ? '#fcd34d' : row.voteType === 'Not Voting' ? '#94a3b8' : '#d1d5db',
                                   fontWeight: 600,
                                   fontSize: '0.75rem',
                                 }}

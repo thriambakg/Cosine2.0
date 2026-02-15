@@ -145,8 +145,8 @@ const CongressBillsSearchPage: React.FC = () => {
   /** Roll key (congress#session#roll) -> update date; from SEARCH#VOTE response for table */
   const [rollCallRollDates, setRollCallRollDates] = useState<Record<string, string>>({});
   const [rollCallResultView, setRollCallResultView] = useState<'rollcalls' | 'bills'>('rollcalls');
-  // Roll call table: flattened rows and client-side filters (voteType for SEARCH#VOTE: Yea/Nay/Abstained)
-  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; voteType?: 'Yea' | 'Nay' | 'Abstained'; latest_action_date?: string; rowKey: string; search_index_sk?: string };
+  // Roll call table: flattened rows and client-side filters (voteType for SEARCH#VOTE: Yea/Nay/Present/Not Voting)
+  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; voteType?: 'Yea' | 'Nay' | 'Present' | 'Not Voting'; latest_action_date?: string; rowKey: string; search_index_sk?: string };
   const rollCallFlattenedRows = React.useMemo((): RollCallTableRow[] => {
     if (!rollCallResults.length) return [];
     if (rollCallSearchIndex === 'SEARCH#VOTE') {
@@ -161,7 +161,7 @@ const CongressBillsSearchPage: React.FC = () => {
       };
       rollCallResults.forEach((r: any, idx) => {
         const displayName = r.display_name || r.search_value || '';
-        const pushRows = (rollArr: string[], voteType: 'Yea' | 'Nay' | 'Abstained', billArr?: string[]) => {
+        const pushRows = (rollArr: string[], voteType: 'Yea' | 'Nay' | 'Present' | 'Not Voting', billArr?: string[]) => {
           (rollArr || []).forEach((key: string, i: number) => {
             const { congress, session, roll } = parseRollKey(key);
             if (!isNaN(congress) && !isNaN(session) && !isNaN(roll)) {
@@ -183,7 +183,8 @@ const CongressBillsSearchPage: React.FC = () => {
         };
         pushRows(Array.isArray(r.roll_yea) ? r.roll_yea : [], 'Yea', Array.isArray(r.bill_yea) ? r.bill_yea : undefined);
         pushRows(Array.isArray(r.roll_nea) ? r.roll_nea : [], 'Nay', Array.isArray(r.bill_nea) ? r.bill_nea : undefined);
-        pushRows(Array.isArray(r.roll_abstained) ? r.roll_abstained : [], 'Abstained', Array.isArray(r.bill_abstained) ? r.bill_abstained : undefined);
+        pushRows(Array.isArray(r.roll_present) ? r.roll_present : [], 'Present', Array.isArray(r.bill_present) ? r.bill_present : undefined);
+        pushRows(Array.isArray(r.roll_not_voting) ? r.roll_not_voting : [], 'Not Voting', Array.isArray(r.bill_not_voting) ? r.bill_not_voting : undefined);
       });
       if (rows.length === 0) {
         rollCallResults.forEach((r: any, idx: number) => {
@@ -235,14 +236,14 @@ const CongressBillsSearchPage: React.FC = () => {
   }, [rollCallResults, rollCallSearchIndex, rollCallRollDates]);
 
   // Bills from SEARCH#VOTE: one row per bill with voteType (for "Bills" sub-tab)
-  type VoteBillRow = { bill_id: string; politician?: string; voteType: 'Yea' | 'Nay' | 'Abstained'; congress: number; rowKey: string };
+  type VoteBillRow = { bill_id: string; politician?: string; voteType: 'Yea' | 'Nay' | 'Present' | 'Not Voting'; congress: number; rowKey: string };
   const voteBillFlattenedRows = React.useMemo((): VoteBillRow[] => {
     if (!rollCallResults.length || rollCallSearchIndex !== 'SEARCH#VOTE') return [];
     const rows: VoteBillRow[] = [];
     const seen = new Set<string>();
     rollCallResults.forEach((r: any, idx: number) => {
       const displayName = r.display_name || r.search_value || '';
-      const push = (billArr: string[], voteType: 'Yea' | 'Nay' | 'Abstained') => {
+      const push = (billArr: string[], voteType: 'Yea' | 'Nay' | 'Present' | 'Not Voting') => {
         (billArr || []).forEach((billId: string, i: number) => {
           if (!billId || seen.has(billId)) return;
           seen.add(billId);
@@ -258,14 +259,15 @@ const CongressBillsSearchPage: React.FC = () => {
       };
       push(Array.isArray(r.bill_yea) ? r.bill_yea : [], 'Yea');
       push(Array.isArray(r.bill_nea) ? r.bill_nea : [], 'Nay');
-      push(Array.isArray(r.bill_abstained) ? r.bill_abstained : [], 'Abstained');
+      push(Array.isArray(r.bill_present) ? r.bill_present : [], 'Present');
+      push(Array.isArray(r.bill_not_voting) ? r.bill_not_voting : [], 'Not Voting');
     });
     return rows;
   }, [rollCallResults, rollCallSearchIndex]);
 
   const [billSelectedFilters, setBillSelectedFilters] = useState<{
     congresses: Set<number>;
-    voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
+    voteTypes: Set<'Yea' | 'Nay' | 'Present' | 'Not Voting'>;
     bill_types: Set<string>;
     sponsor_parties: Set<string>;
     sponsor_states: Set<string>;
@@ -310,7 +312,7 @@ const CongressBillsSearchPage: React.FC = () => {
     });
     return {
       congress_filters: Array.from(congressMap.entries()).map(([c, count]) => ({ congress: c, count })).sort((a, b) => b.congress - a.congress),
-      vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Abstained', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
+      vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Present' | 'Not Voting', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
       bill_type_filters: Array.from(billTypeMap.entries()).map(([billType, count]) => ({ billType, count })).sort((a, b) => (a.billType || '').localeCompare(b.billType || '')),
       sponsor_party_filters: Array.from(sponsorPartyMap.entries()).map(([party, count]) => ({ party, count })).sort((a, b) => (a.party || '').localeCompare(b.party || '')),
       sponsor_state_filters: Array.from(sponsorStateMap.entries()).map(([state, count]) => ({ state, count })).sort((a, b) => (a.state || '').localeCompare(b.state || '')),
@@ -516,7 +518,7 @@ const CongressBillsSearchPage: React.FC = () => {
   };
 
   const [rollCallSelectedFilters, setRollCallSelectedFilters] = useState<{
-    congresses: Set<number>; sessions: Set<number>; politicians: Set<string>; voteTypes: Set<'Yea' | 'Nay' | 'Abstained'>;
+    congresses: Set<number>; sessions: Set<number>; politicians: Set<string>; voteTypes: Set<'Yea' | 'Nay' | 'Present' | 'Not Voting'>;
   }>({ congresses: new Set(), sessions: new Set(), politicians: new Set(), voteTypes: new Set() });
   const [rollCallExpandedFilters, setRollCallExpandedFilters] = useState<{
     congresses: boolean; sessions: boolean; politicians: boolean; voteTypes: boolean;
@@ -537,7 +539,7 @@ const CongressBillsSearchPage: React.FC = () => {
       congress_filters: Array.from(congressMap.entries()).map(([c, count]) => ({ congress: c, count })).sort((a, b) => b.congress - a.congress),
       session_filters: Array.from(sessionMap.entries()).map(([s, count]) => ({ session: s, count })).sort((a, b) => a.session - b.session),
       politician_filters: Array.from(politicianMap.entries()).map(([p, count]) => ({ politician: p, count })).sort((a, b) => b.count - a.count),
-      vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Abstained', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
+      vote_type_filters: Array.from(voteTypeMap.entries()).map(([voteType, count]) => ({ voteType: voteType as 'Yea' | 'Nay' | 'Present' | 'Not Voting', count })).sort((a, b) => a.voteType.localeCompare(b.voteType)),
     };
   }, [rollCallFlattenedRows]);
 
@@ -2001,8 +2003,8 @@ const CongressBillsSearchPage: React.FC = () => {
                                         size="small"
                                         label={row.voteType ?? '—'}
                                         sx={{
-                                          backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : row.voteType === 'Abstained' ? 'rgba(156, 163, 175, 0.2)' : 'transparent',
-                                          color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : row.voteType === 'Abstained' ? '#d1d5db' : '#94a3b8',
+                                          backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : row.voteType === 'Present' ? 'rgba(245, 158, 11, 0.2)' : row.voteType === 'Not Voting' ? 'rgba(100, 116, 139, 0.2)' : 'transparent',
+                                          color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : row.voteType === 'Present' ? '#fcd34d' : row.voteType === 'Not Voting' ? '#94a3b8' : '#94a3b8',
                                           fontWeight: 600,
                                           fontSize: '0.75rem',
                                         }}
@@ -2377,8 +2379,8 @@ const CongressBillsSearchPage: React.FC = () => {
                                           size="small"
                                           label={row.voteType}
                                           sx={{
-                                            backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(156, 163, 175, 0.2)',
-                                            color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : '#d1d5db',
+                                            backgroundColor: row.voteType === 'Yea' ? 'rgba(34, 197, 94, 0.2)' : row.voteType === 'Nay' ? 'rgba(239, 68, 68, 0.2)' : row.voteType === 'Present' ? 'rgba(245, 158, 11, 0.2)' : row.voteType === 'Not Voting' ? 'rgba(100, 116, 139, 0.2)' : 'rgba(156, 163, 175, 0.2)',
+                                            color: row.voteType === 'Yea' ? '#86efac' : row.voteType === 'Nay' ? '#fca5a5' : row.voteType === 'Present' ? '#fcd34d' : row.voteType === 'Not Voting' ? '#94a3b8' : '#d1d5db',
                                             fontWeight: 600,
                                             fontSize: '0.75rem',
                                           }}
