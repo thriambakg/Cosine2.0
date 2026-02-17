@@ -38,6 +38,11 @@ const formatLabel = (key: string) =>
     ?.replace(/_/g, ' ')
     ?.replace(/\b\w/g, (char) => char.toUpperCase()) || '';
 
+/** Keys that must not be shown when expanding context items (internal/S3/index keys). */
+const SENSITIVE_KEYS = new Set([
+  's3_key', 'search_index_sk', 'documentS3Keys', 'dataFileS3Keys', 'PK', 'SK', 'formS3Key',
+]);
+
 const deriveDocumentName = (url: string) => {
   try {
     const parsed = new URL(url);
@@ -166,7 +171,9 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
 
     return (
       <Box sx={{ pl: depth ? 2 : 0, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-        {Object.entries(value).map(([key, val]) => (
+        {Object.entries(value)
+          .filter(([key]) => !SENSITIVE_KEYS.has(key))
+          .map(([key, val]) => (
           <Box key={key}>
             <Typography variant="caption" sx={{ color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {formatLabel(key)}
@@ -313,7 +320,7 @@ const ContextItemRow = ({ item, onRemove, sessionId, userId }: ContextItemRowPro
                       Filing Document
                     </Typography>
                     <Typography variant="body2" sx={{ color: 'white', wordBreak: 'break-word' }}>
-                      {data.formS3Key.split('/').pop() || data.formS3Key}
+                      {data.formS3Key.split('/').pop() || 'Filing'}
                     </Typography>
                   </TableCell>
                   <TableCell align="right" sx={{ width: 80 }}>
