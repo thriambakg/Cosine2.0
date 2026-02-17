@@ -2211,23 +2211,55 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                       {relatedBills.length === 0 ? (
                         <Typography variant="body2" sx={{ color: '#9ca3af' }}>No related bills.</Typography>
                       ) : (
-                        relatedBills.map((r: any, idx: number) => (
-                          <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
-                            <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                              {r.type} {r.number} - {r.latestTitle || r.title || '—'}
-                            </Typography>
-                            {r.latestAction?.text && (
-                              <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>{r.latestAction.text}</Typography>
-                            )}
-                            {r.relationshipDetails && Array.isArray(r.relationshipDetails) && (
-                              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                {r.relationshipDetails.map((rd: any, rdIdx: number) => (
-                                  <Chip key={rdIdx} label={rd.type} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd' }} />
-                                ))}
-                              </Box>
-                            )}
-                          </Box>
-                        ))
+                        relatedBills.map((r: any, idx: number) => {
+                          const relatedCongress = r.congress ?? itemData?.congress ?? (itemData?.bill_id ? parseInt(String(itemData.bill_id).split('-')[0], 10) : undefined);
+                          const relatedType = (r.type || '').toString().toUpperCase().replace(/\s/g, '') || 'HR';
+                          const relatedNumber = r.number != null ? r.number : '';
+                          const relatedBillId = relatedCongress != null && relatedNumber !== '' ? `${relatedCongress}-${relatedType}-${relatedNumber}` : null;
+                          const relatedTitle = r.latestTitle || r.title || relatedBillId || '—';
+                          return (
+                            <Box
+                              key={idx}
+                              onClick={() => {
+                                if (relatedBillId && (user_id || user?.id)) {
+                                  openItemDetails('congress_bill', { bill_id: relatedBillId }, String(relatedTitle), { user_id: user_id || user?.id });
+                                }
+                              }}
+                              sx={{
+                                p: 2,
+                                backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                                borderRadius: '4px',
+                                border: '1px solid #374151',
+                                cursor: relatedBillId ? 'pointer' : 'default',
+                                '&:hover': relatedBillId
+                                  ? {
+                                      backgroundColor: 'rgba(30, 41, 59, 0.7)',
+                                      borderColor: '#3b82f6',
+                                    }
+                                  : undefined,
+                              }}
+                            >
+                              <Typography variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                                {r.type} {r.number} - {r.latestTitle || r.title || '—'}
+                              </Typography>
+                              {r.latestAction?.text && (
+                                <Typography variant="body2" sx={{ color: '#94a3b8', mt: 0.5 }}>{r.latestAction.text}</Typography>
+                              )}
+                              {r.relationshipDetails && Array.isArray(r.relationshipDetails) && (
+                                <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {r.relationshipDetails.map((rd: any, rdIdx: number) => (
+                                    <Chip key={rdIdx} label={rd.type} size="small" sx={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd' }} />
+                                  ))}
+                                </Box>
+                              )}
+                              {relatedBillId && (
+                                <Typography variant="caption" sx={{ color: '#64748b', mt: 1, display: 'block' }}>
+                                  Click to open bill details
+                                </Typography>
+                              )}
+                            </Box>
+                          );
+                        })
                       )}
                     </Box>
                   )}

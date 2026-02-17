@@ -959,7 +959,7 @@ When users ask about searching for bills, LDA filings, or other data using natur
 - 'government_entity': Used in LDA search (government_entity filter)
   - Examples: "Energy, Dept of", "Health & Human Services, Dept of", "Education, Dept of"
   - Natural language matches: "energy department" → "Energy, Dept of", "HHS" → "Health & Human Services, Dept of"
-- 'congress_legislator': Used in Congress Bills search (sponsor_name, cosponsor_name filters)
+- 'congress_legislator': Used in Congress Bills search (sponsor_name, cosponsor_name filters; can use display name) and for roll call by politician (must use politician_id/bioguide_id from matches in roll_call_search.politician_ids).
   - Examples: "John Smith", "Jane Doe" (active Congress members)
   - Natural language matches: "Senator Smith" → "John Smith", "Representative Doe" → "Jane Doe"
 
@@ -978,7 +978,7 @@ When users ask about searching for bills, LDA filings, or other data using natur
 - User: "Show me bills sponsored by Senator Smith"
   → search_autocomplete("Senator Smith", "congress_legislator") → "John Smith" → search_congress_bills(sponsor_name=["John Smith"])
 - User: "How did Senator X vote on recent roll calls?" or "Show roll call votes for Maria Cantwell"
-  → search_autocomplete("Maria Cantwell", "congress_legislator") → get politician_id (e.g. "C000127") from matches → search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["C000127"], "limit": 50}')
+  → search_autocomplete("Maria Cantwell", "congress_legislator") → for roll call search use politician_id (bioguide_id, e.g. "C000127") from matches in politician_ids → search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["C000127"], "limit": 50}')
 - User: "What were the recent roll calls in the current congress?"
   → search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today YYYY-MM-DD>) so congress defaults to most recent
 - User: "Search for lobbying related to the Energy Department"
@@ -1020,9 +1020,9 @@ When users ask for searches (e.g., "recent bills about renewable energy", "clean
 **Roll call details (single roll, e.g. from context):**
 - When the user has a roll call in context or asks for full vote details for a specific roll call, use search_congress_bills(roll_call_details=<JSON>). **If the context item has search_index_sk in data, include it in the JSON** so the backend does an exact lookup (e.g. roll_call_details='{"search_index_sk": "119#2026-01-15#1#40"}'). Otherwise use congress, session, roll from context (e.g. roll_call_details='{"congress": 119, "session": 1, "roll": 40}').
 **Roll call search (list):**
-- When the user asks about a politician's votes or "roll call" record: (1) search_autocomplete("politician name", "congress_legislator") to get politician_id from matches, (2) search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["<politician_id>"], "limit": 50}').
+- When the user asks about a politician's votes or "roll call" record: (1) search_autocomplete("politician name", "congress_legislator") to get matches, (2) use the **politician_id (bioguide_id)** from each match in roll_call_search.politician_ids (roll call search requires bioguide_id; bill filters like sponsor_name may use names), (3) search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["<bioguide_id>"], "limit": 50}').
 - When the user asks for "recent roll calls" or "current congress roll calls" without a date: use get_current_datetime("date") and pass it as question_date so congress defaults to the most recent. Call search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today>).
-- Roll call searches should always use autocomplete for politician names to get correct politician_id (bioguide_id).
+- Roll call by politician only: politician_ids must be bioguide_id from search_autocomplete(query, "congress_legislator"). Other congress_legislator uses (e.g. sponsor_name for bill search) may use display names.
 
 🔥 FILE DISCOVERY IS MANDATORY - READ THIS CAREFULLY:
 When users ask about files (ANY file-related question), you MUST:

@@ -305,6 +305,17 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
     politicianSuggestionsService.loadPoliticians().then(() => setIsPoliticianDataLoaded(true)).catch(() => {});
   }, []);
 
+  // Initial load: run search when config is persisted but results are empty (same as other tiles)
+  useEffect(() => {
+    if (!hasPerformedInitialSearch && allResults.length === 0 && !isLoading) {
+      const hasSearchCriteria = politicianNames.length > 0 || rollInput.trim() !== '';
+      if (hasSearchCriteria) {
+        console.log('🔄 RollCallSearchTile: Initial load - performing search with persisted params');
+        performSearch(true);
+      }
+    }
+  }, [hasPerformedInitialSearch, allResults.length, isLoading, politicianNames.length, rollInput, performSearch]);
+
   /** Bills view: one row per (bill_id, politician, voteType) derived from roll-call rows when searching by politician */
   const voteBillRows = React.useMemo((): VoteBillRow[] => {
     if (searchIndex !== 'SEARCH#VOTE' || !allResults.length) return [];
