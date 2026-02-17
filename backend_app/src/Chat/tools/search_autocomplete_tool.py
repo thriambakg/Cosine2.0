@@ -97,7 +97,7 @@ def load_csv_from_local(list_type: str) -> List[str]:
             return []
         
         values = []
-        with open(csv_path, 'r', encoding='utf-8') as f:
+        with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
             if list_type == 'congress_legislator':
                 # For congress-legislators.csv, use full_name for display and cache; bioguide_id loaded in load_legislators_with_ids()
                 reader = csv.DictReader(f)
@@ -156,7 +156,7 @@ def load_legislators_with_ids() -> List[Dict[str, str]]:
         if not os.path.exists(csv_path):
             return []
         result = []
-        with open(csv_path, 'r', encoding='utf-8') as f:
+        with open(csv_path, 'r', encoding='utf-8', errors='replace') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 full_name = (row.get('full_name') or '').strip()
