@@ -1629,6 +1629,8 @@ export interface RollCallSearchParams {
 export interface RollCallSearchResponse {
   success: boolean;
   results?: any[];
+  /** Enriched rows with only fields needed for display/filter (bill_title, roll_date, bill_type, sponsor_party, etc.) */
+  enriched_results?: any[];
   has_more?: boolean;
   last_evaluated_key?: any;
   count?: number;

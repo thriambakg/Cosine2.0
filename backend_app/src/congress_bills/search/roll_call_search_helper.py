@@ -82,9 +82,10 @@ def _normalize_vote_cast(vote_cast: Any) -> str:
         return 'Yea'
     if v in ('nay', 'no'):
         return 'Nay'
-    if v in ('present', 'present (not voting)'):
+    if v == 'present':
         return 'Present'
-    if v in ('not voting', 'not voting (present)'):
+    # Any variant containing "not voting" -> Not Voting (do not map to Present)
+    if v in ('not voting', 'not voting (present)', 'not voting, present', 'present (not voting)', 'present, not voting'):
         return 'Not Voting'
     # Fallback: capitalize first letter
     return str(vote_cast).strip() or 'Not Voting'

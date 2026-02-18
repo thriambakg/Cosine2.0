@@ -126,7 +126,7 @@ def fetch_oversized_roll_members_from_s3(s3_key: str) -> List[Dict[str, Any]]:
 
 
 def fetch_oversized_vote_data_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
-    """Fetch SEARCH#VOTE oversize payload from S3 (gzip JSON with bill_yea, bill_nea, bill_present, bill_not_voting, roll_*)."""
+    """Fetch SEARCH#VOTE oversize payload from S3 (gzip JSON with vote_entries or legacy bill_yea/roll_yea etc.)."""
     try:
         if not s3_key:
             return None
@@ -137,6 +137,127 @@ def fetch_oversized_vote_data_from_s3(s3_key: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error fetching oversized vote data from S3 ({s3_key}): {str(e)}", exc_info=True)
         return None
+
+
+def _vote_entries_from_item(r: Dict[str, Any], vote_data_from_s3: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """
+    Return vote_entries for a SEARCH#VOTE result. Prefer in-item vote_entries, then S3 vote_entries,
+    then legacy 8-list (bill_yea/roll_yea etc.) converted to vote_entries. Each entry is { bill_id, roll_id, vote_type }.
+    """
+    data = vote_data_from_s3 if isinstance(vote_data_from_s3, dict) else r
+    entries = data.get('vote_entries')
+    if isinstance(entries, list) and entries:
+        return entries
+    bill_keys = ('bill_yea', 'bill_nea', 'bill_present', 'bill_not_voting')
+    roll_keys = ('roll_yea', 'roll_nea', 'roll_present', 'roll_not_voting')
+    types = ('Yea', 'Nay', 'Present', 'Not Voting')
+    out = []
+    for i, vote_type in enumerate(types):
+        roll_list = list(data.get(roll_keys[i]) or [])
+        bill_list = list(data.get(bill_keys[i]) or [])
+        for i, roll_id in enumerate(roll_list):
+            bill_id = bill_list[i] if i < len(bill_list) else ''
+            out.append({'bill_id': bill_id or '', 'roll_id': roll_id, 'vote_type': vote_type})
+    return out
+
+
+def _parse_roll_id(roll_id: str) -> tuple:
+    """Parse roll_id 'congress#session#roll' -> (congress, session, roll) as ints or (None, None, None)."""
+    if not roll_id or '#' not in str(roll_id):
+        return (None, None, None)
+    parts = str(roll_id).strip().split('#')
+    try:
+        c = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else None
+        s = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+        r = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+        return (c, s, r)
+    except (ValueError, TypeError):
+        return (None, None, None)
+
+
+def build_enriched_vote_results(
+    raw_results: List[Dict[str, Any]],
+    bill_details: Dict[str, Dict[str, Any]],
+    roll_dates: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    """
+    Build enriched result rows for SEARCH#VOTE: one row per vote entry with only fields needed for display/filter.
+    """
+    rows = []
+    for r in raw_results or []:
+        pk = (r.get('bill_id') or '').strip()
+        politician_id = pk.replace('SEARCH#VOTE#', '', 1) if pk.startswith('SEARCH#VOTE#') else ''
+        display_name = (r.get('display_name') or r.get('search_value') or '').strip() or politician_id
+        vote_data_s3 = fetch_oversized_vote_data_from_s3(r['vote_data_oversize_s3_key']) if r.get('vote_data_oversize_s3_key') else None
+        entries = _vote_entries_from_item(r, vote_data_s3)
+        for i, e in enumerate(entries):
+            roll_id = (e.get('roll_id') or '').strip()
+            congress, session, roll = _parse_roll_id(roll_id)
+            if congress is None and session is None and roll is None:
+                continue
+            bill_id = (e.get('bill_id') or '').strip()
+            vote_type = (e.get('vote_type') or 'Not Voting').strip()
+            roll_date = roll_dates.get(roll_id, '') if roll_dates else ''
+            bill_info = bill_details.get(bill_id, {}) if bill_id and bill_details else {}
+            bill_title = (bill_info.get('bill_title') or bill_info.get('short_title') or '').strip()
+            bill_type = (bill_info.get('bill_type') or '').strip()
+            sponsor_party = (bill_info.get('sponsor_party') or '').strip()
+            rows.append({
+                'politician_id': politician_id,
+                'display_name': display_name,
+                'roll_id': roll_id,
+                'congress': congress,
+                'session': session,
+                'roll': roll,
+                'bill_id': bill_id or None,
+                'vote_type': vote_type,
+                'roll_date': roll_date,
+                'bill_title': bill_title or None,
+                'bill_type': bill_type or None,
+                'sponsor_party': sponsor_party or None,
+                'row_key': f'vote-{politician_id}-{roll_id}-{i}',
+            })
+    return rows
+
+
+def build_enriched_roll_results(
+    raw_results: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Build enriched result rows for SEARCH#ROLL: one row per roll with only fields needed for display/filter.
+    Expects each raw result to already have bill_associated and vote_summary attached by the handler.
+    """
+    rows = []
+    for i, r in enumerate(raw_results or []):
+        congress = r.get('congress')
+        session = r.get('session')
+        roll = r.get('roll')
+        if congress is not None and session is not None and roll is not None:
+            roll_id = f"{congress}#{session}#{roll}"
+        else:
+            roll_id = (r.get('search_index_sk') or '').strip()
+        bill_associated = r.get('bill_associated') or {}
+        bill_id_associated = (r.get('bill_id_associated') or '').strip()
+        bill_title = (bill_associated.get('bill_title') or bill_associated.get('short_title') or '').strip()
+        bill_type = (bill_associated.get('bill_type') or '').strip()
+        sponsor_party = (bill_associated.get('sponsor_party') or '').strip()
+        latest_action_date = (r.get('latest_action_date') or '').strip()
+        rows.append({
+            'congress': congress,
+            'session': session,
+            'roll': roll,
+            'search_index_sk': r.get('search_index_sk'),
+            'roll_id': roll_id,
+            'bill_id_associated': bill_id_associated or None,
+            'bill_title': bill_title or None,
+            'bill_type': bill_type or None,
+            'sponsor_party': sponsor_party or None,
+            'latest_action_date': latest_action_date or None,
+            'vote_summary': r.get('vote_summary'),
+            'roll_display': r.get('roll_display') or (f'Roll no. {roll}' if roll is not None else ''),
+            'row_key': r.get('search_index_sk') or f'roll-{i}',
+        })
+    return rows
 
 
 def enrich_bill_with_details(bill: Dict[str, Any]) -> Dict[str, Any]:
@@ -1206,36 +1327,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     limit=limit,
                     last_evaluated_key=last_ev,
                 )
-                # Resolve bill IDs and collect roll keys for date lookup (bill/roll: yea, nea, present, not_voting)
-                bill_keys = ('bill_yea', 'bill_nea', 'bill_present', 'bill_not_voting')
-                roll_keys = ('roll_yea', 'roll_nea', 'roll_present', 'roll_not_voting')
+                # Resolve vote_entries (from item or S3), attach to each result, and collect bill_ids/roll_keys for enrichment
                 bill_ids = []
                 roll_keys_set = set()
                 for r in result.get('results') or []:
-                    if r.get('vote_data_oversize_s3_key'):
-                        vote_data = fetch_oversized_vote_data_from_s3(r['vote_data_oversize_s3_key'])
-                        if isinstance(vote_data, dict):
-                            for key in bill_keys:
-                                for bid in (vote_data.get(key) or []):
-                                    if bid and not str(bid).startswith('SEARCH#'):
-                                        bill_ids.append(bid)
-                            for key in roll_keys:
-                                for rk in (vote_data.get(key) or []):
-                                    if rk and '#' in str(rk):
-                                        roll_keys_set.add(str(rk).strip())
-                    else:
-                        for key in bill_keys:
-                            for bid in (r.get(key) or []):
-                                if bid and not str(bid).startswith('SEARCH#'):
-                                    bill_ids.append(bid)
-                        for key in roll_keys:
-                            for rk in (r.get(key) or []):
-                                if rk and '#' in str(rk):
-                                    roll_keys_set.add(str(rk).strip())
+                    vote_data_s3 = fetch_oversized_vote_data_from_s3(r['vote_data_oversize_s3_key']) if r.get('vote_data_oversize_s3_key') else None
+                    entries = _vote_entries_from_item(r, vote_data_s3)
+                    r['vote_entries'] = entries
+                    for e in entries:
+                        bid = e.get('bill_id') or ''
+                        if bid and not str(bid).startswith('SEARCH#'):
+                            bill_ids.append(bid)
+                        rk = e.get('roll_id') or ''
+                        if rk and '#' in str(rk):
+                            roll_keys_set.add(str(rk).strip())
                 if bill_ids:
                     result['bill_details'] = fetch_bill_projections(bills_table, bill_ids)
                 if roll_keys_set:
                     result['roll_dates'] = get_roll_call_dates_for_keys(bills_table, list(roll_keys_set))
+                # Enriched rows: only fields needed for display/filter (bill_title, roll_date, bill_type, sponsor_party, etc.)
+                result['enriched_results'] = build_enriched_vote_results(
+                    result.get('results') or [],
+                    result.get('bill_details') or {},
+                    result.get('roll_dates') or {},
+                )
             elif search_index == 'SEARCH#ROLL':
                 congress = roll_call_search.get('congress')
                 session = roll_call_search.get('session')
@@ -1280,6 +1395,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     r['vote_summary'] = compute_vote_summary(members) if members else {'total': {}, 'by_party': {}}
                     # Omit full members list from list response; details page uses roll_call_details for full data
                     r.pop('members', None)
+                # Enriched rows: only fields needed for display/filter (bill_title, bill_type, sponsor_party, etc.)
+                result['enriched_results'] = build_enriched_roll_results(roll_results)
             else:
                 result = {
                     'success': False,

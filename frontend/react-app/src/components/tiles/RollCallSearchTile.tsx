@@ -86,6 +86,15 @@ export type RollCallResultRow = {
   bill_id?: string;
   rowKey: string;
   latest_action_date?: string;
+  /** Enriched: bill title for display/filter */
+  bill_title?: string;
+  /** Enriched: bill type for filter (HR, S, HRES, etc.) */
+  bill_type?: string;
+  /** Enriched: sponsor party for filter */
+  sponsor_party?: string;
+  /** Enriched: roll date (vote view uses roll_date from API) */
+  roll_date?: string;
+  roll_id?: string;
 };
 
 /** One row per (bill_id, politician, voteType) for Bills view when searching by politician */
@@ -95,6 +104,10 @@ export type VoteBillRow = {
   voteType?: 'Yea' | 'Nay' | 'Present' | 'Not Voting';
   congress: number;
   rowKey: string;
+  /** Enriched: bill title for display */
+  bill_title?: string;
+  bill_type?: string;
+  sponsor_party?: string;
 };
 
 interface RollCallSearchTileProps {
@@ -133,20 +146,43 @@ const parseRollKey = (key: string): { congress: number; session: number; roll: n
   };
 };
 
-/** Flatten SEARCH#VOTE API response (one object per politician with roll_yea/roll_nea/etc.) into one row per roll call. */
+/** Flatten SEARCH#VOTE API response into one row per roll call. Prefers vote_entries; falls back to legacy roll_yea/bill_yea etc. */
 function flattenVoteResults(
   rawResults: any[],
   rollDates: Record<string, string>
 ): RollCallResultRow[] {
   const rows: RollCallResultRow[] = [];
-  const voteTypes = [
-    { rollKey: 'roll_yea', billKey: 'bill_yea', voteType: 'Yea' as const },
-    { rollKey: 'roll_nea', billKey: 'bill_nea', voteType: 'Nay' as const },
-    { rollKey: 'roll_present', billKey: 'bill_present', voteType: 'Present' as const },
-    { rollKey: 'roll_not_voting', billKey: 'bill_not_voting', voteType: 'Not Voting' as const },
-  ];
   rawResults.forEach((r: any, idx: number) => {
     const displayName = r.display_name || r.search_value || '';
+    const entries = Array.isArray(r.vote_entries) ? r.vote_entries : [];
+    if (entries.length > 0) {
+      entries.forEach((e: any, i: number) => {
+        const rollId = e.roll_id || '';
+        const { congress, session, roll } = parseRollKey(rollId);
+        if (!isNaN(congress) && !isNaN(session) && !isNaN(roll)) {
+          const rollKeyStr = `${congress}#${session}#${roll}`;
+          const voteType = (e.vote_type ?? 'Not Voting') as RollCallResultRow['voteType'];
+          rows.push({
+            politician: displayName,
+            congress,
+            session,
+            roll,
+            roll_display: `Roll no. ${roll}`,
+            voteType,
+            bill_id: e.bill_id || undefined,
+            latest_action_date: rollDates[rollKeyStr] ?? '',
+            rowKey: `vote-${idx}-${rollId}-${i}`,
+          });
+        }
+      });
+      return;
+    }
+    const voteTypes = [
+      { rollKey: 'roll_yea', billKey: 'bill_yea', voteType: 'Yea' as const },
+      { rollKey: 'roll_nea', billKey: 'bill_nea', voteType: 'Nay' as const },
+      { rollKey: 'roll_present', billKey: 'bill_present', voteType: 'Present' as const },
+      { rollKey: 'roll_not_voting', billKey: 'bill_not_voting', voteType: 'Not Voting' as const },
+    ];
     voteTypes.forEach(({ rollKey, billKey, voteType }) => {
       const rollArr = Array.isArray(r[rollKey]) ? r[rollKey] : [];
       const billArr = Array.isArray(r[billKey]) ? r[billKey] : undefined;
@@ -164,36 +200,12 @@ function flattenVoteResults(
             voteType,
             bill_id: billId,
             latest_action_date: rollDates[rollKeyStr] ?? '',
-            rowKey: `vote-${idx}-${voteType}-${key}-${i}`,
+            rowKey: `vote-legacy-${idx}-${voteType}-${key}-${i}`,
           });
         }
       });
     });
   });
-  if (rows.length === 0) {
-    rawResults.forEach((r: any, idx: number) => {
-      const displayName = r.display_name || r.search_value || '';
-      const rollNea = Array.isArray(r.roll_nea) ? r.roll_nea : [];
-      const billNea = Array.isArray(r.bill_nea) ? r.bill_nea : undefined;
-      rollNea.forEach((key: string, i: number) => {
-        const { congress, session, roll } = parseRollKey(key);
-        if (!isNaN(congress) && !isNaN(session) && !isNaN(roll)) {
-          const rollKeyStr = `${congress}#${session}#${roll}`;
-          rows.push({
-            politician: displayName,
-            congress,
-            session,
-            roll,
-            roll_display: `Roll no. ${roll}`,
-            voteType: 'Nay' as const,
-            bill_id: billNea && billNea[i] ? billNea[i] : undefined,
-            latest_action_date: rollDates[rollKeyStr] ?? '',
-            rowKey: `vote-legacy-${r.bill_id || idx}-${i}-${key}`,
-          });
-        }
-      });
-    });
-  }
   return rows;
 }
 
@@ -202,6 +214,40 @@ function rowsWithKeys(raw: any[]): RollCallResultRow[] {
     ...r,
     rowKey: r.search_index_sk ?? `roll-${r.congress}-${r.session}-${r.roll}-${i}`,
   }));
+}
+
+/** Map Lambda enriched_results to RollCallResultRow[] for display and filtering. */
+function enrichedResultsToRows(enriched: any[], searchIndex: 'SEARCH#VOTE' | 'SEARCH#ROLL'): RollCallResultRow[] {
+  if (!Array.isArray(enriched) || !enriched.length) return [];
+  return enriched.map((e: any) => {
+    const row: RollCallResultRow = {
+      congress: e.congress ?? NaN,
+      session: e.session ?? NaN,
+      roll: e.roll ?? NaN,
+      rowKey: e.row_key ?? `enriched-${e.roll_id ?? e.search_index_sk ?? Math.random()}`,
+    };
+    if (searchIndex === 'SEARCH#VOTE') {
+      row.politician = e.display_name ?? e.politician_id ?? '';
+      row.voteType = (e.vote_type ?? 'Not Voting') as RollCallResultRow['voteType'];
+      row.bill_id = e.bill_id ?? undefined;
+      row.latest_action_date = e.roll_date ?? '';
+      row.bill_title = e.bill_title ?? undefined;
+      row.bill_type = e.bill_type ?? undefined;
+      row.sponsor_party = e.sponsor_party ?? undefined;
+      row.roll_id = e.roll_id ?? undefined;
+      row.roll_display = `Roll no. ${row.roll}`;
+    } else {
+      row.bill_id_associated = e.bill_id_associated ?? undefined;
+      row.search_index_sk = e.search_index_sk ?? undefined;
+      row.roll_display = e.roll_display ?? `Roll no. ${row.roll}`;
+      row.latest_action_date = e.latest_action_date ?? undefined;
+      row.bill_title = e.bill_title ?? undefined;
+      row.bill_type = e.bill_type ?? undefined;
+      row.sponsor_party = e.sponsor_party ?? undefined;
+      row.roll_id = e.roll_id ?? undefined;
+    }
+    return row;
+  });
 }
 
 const AVAILABLE_COLUMNS = ['congress', 'session', 'roll', 'associated_bill', 'politician', 'vote', 'bill'] as const;
@@ -321,6 +367,9 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
         voteType: r.voteType,
         congress: r.congress,
         rowKey: `bill-${r.bill_id}-${r.politician ?? ''}-${r.voteType ?? ''}-${rows.length}`,
+        bill_title: r.bill_title,
+        bill_type: r.bill_type,
+        sponsor_party: r.sponsor_party,
       });
     });
     return rows;
@@ -357,9 +406,10 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
       congressMap.set(r.congress, (congressMap.get(r.congress) ?? 0) + 1);
       if (r.voteType) voteTypeMap.set(r.voteType, (voteTypeMap.get(r.voteType) ?? 0) + 1);
       if (r.politician) politicianMap.set(r.politician, (politicianMap.get(r.politician) ?? 0) + 1);
-      const d = billDetails[r.bill_id];
-      if (d?.bill_type) billTypeMap.set(d.bill_type, (billTypeMap.get(d.bill_type) ?? 0) + 1);
-      if (d?.sponsor_party) sponsorPartyMap.set(d.sponsor_party, (sponsorPartyMap.get(d.sponsor_party) ?? 0) + 1);
+      const billType = r.bill_type ?? billDetails[r.bill_id]?.bill_type;
+      const sponsorParty = r.sponsor_party ?? billDetails[r.bill_id]?.sponsor_party;
+      if (billType) billTypeMap.set(billType, (billTypeMap.get(billType) ?? 0) + 1);
+      if (sponsorParty) sponsorPartyMap.set(sponsorParty, (sponsorPartyMap.get(sponsorParty) ?? 0) + 1);
     });
     return {
       congresses: Array.from(congressMap.entries()).map(([c, count]) => ({ value: c, count })).sort((a, b) => b.value - a.value),
@@ -388,14 +438,14 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
     if (billSelectedFilters.politicians.size > 0) rows = rows.filter((r) => r.politician && billSelectedFilters.politicians.has(r.politician));
     if (billSelectedFilters.billTypes.size > 0) {
       rows = rows.filter((r) => {
-        const d = billDetails[r.bill_id];
-        return d?.bill_type && billSelectedFilters.billTypes.has(d.bill_type);
+        const t = r.bill_type ?? billDetails[r.bill_id]?.bill_type;
+        return t && billSelectedFilters.billTypes.has(t);
       });
     }
     if (billSelectedFilters.sponsorParties.size > 0) {
       rows = rows.filter((r) => {
-        const d = billDetails[r.bill_id];
-        return d?.sponsor_party && billSelectedFilters.sponsorParties.has(d.sponsor_party);
+        const p = r.sponsor_party ?? billDetails[r.bill_id]?.sponsor_party;
+        return p && billSelectedFilters.sponsorParties.has(p);
       });
     }
     return rows;
@@ -448,8 +498,10 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
           setRollDates(dates);
           setSearchIndex('SEARCH#VOTE');
           setVisibleColumns((prev) => (prev.length === 4 && prev.every((c) => ['congress', 'session', 'roll', 'associated_bill'].includes(c))) ? [...DEFAULT_VISIBLE_COLUMNS_VOTE] : prev);
-          const flattened = flattenVoteResults(res.results, dates);
-          setAllResults(flattened);
+          const rows = Array.isArray(resAny.enriched_results) && resAny.enriched_results.length > 0
+            ? enrichedResultsToRows(resAny.enriched_results, 'SEARCH#VOTE')
+            : flattenVoteResults(res.results, dates);
+          setAllResults(rows);
           setHasPerformedInitialSearch(true);
           const lek = res.last_evaluated_key ?? null;
           setLastEvaluatedKey(lek);
@@ -458,7 +510,7 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
           setLastEvaluatedKeys(keys);
           onUpdate(id, {
             searchParams: { politician_names: politicianNames, congress: congressNum, session: searchParams.session, roll: validRoll ? rollNum : undefined },
-            results: flattened,
+            results: rows,
             billDetails: { ...billDetails, ...details },
             rollDates: dates,
             searchIndex: 'SEARCH#VOTE',
@@ -473,7 +525,10 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
           limit: BATCH_SIZE,
         });
         if (res.success && res.results) {
-          const newRows = rowsWithKeys(res.results);
+          const resAny = res as any;
+          const newRows = Array.isArray(resAny.enriched_results) && resAny.enriched_results.length > 0
+            ? enrichedResultsToRows(resAny.enriched_results, 'SEARCH#ROLL')
+            : rowsWithKeys(res.results);
           setAllResults(newRows);
           setSearchIndex('SEARCH#ROLL');
           setHasPerformedInitialSearch(true);
@@ -535,8 +590,10 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
           const dates = resAny.roll_dates && typeof resAny.roll_dates === 'object' ? resAny.roll_dates : {};
           setBillDetails((prev) => ({ ...prev, ...details }));
           setRollDates((prev) => ({ ...prev, ...dates }));
-          const flattenedNew = flattenVoteResults(res.results, { ...rollDates, ...dates });
-          const merged = [...allResults, ...flattenedNew];
+          const newRows = Array.isArray(resAny.enriched_results) && resAny.enriched_results.length > 0
+            ? enrichedResultsToRows(resAny.enriched_results, 'SEARCH#VOTE')
+            : flattenVoteResults(res.results, { ...rollDates, ...dates });
+          const merged = [...allResults, ...newRows];
           setAllResults(merged);
           const lek = res.last_evaluated_key ?? null;
           setLastEvaluatedKey(lek);
@@ -559,7 +616,10 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
           last_evaluated_key: lastEvaluatedKey,
         });
         if (res.success && res.results) {
-          const newRows = rowsWithKeys(res.results);
+          const resAny = res as any;
+          const newRows = Array.isArray(resAny.enriched_results) && resAny.enriched_results.length > 0
+            ? enrichedResultsToRows(resAny.enriched_results, 'SEARCH#ROLL')
+            : rowsWithKeys(res.results);
           const merged = [...allResults, ...newRows];
           setAllResults(merged);
           const lek = res.last_evaluated_key ?? null;
@@ -1097,7 +1157,7 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
                 {isBillsView
                   ? (currentPageResults as VoteBillRow[]).map((row, index) => {
                       const detail = billDetails[row.bill_id];
-                      const title = detail?.bill_title ?? row.bill_id;
+                      const title = row.bill_title ?? detail?.bill_title ?? row.bill_id;
                       const isSelected = selectedVoteBills.has(row.bill_id);
                       return (
                         <TableRow
@@ -1168,7 +1228,7 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
                         {visibleColumns.includes('congress') && <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>{row.congress}</TableCell>}
                         {visibleColumns.includes('session') && <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>{row.session}</TableCell>}
                         {visibleColumns.includes('roll') && <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>{row.roll_display ?? row.roll}</TableCell>}
-                        {visibleColumns.includes('associated_bill') && <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>{row.bill_id_associated ?? 'N/A'}</TableCell>}
+                        {visibleColumns.includes('associated_bill') && <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>{row.bill_title ?? row.bill_id_associated ?? 'N/A'}</TableCell>}
                         {visibleColumns.includes('politician') && <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>{row.politician ?? 'N/A'}</TableCell>}
                         {visibleColumns.includes('vote') && (
                           <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
@@ -1192,7 +1252,7 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
                           <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
                             {row.bill_id ? (() => {
                               const detail = billDetails[row.bill_id];
-                              const title = detail?.bill_title ?? row.bill_id;
+                              const title = row.bill_title ?? detail?.bill_title ?? row.bill_id;
                               const str = typeof title === 'string' ? title : String(title ?? '');
                               const display = str.length > 80 ? `${str.slice(0, 80)}…` : str || 'N/A';
                               const cell = <span>{display}</span>;

@@ -135,6 +135,8 @@ const CongressBillsSearchPage: React.FC = () => {
   const [rollCallSearchSidebarVisible, setRollCallSearchSidebarVisible] = useState<boolean>(true);
   const [rollCallSearchMessage, setRollCallSearchMessage] = useState<string | null>(null);
   const [rollCallResults, setRollCallResults] = useState<any[]>([]);
+  /** When API returns enriched_results, use these for display/filter (one row per vote or roll with bill_title, roll_date, etc.) */
+  const [rollCallEnrichedRows, setRollCallEnrichedRows] = useState<any[]>([]);
   const [rollCallLoading, setRollCallLoading] = useState<boolean>(false);
   const [rollCallError, setRollCallError] = useState<string | null>(null);
   const [rollCallHasMore, setRollCallHasMore] = useState<boolean>(false);
@@ -146,8 +148,42 @@ const CongressBillsSearchPage: React.FC = () => {
   const [rollCallRollDates, setRollCallRollDates] = useState<Record<string, string>>({});
   const [rollCallResultView, setRollCallResultView] = useState<'rollcalls' | 'bills'>('rollcalls');
   // Roll call table: flattened rows and client-side filters (voteType for SEARCH#VOTE: Yea/Nay/Present/Not Voting)
-  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; voteType?: 'Yea' | 'Nay' | 'Present' | 'Not Voting'; latest_action_date?: string; rowKey: string; search_index_sk?: string };
+  type RollCallTableRow = { politician?: string; congress: number; session: number; roll: number; roll_display?: string; bill_id?: string; bill_id_associated?: string; bill_title?: string; bill_type?: string; sponsor_party?: string; voteType?: 'Yea' | 'Nay' | 'Present' | 'Not Voting'; latest_action_date?: string; rowKey: string; search_index_sk?: string };
   const rollCallFlattenedRows = React.useMemo((): RollCallTableRow[] => {
+    // Prefer enriched_results when present (fields needed for display/filter only)
+    if (rollCallEnrichedRows.length > 0) {
+      return rollCallEnrichedRows.map((e: any) => {
+        if (rollCallSearchIndex === 'SEARCH#VOTE') {
+          return {
+            politician: e.display_name ?? e.politician_id ?? '',
+            congress: e.congress ?? 0,
+            session: e.session ?? 0,
+            roll: e.roll ?? 0,
+            roll_display: `Roll no. ${e.roll ?? ''}`,
+            bill_id: e.bill_id ?? undefined,
+            bill_title: e.bill_title ?? undefined,
+            bill_type: e.bill_type ?? undefined,
+            sponsor_party: e.sponsor_party ?? undefined,
+            voteType: (e.vote_type ?? 'Not Voting') as RollCallTableRow['voteType'],
+            latest_action_date: e.roll_date ?? '',
+            rowKey: e.row_key ?? `enriched-${e.roll_id ?? ''}`,
+          };
+        }
+        return {
+          congress: e.congress ?? 0,
+          session: e.session ?? 0,
+          roll: e.roll ?? 0,
+          roll_display: e.roll_display ?? `Roll no. ${e.roll ?? ''}`,
+          bill_id_associated: e.bill_id_associated ?? undefined,
+          bill_title: e.bill_title ?? undefined,
+          bill_type: e.bill_type ?? undefined,
+          sponsor_party: e.sponsor_party ?? undefined,
+          latest_action_date: e.latest_action_date ?? '',
+          rowKey: e.row_key ?? e.search_index_sk ?? '',
+          search_index_sk: e.search_index_sk,
+        };
+      });
+    }
     if (!rollCallResults.length) return [];
     if (rollCallSearchIndex === 'SEARCH#VOTE') {
       const rows: RollCallTableRow[] = [];
@@ -233,12 +269,33 @@ const CongressBillsSearchPage: React.FC = () => {
       });
     }
     return [];
-  }, [rollCallResults, rollCallSearchIndex, rollCallRollDates]);
+  }, [rollCallEnrichedRows, rollCallResults, rollCallSearchIndex, rollCallRollDates]);
 
   // Bills from SEARCH#VOTE: one row per bill with voteType (for "Bills" sub-tab)
-  type VoteBillRow = { bill_id: string; politician?: string; voteType: 'Yea' | 'Nay' | 'Present' | 'Not Voting'; congress: number; rowKey: string };
+  type VoteBillRow = { bill_id: string; politician?: string; voteType: 'Yea' | 'Nay' | 'Present' | 'Not Voting'; congress: number; rowKey: string; bill_title?: string; bill_type?: string; sponsor_party?: string };
   const voteBillFlattenedRows = React.useMemo((): VoteBillRow[] => {
-    if (!rollCallResults.length || rollCallSearchIndex !== 'SEARCH#VOTE') return [];
+    if (rollCallSearchIndex !== 'SEARCH#VOTE') return [];
+    if (rollCallEnrichedRows.length > 0) {
+      const rows: VoteBillRow[] = [];
+      const seen = new Set<string>();
+      rollCallEnrichedRows.forEach((e: any) => {
+        const bid = e.bill_id?.trim?.();
+        if (!bid || seen.has(bid)) return;
+        seen.add(bid);
+        rows.push({
+          bill_id: bid,
+          politician: e.display_name ?? e.politician_id ?? '',
+          voteType: (e.vote_type ?? 'Not Voting') as VoteBillRow['voteType'],
+          congress: e.congress ?? 0,
+          rowKey: `bill-${bid}-${e.display_name ?? ''}-${e.vote_type ?? ''}-${rows.length}`,
+          bill_title: e.bill_title,
+          bill_type: e.bill_type,
+          sponsor_party: e.sponsor_party,
+        });
+      });
+      return rows;
+    }
+    if (!rollCallResults.length) return [];
     const rows: VoteBillRow[] = [];
     const seen = new Set<string>();
     rollCallResults.forEach((r: any, idx: number) => {
@@ -263,7 +320,7 @@ const CongressBillsSearchPage: React.FC = () => {
       push(Array.isArray(r.bill_not_voting) ? r.bill_not_voting : [], 'Not Voting');
     });
     return rows;
-  }, [rollCallResults, rollCallSearchIndex]);
+  }, [rollCallEnrichedRows, rollCallResults, rollCallSearchIndex]);
 
   const [billSelectedFilters, setBillSelectedFilters] = useState<{
     congresses: Set<number>;
@@ -1712,17 +1769,20 @@ const CongressBillsSearchPage: React.FC = () => {
                               });
                               if (res.success) {
                                 setRollCallResults(res.results || []);
+                                const resAny = res as any;
+                                setRollCallEnrichedRows(Array.isArray(resAny.enriched_results) ? resAny.enriched_results : []);
                                 setRollCallHasMore(res.has_more || false);
                                 setRollCallLastKey(res.last_evaluated_key ?? null);
                                 setRollCallSearchIndex('SEARCH#VOTE');
-                                const details = (res as any).bill_details;
+                                const details = resAny.bill_details;
                                 if (details && typeof details === 'object') {
                                   setRollCallBillDetails(prev => ({ ...prev, ...details }));
                                 }
-                                setRollCallRollDates((res as any).roll_dates ?? {});
+                                setRollCallRollDates(resAny.roll_dates ?? {});
                               } else {
                                 setRollCallError(res.error || 'Vote search failed');
                                 setRollCallResults([]);
+                                setRollCallEnrichedRows([]);
                               }
                             } else if (hasRollNumber || congressNum !== undefined) {
                               // SEARCH#ROLL: by congress and/or specific roll number (always send congress when we have it or default 119)
@@ -1734,12 +1794,15 @@ const CongressBillsSearchPage: React.FC = () => {
                               });
                               if (res.success) {
                                 setRollCallResults(res.results || []);
+                                const resAny = res as any;
+                                setRollCallEnrichedRows(Array.isArray(resAny.enriched_results) ? resAny.enriched_results : []);
                                 setRollCallHasMore(res.has_more || false);
                                 setRollCallLastKey(res.last_evaluated_key ?? null);
                                 setRollCallSearchIndex('SEARCH#ROLL');
                               } else {
                                 setRollCallError(res.error || 'Roll search failed');
                                 setRollCallResults([]);
+                                setRollCallEnrichedRows([]);
                               }
                             } else {
                               // Empty search: SEARCH#ROLL for most recent Congress (119) only
@@ -1750,17 +1813,21 @@ const CongressBillsSearchPage: React.FC = () => {
                               });
                               if (res.success) {
                                 setRollCallResults(res.results || []);
+                                const resAny = res as any;
+                                setRollCallEnrichedRows(Array.isArray(resAny.enriched_results) ? resAny.enriched_results : []);
                                 setRollCallHasMore(res.has_more || false);
                                 setRollCallLastKey(res.last_evaluated_key ?? null);
                                 setRollCallSearchIndex('SEARCH#ROLL');
                               } else {
                                 setRollCallError(res.error || 'Roll search failed');
                                 setRollCallResults([]);
+                                setRollCallEnrichedRows([]);
                               }
                             }
                           } catch (e: any) {
                             setRollCallError(e?.message || 'Search failed');
                             setRollCallResults([]);
+                            setRollCallEnrichedRows([]);
                           } finally {
                             setRollCallLoading(false);
                           }
@@ -1783,6 +1850,7 @@ const CongressBillsSearchPage: React.FC = () => {
                           setRollCallPoliticianName([]);
                           setRollCallSearchMessage(null);
                           setRollCallResults([]);
+                          setRollCallEnrichedRows([]);
                           setRollCallError(null);
                           setRollCallLastKey(null);
                           setRollCallHasMore(false);
@@ -2014,8 +2082,8 @@ const CongressBillsSearchPage: React.FC = () => {
                                   {rollCallSearchIndex === 'SEARCH#VOTE' && visibleRollCallColumns.includes('bill') && (
                                     <TableCell sx={{ color: '#e2e8f0', borderColor: '#374151', maxWidth: 280 }}>
                                       {row.bill_id ? (
-                                        <Tooltip title={rollCallBillDetails[row.bill_id]?.bill_title ?? row.bill_id} disableHoverListener={!rollCallBillDetails[row.bill_id]?.bill_title}>
-                                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{rollCallBillDetails[row.bill_id]?.bill_title ?? row.bill_id}</span>
+                                        <Tooltip title={row.bill_title ?? rollCallBillDetails[row.bill_id]?.bill_title ?? row.bill_id} disableHoverListener={!(row.bill_title ?? rollCallBillDetails[row.bill_id]?.bill_title)}>
+                                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{row.bill_title ?? rollCallBillDetails[row.bill_id]?.bill_title ?? row.bill_id}</span>
                                         </Tooltip>
                                       ) : <span>—</span>}
                                     </TableCell>
@@ -2648,13 +2716,17 @@ const CongressBillsSearchPage: React.FC = () => {
                             });
                             if (res.success && (res.results?.length ?? 0) > 0) {
                               setRollCallResults(prev => [...prev, ...(res.results || [])]);
+                              const resAny = res as any;
+                              if (Array.isArray(resAny.enriched_results) && resAny.enriched_results.length > 0) {
+                                setRollCallEnrichedRows(prev => [...prev, ...resAny.enriched_results]);
+                              }
                               setRollCallHasMore(res.has_more || false);
                               setRollCallLastKey(res.last_evaluated_key ?? null);
-                              const details = (res as any).bill_details;
+                              const details = resAny.bill_details;
                               if (details && typeof details === 'object') {
                                 setRollCallBillDetails(prev => ({ ...prev, ...details }));
                               }
-                              const rollDates = (res as any).roll_dates;
+                              const rollDates = resAny.roll_dates;
                               if (rollDates && typeof rollDates === 'object') {
                                 setRollCallRollDates(prev => ({ ...prev, ...rollDates }));
                               }
@@ -2674,6 +2746,10 @@ const CongressBillsSearchPage: React.FC = () => {
                             });
                             if (res.success && (res.results?.length ?? 0) > 0) {
                               setRollCallResults(prev => [...prev, ...(res.results || [])]);
+                              const resAny = res as any;
+                              if (Array.isArray(resAny.enriched_results) && resAny.enriched_results.length > 0) {
+                                setRollCallEnrichedRows(prev => [...prev, ...resAny.enriched_results]);
+                              }
                               setRollCallHasMore(res.has_more || false);
                               setRollCallLastKey(res.last_evaluated_key ?? null);
                             } else {
