@@ -5,6 +5,7 @@ Supports resolving bill IDs to projections (title, etc.) and computing vote summ
 """
 
 import logging
+import time
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
@@ -131,6 +132,7 @@ def fetch_bill_projections(table, bill_ids: List[str]) -> Dict[str, Dict[str, An
     Batch fetch bill attributes for display and Refine filtering (same set as main bill search).
     Returns dict: bill_id -> { bill_id, bill_title, bill_type, bill_number, sponsor_full_name, ... }.
     Only includes bills that exist and are not search index items.
+    Retries UnprocessedKeys so throttled requests don't drop bills (which would show blank titles).
     """
     if not table or not bill_ids:
         return {}
@@ -142,38 +144,49 @@ def fetch_bill_projections(table, bill_ids: List[str]) -> Dict[str, Dict[str, An
     for i in range(0, len(unique_ids), batch_size):
         batch = unique_ids[i:i + batch_size]
         keys = [{'bill_id': str(bid), 'search_index_sk': str(bid)} for bid in batch]
-        try:
-            response = table.meta.client.batch_get_item(
-                RequestItems={
-                    table.name: {
-                        'Keys': keys,
-                        'ProjectionExpression': ','.join(BILL_PROJECTION_ATTRS),
+        unprocessed = keys
+        retries = 0
+        max_retries = 5
+        while unprocessed and retries <= max_retries:
+            try:
+                if retries > 0:
+                    time.sleep(0.2 * (2**retries))
+                response = table.meta.client.batch_get_item(
+                    RequestItems={
+                        table.name: {
+                            'Keys': unprocessed,
+                            'ProjectionExpression': ','.join(BILL_PROJECTION_ATTRS),
+                        }
                     }
-                }
-            )
-            items = response.get('Responses', {}).get(table.name, [])
-            for item in items:
-                bid = item.get('bill_id')
-                if not bid or str(bid).startswith('SEARCH#'):
-                    continue
-                out[str(bid)] = _convert_decimal({
-                    'bill_id': bid,
-                    'bill_title': item.get('bill_title') or item.get('title') or '',
-                    'short_title': item.get('short_title') or '',
-                    'latest_action_text': item.get('latest_action_text') or item.get('latest_action') or '',
-                    'latest_action_date': item.get('latest_action_date') or '',
-                    'bill_type': item.get('bill_type'),
-                    'bill_number': item.get('bill_number'),
-                    'sponsor_full_name': item.get('sponsor_full_name'),
-                    'sponsor_party': item.get('sponsor_party'),
-                    'sponsor_state': item.get('sponsor_state'),
-                    'introduced_date': item.get('introduced_date'),
-                    'congress': item.get('congress'),
-                    'bipartisan': item.get('bipartisan'),
-                    'policy_area': item.get('policy_area'),
-                })
-        except Exception as e:
-            logger.warning(f"fetch_bill_projections batch error: {e}")
+                )
+                items = response.get('Responses', {}).get(table.name, [])
+                for item in items:
+                    bid = item.get('bill_id')
+                    if not bid or str(bid).startswith('SEARCH#'):
+                        continue
+                    out[str(bid)] = _convert_decimal({
+                        'bill_id': bid,
+                        'bill_title': item.get('bill_title') or item.get('title') or '',
+                        'short_title': item.get('short_title') or '',
+                        'latest_action_text': item.get('latest_action_text') or item.get('latest_action') or '',
+                        'latest_action_date': item.get('latest_action_date') or '',
+                        'bill_type': item.get('bill_type'),
+                        'bill_number': item.get('bill_number'),
+                        'sponsor_full_name': item.get('sponsor_full_name'),
+                        'sponsor_party': item.get('sponsor_party'),
+                        'sponsor_state': item.get('sponsor_state'),
+                        'introduced_date': item.get('introduced_date'),
+                        'congress': item.get('congress'),
+                        'bipartisan': item.get('bipartisan'),
+                        'policy_area': item.get('policy_area'),
+                    })
+                unprocessed = response.get('UnprocessedKeys', {}).get(table.name, {}).get('Keys', [])
+                retries += 1
+            except Exception as e:
+                logger.warning(f"fetch_bill_projections batch error: {e}")
+                break
+        if unprocessed and retries > max_retries:
+            logger.warning(f"fetch_bill_projections: {len(unprocessed)} keys still unprocessed after retries")
     return out
 
 
