@@ -74,11 +74,11 @@ def _parse_roll_sort_key_date(search_index_sk: Any) -> Optional[str]:
 
 
 def _normalize_vote_cast(vote_cast: Any) -> str:
-    """Map Congress.gov voteCast to display bucket: Yea, Nay, Present, Not Voting."""
+    """Map Congress.gov voteCast to display bucket: Yea, Nay, Present, Not Voting. House uses 'Aye', Senate uses 'Yea'."""
     if vote_cast is None:
         return 'Not Voting'
     v = str(vote_cast).strip().lower()
-    if v in ('yea', 'yes'):
+    if v in ('yea', 'yes', 'aye'):
         return 'Yea'
     if v in ('nay', 'no'):
         return 'Nay'
