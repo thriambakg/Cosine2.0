@@ -143,10 +143,12 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     needs: [wait-for-infrastructure]
-    # Always run setup, but skip wait-for-infrastructure for manual triggers
+    # Always run setup when wait-for-infrastructure succeeds or is skipped (manual/workflow_call)
     if: always() && (needs.wait-for-infrastructure.result == 'success' || needs.wait-for-infrastructure.result == 'skipped')
     environment:
-      name: ${{ github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      # Use manual input when workflow_dispatch/workflow_call; otherwise derive from branch.
+      # Ensure staging/production environments exist in repo Settings → Environments (add "Required reviewers" for approval gate).
+      name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.event_name == 'workflow_call' && inputs.environment || (github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/main') && 'production' || 'staging' }}
       url: https://github.com/${{ github.repository }}/actions
     outputs:
       environment: ${{ steps.env.outputs.environment }}
@@ -255,10 +257,13 @@ jobs:
           echo "🎉 All CloudFront infrastructure components are ready!"
 
   # Frontend security (SCA, SAST, secrets) — runs before build/deploy
+  # Uses environment for deployment protection: add "Required reviewers" in repo Settings → Environments
+  # to require manual approval before security scan runs (and before deploy)
   frontend-security:
     name: 'Frontend Security (SCA / SAST / Secrets)'
     needs: [setup]
     runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.environment }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

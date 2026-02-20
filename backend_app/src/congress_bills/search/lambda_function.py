@@ -4,8 +4,9 @@ Uses Boto3 query method efficiently with union/intersection logic
 """
 
 import json
-import os
 import logging
+import os
+import time
 import boto3
 import gzip
 from typing import Dict, List, Any, Optional, Set
@@ -704,46 +705,58 @@ def get_bill_by_id(bill_id: str) -> Optional[Dict[str, Any]]:
 
 
 def fetch_full_bills_batch(bill_ids: List[str]) -> List[Dict[str, Any]]:
-    """Fetch full bill items using BatchGetItem"""
+    """
+    Fetch full bill items using BatchGetItem.
+    Retries UnprocessedKeys so throttled requests don't drop bills (matches fetch_bill_projections).
+    """
     if not bill_ids:
         return []
-    
+
     all_items = []
     batch_size = 100
-    
+    max_retries = 5
+
     for i in range(0, len(bill_ids), batch_size):
         batch_ids = bill_ids[i:i + batch_size]
-        # Deduplicate to avoid ValidationException
         batch_ids = list(dict.fromkeys(batch_ids))
-        
-        try:
-            request_items = {
-                BILLS_TABLE_NAME: {
-                    'Keys': [
-                        {
-                            'bill_id': {'S': str(bid)},
-                            'search_index_sk': {'S': str(bid)}  # For regular bills, search_index_sk equals bill_id
-                        }
-                        for bid in batch_ids
-                    ],
-                    'ProjectionExpression': ', '.join(BILL_SEARCH_PROJECTION_ATTRS),
+
+        keys = [
+            {'bill_id': {'S': str(bid)}, 'search_index_sk': {'S': str(bid)}}
+            for bid in batch_ids
+        ]
+        unprocessed = list(keys)
+        retries = 0
+
+        while unprocessed and retries <= max_retries:
+            try:
+                if retries > 0:
+                    time.sleep(0.2 * (2 ** retries))
+                request_items = {
+                    BILLS_TABLE_NAME: {
+                        'Keys': unprocessed,
+                        'ProjectionExpression': ', '.join(BILL_SEARCH_PROJECTION_ATTRS),
+                    }
                 }
-            }
-            batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
-            batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
-            
-            deserializer = TypeDeserializer()
-            for item in batch_items:
-                converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
-                # Filter out search index items
-                if not is_search_index_item(converted_item):
-                    all_items.append(converted_item)
-            
-            logger.info(f"Fetched {len(batch_items)} items from BatchGetItem, {len([i for i in batch_items if not is_search_index_item({k: deserializer.deserialize(v) for k, v in i.items()})])} after filtering")
-        except Exception as e:
-            logger.error(f"Error fetching batch: {str(e)}", exc_info=True)
-            continue
-    
+                batch_response = dynamodb_client.batch_get_item(RequestItems=request_items)
+                batch_items = batch_response.get('Responses', {}).get(BILLS_TABLE_NAME, [])
+                unprocessed = batch_response.get('UnprocessedKeys', {}).get(BILLS_TABLE_NAME, {}).get('Keys', [])
+
+                deserializer = TypeDeserializer()
+                for item in batch_items:
+                    converted_item = {k: deserializer.deserialize(v) for k, v in item.items()}
+                    if not is_search_index_item(converted_item):
+                        all_items.append(converted_item)
+
+                if unprocessed:
+                    logger.info(f"BatchGetItem: {len(unprocessed)} keys unprocessed, retrying (attempt {retries + 1})")
+                retries += 1
+            except Exception as e:
+                logger.error(f"Error fetching batch: {str(e)}", exc_info=True)
+                break
+
+        if unprocessed and retries > max_retries:
+            logger.warning(f"fetch_full_bills_batch: {len(unprocessed)} keys still unprocessed after {max_retries} retries")
+
     logger.info(f"Total items fetched: {len(all_items)} from {len(bill_ids)} bill_ids")
     return all_items
 
