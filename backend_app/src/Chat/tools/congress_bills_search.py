@@ -336,7 +336,12 @@ def search_congress_bills(
         roll_call_details: Optional JSON string to fetch full details for ONE roll call (members, vote_summary, bill_associated). Include search_index_sk from context when present for direct lookup; otherwise congress, session, roll. Example: '{"search_index_sk": "119#2026-01-15#1#40"}' or '{"congress": 119, "session": 1, "roll": 40}'.
     
     Returns:
-        JSON string: roll_call_details returns result with roll_item, vote_summary, members, bill_associated; bill search returns results/s3_key; roll call search returns results array.
+        JSON string. Schema varies by mode:
+        * **Roll call details**: { success, result: { roll_item, bill_associated, vote_summary, members } }
+        * **Bill search**: { success, results[], count, has_more, last_evaluated_key: { offset, total_items, method }, method }.
+          Large datasets return { status, s3_key, count, has_more, last_evaluated_key, message } - use read_s3_file_tool(s3_key) to fetch.
+        * **Roll call search** (SEARCH#VOTE or SEARCH#ROLL): { success, results[], count, has_more, last_evaluated_key, enriched_results[] }.
+          Use enriched_results for display: each row has bill_title, roll_date, vote_type, congress, session, roll, bill_id_associated, display_name (SEARCH#VOTE), roll_display.
     """
     try:
         # --- Roll call details path (single roll: use PK/SK when available from context) ---

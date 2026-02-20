@@ -1013,13 +1013,15 @@ When users ask for searches (e.g., "recent bills about renewable energy", "clean
 - Only increase limit if user explicitly asks for more results or you need to search deeper
 
 **Pagination:**
-- Use last_evaluated_key from previous search to get next batch
+- Use last_evaluated_key from previous search to get next batch (pass as JSON string)
+- Bill search last_evaluated_key contains { offset, total_items, method } — total_items is total matching count
 - Don't fetch all results upfront - fetch incrementally as needed
 - The tool will return has_more=true if more results are available
 
 **Roll call details (single roll, e.g. from context):**
 - When the user has a roll call in context or asks for full vote details for a specific roll call, use search_congress_bills(roll_call_details=<JSON>). **If the context item has search_index_sk in data, include it in the JSON** so the backend does an exact lookup (e.g. roll_call_details='{"search_index_sk": "119#2026-01-15#1#40"}'). Otherwise use congress, session, roll from context (e.g. roll_call_details='{"congress": 119, "session": 1, "roll": 40}').
-**Roll call search (list):**
+**Roll call search (list) — use enriched_results for display:**
+- Roll call search returns enriched_results[] (display-ready rows with bill_title, roll_date, vote_type, congress, session, roll). Prefer enriched_results over results when presenting to the user.
 - When the user asks about a politician's votes or "roll call" record: (1) search_autocomplete("politician name", "congress_legislator") to get matches, (2) use the **politician_id (bioguide_id)** from each match in roll_call_search.politician_ids (roll call search requires bioguide_id; bill filters like sponsor_name may use names), (3) search_congress_bills(roll_call_search='{"search_index": "SEARCH#VOTE", "politician_ids": ["<bioguide_id>"], "limit": 50}').
 - When the user asks for "recent roll calls" or "current congress roll calls" without a date: use get_current_datetime("date") and pass it as question_date so congress defaults to the most recent. Call search_congress_bills(roll_call_search='{"search_index": "SEARCH#ROLL", "limit": 20}', question_date=<today>).
 - Roll call by politician only: politician_ids must be bioguide_id from search_autocomplete(query, "congress_legislator"). Other congress_legislator uses (e.g. sponsor_name for bill search) may use display names.
