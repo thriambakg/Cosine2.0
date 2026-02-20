@@ -10,6 +10,11 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "setup-env": "node scripts/setup-env.js"
   },
+  "overrides": {
+    "fast-xml-parser": "^5.3.6",
+    "minimatch": "^10.2.1",
+    "ajv": "^8.18.0"
+  },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.14.0",
     "@emotion/react": "^11.14.0",
