@@ -1295,15 +1295,17 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       customIcon: tile.customIcon,
     };
 
-    // Restore paginationState and results for roll call tile
+    // Restore paginationState, results, and politicianResultView for roll call tile
     let sessionPaginationStateRollCall = tile.paginationState;
     let sessionResultsRollCall = tile.results;
+    let sessionPoliticianResultView = (tile as any).politicianResultView;
     try {
       const sessionData = sessionStorage.getItem(`tile_results_${tile.id}`);
       if (sessionData) {
         const parsed = JSON.parse(sessionData);
         if (parsed.paginationState) sessionPaginationStateRollCall = parsed.paginationState;
         if (parsed.results) sessionResultsRollCall = parsed.results;
+        if (parsed.politicianResultView) sessionPoliticianResultView = parsed.politicianResultView;
       }
     } catch (error) {
       // ignore
@@ -1313,6 +1315,10 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
       searchParams: tile.searchParams,
+      billDetails: (tile as any).billDetails,
+      rollDates: (tile as any).rollDates,
+      searchIndex: (tile as any).searchIndex,
+      politicianResultView: sessionPoliticianResultView,
       paginationState: sessionPaginationStateRollCall as { last_evaluated_key?: any; has_more?: boolean } | undefined,
       results: sessionResultsRollCall,
       isPinned: tile.isPinned,

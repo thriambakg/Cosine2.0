@@ -1938,14 +1938,22 @@ const UnifiedDashboardPage: React.FC = () => {
     // Keep paginationState for database persistence (pagination keys needed for restoration)
     const { results, lastUpdated, ...configData } = data;
     const paginationState = data.paginationState;
-    
-    // Store results and paginationState in sessionStorage only (not database)
-    if (results !== undefined || paginationState !== undefined) {
+    const politicianResultView = data.politicianResultView;
+
+    // Store results, paginationState, and politicianResultView in sessionStorage (not database)
+    if (results !== undefined || paginationState !== undefined || politicianResultView !== undefined) {
       try {
-        const sessionData: any = {};
+        const existing = (() => {
+          try {
+            const raw = sessionStorage.getItem(`tile_results_${id}`);
+            return raw ? JSON.parse(raw) : {};
+          } catch { return {}; }
+        })();
+        const sessionData: any = { ...existing };
         if (results !== undefined) sessionData.results = results;
         if (paginationState !== undefined) sessionData.paginationState = paginationState;
         if (lastUpdated !== undefined) sessionData.lastUpdated = lastUpdated;
+        if (politicianResultView !== undefined) sessionData.politicianResultView = politicianResultView;
         sessionStorage.setItem(`tile_results_${id}`, JSON.stringify(sessionData));
       } catch (error: any) {
         // Handle quota exceeded errors gracefully

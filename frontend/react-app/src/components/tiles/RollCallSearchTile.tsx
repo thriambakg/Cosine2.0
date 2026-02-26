@@ -127,6 +127,8 @@ interface RollCallSearchTileProps {
   rollDates?: Record<string, string>;
   searchIndex?: 'SEARCH#VOTE' | 'SEARCH#ROLL' | null;
   paginationState?: { last_evaluated_key?: any; has_more?: boolean; lastEvaluatedKeys?: any[] };
+  /** When searchIndex is SEARCH#VOTE: 'rollcalls' = one row per roll, 'bills' = one row per bill. Persisted via onUpdate. */
+  politicianResultView?: 'rollcalls' | 'bills';
   isPinned?: boolean;
   customTitle?: string;
   customColor?: string;
@@ -269,6 +271,7 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
   rollDates: initialRollDates = {},
   searchIndex: initialSearchIndex = null,
   paginationState: initialPaginationState,
+  politicianResultView: initialPoliticianResultView = 'rollcalls',
   isPinned = false,
   customTitle,
   customColor,
@@ -315,8 +318,8 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
   const [billDetails, setBillDetails] = useState<Record<string, any>>(initialBillDetails);
   const [rollDates, setRollDates] = useState<Record<string, string>>(initialRollDates);
   const [isPoliticianDataLoaded, setIsPoliticianDataLoaded] = useState(false);
-  /** When searching by politician: 'rollcalls' = one row per roll, 'bills' = one row per bill */
-  const [politicianResultView, setPoliticianResultView] = useState<'rollcalls' | 'bills'>('rollcalls');
+  /** When searching by politician: 'rollcalls' = one row per roll, 'bills' = one row per bill. Persisted via onUpdate. */
+  const [politicianResultView, setPoliticianResultView] = useState<'rollcalls' | 'bills'>(initialPoliticianResultView ?? 'rollcalls');
   const [selectedVoteBills, setSelectedVoteBills] = useState<Set<string>>(new Set());
   const [voteBillCurrentPage, setVoteBillCurrentPage] = useState(1);
 
@@ -1053,7 +1056,10 @@ const RollCallSearchTile: React.FC<RollCallSearchTileProps> = ({
           {searchIndex === 'SEARCH#VOTE' && (
             <Tabs
               value={politicianResultView}
-              onChange={(_, v: 'rollcalls' | 'bills') => setPoliticianResultView(v)}
+              onChange={(_, v: 'rollcalls' | 'bills') => {
+                setPoliticianResultView(v);
+                onUpdate(id, { politicianResultView: v });
+              }}
               sx={{ mb: 1, minHeight: 36, '& .MuiTab-root': { color: '#94a3b8', minHeight: 36 }, '& .Mui-selected': { color: '#3b82f6' }, '& .MuiTabs-indicator': { backgroundColor: '#3b82f6' } }}
             >
               <Tab label="Roll calls" value="rollcalls" />
