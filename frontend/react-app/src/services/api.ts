@@ -1714,6 +1714,14 @@ export interface RollCallDetailsResult {
   search_index_sk: string;
   bill_id_associated?: string;
   roll_display?: string;
+  vote_question?: string;
+  result?: string;
+  result_display?: string;
+  vote_type?: string;
+  latest_action_date?: string;
+  legislation_number?: string;
+  legislation_type?: string;
+  legislation_url?: string;
   bill_associated?: {
     bill_id?: string;
     bill_title?: string;

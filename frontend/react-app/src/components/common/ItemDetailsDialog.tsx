@@ -670,8 +670,16 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         if (cancelled) break;
         try {
           const res = await congressBillsSearchAPI.getRollCallDetails({ congress, session, roll });
-          if (cancelled || !res?.result?.vote_summary) continue;
-          setBillVoteResultsByKey((prev) => ({ ...prev, [key]: res.result!.vote_summary! }));
+          if (cancelled || !res?.result) continue;
+          const r = res.result as any;
+          const rollItem = r.roll_item ?? r;
+          setBillVoteResultsByKey((prev) => ({
+            ...prev,
+            [key]: {
+              vote_summary: r.vote_summary ?? rollItem.vote_summary,
+              vote_question: rollItem.vote_question ?? r.vote_question,
+            },
+          }));
         } catch { /* ignore */ }
       }
     };
@@ -1457,37 +1465,62 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Tooltip>
           </Box>
 
-          <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
-            <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5, fontWeight: 600 }}>
-              Associated bill
-            </Typography>
-            {data.bill_id_associated ? (
-              <Box>
-                <Typography component="span" variant="body1" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
-                  {data.bill_id_associated}
-                </Typography>
-                {' · '}
-                <Link
-                  component="button"
-                  variant="body2"
-                  sx={{ color: '#60a5fa', cursor: 'pointer', textTransform: 'none', '&:hover': { textDecoration: 'underline' } }}
-                  onClick={() => {
-                    openItemDetails('congress_bill', { bill_id: data.bill_id_associated }, data.bill_id_associated, { user_id: user_id || user?.id });
-                  }}
-                >
-                  View
-                </Link>
-                {bill?.bill_title && (
-                  <Typography variant="body2" sx={{ color: '#cbd5e1', mt: 0.5 }}>{bill.bill_title}</Typography>
-                )}
-                {bill?.latest_action_text && (
-                  <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mt: 0.5 }}>{bill.latest_action_text}</Typography>
-                )}
-              </Box>
-            ) : (
-              <Typography variant="body2" sx={{ color: '#94a3b8' }}>No associated bill</Typography>
-            )}
-          </Paper>
+          <Box className="overview" sx={{ mb: 2 }}>
+            <Table size="small" className="standard01" sx={{ '& th, & td': { color: '#cbd5e1', borderColor: '#374151', py: 1 }, '& th': { fontWeight: 600, width: 140 } }}>
+              <TableBody>
+                <TableRow>
+                  <TableCell component="th" scope="row" sx={{ borderColor: '#374151', color: '#94a3b8' }}>Date</TableCell>
+                  <TableCell sx={{ borderColor: '#374151' }}>{data.latest_action_date ? formatDate(data.latest_action_date) : '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row" sx={{ borderColor: '#374151', color: '#94a3b8' }}>Vote Question</TableCell>
+                  <TableCell sx={{ borderColor: '#374151' }}>{data.vote_question ?? '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row" sx={{ borderColor: '#374151', color: '#94a3b8' }}>Description</TableCell>
+                  <TableCell sx={{ borderColor: '#374151' }}>
+                    {data.bill_id_associated ? (
+                      <>
+                        <Link
+                          component="button"
+                          variant="body2"
+                          sx={{ color: '#60a5fa', cursor: 'pointer', textTransform: 'none', '&:hover': { textDecoration: 'underline' } }}
+                          onClick={() => openItemDetails('congress_bill', { bill_id: data.bill_id_associated }, data.bill_id_associated, { user_id: user_id || user?.id })}
+                        >
+                          {(() => {
+                            const parts = (data.bill_id_associated || '').split('-');
+                            const legType = (data.legislation_type || parts[1] || 'HR').toUpperCase().replace(/\s/g, '');
+                            const legNum = data.legislation_number || parts[2] || '';
+                            if (legType && legNum) {
+                              return /^HR$/i.test(legType) ? `H.R.${legNum}` : /^S$/i.test(legType) ? `S.${legNum}` : `${legType}.${legNum}`;
+                            }
+                            return data.bill_id_associated;
+                          })()}
+                        </Link>
+                        {' — '}
+                        {[data.vote_question, data.result_display ?? data.result].filter(Boolean).join(' ') || '—'}
+                        {data.roll_display ? ` (${data.roll_display}).` : '.'}
+                      </>
+                    ) : (
+                      <Typography component="span" variant="body2" sx={{ color: '#94a3b8' }}>No associated bill</Typography>
+                    )}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row" sx={{ borderColor: '#374151', color: '#94a3b8' }}>Vote Type</TableCell>
+                  <TableCell sx={{ borderColor: '#374151' }}>{data.vote_type ?? '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row" sx={{ borderColor: '#374151', color: '#94a3b8' }}>Result</TableCell>
+                  <TableCell sx={{ borderColor: '#374151' }}>
+                    {data.result_display ?? data.result ?? (total.yea != null && total.nay != null
+                      ? `${(total.yea ?? 0) > (total.nay ?? 0) ? 'Passed' : (total.nay ?? 0) > (total.yea ?? 0) ? 'Failed' : 'Tied'} - Yea: ${total.yea ?? 0} | Nay: ${total.nay ?? 0}` + (Object.keys(byParty).length ? ` (${Object.entries(byParty).map(([p, c]) => `${p} ${c.yea ?? 0}-${c.nay ?? 0} Pres=${c.present ?? 0} NV=${c.not_voting ?? 0}`).join(', ')})` : '')
+                      : '—')}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </Box>
 
           <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderColor: '#374151' }}>
             <Typography variant="subtitle1" sx={{ color: '#e2e8f0', mb: 1.5 }}>Vote summary</Typography>
@@ -2278,9 +2311,12 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                             ? `https://www.congress.gov/votes/${chamber}/${congress}-${session}/${roll}`
                             : v.url || null;
                           const rollKey = typeof congress === 'number' && session != null && roll != null ? `${congress}#${session}#${roll}` : '';
-                          const voteSummary = rollKey ? billVoteResultsByKey[rollKey] : null;
+                          const rollData = rollKey ? billVoteResultsByKey[rollKey] : null;
+                          const voteSummary = rollData?.vote_summary ?? (rollData && !rollData.vote_question ? rollData : null);
+                          const voteQuestion = rollData?.vote_question;
                           const resultText = voteSummary
                             ? formatVoteResult({
+                                result: voteSummary.result,
                                 yea: voteSummary.total?.yea,
                                 nay: voteSummary.total?.nay,
                                 present: voteSummary.total?.present,
@@ -2290,9 +2326,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                             : formatVoteResult(v);
                           return (
                             <Box key={idx} sx={{ p: 2, backgroundColor: 'rgba(30, 41, 59, 0.5)', borderRadius: '4px', border: '1px solid #374151' }}>
-                              <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, mb: resultText ? 1 : 0 }}>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, mb: (resultText || voteQuestion) ? 1 : 0 }}>
                                 <Box>
-                                  <Typography variant="subtitle2" sx={{ color: '#e2e8f0' }}>{v.chamber ?? 'House'} — {rollDisplay}</Typography>
+                                  <Typography variant="subtitle2" sx={{ color: '#e2e8f0' }}>{v.chamber ?? 'House'} — {rollDisplay}{voteQuestion ? ` · ${voteQuestion}` : ''}</Typography>
                                   <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block' }}>
                                     Congress {congress ?? '—'} · Session {session ?? '—'} · Roll #{roll ?? '—'}
                                     {v.date ? ` · ${formatDate(v.date)}` : ''}

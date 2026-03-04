@@ -221,6 +221,35 @@ def build_enriched_vote_results(
     return rows
 
 
+def _format_roll_result_display(r: Dict[str, Any]) -> Optional[str]:
+    """Build Result display string: 'Passed - Yea: 220 | Nay: 208 (R 216-0 ..., D 4-208 ...)'."""
+    vote_summary = r.get('vote_summary') or {}
+    total = vote_summary.get('total') or {}
+    by_party = vote_summary.get('by_party') or {}
+    yea = total.get('yea', 0) or 0
+    nay = total.get('nay', 0) or 0
+    present = total.get('present', 0) or 0
+    not_voting = total.get('not_voting', 0) or 0
+    if yea == 0 and nay == 0 and present == 0 and not_voting == 0:
+        # Fallback to stored result string if no vote_summary
+        return (r.get('result') or '').strip() or None
+    outcome = 'Passed' if yea > nay else ('Failed' if nay > yea else 'Tied')
+    parts = [f'{outcome} - Yea: {yea} | Nay: {nay}']
+    if by_party:
+        party_parts = []
+        for party in ('R', 'D', 'I'):
+            counts = by_party.get(party) or {}
+            y = counts.get('yea', 0) or 0
+            n = counts.get('nay', 0) or 0
+            p = counts.get('present', 0) or 0
+            nv = counts.get('not_voting', 0) or 0
+            if y or n or p or nv:
+                party_parts.append(f'{party} {y}-{n} Pres={p} NV={nv}')
+        if party_parts:
+            parts.append(f' ({", ".join(party_parts)})')
+    return ''.join(parts) if parts else None
+
+
 def build_enriched_roll_results(
     raw_results: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -243,6 +272,10 @@ def build_enriched_roll_results(
         bill_type = (bill_associated.get('bill_type') or '').strip()
         sponsor_party = (bill_associated.get('sponsor_party') or '').strip()
         latest_action_date = (r.get('latest_action_date') or '').strip()
+        vote_question = (r.get('vote_question') or '').strip() or None
+        result = (r.get('result') or '').strip() or None
+        vote_type = (r.get('vote_type') or '').strip() or None
+        result_display = _format_roll_result_display(r) or result
         rows.append({
             'congress': congress,
             'session': session,
@@ -255,6 +288,10 @@ def build_enriched_roll_results(
             'sponsor_party': sponsor_party or None,
             'latest_action_date': latest_action_date or None,
             'vote_summary': r.get('vote_summary'),
+            'vote_question': vote_question,
+            'result': result,
+            'result_display': result_display,
+            'vote_type': vote_type,
             'roll_display': r.get('roll_display') or (f'Roll no. {roll}' if roll is not None else ''),
             'row_key': r.get('search_index_sk') or f'roll-{i}',
         })
@@ -1244,10 +1281,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 if bill_id_associated:
                     bill_associated = fetch_bill_projections(bills_table, [bill_id_associated]).get(bill_id_associated, {})
                 vote_summary = compute_vote_summary(members) if members else {'total': {}, 'by_party': {}}
+                roll_item = {k: v for k, v in item.items() if k != 'members'}
+                roll_item['vote_summary'] = vote_summary  # for _format_roll_result_display
+                roll_item['result_display'] = _format_roll_result_display(roll_item) or roll_item.get('result')
                 result = {
                     'success': True,
                     'result': {
-                        'roll_item': {k: v for k, v in item.items() if k != 'members'},
+                        'roll_item': roll_item,
                         'bill_associated': bill_associated,
                         'vote_summary': vote_summary,
                         'members': members,
