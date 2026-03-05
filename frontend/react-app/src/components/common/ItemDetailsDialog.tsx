@@ -154,8 +154,10 @@ export type ItemType =
 
 /** Vote result per roll key for bill Votes tab (vote_summary + vote_question, or legacy raw vote_summary) */
 type BillVoteResultEntry = {
-  vote_summary?: { total?: { yea?: number; nay?: number; present?: number; not_voting?: number }; by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }> };
+  vote_summary?: { result?: string; total?: { yea?: number; nay?: number; present?: number; not_voting?: number }; by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }> };
   vote_question?: string;
+  /** Legacy: raw vote_summary at top level */
+  result?: string;
   total?: { yea?: number; nay?: number; present?: number; not_voting?: number };
   by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }>;
 };
