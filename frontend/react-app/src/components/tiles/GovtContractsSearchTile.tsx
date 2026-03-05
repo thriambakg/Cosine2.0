@@ -56,6 +56,8 @@ import { useEasyMode } from '@/contexts/EasyModeContext';
 import { useDemoDashboard } from '@/contexts/DemoDashboardContext';
 import { getTileBatchSize, getTileMaxPages, getTileMaxPaginationKeys } from './config/tileConfig';
 
+const MIN_DATE = '2000-01-01';
+
 // US States
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -148,7 +150,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     psc_code: [],
     cfda_number: [],
     date_year: undefined,
-    // Don't include legacy date_from/date_to - they're no longer used
+    date_from: undefined,
+    date_to: undefined,
   },
   filterSettings: initialFilterSettings,
   paginationState: initialPaginationState,
@@ -620,10 +623,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         ...currentSearchParams,
       };
 
-      // Remove legacy date fields (date_from, date_to) - use date_year instead
-      delete filters.date_from;
-      delete filters.date_to;
-
       // Remove empty arrays, empty strings, null, and undefined
       Object.keys(filters).forEach((key) => {
         const value = filters[key];
@@ -633,9 +632,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           delete filters[key];
         }
         // Also explicitly remove legacy date fields if they somehow got through
-        if (key === 'date_from' || key === 'date_to') {
-          delete filters[key];
-        }
       });
 
       const response = await govtContractsSearchAPI.search({
@@ -750,10 +746,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         ...currentSearchParams,
       };
 
-      // Remove legacy date fields (date_from, date_to) - use date_year instead
-      delete filters.date_from;
-      delete filters.date_to;
-
       // Remove empty arrays, empty strings, null, and undefined
       Object.keys(filters).forEach((key) => {
         const value = filters[key];
@@ -763,9 +755,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
           delete filters[key];
         }
         // Also explicitly remove legacy date fields if they somehow got through
-        if (key === 'date_from' || key === 'date_to') {
-          delete filters[key];
-        }
       });
 
       const response = await govtContractsSearchAPI.search({
@@ -899,11 +888,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
       if (currentSearchParams && pageCountToRestore >= 0) {
         const filters: any = { ...currentSearchParams };
         
-        // Remove legacy date fields (date_from, date_to) - use date_year instead
-        delete filters.date_from;
-        delete filters.date_to;
-        
-        Object.keys(filters).forEach((key) => {
+      Object.keys(filters).forEach((key) => {
           const value = filters[key];
           if (Array.isArray(value) && value.length === 0) {
             delete filters[key];
@@ -1091,8 +1076,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         (currentSearchParams.psc_code && currentSearchParams.psc_code.length > 0) ||
         (currentSearchParams.cfda_number && currentSearchParams.cfda_number.length > 0) ||
         currentSearchParams.date_year ||
-        currentSearchParams.date_from ||  // Legacy
-        currentSearchParams.date_to;  // Legacy
+        currentSearchParams.date_from ||
+        currentSearchParams.date_to
       
       if (hasSearchCriteria) {
         console.log('🔄 GovtContractsSearchTile: Preview mode - running fresh query (no pagination state)');
@@ -1120,8 +1105,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
         (currentSearchParams.psc_code && currentSearchParams.psc_code.length > 0) ||
         (currentSearchParams.cfda_number && currentSearchParams.cfda_number.length > 0) ||
         currentSearchParams.date_year ||
-        currentSearchParams.date_from ||  // Legacy
-        currentSearchParams.date_to;  // Legacy
+        currentSearchParams.date_from ||
+        currentSearchParams.date_to
       
       if (hasSearchCriteria) {
         console.log('🔄 GovtContractsSearchTile: Initial load - performing search with existing params');
@@ -2482,6 +2467,43 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 '& .MuiInputLabel-root': { color: '#94a3b8' },
               }}
             />
+            {/* Recently Updated Date Range */}
+            <Box display="flex" gap={2}>
+              <TextField
+                label="Date From"
+                type="date"
+                value={currentSearchParams.date_from || ''}
+                onChange={(e) => {
+                  let dateValue = e.target.value || undefined;
+                  if (dateValue && dateValue < MIN_DATE) dateValue = MIN_DATE;
+                  setCurrentSearchParams(prev => ({ ...prev, date_from: dateValue }));
+                }}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ min: MIN_DATE }}
+                size="small"
+                sx={{
+                  '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
+                  '& .MuiInputLabel-root': { color: '#94a3b8' },
+                }}
+              />
+              <TextField
+                label="Date To"
+                type="date"
+                value={currentSearchParams.date_to || ''}
+                onChange={(e) => {
+                  let dateValue = e.target.value || undefined;
+                  if (dateValue && dateValue < MIN_DATE) dateValue = MIN_DATE;
+                  setCurrentSearchParams(prev => ({ ...prev, date_to: dateValue }));
+                }}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ min: MIN_DATE }}
+                size="small"
+                sx={{
+                  '& .MuiOutlinedInput-root': { backgroundColor: '#334155', color: '#ffffff' },
+                  '& .MuiInputLabel-root': { color: '#94a3b8' },
+                }}
+              />
+            </Box>
 
             {/* Funding Agency - Hidden in easy mode */}
             {!isEasyMode && (
@@ -2630,6 +2652,8 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                 psc_code: [],
                 cfda_number: [],
                 date_year: undefined,
+                date_from: undefined,
+                date_to: undefined,
               });
             }}
             sx={{ color: '#94a3b8' }}

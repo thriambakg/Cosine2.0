@@ -85,6 +85,8 @@ const GlassCard = ({ children, sx = {}, ...props }: any) => {
 };
 
 // US States
+const MIN_DATE = '2000-01-01';
+
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
   'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
@@ -152,7 +154,8 @@ const GovtContractsSearchPage: React.FC = () => {
       psc_code: Array.isArray(saved?.psc_code) ? saved.psc_code : [],
       cfda_number: Array.isArray(saved?.cfda_number) ? saved.cfda_number : [],
       date_year: saved?.date_year || undefined,
-      // Don't restore legacy date_from/date_to - they're no longer used
+      date_from: saved?.date_from || undefined,
+      date_to: saved?.date_to || undefined,
     };
   });
   
@@ -725,10 +728,6 @@ const GovtContractsSearchPage: React.FC = () => {
         ...searchParams,
       };
 
-      // Remove legacy date fields (date_from, date_to) - use date_year instead
-      delete filters.date_from;
-      delete filters.date_to;
-
       // Keep agency names as-is (backend handles both names and codes)
       // Remove any code fields if names are present to avoid confusion
       if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
@@ -745,10 +744,6 @@ const GovtContractsSearchPage: React.FC = () => {
         if (Array.isArray(value) && value.length === 0) {
           delete filters[key];
         } else if (value === '' || value === null || value === undefined) {
-          delete filters[key];
-        }
-        // Also explicitly remove legacy date fields if they somehow got through
-        if (key === 'date_from' || key === 'date_to') {
           delete filters[key];
         }
       });
@@ -790,10 +785,6 @@ const GovtContractsSearchPage: React.FC = () => {
         ...searchParams,
       };
 
-      // Remove legacy date fields (date_from, date_to) - use date_year instead
-      delete filters.date_from;
-      delete filters.date_to;
-
       // Keep agency names as-is (backend handles both names and codes)
       // Remove any code fields if names are present to avoid confusion
       if (filters.awarding_agency_name && filters.awarding_agency_name.length > 0) {
@@ -810,10 +801,6 @@ const GovtContractsSearchPage: React.FC = () => {
         if (Array.isArray(value) && value.length === 0) {
           delete filters[key];
         } else if (value === '' || value === null || value === undefined) {
-          delete filters[key];
-        }
-        // Also explicitly remove legacy date fields if they somehow got through
-        if (key === 'date_from' || key === 'date_to') {
           delete filters[key];
         }
       });
@@ -1447,6 +1434,58 @@ const GovtContractsSearchPage: React.FC = () => {
                     }}
                   />
                   </Box>
+                  {/* Recently Updated Date Range - contracts last indexed within this range */}
+                  <Box data-tutorial="updated-date-range">
+                  <Typography variant="body2" sx={{ color: '#94a3b8', mb: 1 }}>Recently Updated (Date Range)</Typography>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                      label="Date From"
+                      type="date"
+                      value={searchParams.date_from || ''}
+                      onChange={(e) => {
+                        let dateValue = e.target.value || undefined;
+                        if (dateValue && dateValue < MIN_DATE) dateValue = MIN_DATE;
+                        setSearchParams(prev => ({ ...prev, date_from: dateValue }));
+                      }}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{ min: MIN_DATE }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          color: '#e2e8f0',
+                          '& fieldset': { borderColor: '#475569' },
+                          '&:hover fieldset': { borderColor: '#64748b' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      }}
+                    />
+                    <TextField
+                      label="Date To"
+                      type="date"
+                      value={searchParams.date_to || ''}
+                      onChange={(e) => {
+                        let dateValue = e.target.value || undefined;
+                        if (dateValue && dateValue < MIN_DATE) dateValue = MIN_DATE;
+                        setSearchParams(prev => ({ ...prev, date_to: dateValue }));
+                      }}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{ min: MIN_DATE }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                          color: '#e2e8f0',
+                          '& fieldset': { borderColor: '#475569' },
+                          '&:hover fieldset': { borderColor: '#64748b' },
+                          '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+                        },
+                        '& .MuiInputLabel-root': { color: '#94a3b8' },
+                      }}
+                    />
+                  </Box>
+                  </Box>
                 </Box>
 
                   {/* Advanced Search Section - Hidden in easy mode */}
@@ -1657,6 +1696,8 @@ const GovtContractsSearchPage: React.FC = () => {
                             psc_code: [],
                             cfda_number: [],
                             date_year: undefined,
+                            date_from: undefined,
+                            date_to: undefined,
                           });
                         }}
                         fullWidth

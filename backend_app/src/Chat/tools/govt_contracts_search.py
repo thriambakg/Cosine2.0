@@ -116,7 +116,10 @@ def get_all_items_from_gsi(
     range_key_name: Optional[str] = None,
     range_key_condition: Optional[str] = None,
     range_key_value: Any = None,
-    max_items: int = 50000
+    max_items: int = 50000,
+    filter_expression: Optional[Any] = None,
+    expression_attribute_values: Optional[Dict[str, Any]] = None,
+    scan_index_forward: bool = True
 ) -> List[Dict[str, Any]]:
     """
     Get ALL items from a GSI using Boto3 paginator (automatically handles pagination)
@@ -130,6 +133,8 @@ def get_all_items_from_gsi(
         range_key_condition: Optional range condition
         range_key_value: Range key value
         max_items: Maximum items to fetch (safety limit)
+        filter_expression: Optional Attr() filter (e.g. for last_updated date range)
+        expression_attribute_values: Optional values for FilterExpression placeholders
     
     Returns:
         List of all items from the GSI
@@ -155,6 +160,11 @@ def get_all_items_from_gsi(
             'KeyConditionExpression': key_condition,
             'Limit': 1000  # Fetch large batches per page for efficiency
         }
+        if filter_expression is not None:
+            query_params['FilterExpression'] = filter_expression
+        if expression_attribute_values is not None:
+            query_params['ExpressionAttributeValues'] = expression_attribute_values
+        query_params['ScanIndexForward'] = scan_index_forward
         
         # Use table resource query with manual pagination (simpler than converting to client format)
         all_items = []
@@ -221,6 +231,19 @@ def fetch_full_awards_batch(award_ids: List[str]) -> List[Dict[str, Any]]:
     return all_items
 
 
+def _build_last_updated_filter(updated_date_from: Optional[str], updated_date_to: Optional[str]):
+    """
+    Build FilterExpression for last_updated date range.
+    last_updated is stored as ISO format (e.g. 2024-01-15T14:30:00.123456+00:00).
+    Returns (filter_expression, None) - boto3 resource handles literal values in Attr.
+    """
+    if not updated_date_from and not updated_date_to:
+        return None, None
+    start_val = (updated_date_from or '0001-01-01')[:10] + 'T00:00:00'
+    end_val = (updated_date_to or '9999-12-31')[:10] + 'T23:59:59.999999'
+    return Attr('last_updated').between(start_val, end_val), None
+
+
 def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Identify all GSI queries needed for union approach
@@ -228,6 +251,17 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns list of query configs for each filter that has a GSI
     """
     queries = []
+    
+    # Extract "recently updated" date range (contracts updated within date range)
+    updated_date_from = filters.get('updated_date_from') or filters.get('date_from')
+    updated_date_to = filters.get('updated_date_to') or filters.get('date_to')
+    # Normalize to strings
+    if updated_date_from is not None:
+        updated_date_from = str(updated_date_from).strip()[:10]
+    if updated_date_to is not None:
+        updated_date_to = str(updated_date_to).strip()[:10]
+    has_updated_date_range = bool(updated_date_from or updated_date_to)
+    last_updated_filter, last_updated_attr_vals = _build_last_updated_filter(updated_date_from, updated_date_to)
     
     # Convert date_year to fiscal_year FIRST, before processing other filters
     # This ensures that GSIs with fiscal_year can use it
@@ -451,8 +485,38 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_key_value': None,
                 'range_key_condition': None,
                 'filter_type': 'fiscal_year',
-                'is_intersection': False  # Fiscal_year is a field query, gets intersected with other fields
+                'is_intersection': False,
+                'filter_expression': last_updated_filter,
+                'expression_attribute_values': last_updated_attr_vals
             })
+    
+    # LastUpdatedIndex - for "recently updated" date range queries
+    # Use when user wants contracts updated within a date range (e.g. date_from/date_to, updated_date_from/updated_date_to)
+    if has_updated_date_range and last_updated_filter is not None:
+        start_val = (updated_date_from or '0001-01-01')[:10] + 'T00:00:00'
+        end_val = (updated_date_to or '9999-12-31')[:10] + 'T23:59:59.999999'
+        # Query contracts (is_assistance=0) and assistance (is_assistance=1)
+        for is_assistance_val in [0, 1]:
+            queries.append({
+                'index_name': 'LastUpdatedIndex',
+                'hash_key_name': 'is_assistance',
+                'hash_key_value': is_assistance_val,
+                'range_key_name': 'last_updated',
+                'range_key_value': (start_val, end_val),
+                'range_key_condition': 'between',
+                'filter_type': 'updated_date_range',
+                'is_intersection': len(queries) > 0,
+                'filter_expression': None,
+                'expression_attribute_values': None,
+                'scan_index_forward': False  # Newest first, paginate backwards in time
+            })
+    
+    # Attach last_updated FilterExpression to all non-LastUpdatedIndex queries when date range is present
+    if has_updated_date_range and last_updated_filter is not None:
+        for q in queries:
+            if q.get('index_name') != 'LastUpdatedIndex' and q.get('filter_expression') is None:
+                q['filter_expression'] = last_updated_filter
+                q['expression_attribute_values'] = last_updated_attr_vals
     
     return queries
 
@@ -486,6 +550,12 @@ def search_awards_union(
     
     logger.info(f"Union search with filters: {json.dumps(filters, default=str)}, limit: {limit}, offset: {offset}")
     
+    # Check if we have date range filter - affects sort order (most recent first)
+    has_updated_date_range = bool(
+        filters.get('updated_date_from') or filters.get('updated_date_to') or
+        filters.get('date_from') or filters.get('date_to')
+    )
+    
     # Identify all GSI queries needed
     union_queries = identify_union_queries(filters)
     
@@ -518,10 +588,13 @@ def search_awards_union(
     logger.info(f"Grouped queries by field: {dict((k, len(v)) for k, v in queries_by_field.items())}")
     
     # Step 1: For each field, UNION all queries within that field
+    # When updated_date_range: collect (award_id, last_updated) for chronological sort (newest first)
     field_result_sets: Dict[str, Set[str]] = {}
+    last_updated_ordered_ids: List[str] = []
     
     for filter_type, query_configs in queries_by_field.items():
         field_award_ids: Set[str] = set()
+        date_range_pairs: List[tuple] = []
         
         logger.info(f"UNION queries for field '{filter_type}': {len(query_configs)} queries")
         
@@ -536,14 +609,33 @@ def search_awards_union(
                 range_key_name=query_config.get('range_key_name'),
                 range_key_condition=query_config.get('range_key_condition'),
                 range_key_value=query_config.get('range_key_value'),
-                max_items=50000
+                max_items=50000,
+                filter_expression=query_config.get('filter_expression'),
+                expression_attribute_values=query_config.get('expression_attribute_values'),
+                scan_index_forward=query_config.get('scan_index_forward', True)
             )
             
             # Extract award_ids and UNION them with other queries in this field
             query_award_ids = {item.get('award_id') for item in gsi_items if item.get('award_id')}
-            field_award_ids.update(query_award_ids)  # UNION: add all IDs from this query
+            field_award_ids.update(query_award_ids)
+            # For updated_date_range: collect (award_id, last_updated) - GSI returns newest first with scan_index_forward=False
+            if filter_type == 'updated_date_range':
+                for item in gsi_items:
+                    aid = item.get('award_id')
+                    lu = item.get('last_updated') or ''
+                    if aid:
+                        date_range_pairs.append((aid, lu))
             
             logger.info(f"    Query returned {len(query_award_ids)} items, field total: {len(field_award_ids)}")
+        
+        # Merge date_range pairs from both is_assistance queries, sort by last_updated desc (newest first)
+        if filter_type == 'updated_date_range' and date_range_pairs:
+            date_range_pairs.sort(key=lambda x: x[1], reverse=True)
+            seen = set()
+            for aid, _ in date_range_pairs:
+                if aid not in seen:
+                    seen.add(aid)
+                    last_updated_ordered_ids.append(aid)
         
         field_result_sets[filter_type] = field_award_ids
         logger.info(f"Field '{filter_type}' UNION complete: {len(field_award_ids)} unique award_ids")
@@ -622,7 +714,10 @@ def search_awards_union(
                         range_key_name=query_config.get('range_key_name'),
                         range_key_condition=query_config.get('range_key_condition'),
                         range_key_value=query_config.get('range_key_value'),
-                        max_items=50000  # Fetch all items from this year (within obligation range)
+                        max_items=50000,
+                        filter_expression=query_config.get('filter_expression'),
+                        expression_attribute_values=query_config.get('expression_attribute_values'),
+                        scan_index_forward=query_config.get('scan_index_forward', True)
                     )
                     
                     query_ids = {item.get('award_id') for item in gsi_items if item.get('award_id')}
@@ -653,7 +748,10 @@ def search_awards_union(
                         range_key_name=query_config.get('range_key_name'),
                         range_key_condition=query_config.get('range_key_condition'),
                         range_key_value=query_config.get('range_key_value'),
-                        max_items=obligation_max_items  # Use optimized limit
+                        max_items=obligation_max_items,
+                        filter_expression=query_config.get('filter_expression'),
+                        expression_attribute_values=query_config.get('expression_attribute_values'),
+                        scan_index_forward=query_config.get('scan_index_forward', True)
                     )
                     
                     query_ids = {item.get('award_id') for item in gsi_items if item.get('award_id')}
@@ -689,14 +787,18 @@ def search_awards_union(
     
     total_unique_award_ids = len(all_award_ids)
     
+    # Use chronological order (newest first) when we have date range; else by award_id for consistency
+    if last_updated_ordered_ids:
+        award_ids_ordered = [aid for aid in last_updated_ordered_ids if aid in all_award_ids]
+    else:
+        award_ids_ordered = sorted(list(all_award_ids))
+    
     # Step 3: Fetch full award items for the items we need (considering offset)
-    # Calculate how many items we need to fetch (offset + limit + buffer for enrichment)
-    items_to_fetch = min(offset + limit * 5, total_unique_award_ids)  # Fetch enough for offset + limit + buffer
+    items_to_fetch = min(offset + limit * 5, total_unique_award_ids)
     
     logger.info(f"Fetching full items for {items_to_fetch} award_ids (offset: {offset}, limit: {limit}, total: {total_unique_award_ids})")
     
-    # Convert set to sorted list for consistent ordering
-    award_ids_list = sorted(list(all_award_ids))[:items_to_fetch]
+    award_ids_list = award_ids_ordered[:items_to_fetch]
     full_items = fetch_full_awards_batch(award_ids_list)
     
     # Step 4: Enrich items with S3 data if needed
@@ -709,11 +811,14 @@ def search_awards_union(
             logger.error(f"Error enriching award {item.get('award_id')}: {str(e)}")
             enriched_items.append(item)
     
-    # Step 5: Sort by fiscal_year descending (most recent first), then by total_obligation descending
-    enriched_items.sort(key=lambda x: (
-        x.get('fiscal_year', 0) or 0,
-        x.get('total_obligation', 0) or 0
-    ), reverse=True)
+    # Step 5: Sort - when date range: newest first (last_updated desc); else fiscal_year then obligation
+    if has_updated_date_range:
+        enriched_items.sort(key=lambda x: (x.get('last_updated') or '', x.get('award_id', '')), reverse=True)
+    else:
+        enriched_items.sort(key=lambda x: (
+            x.get('fiscal_year', 0) or 0,
+            x.get('total_obligation', 0) or 0
+        ), reverse=True)
     
     # Step 6: Apply offset and limit for pagination
     paginated_items = enriched_items[offset:offset + limit]
@@ -892,8 +997,10 @@ def search_govt_contracts(
             - psc_code: List or string of PSC codes
             - cfda_number: List or string of CFDA numbers
             - fiscal_year: List or integer of fiscal years
-            - date_from: Start date in YYYY-MM-DD format
-            - date_to: End date in YYYY-MM-DD format
+            - date_from: Start date (YYYY-MM-DD) for "recently updated" filter - contracts last indexed/updated in this range
+            - date_to: End date (YYYY-MM-DD) for "recently updated" filter
+            - updated_date_from: Same as date_from - filters by when contract was last updated in our index
+            - updated_date_to: Same as date_to - filters by when contract was last updated in our index
             - min_obligation: Minimum obligation amount (decimal)
             - max_obligation: Maximum obligation amount (decimal)
         limit: Maximum number of results to return (default: 5 for compute efficiency, max: 1000)

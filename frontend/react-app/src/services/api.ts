@@ -1251,8 +1251,8 @@ export interface GovtContractsSearchFilters {
   min_obligation?: number;
   max_obligation?: number;
   date_year?: number;  // Fiscal year for date filtering (e.g., 2025)
-  date_from?: string;  // Legacy - deprecated, use date_year instead
-  date_to?: string;  // Legacy - deprecated, use date_year instead
+  date_from?: string;  // Recently updated: filter contracts last indexed within date range (YYYY-MM-DD)
+  date_to?: string;  // Recently updated: filter contracts last indexed within date range (YYYY-MM-DD)
   fiscal_year?: number[];
   [key: string]: any;  // Allow additional properties for dynamic filters
 }
