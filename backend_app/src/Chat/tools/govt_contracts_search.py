@@ -491,6 +491,7 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
             })
     
     # LastModifiedDateIndex - for "recently updated" date range (uses last_modified_date from USAspending bulk file)
+    # Both is_assistance=0 and is_assistance=1 are field queries (UNION), NOT intersection - we want contracts OR assistance
     if has_updated_date_range and last_modified_date_filter is not None:
         start_val = (updated_date_from or '0001-01-01')[:10]
         end_val = (updated_date_to or '9999-12-31')[:10]
@@ -504,7 +505,7 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_key_value': (start_val, end_val),
                 'range_key_condition': 'between',
                 'filter_type': 'updated_date_range',
-                'is_intersection': len(queries) > 0,
+                'is_intersection': False,  # Always field query - UNION contracts + assistance, never intersect
                 'filter_expression': None,
                 'expression_attribute_values': None,
                 'scan_index_forward': False  # Newest first, paginate backwards in time
