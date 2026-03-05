@@ -133,7 +133,7 @@ def get_all_items_from_gsi(
         range_key_condition: Optional range condition
         range_key_value: Range key value
         max_items: Maximum items to fetch (safety limit)
-        filter_expression: Optional Attr() filter (e.g. for last_updated date range)
+        filter_expression: Optional Attr() filter (e.g. for last_modified_date date range)
         expression_attribute_values: Optional values for FilterExpression placeholders
     
     Returns:
@@ -231,17 +231,17 @@ def fetch_full_awards_batch(award_ids: List[str]) -> List[Dict[str, Any]]:
     return all_items
 
 
-def _build_last_updated_filter(updated_date_from: Optional[str], updated_date_to: Optional[str]):
+def _build_last_modified_date_filter(updated_date_from: Optional[str], updated_date_to: Optional[str]):
     """
-    Build FilterExpression for last_updated date range.
-    last_updated is stored as ISO format (e.g. 2024-01-15T14:30:00.123456+00:00).
+    Build FilterExpression for last_modified_date date range.
+    last_modified_date comes from USAspending bulk file (YYYY-MM-DD or similar).
     Returns (filter_expression, None) - boto3 resource handles literal values in Attr.
     """
     if not updated_date_from and not updated_date_to:
         return None, None
-    start_val = (updated_date_from or '0001-01-01')[:10] + 'T00:00:00'
-    end_val = (updated_date_to or '9999-12-31')[:10] + 'T23:59:59.999999'
-    return Attr('last_updated').between(start_val, end_val), None
+    start_val = (updated_date_from or '0001-01-01')[:10]
+    end_val = (updated_date_to or '9999-12-31')[:10]
+    return Attr('last_modified_date').between(start_val, end_val), None
 
 
 def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -261,7 +261,7 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     if updated_date_to is not None:
         updated_date_to = str(updated_date_to).strip()[:10]
     has_updated_date_range = bool(updated_date_from or updated_date_to)
-    last_updated_filter, last_updated_attr_vals = _build_last_updated_filter(updated_date_from, updated_date_to)
+    last_modified_date_filter, last_modified_date_attr_vals = _build_last_modified_date_filter(updated_date_from, updated_date_to)
     
     # Convert date_year to fiscal_year FIRST, before processing other filters
     # This ensures that GSIs with fiscal_year can use it
@@ -486,22 +486,21 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'range_key_condition': None,
                 'filter_type': 'fiscal_year',
                 'is_intersection': False,
-                'filter_expression': last_updated_filter,
-                'expression_attribute_values': last_updated_attr_vals
+                'filter_expression': last_modified_date_filter,
+                'expression_attribute_values': last_modified_date_attr_vals
             })
     
-    # LastUpdatedIndex - for "recently updated" date range queries
-    # Use when user wants contracts updated within a date range (e.g. date_from/date_to, updated_date_from/updated_date_to)
-    if has_updated_date_range and last_updated_filter is not None:
-        start_val = (updated_date_from or '0001-01-01')[:10] + 'T00:00:00'
-        end_val = (updated_date_to or '9999-12-31')[:10] + 'T23:59:59.999999'
+    # LastModifiedDateIndex - for "recently updated" date range (uses last_modified_date from USAspending bulk file)
+    if has_updated_date_range and last_modified_date_filter is not None:
+        start_val = (updated_date_from or '0001-01-01')[:10]
+        end_val = (updated_date_to or '9999-12-31')[:10]
         # Query contracts (is_assistance=0) and assistance (is_assistance=1)
         for is_assistance_val in [0, 1]:
             queries.append({
-                'index_name': 'LastUpdatedIndex',
+                'index_name': 'LastModifiedDateIndex',
                 'hash_key_name': 'is_assistance',
                 'hash_key_value': is_assistance_val,
-                'range_key_name': 'last_updated',
+                'range_key_name': 'last_modified_date',
                 'range_key_value': (start_val, end_val),
                 'range_key_condition': 'between',
                 'filter_type': 'updated_date_range',
@@ -511,12 +510,12 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'scan_index_forward': False  # Newest first, paginate backwards in time
             })
     
-    # Attach last_updated FilterExpression to all non-LastUpdatedIndex queries when date range is present
-    if has_updated_date_range and last_updated_filter is not None:
+    # Attach last_modified_date FilterExpression to all non-LastModifiedDateIndex queries when date range is present
+    if has_updated_date_range and last_modified_date_filter is not None:
         for q in queries:
-            if q.get('index_name') != 'LastUpdatedIndex' and q.get('filter_expression') is None:
-                q['filter_expression'] = last_updated_filter
-                q['expression_attribute_values'] = last_updated_attr_vals
+            if q.get('index_name') != 'LastModifiedDateIndex' and q.get('filter_expression') is None:
+                q['filter_expression'] = last_modified_date_filter
+                q['expression_attribute_values'] = last_modified_date_attr_vals
     
     return queries
 
@@ -588,7 +587,7 @@ def search_awards_union(
     logger.info(f"Grouped queries by field: {dict((k, len(v)) for k, v in queries_by_field.items())}")
     
     # Step 1: For each field, UNION all queries within that field
-    # When updated_date_range: collect (award_id, last_updated) for chronological sort (newest first)
+    # When updated_date_range: collect (award_id, last_modified_date) for chronological sort (newest first)
     field_result_sets: Dict[str, Set[str]] = {}
     last_updated_ordered_ids: List[str] = []
     
@@ -618,17 +617,17 @@ def search_awards_union(
             # Extract award_ids and UNION them with other queries in this field
             query_award_ids = {item.get('award_id') for item in gsi_items if item.get('award_id')}
             field_award_ids.update(query_award_ids)
-            # For updated_date_range: collect (award_id, last_updated) - GSI returns newest first with scan_index_forward=False
+            # For updated_date_range: collect (award_id, last_modified_date) - GSI returns newest first with scan_index_forward=False
             if filter_type == 'updated_date_range':
                 for item in gsi_items:
                     aid = item.get('award_id')
-                    lu = item.get('last_updated') or ''
+                    lmd = item.get('last_modified_date') or ''
                     if aid:
-                        date_range_pairs.append((aid, lu))
+                        date_range_pairs.append((aid, lmd))
             
             logger.info(f"    Query returned {len(query_award_ids)} items, field total: {len(field_award_ids)}")
         
-        # Merge date_range pairs from both is_assistance queries, sort by last_updated desc (newest first)
+        # Merge date_range pairs from both is_assistance queries, sort by last_modified_date desc (newest first)
         if filter_type == 'updated_date_range' and date_range_pairs:
             date_range_pairs.sort(key=lambda x: x[1], reverse=True)
             seen = set()
@@ -811,9 +810,9 @@ def search_awards_union(
             logger.error(f"Error enriching award {item.get('award_id')}: {str(e)}")
             enriched_items.append(item)
     
-    # Step 5: Sort - when date range: newest first (last_updated desc); else fiscal_year then obligation
+    # Step 5: Sort - when date range: newest first (last_modified_date desc); else fiscal_year then obligation
     if has_updated_date_range:
-        enriched_items.sort(key=lambda x: (x.get('last_updated') or '', x.get('award_id', '')), reverse=True)
+        enriched_items.sort(key=lambda x: (x.get('last_modified_date') or '', x.get('award_id', '')), reverse=True)
     else:
         enriched_items.sort(key=lambda x: (
             x.get('fiscal_year', 0) or 0,
