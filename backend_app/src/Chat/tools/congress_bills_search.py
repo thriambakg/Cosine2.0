@@ -115,7 +115,7 @@ def invoke_roll_call_details_lambda(roll_call_details: Dict[str, Any]) -> Dict[s
     """
     Invoke the Congress Bills Search Lambda with roll_call_details to fetch full vote data for one roll call.
     When search_index_sk (DynamoDB SK) is provided, the Lambda does a direct get_item (PK=SEARCH#ROLL, SK=search_index_sk).
-    Otherwise uses congress, session, roll to query. Returns result with roll_item, bill_associated, vote_summary, members.
+    Otherwise uses congress, session, roll to query. Returns result with roll_item (includes vote_question, result, result_display, vote_type, latest_action_date), bill_associated, vote_summary, members.
     """
     try:
         body = {'roll_call_details': roll_call_details}
@@ -302,7 +302,7 @@ def search_congress_bills(
     Search for congressional bills OR roll call votes, OR fetch full details for one roll call by invoking the Congress Bills Search Lambda.
     
     **Three modes:**
-    1. **Roll call details** (single roll): Pass roll_call_details (JSON) to get full vote data for ONE roll call (members, vote_summary, bill_associated). When the user has a roll call in context, use this with the context item's data. **Always include search_index_sk when the context item has it** (e.g. "119#2026-01-15#1#40") so the backend does a direct lookup (PK=SEARCH#ROLL, SK=search_index_sk). Otherwise pass congress, session, roll. Example: roll_call_details = '{"search_index_sk": "119#2026-01-15#1#40"}' or '{"congress": 119, "session": 1, "roll": 40}'.
+    1. **Roll call details** (single roll): Pass roll_call_details (JSON) to get full vote data for ONE roll call (members, vote_summary, bill_associated, roll_item with vote_question, result, result_display, vote_type, latest_action_date). When the user has a roll call in context, use this with the context item's data. **Always include search_index_sk when the context item has it** (e.g. "119#2026-01-15#1#40") so the backend does a direct lookup (PK=SEARCH#ROLL, SK=search_index_sk). Otherwise pass congress, session, roll. Example: roll_call_details = '{"search_index_sk": "119#2026-01-15#1#40"}' or '{"congress": 119, "session": 1, "roll": 40}'.
     2. **Bill search** (default): Pass filters (and optionally limit, last_evaluated_key). Use for bills by sponsor, policy area, congress, etc.
     3. **Roll call search** (list): Pass roll_call_search (JSON) to search roll call votes (SEARCH#VOTE or SEARCH#ROLL). Use question_date to default congress when needed.
     
@@ -337,11 +337,11 @@ def search_congress_bills(
     
     Returns:
         JSON string. Schema varies by mode:
-        * **Roll call details**: { success, result: { roll_item, bill_associated, vote_summary, members } }
+        * **Roll call details**: { success, result: { roll_item (includes vote_question, result, result_display, vote_type, latest_action_date, bill_id_associated), bill_associated, vote_summary, members } }
         * **Bill search**: { success, results[], count, has_more, last_evaluated_key: { offset, total_items, method }, method }.
           Large datasets return { status, s3_key, count, has_more, last_evaluated_key, message } - use read_s3_file_tool(s3_key) to fetch.
         * **Roll call search** (SEARCH#VOTE or SEARCH#ROLL): { success, results[], count, has_more, last_evaluated_key, enriched_results[] }.
-          Use enriched_results for display: each row has bill_title, roll_date, vote_type, congress, session, roll, bill_id_associated, display_name (SEARCH#VOTE), roll_display.
+          Use enriched_results for display: each row has bill_title, roll_date, vote_type, vote_question, result_display, congress, session, roll, bill_id_associated, display_name (SEARCH#VOTE), roll_display.
     """
     try:
         # --- Roll call details path (single roll: use PK/SK when available from context) ---
