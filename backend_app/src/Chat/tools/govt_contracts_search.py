@@ -510,13 +510,9 @@ def identify_union_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
                 'scan_index_forward': False  # Newest first, paginate backwards in time
             })
     
-    # Attach last_modified_date FilterExpression to all non-LastModifiedDateIndex queries when date range is present
-    if has_updated_date_range and last_modified_date_filter is not None:
-        for q in queries:
-            if q.get('index_name') != 'LastModifiedDateIndex' and q.get('filter_expression') is None:
-                q['filter_expression'] = last_modified_date_filter
-                q['expression_attribute_values'] = last_modified_date_attr_vals
-    
+    # Do NOT attach last_modified_date FilterExpression to other GSIs - they don't project that attribute.
+    # Date filtering is done via LastModifiedDateIndex; we intersect those results with other field results.
+
     return queries
 
 
