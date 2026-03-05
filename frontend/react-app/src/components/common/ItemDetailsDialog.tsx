@@ -147,10 +147,18 @@ export type ItemType =
   | 'news_article' 
   | 'politician_trade' 
   | 'congress_bill' 
-  | 'roll_call'
+  | 'roll_call' 
   | 'lda_disclosure' 
   | 'stock_result' 
   | 'tile';
+
+/** Vote result per roll key for bill Votes tab (vote_summary + vote_question, or legacy raw vote_summary) */
+type BillVoteResultEntry = {
+  vote_summary?: { total?: { yea?: number; nay?: number; present?: number; not_voting?: number }; by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }> };
+  vote_question?: string;
+  total?: { yea?: number; nay?: number; present?: number; not_voting?: number };
+  by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }>;
+};
 
 interface ItemDetailsDialogProps {
   open: boolean;
@@ -342,8 +350,8 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
   const [rollCallVoteFilterParty, setRollCallVoteFilterParty] = useState<string>('');
   const [rollCallVoteFilterState, setRollCallVoteFilterState] = useState<string>('');
   const [rollCallVoteFilterVote, setRollCallVoteFilterVote] = useState<string>('');
-  /** Vote summary by roll key (congress#session#roll) for bill Votes tab when we fetch roll call details */
-  const [billVoteResultsByKey, setBillVoteResultsByKey] = useState<Record<string, { total?: { yea?: number; nay?: number; present?: number; not_voting?: number }; by_party?: Record<string, { yea?: number; nay?: number; present?: number; not_voting?: number }> }>>({});
+  /** Vote summary + vote_question by roll key (congress#session#roll) for bill Votes tab when we fetch roll call details */
+  const [billVoteResultsByKey, setBillVoteResultsByKey] = useState<Record<string, BillVoteResultEntry>>({});
   
   // State to track item data - updated when enrichment completes
   const [itemData, setItemData] = useState<any>(() => {
@@ -1404,7 +1412,6 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         );
       }
       const data = rollCallDetails;
-      const bill = data.bill_associated;
       const voteSummary = data.vote_summary;
       const total = voteSummary?.total ?? {};
       const byParty = voteSummary?.by_party ?? {};
