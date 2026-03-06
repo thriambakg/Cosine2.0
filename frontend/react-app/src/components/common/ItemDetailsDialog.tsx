@@ -4303,23 +4303,13 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                 Dates and Metadata
               </Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                {itemData?.action_date && (
+                {(itemData?.action_date || itemData?.last_modified_date) && (
                   <Box>
                     <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
-                      Action Date
+                      Latest Action
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                      {formatDate(itemData.action_date)}
-                    </Typography>
-                  </Box>
-                )}
-                {itemData?.last_modified_date && (
-                  <Box>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block', mb: 0.5 }}>
-                      Last Modified
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: '#e2e8f0' }}>
-                      {formatDate(itemData.last_modified_date)}
+                      {formatDate(itemData.action_date || itemData.last_modified_date)}
                     </Typography>
                   </Box>
                 )}

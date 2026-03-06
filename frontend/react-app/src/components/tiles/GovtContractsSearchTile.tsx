@@ -2073,7 +2073,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>PSC</TableCell>
                   )}
                   {visibleColumns.includes('last_updated') && (
-                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Last Modified</TableCell>
+                    <TableCell sx={{ color: '#9ca3af', fontWeight: 600 }}>Latest Action</TableCell>
                   )}
                 </TableRow>
               </TableHead>
@@ -2178,7 +2178,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
                     )}
                     {visibleColumns.includes('last_updated') && (
                       <TableCell sx={{ color: '#ffffff', fontSize: '0.875rem' }}>
-                        {formatLastUpdated(award.last_modified_date)}
+                        {formatDate(award.action_date || award.last_modified_date)}
                       </TableCell>
                     )}
                   </TableRow>
@@ -3719,7 +3719,7 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
             period_end_date: 'Period End Date',
             naics_code: 'NAICS Code',
             psc_code: 'PSC Code',
-            last_updated: 'Last Modified',
+            last_updated: 'Latest Action',
             actions: 'Actions',
           };
           const isVisible = visibleColumns.includes(column);

@@ -1916,7 +1916,7 @@ const GovtContractsSearchPage: React.FC = () => {
                         period_end_date: 'Period End Date',
                         naics_code: 'NAICS Code',
                         psc_code: 'PSC Code',
-                        last_updated: 'Last Modified',
+                        last_updated: 'Latest Action',
                         // Note: 'actions' removed - always visible, not selectable
                       };
                       return (
@@ -2078,7 +2078,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                   color: '#9ca3af', 
                                   fontWeight: 600, 
                                   fontSize: '0.875rem',
-                                }}>Last Modified</TableCell>
+                                }}>Latest Action</TableCell>
                               )}
                             </TableRow>
                           </TableHead>
@@ -2212,7 +2212,7 @@ const GovtContractsSearchPage: React.FC = () => {
                                     fontSize: '0.875rem',
                                     padding: '12px',
                                   }}>
-                                    {formatLastUpdated(award.last_modified_date)}
+                                    {formatDate(award.action_date || award.last_modified_date)}
                                   </TableCell>
                                 )}
                                 {/* Actions column removed - use double-click to open details */}
