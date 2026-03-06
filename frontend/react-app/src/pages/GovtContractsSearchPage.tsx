@@ -986,23 +986,6 @@ const GovtContractsSearchPage: React.FC = () => {
     }
   };
 
-  // Format last updated date
-  const formatLastUpdated = (dateString?: string) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateString;
-    }
-  };
-
   // Context menu handlers (for future use)
   // const handleContextMenuClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
   //   event.preventDefault();

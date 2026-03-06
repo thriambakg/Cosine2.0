@@ -1649,22 +1649,6 @@ const GovtContractsSearchTile: React.FC<GovtContractsSearchTileProps> = ({
     }
   };
 
-  const formatLastUpdated = (dateString?: string) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateString;
-    }
-  };
-
   // Calculate pagination values
   const totalPages = Math.ceil(currentResults.length / resultsPerPage);
   const startIndex = (currentPage - 1) * resultsPerPage;
