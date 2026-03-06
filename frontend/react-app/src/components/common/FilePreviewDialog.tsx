@@ -1747,8 +1747,12 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
             const nonFederalFunding = parseFloat(data.total_non_federal_funding_amount as string) || 0;
             // Total Funding = Obligated + Non-Federal (per USAspending)
             const totalFunding = obligatedAmount + nonFederalFunding;
-            
-            if (obligatedAmount > 0) {
+            const chartSuitable = obligatedAmount > 0 && totalFunding > 0 && outlayedAmount <= obligatedAmount;
+
+            const hasAmountData = obligatedAmount !== 0 || outlayedAmount !== 0 || nonFederalFunding !== 0;
+            if (!hasAmountData) return null;
+
+            if (chartSuitable) {
               return (
                 <Box sx={{ mb: 4 }}>
                   <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
@@ -1883,7 +1887,60 @@ const FilePreviewDialog: React.FC<FilePreviewDialogProps> = ({
                 </Box>
               );
             }
-            return null;
+            return (
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600, mb: 2 }}>
+                  Funding Overview
+                </Typography>
+                <Box sx={{ py: 3, px: 2, textAlign: 'center' }}>
+                  <Typography variant="h6" sx={{ color: '#94a3b8', fontWeight: 600, mb: 1 }}>Chart Not Available</Typography>
+                  <Typography variant="body2" sx={{ color: '#64748b' }}>Data in this instance is not suitable for charting</Typography>
+                </Box>
+                {/* Amount Details - values still shown */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#10b981' }} />
+                      <Typography variant="body2" sx={{ color: '#94a3b8' }}>Amount Paid</Typography>
+                    </Box>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      {formatCurrency(outlayedAmount)}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#4773aa' }} />
+                      <Typography variant="body2" sx={{ color: '#94a3b8' }}>Obligated Amount</Typography>
+                    </Box>
+                    <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                      {formatCurrency(obligatedAmount)}
+                    </Typography>
+                  </Box>
+                  {nonFederalFunding > 0 && (
+                    <>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#64748b' }} />
+                          <Typography variant="body2" sx={{ color: '#94a3b8' }}>Non-Federal Funding</Typography>
+                        </Box>
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                          {formatCurrency(nonFederalFunding)}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, backgroundColor: 'rgba(15, 23, 42, 0.5)', borderRadius: '4px' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ width: '16px', height: '16px', borderRadius: '2px', backgroundColor: '#64748b' }} />
+                          <Typography variant="body2" sx={{ color: '#94a3b8' }}>Total Funding</Typography>
+                        </Box>
+                        <Typography variant="body2" sx={{ color: '#e2e8f0', fontWeight: 600 }}>
+                          {formatCurrency(totalFunding)}
+                        </Typography>
+                      </Box>
+                    </>
+                  )}
+                </Box>
+              </Box>
+            );
           })()}
 
           {/* Award Information */}

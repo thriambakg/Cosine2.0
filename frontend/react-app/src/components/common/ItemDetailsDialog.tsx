@@ -3242,14 +3242,23 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             </Box>
             <Box sx={{ borderBottom: '1px solid #374151', mb: 3 }} />
             
-            {/* Chart: simple bar + label flags (total off to the right). */}
+            {/* Chart: simple bar + label flags (total off to the right). Hide when data is unsuitable (negative amounts, outlay > obligated). */}
             <Box sx={{ mb: 3 }}>
               {(() => {
+                const chartSuitable = obligatedAmount > 0 && totalFunding > 0 && outlayedAmount <= obligatedAmount;
+                if (!chartSuitable) {
+                  return (
+                    <Box sx={{ py: 3, px: 2, textAlign: 'center' }}>
+                      <Typography variant="h6" sx={{ color: '#94a3b8', fontWeight: 600, mb: 1 }}>Chart Not Available</Typography>
+                      <Typography variant="body2" sx={{ color: '#64748b' }}>Data in this instance is not suitable for charting</Typography>
+                    </Box>
+                  );
+                }
                 const chartWidth = 640;
                 const barHeight = 32;
                 const chartHeight = 56;
                 const labelRowHeight = 56;
-                const totalForChart = totalFunding > 0 ? totalFunding : 1;
+                const totalForChart = totalFunding;
                 const obligatedWidth = (obligatedAmount / totalForChart) * chartWidth;
                 const nonFederalWidth = (nonFederalFunding / totalForChart) * chartWidth;
                 const outlayedWidth = (outlayedAmount / totalForChart) * chartWidth;
