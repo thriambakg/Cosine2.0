@@ -1671,7 +1671,7 @@ export const congressBillsSearchAPI = {
       body: JSON.stringify(body),
     });
   },
-  getBill: async (params: { bill_id: string; refresh_roll_calls?: boolean }): Promise<{
+  getBill: async (params: { bill_id: string }): Promise<{
     success: boolean;
     result?: any;
     count?: number;
@@ -1680,10 +1680,7 @@ export const congressBillsSearchAPI = {
     console.log('📋 API - Fetching congress bill by ID:', params);
     return apiRequest('/congress-bills-search', {
       method: 'POST',
-      body: JSON.stringify({
-        bill_id: params.bill_id,
-        refresh_roll_calls: !!params.refresh_roll_calls,
-      }),
+      body: JSON.stringify({ bill_id: params.bill_id }),
     });
   },
   /** Single roll call details for details page (congress, session, roll). Returns roll item + bill_associated + vote_summary + members. */
