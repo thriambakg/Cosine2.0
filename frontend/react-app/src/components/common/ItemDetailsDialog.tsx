@@ -55,6 +55,7 @@ import {
   addArticleToContext,
   addTradeToContext,
   addBillToContext,
+  addRollCallToContext,
   addLDAFilingToContext,
   addStockToContext,
 } from '../tiles/common/contextManager';
@@ -1015,12 +1016,25 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         case 'congress_bill':
           addBillToContext(itemData);
           break;
-        case 'roll_call':
-          // Roll call can be added as context with minimal payload (e.g. for chat)
-          if (rollCallDetails?.bill_id_associated) {
-            addBillToContext({ bill_id: rollCallDetails.bill_id_associated, ...rollCallDetails.bill_associated });
+        case 'roll_call': {
+          const congress = rollCallDetails?.congress ?? itemData?.congress;
+          const session = rollCallDetails?.session ?? itemData?.session;
+          const roll = rollCallDetails?.roll ?? itemData?.roll;
+          if (typeof congress === 'number' && typeof session === 'number' && typeof roll === 'number') {
+            addRollCallToContext(
+              {
+                congress,
+                session,
+                roll,
+                roll_display: rollCallDetails?.roll_display ?? itemData?.roll_display,
+                bill_id_associated: rollCallDetails?.bill_id_associated ?? itemData?.bill_id_associated,
+                search_index_sk: rollCallDetails?.search_index_sk ?? itemData?.search_index_sk,
+              },
+              rollCallDetails?.roll_display ?? itemData?.roll_display ?? undefined
+            );
           }
           break;
+        }
         case 'lda_disclosure':
           addLDAFilingToContext(itemData);
           break;
