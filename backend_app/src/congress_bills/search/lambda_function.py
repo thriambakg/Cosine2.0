@@ -729,7 +729,7 @@ def get_bill_by_id(bill_id: str) -> Optional[Dict[str, Any]]:
             item = response['Item']
             # Filter out search index items
             if not is_search_index_item(item):
-                return item
+                return _refresh_bill_roll_calls_from_search_roll(item)
             else:
                 logger.warning(f"Bill {bill_id} is a search index item, skipping")
                 return None
@@ -739,6 +739,153 @@ def get_bill_by_id(bill_id: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error fetching bill {bill_id}: {str(e)}", exc_info=True)
         return None
+
+
+def _refresh_bill_roll_calls_from_search_roll(bill: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Reconcile bill roll-call fields from SEARCH#ROLL entries.
+    This self-heals stale bill rows where roll calls exist in SEARCH#ROLL but
+    has_roll_call/recorded_votes_json were not updated on the bill item.
+    """
+    if not bills_table or not bill:
+        return bill
+
+    bill_id = str(bill.get('bill_id') or '').strip()
+    if not bill_id or bill_id.startswith('SEARCH#'):
+        return bill
+
+    congress = bill.get('congress')
+    try:
+        congress = int(congress) if congress is not None else None
+    except (TypeError, ValueError):
+        congress = None
+
+    # Query SEARCH#ROLL and filter by associated bill ID.
+    try:
+        key_condition = Key('bill_id').eq('SEARCH#ROLL')
+        if congress is not None:
+            key_condition = key_condition & Key('search_index_sk').begins_with(f"{congress}#")
+
+        params: Dict[str, Any] = {
+            'KeyConditionExpression': key_condition,
+            'FilterExpression': Attr('bill_id_associated').eq(bill_id),
+        }
+
+        roll_items: List[Dict[str, Any]] = []
+        while True:
+            resp = bills_table.query(**params)
+            roll_items.extend(resp.get('Items') or [])
+            lek = resp.get('LastEvaluatedKey')
+            if not lek:
+                break
+            params['ExclusiveStartKey'] = lek
+    except Exception as e:
+        logger.warning(f"Could not query SEARCH#ROLL for bill {bill_id}: {e}")
+        return bill
+
+    if not roll_items:
+        return bill
+
+    def _to_recorded_vote(roll_item: Dict[str, Any]) -> Dict[str, Any]:
+        d = (
+            (roll_item.get('latest_action_date') or '').strip()[:10]
+            or (_parse_roll_sort_key_date(roll_item.get('search_index_sk')) or '')
+        )
+        out = {
+            'chamber': 'House',
+            'congress': roll_item.get('congress', congress),
+            'sessionNumber': roll_item.get('session'),
+            'rollNumber': roll_item.get('roll'),
+            'date': d,
+        }
+        if roll_item.get('vote_question'):
+            out['vote_question'] = roll_item.get('vote_question')
+        if roll_item.get('result'):
+            out['result'] = roll_item.get('result')
+        if roll_item.get('vote_type'):
+            out['type'] = roll_item.get('vote_type')
+        if roll_item.get('source_data_url'):
+            out['url'] = roll_item.get('source_data_url')
+        return out
+
+    # Merge with existing recorded_votes_json (preserve existing details, add missing rolls).
+    existing_votes: List[Dict[str, Any]] = []
+    try:
+        raw = bill.get('recorded_votes_json') or '[]'
+        existing_votes = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except Exception:
+        existing_votes = []
+    if not isinstance(existing_votes, list):
+        existing_votes = []
+
+    existing_keys: Set[tuple] = set()
+    for v in existing_votes:
+        if not isinstance(v, dict):
+            continue
+        s = v.get('sessionNumber', v.get('session'))
+        r = v.get('rollNumber', v.get('roll'))
+        if s is not None and r is not None:
+            existing_keys.add((str(s), str(r)))
+
+    merged_votes = list(existing_votes)
+    for ri in roll_items:
+        s = ri.get('session')
+        r = ri.get('roll')
+        if s is None or r is None:
+            continue
+        key = (str(s), str(r))
+        if key in existing_keys:
+            continue
+        merged_votes.append(_to_recorded_vote(ri))
+        existing_keys.add(key)
+
+    def _sort_key(v: Dict[str, Any]):
+        d = str(v.get('date') or '')[:10]
+        s = v.get('sessionNumber', v.get('session'))
+        r = v.get('rollNumber', v.get('roll'))
+        try:
+            s_i = int(s) if s is not None else -1
+        except Exception:
+            s_i = -1
+        try:
+            r_i = int(r) if r is not None else -1
+        except Exception:
+            r_i = -1
+        return (d, s_i, r_i)
+
+    merged_votes.sort(key=_sort_key, reverse=True)
+    has_roll_call = 1 if merged_votes else 0
+    roll_call_number = None
+    if merged_votes:
+        roll_call_number = merged_votes[0].get('rollNumber', merged_votes[0].get('roll'))
+
+    existing_has_roll = int(bill.get('has_roll_call') or 0)
+    needs_update = (
+        existing_has_roll != has_roll_call
+        or len(merged_votes) != len(existing_votes)
+        or (has_roll_call and bill.get('roll_call_number') != roll_call_number)
+    )
+    if not needs_update:
+        return bill
+
+    try:
+        bills_table.update_item(
+            Key={'bill_id': bill_id, 'search_index_sk': bill_id},
+            UpdateExpression="SET has_roll_call = :h, roll_call_number = :n, recorded_votes_json = :v, last_updated = :u",
+            ExpressionAttributeValues={
+                ':h': has_roll_call,
+                ':n': int(roll_call_number) if roll_call_number is not None else 0,
+                ':v': json.dumps(merged_votes),
+                ':u': datetime.utcnow().isoformat(),
+            },
+        )
+        bill['has_roll_call'] = has_roll_call
+        bill['roll_call_number'] = int(roll_call_number) if roll_call_number is not None else bill.get('roll_call_number')
+        bill['recorded_votes_json'] = json.dumps(merged_votes)
+    except Exception as e:
+        logger.warning(f"Failed to refresh bill roll-call fields for {bill_id}: {e}")
+
+    return bill
 
 
 def fetch_full_bills_batch(bill_ids: List[str]) -> List[Dict[str, Any]]:
