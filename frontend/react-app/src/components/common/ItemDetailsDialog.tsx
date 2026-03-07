@@ -79,6 +79,8 @@ const STAGE_ACTION_CODES: Record<string, number> = {
   '36000': 4,  // Became Public Law
   'E40000': 4, // Became Public Law No: 114-47
 };
+/** Action code 9000 = Failed of passage/not agreed to in House (terminal state; use houseOutcome, not stage). */
+const FAILED_HOUSE_ACTION_CODE = '9000';
 /** LOC code 31000 = Vetoed by President (do not treat as Became Law). */
 const VETO_ACTION_CODES: Set<string> = new Set(['31000', '33000']); // 33000 = Failed of passage in House over veto
 const STAGE_TYPE_PATTERNS: { pattern: RegExp | string; stage: number }[] = [
@@ -89,12 +91,22 @@ const STAGE_TYPE_PATTERNS: { pattern: RegExp | string; stage: number }[] = [
   { pattern: /became law|became public law|signed by president/i, stage: 4 },
 ];
 
-function getBillLegislativeStage(itemData: Record<string, unknown> | null | undefined): { stageIndex: number; stageLabel: string; vetoed: boolean } {
+/** House vote outcome for 2-step Congress.gov-style tracker (Introduced → Failed House | Agreed to in House). */
+export type HouseVoteOutcome = 'failed' | 'agreed' | null;
+
+function getBillLegislativeStage(itemData: Record<string, unknown> | null | undefined): {
+  stageIndex: number;
+  stageLabel: string;
+  vetoed: boolean;
+  houseOutcome: HouseVoteOutcome;
+} {
   const introducedLabel = 'Introduced';
-  if (!itemData) return { stageIndex: 0, stageLabel: introducedLabel, vetoed: false };
+  const def = { stageIndex: 0, stageLabel: introducedLabel, vetoed: false, houseOutcome: null as HouseVoteOutcome };
+  if (!itemData) return def;
 
   let maxStage = 0;
   let vetoed = false;
+  let houseOutcome: HouseVoteOutcome = null;
   const typeStr = (itemData.latest_action_type as string) || '';
   const textStr = (itemData.latest_action_text as string) || '';
 
@@ -111,6 +123,28 @@ function getBillLegislativeStage(itemData: Record<string, unknown> | null | unde
   checkType(typeStr);
   checkType(textStr);
 
+  // Check recorded_votes_json for roll call result (from SEARCH#ROLL sync; lambda sorts by date desc)
+  let recordedVotes: { result?: string }[] = [];
+  try {
+    const rv = itemData.recorded_votes_json;
+    const parsed = typeof rv === 'string' && rv ? JSON.parse(rv) : rv;
+    recordedVotes = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    recordedVotes = [];
+  }
+  for (const v of recordedVotes) {
+    if (!v || typeof v !== 'object') continue;
+    const r = String((v.result ?? '') || '').trim().toLowerCase();
+    if (r === 'failed') {
+      houseOutcome = 'failed';
+      break;
+    }
+    if (r === 'passed' || r === 'agreed') {
+      houseOutcome = 'agreed';
+      break;
+    }
+  }
+
   let actions: { actionCode?: string; type?: string; text?: string }[] = [];
   try {
     const raw = itemData.actions_json;
@@ -126,6 +160,11 @@ function getBillLegislativeStage(itemData: Record<string, unknown> | null | unde
     const isVeto = /veto/i.test(text) || /veto/i.test(type) || VETO_ACTION_CODES.has(code);
     if (isVeto) vetoed = true;
 
+    if (code === FAILED_HOUSE_ACTION_CODE) {
+      houseOutcome = 'failed';
+    } else if (code === '8000' && houseOutcome === null) {
+      houseOutcome = 'agreed';
+    }
     if (code && !isVeto && STAGE_ACTION_CODES[code] !== undefined) {
       maxStage = Math.max(maxStage, STAGE_ACTION_CODES[code]);
     }
@@ -136,9 +175,15 @@ function getBillLegislativeStage(itemData: Record<string, unknown> | null | unde
     if (a.text) checkType(a.text);
   }
 
+  // When we have a House vote outcome and bill hasn't reached President, use 2-step Congress.gov tracker
+  if (houseOutcome && maxStage < 3) {
+    const stageLabel = houseOutcome === 'failed' ? 'Failed House' : 'Agreed to in House';
+    return { stageIndex: 1, stageLabel, vetoed: false, houseOutcome };
+  }
+
   const stageIndex = Math.min(maxStage, LEGISLATIVE_STAGES.length - 1);
   const stageLabel = LEGISLATIVE_STAGES[stageIndex].label;
-  return { stageIndex, stageLabel, vetoed: vetoed && maxStage < 4 };
+  return { stageIndex, stageLabel, vetoed: vetoed && maxStage < 4, houseOutcome: null };
 }
 
 export type ItemType = 
@@ -1665,8 +1710,14 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
           {/* Status of Legislation — horizontal tracker (congress.gov style) */}
           {(() => {
-            const { stageIndex, stageLabel, vetoed } = getBillLegislativeStage(itemData ?? undefined);
+            const { stageIndex, stageLabel, vetoed, houseOutcome } = getBillLegislativeStage(itemData ?? undefined);
             const statusForSr = vetoed ? 'To President — Vetoed by President' : stageLabel;
+            const steps = houseOutcome
+              ? [
+                  { label: 'Introduced', key: 'introduced' },
+                  { label: stageLabel, key: 'house_outcome' },
+                ]
+              : LEGISLATIVE_STAGES;
             return (
               <Box
                 sx={{
@@ -1730,6 +1781,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                                 padding: '6px 8px',
                                 borderRadius: '4px',
                               },
+                              '& > li.passed': {
+                                color: '#94a3b8',
+                              },
                               '& > li.selected': {
                                 color: '#e2e8f0',
                                 fontWeight: 600,
@@ -1740,15 +1794,20 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
                               },
                             }}
                           >
-                            {LEGISLATIVE_STAGES.map((step, idx) => (
-                              <React.Fragment key={step.key}>
+                            {steps.map((step, idx) => (
+                              <React.Fragment key={step.key + idx}>
                                 <Box
                                   component="li"
-                                  className={[idx === stageIndex ? 'selected' : '', idx === LEGISLATIVE_STAGES.length - 1 ? 'last' : ''].filter(Boolean).join(' ') || undefined}
+                                  className={[
+                                    idx < stageIndex ? 'passed' : '',
+                                    idx === stageIndex ? 'selected' : '',
+                                    houseOutcome && idx === 1 ? 'mediumTrack' : '',
+                                    idx === steps.length - 1 ? 'last' : '',
+                                  ].filter(Boolean).join(' ') || undefined}
                                 >
                                   {step.label}
                                 </Box>
-                                {idx < LEGISLATIVE_STAGES.length - 1 && (
+                                {idx < steps.length - 1 && (
                                   <Box component="span" sx={{ color: '#4b5563', fontSize: '0.75rem', px: 0.5 }} aria-hidden="true">
                                     ›
                                   </Box>
