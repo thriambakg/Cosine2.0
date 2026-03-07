@@ -820,6 +820,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
       console.log('🔄 Refreshing bill data from DynamoDB...', billId);
       const response = await congressBillsSearchAPI.getBill({
         bill_id: billId,
+        refresh_roll_calls: true,
       });
 
       if (response.success && response.result) {

@@ -9,6 +9,7 @@ import os
 import time
 import boto3
 import gzip
+import requests
 from typing import Dict, List, Any, Optional, Set
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -40,6 +41,9 @@ s3_client = boto3.client('s3')
 # Environment variables
 BILLS_TABLE_NAME = os.environ.get('BILLS_TABLE_NAME', 'congress-bills')
 S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cosine-congress-bills-data-production')
+CONGRESS_API_BASE_URL = os.environ.get('CONGRESS_API_BASE_URL', 'https://api.congress.gov/v3')
+CONGRESS_API_KEY = os.environ.get('CONGRESS_API_KEY', '')
+CONGRESS_API_TIMEOUT = int(os.environ.get('CONGRESS_API_TIMEOUT', '30'))
 
 # Get DynamoDB table
 bills_table = dynamodb.Table(BILLS_TABLE_NAME) if BILLS_TABLE_NAME else None
@@ -711,7 +715,345 @@ def identify_queries(filters: Dict[str, Any]) -> List[Dict[str, Any]]:
     return queries
 
 
-def get_bill_by_id(bill_id: str) -> Optional[Dict[str, Any]]:
+def _parse_bill_id_parts(bill_id: str) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Parse bill_id format: <congress>-<bill_type>-<bill_number>."""
+    try:
+        parts = str(bill_id).split('-', 2)
+        if len(parts) != 3:
+            return None, None, None
+        congress = int(parts[0])
+        bill_type = str(parts[1]).strip().upper()
+        bill_number = str(parts[2]).strip()
+        if not bill_type or not bill_number:
+            return None, None, None
+        return congress, bill_type, bill_number
+    except (TypeError, ValueError):
+        return None, None, None
+
+
+def _congress_api_get(path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    params = dict(params or {})
+    if CONGRESS_API_KEY:
+        params['api_key'] = CONGRESS_API_KEY
+    params.setdefault('format', 'json')
+    url = f"{CONGRESS_API_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
+    for attempt in range(4):
+        try:
+            resp = requests.get(url, params=params, timeout=CONGRESS_API_TIMEOUT)
+            if resp.status_code == 429 and attempt < 3:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            if attempt < 3:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning(f"Congress API request failed for {path}: {e}")
+            return None
+    return None
+
+
+def _extract_house_vote_list_items(data: Any) -> List[Dict[str, Any]]:
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    if not isinstance(data, dict):
+        return []
+    items = data.get('votes') or data.get('houseVotes') or data.get('results') or data.get('items')
+    if isinstance(items, dict):
+        items = items.get('item') or items.get('vote') or items.get('votes') or []
+    if isinstance(items, list):
+        return [x for x in items if isinstance(x, dict)]
+    if data.get('rollCallNumber') is not None:
+        return [data]
+    return []
+
+
+def _fetch_house_vote_list_for_session(congress: int, session: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    offset = 0
+    limit = 250
+    while True:
+        payload = _congress_api_get(
+            f"house-vote/{congress}/{session}",
+            {'offset': offset, 'limit': limit}
+        )
+        if not payload:
+            break
+        items = _extract_house_vote_list_items(payload)
+        if not items:
+            break
+        out.extend(items)
+        if len(items) < limit:
+            break
+        offset += limit
+    return out
+
+
+def _unwrap_house_vote_response(data: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    inner = data.get('houseRollCallVoteMemberVotes')
+    return inner if isinstance(inner, dict) else data
+
+
+def _extract_members_from_vote_response(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    inner = _unwrap_house_vote_response(data)
+    candidates = [
+        inner.get('results'),
+        inner.get('memberVotes'),
+        inner.get('members'),
+        data.get('results') if isinstance(data, dict) else None,
+    ]
+    for c in candidates:
+        if isinstance(c, list):
+            return [m for m in c if isinstance(m, dict)]
+        if isinstance(c, dict):
+            for key in ('item', 'memberVote', 'memberVotes', 'members', 'results'):
+                sub = c.get(key)
+                if isinstance(sub, list):
+                    return [m for m in sub if isinstance(m, dict)]
+    return []
+
+
+def _extract_vote_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
+    inner = _unwrap_house_vote_response(data)
+    meta: Dict[str, Any] = {}
+    mapping = [
+        ('vote_question', 'voteQuestion'),
+        ('result', 'result'),
+        ('vote_type', 'voteType'),
+        ('legislation_number', 'legislationNumber'),
+        ('legislation_type', 'legislationType'),
+        ('legislation_url', 'legislationUrl'),
+        ('source_data_url', 'sourceDataURL'),
+    ]
+    for out_key, in_key in mapping:
+        val = inner.get(in_key)
+        if val is not None and str(val).strip():
+            meta[out_key] = str(val).strip()
+    start_date = inner.get('startDate') or inner.get('start_date')
+    update_date = inner.get('updateDate') or inner.get('update_date')
+    if start_date:
+        meta['start_date'] = str(start_date).strip()[:10]
+    if update_date:
+        meta['update_date'] = str(update_date).strip()[:10]
+    vote_party_total = inner.get('votePartyTotal') or inner.get('vote_party_total')
+    if isinstance(vote_party_total, list) and vote_party_total:
+        meta['vote_party_total'] = vote_party_total
+    return meta
+
+
+def _fetch_house_vote_members(congress: int, session: int, roll: int) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    payload = _congress_api_get(f"house-vote/{congress}/{session}/{roll}/members", {'offset': 0, 'limit': 250})
+    if not payload:
+        return [], {}
+    members = _extract_members_from_vote_response(payload)
+    meta = _extract_vote_metadata(payload)
+    return members, meta
+
+
+def _store_roll_members_to_s3(congress: int, session: int, roll: int, members: List[Dict[str, Any]]) -> Optional[str]:
+    if not S3_BUCKET_NAME:
+        return None
+    try:
+        key = f"oversize/roll-call/{congress}/{session}/{roll}-members.json.gz"
+        compressed = gzip.compress(json.dumps(members, default=str).encode('utf-8'))
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=key,
+            Body=compressed,
+            ContentType='application/json',
+            ContentEncoding='gzip',
+        )
+        return key
+    except Exception as e:
+        logger.warning(f"Failed storing roll members to S3 for {congress}/{session}/{roll}: {e}")
+        return None
+
+
+def _upsert_search_roll_item(
+    congress: int,
+    session: int,
+    roll: int,
+    bill_id_associated: str,
+    members: List[Dict[str, Any]],
+    latest_action_date: Optional[str],
+    vote_metadata: Optional[Dict[str, Any]],
+) -> None:
+    date_part = (latest_action_date or '').strip()[:10] if latest_action_date else '0000-00-00'
+    if not (len(date_part) >= 10 and date_part.replace('-', '').isdigit()):
+        date_part = '0000-00-00'
+    sk = f"{congress}#{date_part}#{session}#{roll}"
+    item: Dict[str, Any] = {
+        'bill_id': 'SEARCH#ROLL',
+        'search_index_sk': sk,
+        'search_type': 'ROLL',
+        'search_value': sk,
+        'congress': int(congress),
+        'session': int(session),
+        'roll': int(roll),
+        'bill_id_associated': bill_id_associated,
+        'roll_display': f"Roll no. {roll}",
+        'members': members,
+        'is_search_index': True,
+    }
+    if date_part != '0000-00-00':
+        item['latest_action_date'] = date_part
+    if vote_metadata:
+        for key in (
+            'vote_question', 'result', 'vote_type',
+            'legislation_number', 'legislation_type', 'legislation_url',
+            'source_data_url', 'start_date', 'update_date', 'vote_party_total',
+        ):
+            if key in vote_metadata and vote_metadata[key] is not None:
+                item[key] = vote_metadata[key]
+
+    if len(json.dumps(item, default=str)) > int(400 * 1024 * 0.85):
+        s3_key = _store_roll_members_to_s3(congress, session, roll, members)
+        item = {
+            'bill_id': 'SEARCH#ROLL',
+            'search_index_sk': sk,
+            'search_type': 'ROLL',
+            'search_value': sk,
+            'congress': int(congress),
+            'session': int(session),
+            'roll': int(roll),
+            'bill_id_associated': bill_id_associated,
+            'roll_display': f"Roll no. {roll}",
+            'is_search_index': True,
+        }
+        if date_part != '0000-00-00':
+            item['latest_action_date'] = date_part
+        if s3_key:
+            item['members_oversize_s3_key'] = s3_key
+        if vote_metadata:
+            for key in (
+                'vote_question', 'result', 'vote_type',
+                'legislation_number', 'legislation_type', 'legislation_url',
+                'source_data_url', 'start_date', 'update_date', 'vote_party_total',
+            ):
+                if key in vote_metadata and vote_metadata[key] is not None:
+                    item[key] = vote_metadata[key]
+
+    bills_table.put_item(Item=item)
+
+
+def _refresh_roll_calls_from_congress_api(bill: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Refresh roll calls for a bill from Congress API and persist:
+    - bill row fields (has_roll_call, roll_call_number, recorded_votes_json)
+    - SEARCH#ROLL rows (same key shape as Glue).
+    """
+    if not bills_table or not bill:
+        return bill
+    bill_id = str(bill.get('bill_id') or '').strip()
+    if not bill_id or bill_id.startswith('SEARCH#'):
+        return bill
+
+    congress, bill_type, bill_number = _parse_bill_id_parts(bill_id)
+    if congress is None or not bill_type or not bill_number:
+        return bill
+
+    matched_rolls: List[Dict[str, Any]] = []
+    for session in (1, 2):
+        vote_list = _fetch_house_vote_list_for_session(congress, session)
+        for v in vote_list:
+            v_type = str(v.get('legislationType') or '').strip().upper()
+            v_num = str(v.get('legislationNumber') or '').strip()
+            if v_type != bill_type or v_num != bill_number:
+                continue
+            roll_num = v.get('rollCallNumber') or v.get('rollNumber')
+            sess_num = v.get('sessionNumber') or session
+            try:
+                roll_int = int(roll_num)
+                sess_int = int(sess_num)
+            except (TypeError, ValueError):
+                continue
+            latest_action_date = (str(v.get('startDate') or v.get('updateDate') or '').strip()[:10]) or None
+            members, vote_meta = _fetch_house_vote_members(congress, sess_int, roll_int)
+            _upsert_search_roll_item(
+                congress=congress,
+                session=sess_int,
+                roll=roll_int,
+                bill_id_associated=bill_id,
+                members=members,
+                latest_action_date=latest_action_date,
+                vote_metadata=vote_meta,
+            )
+            entry = {
+                'chamber': 'House',
+                'congress': congress,
+                'sessionNumber': sess_int,
+                'rollNumber': roll_int,
+                'date': (latest_action_date or ''),
+            }
+            if vote_meta.get('vote_question'):
+                entry['vote_question'] = vote_meta.get('vote_question')
+            if vote_meta.get('result'):
+                entry['result'] = vote_meta.get('result')
+            if vote_meta.get('vote_type'):
+                entry['type'] = vote_meta.get('vote_type')
+            if vote_meta.get('legislation_url'):
+                entry['url'] = vote_meta.get('legislation_url')
+            matched_rolls.append(entry)
+
+    existing_votes: List[Dict[str, Any]] = []
+    try:
+        raw = bill.get('recorded_votes_json') or '[]'
+        existing_votes = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except Exception:
+        existing_votes = []
+    if not isinstance(existing_votes, list):
+        existing_votes = []
+
+    by_key: Dict[tuple, Dict[str, Any]] = {}
+    for v in existing_votes + matched_rolls:
+        if not isinstance(v, dict):
+            continue
+        s = v.get('sessionNumber', v.get('session'))
+        r = v.get('rollNumber', v.get('roll'))
+        if s is None or r is None:
+            continue
+        by_key[(str(s), str(r))] = v
+    merged_votes = list(by_key.values())
+
+    def _sort_key(v: Dict[str, Any]):
+        d = str(v.get('date') or '')[:10]
+        s = v.get('sessionNumber', v.get('session'))
+        r = v.get('rollNumber', v.get('roll'))
+        try:
+            s_i = int(s) if s is not None else -1
+        except Exception:
+            s_i = -1
+        try:
+            r_i = int(r) if r is not None else -1
+        except Exception:
+            r_i = -1
+        return (d, s_i, r_i)
+
+    merged_votes.sort(key=_sort_key, reverse=True)
+    has_roll_call = 1 if merged_votes else 0
+    roll_call_number = merged_votes[0].get('rollNumber', merged_votes[0].get('roll')) if merged_votes else None
+
+    bills_table.update_item(
+        Key={'bill_id': bill_id, 'search_index_sk': bill_id},
+        UpdateExpression="SET has_roll_call = :h, roll_call_number = :n, recorded_votes_json = :v, last_updated = :u",
+        ExpressionAttributeValues={
+            ':h': has_roll_call,
+            ':n': int(roll_call_number) if roll_call_number is not None else 0,
+            ':v': json.dumps(merged_votes),
+            ':u': datetime.utcnow().isoformat(),
+        },
+    )
+    bill['has_roll_call'] = has_roll_call
+    if roll_call_number is not None:
+        bill['roll_call_number'] = int(roll_call_number)
+    bill['recorded_votes_json'] = json.dumps(merged_votes)
+    return bill
+
+
+def get_bill_by_id(bill_id: str, refresh_roll_calls: bool = False) -> Optional[Dict[str, Any]]:
     """Fetch a single bill by bill_id directly from DynamoDB"""
     if not bills_table or not bill_id:
         return None
@@ -729,6 +1071,11 @@ def get_bill_by_id(bill_id: str) -> Optional[Dict[str, Any]]:
             item = response['Item']
             # Filter out search index items
             if not is_search_index_item(item):
+                if refresh_roll_calls:
+                    try:
+                        item = _refresh_roll_calls_from_congress_api(item)
+                    except Exception as e:
+                        logger.warning(f"Live roll-call refresh failed for {bill_id}; using stored data. Error: {e}")
                 return _refresh_bill_roll_calls_from_search_roll(item)
             else:
                 logger.warning(f"Bill {bill_id} is a search index item, skipping")
@@ -1618,7 +1965,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Direct bill fetch by bill_id
             try:
                 logger.info(f"Fetching bill directly by bill_id: {bill_id}")
-                bill = get_bill_by_id(bill_id)
+                refresh_roll_calls = bool(body.get('refresh_roll_calls'))
+                bill = get_bill_by_id(bill_id, refresh_roll_calls=refresh_roll_calls)
                 if bill:
                     # Enrich with S3 data if needed
                     bill = enrich_bill_with_details(bill)
