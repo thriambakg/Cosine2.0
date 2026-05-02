@@ -51,9 +51,9 @@ production_subdomain = ""
 # This will be populated after we create the certificate
 certificate_arn = "arn:aws:acm:us-east-1:676206904242:certificate/76a2a444-d2ac-4e24-947a-07dce59af77a"
 
-# Lambda Concurrency Configuration (limit to 5 concurrent requests for staging)
-lambda_reserved_concurrency_default    = 5 # Set all reserved concurrency to 5 (5 concurrent requests allowed at a time)
-lambda_provisioned_concurrency_default = 0 # Set all provisioned concurrency to 0 (disabled for staging)
+# Lambda (hibernate): no reserved pool carve-out, no provisioned warm capacity
+lambda_reserved_concurrency_default    = null
+lambda_provisioned_concurrency_default = 0
 
 # Note: When enabling custom domain:
 # 1. Set enable_custom_domain = true

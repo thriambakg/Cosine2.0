@@ -2155,16 +2155,14 @@ resource "aws_lambda_alias" "chat_agent_alias" {
   }
 }
 
-# Provisioned Concurrency for Chat Agent Lambda (Performance Optimization)
-# Keeps containers warm to eliminate cold starts for concurrent requests
-# Cost: ~$0.015/hour per unit = ~$88/month for 8 units
-# Only create resource if variable is not explicitly 0 (disabled in staging, enabled in prod)
+# Provisioned concurrency: only when variable is a positive integer.
+# null or 0 = no provisioned capacity (cold starts; lowest cost). Previously null incorrectly created 2 units.
 resource "aws_lambda_provisioned_concurrency_config" "chat_agent_warm" {
-  count = var.lambda_provisioned_concurrency_default != null && var.lambda_provisioned_concurrency_default == 0 ? 0 : 1
+  count = var.lambda_provisioned_concurrency_default != null && var.lambda_provisioned_concurrency_default > 0 ? 1 : 0
 
   function_name                     = aws_lambda_function.chat_agent.function_name
   qualifier                         = aws_lambda_alias.chat_agent_alias.name
-  provisioned_concurrent_executions = 2
+  provisioned_concurrent_executions = var.lambda_provisioned_concurrency_default
 
   depends_on = [aws_lambda_alias.chat_agent_alias]
 }

@@ -192,13 +192,13 @@ variable "api_daily_quota_limit" {
 
 # Lambda Concurrency Configuration
 variable "lambda_reserved_concurrency_default" {
-  description = "Default reserved concurrent executions for Lambda functions. Set to 0 to disable reserved concurrency (useful for staging/dev environments). If null, uses function-specific defaults."
+  description = "Reserved concurrency for reader Lambdas. null = none (recommended for hibernate). Use a positive integer only if you need a dedicated concurrency carve-out. Do not use 0."
   type        = number
   default     = null
 }
 
 variable "lambda_provisioned_concurrency_default" {
-  description = "Default provisioned concurrent executions for Lambda functions. Set to 0 to disable provisioned concurrency (useful for staging/dev environments). If null, uses function-specific defaults."
+  description = "Chat-agent alias provisioned concurrency. null or 0 = disabled (no extra cost). Positive N = N warm executions on the production alias."
   type        = number
   default     = null
 }
