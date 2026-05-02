@@ -1458,10 +1458,8 @@ module "stock_volatility_lambda" {
   sns_topic_name              = "${var.project_name}-stock-volatility-completion-${var.environment}"
   response_table_name         = null
   completion_sns_env_var_name = "STOCK_VOLATILITY_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Wrapper only needs boto3/SQS path — omit financial layer to stay under 250MB unzipped
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -1678,6 +1676,11 @@ module "chat_agent_ecr" {
 
   # Override the repository name for chat agent
   repository_name = "chat-agent"
+
+  # Explicit pull for chat Lambda execution role (stable ARN string; avoids ImageAccessDenied with KMS-backed ECR)
+  image_pull_principal_arns = [
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-chat-agent-${var.environment}-execution-role"
+  ]
 }
 
 # Chat Agent Lambda Function (Custom deployment with dependencies)
@@ -2628,15 +2631,12 @@ module "stock_data_lambda" {
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda       = true
-  wrapper_timeout             = 60
-  sns_topic_name              = "${var.project_name}-stock-data-completion-${var.environment}"
-  response_table_name         = null
-  completion_sns_env_var_name = "STOCK_DATA_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 60
+  sns_topic_name                 = "${var.project_name}-stock-data-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "STOCK_DATA_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -2677,15 +2677,12 @@ module "stock_statistics_lambda" {
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda       = true
-  wrapper_timeout             = 60
-  sns_topic_name              = "${var.project_name}-stock-statistics-completion-${var.environment}"
-  response_table_name         = null
-  completion_sns_env_var_name = "STOCK_STATISTICS_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 60
+  sns_topic_name                 = "${var.project_name}-stock-statistics-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "STOCK_STATISTICS_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -2727,15 +2724,12 @@ module "volatility_fetch_lambda" {
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda       = true
-  wrapper_timeout             = 30
-  sns_topic_name              = "${var.project_name}-volatility-fetch-completion-${var.environment}"
-  response_table_name         = null
-  completion_sns_env_var_name = "VOLATILITY_FETCH_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 30
+  sns_topic_name                 = "${var.project_name}-volatility-fetch-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "VOLATILITY_FETCH_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -2778,15 +2772,12 @@ module "robinhood_integration_lambda" {
   ]
 
   # Enable wrapper Lambda for synchronous API Gateway responses
-  enable_wrapper_lambda       = true
-  wrapper_timeout             = 60
-  sns_topic_name              = "${var.project_name}-robinhood-integration-completion-${var.environment}"
-  response_table_name         = null
-  completion_sns_env_var_name = "ROBINHOOD_INTEGRATION_COMPLETION_SNS_TOPIC_ARN"
-  wrapper_layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 60
+  sns_topic_name                 = "${var.project_name}-robinhood-integration-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "ROBINHOOD_INTEGRATION_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
   sqs_enable_dlq                 = true
   sqs_batch_size                 = 1
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default

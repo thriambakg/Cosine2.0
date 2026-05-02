@@ -62,52 +62,64 @@ resource "aws_ecr_lifecycle_policy" "frontend" {
   })
 }
 
-# ECR Repository policy for cross-account access if needed
+# Single repository policy (replaces duplicate frontend + lambda_access resources that overwrote each other in AWS).
+# GetAuthorizationToken is IAM-only, not ECR repo policy.
 resource "aws_ecr_repository_policy" "frontend" {
   repository = aws_ecr_repository.frontend.name
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowPull"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+    Statement = concat(
+      [
+        {
+          Sid    = "AllowSameAccountPull"
+          Effect = "Allow"
+          Principal = {
+            AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+          }
+          Action = [
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "ecr:BatchCheckLayerAvailability"
+          ]
         }
-        Action = [
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:GetAuthorizationToken"
-        ]
-      }
-    ]
-  })
-}
-
-# ECR Repository policy for Lambda access (applies to all repositories using this module)
-resource "aws_ecr_repository_policy" "lambda_access" {
-  repository = aws_ecr_repository.frontend.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowLambdaPull"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+      ],
+      length(var.image_pull_principal_arns) > 0 ? [
+        {
+          Sid    = "AllowLambdaExecutionRoles"
+          Effect = "Allow"
+          Principal = {
+            AWS = var.image_pull_principal_arns
+          }
+          Action = [
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "ecr:BatchCheckLayerAvailability"
+          ]
         }
-        Action = [
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:GetAuthorizationToken"
-        ]
-      }
-    ]
+      ] : [],
+      [
+        {
+          Sid    = "AllowLambdaServicePull"
+          Effect = "Allow"
+          Principal = {
+            Service = "lambda.amazonaws.com"
+          }
+          Action = [
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "ecr:BatchCheckLayerAvailability"
+          ]
+          Condition = {
+            StringLike = {
+              "aws:sourceArn" = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-chat-agent-${var.environment}*"
+            }
+          }
+        }
+      ]
+    )
   })
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}

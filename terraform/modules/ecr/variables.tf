@@ -27,3 +27,10 @@ variable "repository_name" {
   type        = string
   default     = "frontend"
 }
+
+# IAM principals allowed to pull images (same account). Avoids relying on duplicate/overwritten repo policies.
+variable "image_pull_principal_arns" {
+  description = "IAM role/user ARNs that may pull from this repository (e.g. Lambda execution role for chat agent)"
+  type        = list(string)
+  default     = []
+}
