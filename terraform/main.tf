@@ -1443,11 +1443,8 @@ module "stock_volatility_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # Attach core, numpy, and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only (yfinance+pandas+requests). Stacking core+financial exceeds 250MB unzipped; runtime supplies boto3.
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # SNS publish from lambda-sqs module; no Secrets/DynamoDB
   additional_policy_arns = []
@@ -2507,11 +2504,8 @@ module "portfolio_analysis_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # Attach core and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only — see stock_volatility_lambda (250MB cap)
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # Additional IAM policies
   additional_policy_arns = [
@@ -2564,11 +2558,8 @@ module "stock_screener_lambda" {
     # trigger redeploy to latest financial layer after metadata fix
   }
 
-  # Attach core and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only — see stock_volatility_lambda (250MB cap)
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # KMS only; no DynamoDB (stock_data Lambda does not use stock_data_table). No Secrets (SNS from lambda-sqs)
   additional_policy_arns = [
@@ -2617,11 +2608,8 @@ module "stock_data_lambda" {
     YFINANCE_USE_CURL = "false" # Disable curl_cffi, use requests instead
   }
 
-  # Attach core and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only — see stock_volatility_lambda (250MB cap)
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # Additional IAM policies
   # Note: stock_data lambda does not use DynamoDB - removed lambda_dynamodb_policy
@@ -2664,11 +2652,8 @@ module "stock_statistics_lambda" {
     LOG_LEVEL   = var.environment == "development" ? "DEBUG" : "INFO"
   }
 
-  # Attach core and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only — see stock_volatility_lambda (250MB cap)
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # Additional IAM policies
   # Note: stock_statistics lambda does not use DynamoDB - removed lambda_dynamodb_policy
@@ -2711,11 +2696,8 @@ module "volatility_fetch_lambda" {
     YFINANCE_USE_CURL = "false" # Disable curl_cffi, use requests instead
   }
 
-  # Attach core and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only — see stock_volatility_lambda (250MB cap)
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # Additional IAM policies
   # Note: volatility_fetch lambda does not use DynamoDB - removed lambda_dynamodb_policy
@@ -2759,11 +2741,8 @@ module "robinhood_integration_lambda" {
     PORTFOLIO_ANALYSIS_WRAPPER_FUNCTION_NAME = module.portfolio_analysis_lambda.wrapper_function_name != null ? module.portfolio_analysis_lambda.wrapper_function_name : module.portfolio_analysis_lambda.function_name
   }
 
-  # Attach core and financial layers
-  layers = [
-    data.terraform_remote_state.base_infra.outputs.core_layer_arn,
-    data.terraform_remote_state.base_infra.outputs.financial_layer_arn
-  ]
+  # Financial layer only — imports portfolio metrics (numpy/pandas); 250MB cap
+  layers = [data.terraform_remote_state.base_infra.outputs.financial_layer_arn]
 
   # KMS; invoke portfolio_analysis Lambda only (SNS from lambda-sqs)
   additional_policy_arns = [
