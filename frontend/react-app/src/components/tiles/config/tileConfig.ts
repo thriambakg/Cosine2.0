@@ -74,6 +74,10 @@ export const TILE_CONFIGS: Record<string, TileConfig> = {
     pagination: SEARCH_TILE_PAGINATION,
     size: DEFAULT_TILE_SIZE,
   },
+  'fec_campaign_finance': {
+    pagination: SEARCH_TILE_PAGINATION,
+    size: DEFAULT_TILE_SIZE,
+  },
   'congress_bills': {
     pagination: SEARCH_TILE_PAGINATION,
     size: DEFAULT_TILE_SIZE,

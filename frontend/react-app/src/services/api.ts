@@ -722,7 +722,7 @@ export const handleAPIError = (error: any, endpoint: string): never => {
 
 export interface DashboardTile {
   id?: string;
-  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder' | 'stock_screener' | 'news' | 'portfolio' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'congress_roll_calls' | 'lda_disclosures';
+  type: 'crypto' | 'stock' | 'custom' | 'placeholder' | 'folder' | 'stock_screener' | 'news' | 'portfolio' | 'politician_trades' | 'sec_search' | 'govt_contracts' | 'congress_bills' | 'congress_roll_calls' | 'lda_disclosures' | 'fec_campaign_finance';
   symbol?: string;
   timeframe?: string;
   title: string;
@@ -1855,6 +1855,87 @@ export const ldaSearchAPI = {
     return apiRequest<LDAGetFilingResponse>('/lda-search', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+};
+
+// FEC Campaign Finance
+export interface FECSearchHit {
+  entity_type: 'candidate' | 'committee';
+  entity_id: string;
+  name: string;
+  subtitle?: string;
+  cycles?: number[];
+  party?: string;
+  state?: string;
+  office?: string;
+  committee_type?: string;
+}
+
+export interface FECSearchFilters {
+  q?: string;
+  cycle?: number;
+}
+
+export interface FECSearchResponse {
+  success: boolean;
+  results?: FECSearchHit[];
+  count?: number;
+  cycle?: number;
+  error?: string;
+}
+
+export interface FECProfileResponse {
+  success: boolean;
+  result?: Record<string, unknown> | null;
+  count?: number;
+  error?: string;
+}
+
+export interface FECSchedulesResponse {
+  success: boolean;
+  results?: Record<string, unknown>[];
+  count?: number;
+  page?: number;
+  per_page?: number;
+  total_rows?: number;
+  total_pages?: number;
+  has_more?: boolean;
+  schedule?: string;
+  s3_key?: string;
+  error?: string;
+}
+
+export const fecSearchAPI = {
+  search: async (params: {
+    filters: FECSearchFilters;
+    limit?: number;
+  }): Promise<FECSearchResponse> => {
+    return apiRequest<FECSearchResponse>('/fec-search', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'search', filters: params.filters, limit: params.limit }),
+    });
+  },
+  getProfile: async (params: {
+    entity_type: 'candidate' | 'committee';
+    entity_id: string;
+    cycle: number;
+  }): Promise<FECProfileResponse> => {
+    return apiRequest<FECProfileResponse>('/fec-search', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'profile', ...params }),
+    });
+  },
+  getSchedules: async (params: {
+    entity_id: string;
+    cycle: number;
+    schedule: 'schedule_a' | 'schedule_b' | 'schedule_e';
+    page?: number;
+    per_page?: number;
+  }): Promise<FECSchedulesResponse> => {
+    return apiRequest<FECSchedulesResponse>('/fec-search', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'schedules', entity_type: 'committee', ...params }),
     });
   },
 };
@@ -3021,6 +3102,7 @@ export const api = {
   congressBillsAutocomplete: congressBillsAutocompleteAPI,
   ldaSearch: ldaSearchAPI,
   ldaAutocomplete: ldaAutocompleteAPI,
+  fecSearch: fecSearchAPI,
   fileReturn: fileReturnAPI,
   filesystem: filesystemAPI,
   billing: {

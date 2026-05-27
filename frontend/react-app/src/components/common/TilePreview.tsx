@@ -11,6 +11,7 @@ import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
 import RollCallSearchTile from '../tiles/RollCallSearchTile';
 import LDASearchTile from '../tiles/LDASearchTile';
+import FECSearchTile from '../tiles/FECSearchTile';
 import { UnifiedTile } from '../../types/dashboardTypes';
 import { filesystemAPI } from '@/services/api';
 
@@ -456,6 +457,17 @@ const TilePreview: React.FC<TilePreviewProps> = ({
     customIcon: currentTile.customIcon,
   }), [commonProps, currentTile]);
 
+  const fecSearchProps = useMemo(
+    () => ({
+      ...commonProps,
+      searchParams: currentTile.searchParams,
+      results: (currentTile as { results?: unknown[] }).results,
+      customTitle: currentTile.customTitle,
+      isPinned: currentTile.isPinned,
+    }),
+    [commonProps, currentTile]
+  );
+
   return (
     <Box
       ref={containerRef}
@@ -512,6 +524,8 @@ const TilePreview: React.FC<TilePreviewProps> = ({
             <RollCallSearchTile key={currentTile.id} {...rollCallProps} />
           ) : currentTile.type === 'lda_disclosures' ? (
             <LDASearchTile key={currentTile.id} {...ldaSearchProps} />
+          ) : currentTile.type === 'fec_campaign_finance' ? (
+            <FECSearchTile key={currentTile.id} {...fecSearchProps} />
           ) : null}
         </Box>
       </Box>

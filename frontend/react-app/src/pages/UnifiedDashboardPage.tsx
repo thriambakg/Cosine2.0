@@ -144,6 +144,17 @@ const tileCategories: TileCategory[] = [
             color: '#dc2626',
             isAvailable: true,
             placeholder: false
+          },
+          {
+            id: 'fec_campaign_finance',
+            name: 'Campaign Finance',
+            description: 'Search FEC candidates and committees; view indexed profiles and committee schedule data',
+            category: 'government',
+            subcategory: 'trades',
+            icon: <AccountBalanceIcon />,
+            color: '#0d9488',
+            isAvailable: true,
+            placeholder: false
           }
         ]
       }
@@ -940,6 +951,8 @@ const UnifiedDashboardPage: React.FC = () => {
         await handleCreateRollCallTile();
       } else if (tileId === 'lda_disclosures') {
         await handleCreateLDASearchTile();
+      } else if (tileId === 'fec_campaign_finance') {
+        await handleCreateFECSearchTile();
       } else if (tileId === 'folder') {
         await handleCreateFolderTile();
       }
@@ -1481,6 +1494,31 @@ const UnifiedDashboardPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to create LDA search tile:', error);
+    }
+  };
+
+  const handleCreateFECSearchTile = async () => {
+    if (!activeTab || !user?.id) return;
+
+    const newTile = {
+      type: 'fec_campaign_finance' as const,
+      title: 'Campaign Finance',
+      displayOptions: { maxResults: 15 },
+      autoRefresh: false,
+      isPinned: false,
+      gridPosition: findNextAvailablePosition({ width: 6, height: 6 }),
+      gridSize: { width: 6, height: 6 },
+      searchParams: { q: '', cycle: new Date().getFullYear() % 2 === 0 ? new Date().getFullYear() : new Date().getFullYear() + 1 },
+      results: [],
+    };
+
+    try {
+      const response = await dashboardAPI.addTile(newTile, activeTab.id, user.id);
+      if (response.tile) {
+        updateTabTiles(activeTab.id, (currentTiles) => [...(currentTiles || []), response.tile as UnifiedTile]);
+      }
+    } catch (error) {
+      console.error('Failed to create FEC search tile:', error);
     }
   };
 

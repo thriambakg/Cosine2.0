@@ -236,6 +236,9 @@ module "api_gateway" {
     lda_autocomplete = {
       path_part = "lda-autocomplete"
     }
+    fec_search = {
+      path_part = "fec-search"
+    }
     billing_spending = {
       path_part = "billing-spending"
     }
@@ -641,6 +644,16 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    fec_search_post = {
+      resource_key            = "fec_search"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.fec_search_lambda.wrapper_function_arn != null ? module.fec_search_lambda.wrapper_function_arn : module.fec_search_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000
+      authorization_type      = "COGNITO_USER_POOLS"
+    }
     # GET method for billing spending
     billing_spending_get = {
       resource_key            = "billing_spending"
@@ -884,6 +897,11 @@ module "api_gateway" {
       function_arn  = module.lda_autocomplete_lambda.wrapper_function_arn != null ? module.lda_autocomplete_lambda.wrapper_function_arn : module.lda_autocomplete_lambda.function_arn
       http_method   = "POST"
       resource_path = "lda-autocomplete"
+    }
+    fec_search_post = {
+      function_arn  = module.fec_search_lambda.wrapper_function_arn != null ? module.fec_search_lambda.wrapper_function_arn : module.fec_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "fec-search"
     }
     billing_spending_get = {
       function_arn  = module.billing_spending_lambda.function_arn
@@ -3728,6 +3746,98 @@ resource "aws_iam_policy" "lda_autocomplete_s3_policy" {
       }
     ]
   })
+
+  tags = var.common_tags
+}
+
+# ==============================================================================
+# FEC CAMPAIGN FINANCE SEARCH API
+# ==============================================================================
+
+resource "aws_iam_policy" "fec_search_dynamodb_policy" {
+  name        = "${var.project_name}-fec-search-dynamodb-policy-${var.environment}"
+  description = "Policy for FEC Search Lambda to read fec-profiles table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.fec_profiles_table_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_policy" "fec_search_s3_policy" {
+  name        = "${var.project_name}-fec-search-s3-policy-${var.environment}"
+  description = "Policy for FEC Search Lambda to read schedule gzip JSON from fec-data bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_arn}/*"]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+module "fec_search_lambda" {
+  source = "./modules/lambda-sqs"
+
+  function_name = "${var.project_name}-fec-search-${var.environment}"
+  description   = "FEC campaign finance search, profile, and schedule API"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/fec_search/search"
+
+  environment_variables = {
+    ENVIRONMENT             = var.environment
+    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
+    FEC_API_BASE_URL        = "https://api.open.fec.gov/v1"
+    FEC_SECRET_NAME         = data.terraform_remote_state.base_infra.outputs.fec_api_secret_name
+    FEC_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.fec_profiles_table_name
+    FEC_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_name
+    REQUEST_TIMEOUT         = "30"
+    SEARCH_PER_PAGE         = "25"
+  }
+
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  additional_policy_arns = [
+    aws_iam_policy.fec_search_dynamodb_policy.arn,
+    aws_iam_policy.fec_search_s3_policy.arn,
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 300
+  sns_topic_name                 = "${var.project_name}-fec-search-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "FEC_SEARCH_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
 
   tags = var.common_tags
 }
