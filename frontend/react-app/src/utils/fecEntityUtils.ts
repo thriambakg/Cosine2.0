@@ -29,6 +29,12 @@ export type FECEntityContextData = FECSearchHit & {
   profile?: Record<string, unknown> | null;
   schedule_preview?: Record<string, unknown>[];
   schedule_meta?: string;
+  committee_id?: string;
+  schedule_keys?: {
+    schedule_a: string;
+    schedule_b: string;
+    schedule_e: string;
+  };
 };
 
 export function buildFECEntityContextData(
@@ -38,6 +44,12 @@ export function buildFECEntityContextData(
     profile?: Record<string, unknown> | null;
     schedule_preview?: Record<string, unknown>[];
     schedule_meta?: string;
+    committee_id?: string;
+    schedule_keys?: {
+      schedule_a: string;
+      schedule_b: string;
+      schedule_e: string;
+    };
   }
 ): FECEntityContextData {
   return {
@@ -46,6 +58,8 @@ export function buildFECEntityContextData(
     profile: extras?.profile ?? undefined,
     schedule_preview: extras?.schedule_preview,
     schedule_meta: extras?.schedule_meta,
+    committee_id: extras?.committee_id,
+    schedule_keys: extras?.schedule_keys,
   };
 }
 
@@ -84,7 +98,7 @@ export async function loadFECEntityDetails(
         cycle,
         schedule: 'schedule_a',
         page: 1,
-        per_page: 10,
+        per_page: 25,
       });
       if (sched.success && sched.results?.length) {
         schedule_preview = sched.results;
@@ -96,6 +110,14 @@ export async function loadFECEntityDetails(
       profile,
       schedule_preview,
       schedule_meta,
+      committee_id: committeeId,
+      schedule_keys: committeeId
+        ? {
+            schedule_a: `${cycle}/committee/${committeeId}/schedule_a.json.gz`,
+            schedule_b: `${cycle}/committee/${committeeId}/schedule_b.json.gz`,
+            schedule_e: `${cycle}/committee/${committeeId}/schedule_e.json.gz`,
+          }
+        : undefined,
     });
   } catch (err) {
     console.warn('FEC profile load failed:', err);

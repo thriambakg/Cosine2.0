@@ -10,8 +10,13 @@ import {
   TableHead,
   TableRow,
   Alert,
+  IconButton,
+  Tooltip,
+  CircularProgress,
 } from '@mui/material';
+import DownloadIcon from '@mui/icons-material/Download';
 import { formatFECMoney } from '../../utils/fecEntityUtils';
+import { fileReturnAPI } from '../../services/api';
 
 const scrollbarStyles = {
   '&::-webkit-scrollbar': { width: '8px' },
@@ -25,6 +30,7 @@ const scrollbarStyles = {
 interface FECEntityDetailsContentProps {
   itemData: Record<string, unknown>;
   title?: string;
+  userId?: string;
 }
 
 function labelize(key: string): string {
@@ -146,7 +152,11 @@ const FECFinancialChart: React.FC<{ totals: Record<string, unknown> }> = ({ tota
   );
 };
 
-const FECEntityDetailsContent: React.FC<FECEntityDetailsContentProps> = ({ itemData, title }) => {
+const FECEntityDetailsContent: React.FC<FECEntityDetailsContentProps> = ({
+  itemData,
+  title,
+  userId,
+}) => {
   const profile = (itemData.profile as Record<string, unknown> | undefined) || itemData;
   const totals =
     (profile.authorized_totals as Record<string, unknown> | undefined) ||
@@ -156,6 +166,10 @@ const FECEntityDetailsContent: React.FC<FECEntityDetailsContentProps> = ({ itemD
   const schedulePreview =
     (itemData.schedule_preview as Record<string, unknown>[] | undefined) || [];
   const scheduleMeta = itemData.schedule_meta as string | undefined;
+  const scheduleKeys =
+    (itemData.schedule_keys as
+      | { schedule_a: string; schedule_b: string; schedule_e: string }
+      | undefined) || undefined;
   const entityType = (itemData.entity_type as string) || (profile.entity_type as string);
   const entityId = (itemData.entity_id as string) || (profile.candidate_id as string);
   const cycle = itemData.cycle as number | undefined;
@@ -173,6 +187,48 @@ const FECEntityDetailsContent: React.FC<FECEntityDetailsContentProps> = ({ itemD
 
   const scalarFields = Object.entries(profile).filter(
     ([k, v]) => !skipKeys.has(k) && v !== null && typeof v !== 'object'
+  );
+  const scheduleColumns = React.useMemo(() => {
+    const keys = new Set<string>();
+    schedulePreview.forEach((row) => {
+      Object.keys(row).forEach((k) => keys.add(k));
+    });
+    return Array.from(keys);
+  }, [schedulePreview]);
+  const [downloadLoadingKey, setDownloadLoadingKey] = React.useState<string | null>(null);
+
+  const handleScheduleDownload = React.useCallback(
+    async (schedule: 'schedule_a' | 'schedule_b' | 'schedule_e') => {
+      if (!userId || !scheduleKeys) return;
+      const s3Key = scheduleKeys[schedule];
+      const filename = s3Key.split('/').pop() || `${schedule}.json.gz`;
+      setDownloadLoadingKey(schedule);
+      try {
+        const response = await fileReturnAPI.downloadFile({
+          user_id: userId,
+          session_id: '',
+          bucket: 'FEC_DATA',
+          s3_key: s3Key,
+          filename,
+        });
+        if (!response.success || !response.data?.download_url) {
+          throw new Error(response.error || 'Failed to generate download URL');
+        }
+        const link = document.createElement('a');
+        link.href = response.data.download_url;
+        link.download = filename;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        console.error('Failed to download schedule file:', err);
+      } finally {
+        setDownloadLoadingKey(null);
+      }
+    },
+    [userId, scheduleKeys]
   );
 
   return (
@@ -326,35 +382,107 @@ const FECEntityDetailsContent: React.FC<FECEntityDetailsContentProps> = ({ itemD
             border: '1px solid #374151',
           }}
         >
-          <Typography variant="h6" sx={{ color: '#3b82f6', mb: 1, fontWeight: 600 }}>
-            {scheduleMeta}
-          </Typography>
-          <TableContainer sx={{ maxHeight: 220 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 600 }}>
+              {scheduleMeta}
+            </Typography>
+            {scheduleKeys && (
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                {(['schedule_a', 'schedule_b', 'schedule_e'] as const).map((sched) => (
+                  <Tooltip key={sched} title={`Download ${sched}.json.gz`}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleScheduleDownload(sched)}
+                        disabled={!userId || downloadLoadingKey === sched}
+                        sx={{ color: '#3b82f6' }}
+                      >
+                        {downloadLoadingKey === sched ? (
+                          <CircularProgress size={14} sx={{ color: '#3b82f6' }} />
+                        ) : (
+                          <DownloadIcon fontSize="small" />
+                        )}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                ))}
+              </Box>
+            )}
+          </Box>
+          <TableContainer sx={{ maxHeight: 320 }}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ color: '#94a3b8', bgcolor: '#1e293b' }}>Amount</TableCell>
-                  <TableCell sx={{ color: '#94a3b8', bgcolor: '#1e293b' }}>Contributor</TableCell>
-                  <TableCell sx={{ color: '#94a3b8', bgcolor: '#1e293b' }}>Date</TableCell>
+                  {scheduleColumns.map((col) => (
+                    <TableCell
+                      key={col}
+                      sx={{ color: '#94a3b8', bgcolor: '#1e293b', whiteSpace: 'nowrap' }}
+                    >
+                      {labelize(col)}
+                    </TableCell>
+                  ))}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {schedulePreview.map((row, i) => (
                   <TableRow key={i}>
-                    <TableCell sx={{ color: '#e2e8f0' }}>
-                      {formatFECMoney(row.contribution_receipt_amount)}
-                    </TableCell>
-                    <TableCell sx={{ color: '#f8fafc' }}>
-                      {(row.contributor_name as string) || '—'}
-                    </TableCell>
-                    <TableCell sx={{ color: '#94a3b8', fontSize: '0.75rem' }}>
-                      {(row.contribution_receipt_date as string) || '—'}
-                    </TableCell>
+                    {scheduleColumns.map((col) => (
+                      <TableCell
+                        key={`${i}-${col}`}
+                        sx={{
+                          color: '#e2e8f0',
+                          maxWidth: 280,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          fontSize: '0.75rem',
+                        }}
+                        title={formatFieldValue(row[col])}
+                      >
+                        {formatFieldValue(row[col])}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </TableContainer>
+        </Box>
+      )}
+
+      {scheduleKeys && (!scheduleMeta || schedulePreview.length === 0) && (
+        <Box
+          sx={{
+            mb: 3,
+            p: 2,
+            backgroundColor: 'rgba(30, 41, 59, 0.5)',
+            borderRadius: '4px',
+            border: '1px solid #374151',
+          }}
+        >
+          <Typography variant="h6" sx={{ color: '#3b82f6', mb: 1, fontWeight: 600 }}>
+            Schedule files
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {(['schedule_a', 'schedule_b', 'schedule_e'] as const).map((sched) => (
+              <Tooltip key={`fallback-${sched}`} title={`Download ${sched}.json.gz`}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleScheduleDownload(sched)}
+                    disabled={!userId || downloadLoadingKey === sched}
+                    sx={{ color: '#3b82f6' }}
+                  >
+                    {downloadLoadingKey === sched ? (
+                      <CircularProgress size={14} sx={{ color: '#3b82f6' }} />
+                    ) : (
+                      <DownloadIcon fontSize="small" />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            ))}
+          </Box>
         </Box>
       )}
 

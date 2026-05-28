@@ -34,6 +34,7 @@ SEC_FILINGS_BUCKET = os.environ.get('SEC_FILINGS_BUCKET')
 POLITICIAN_TRADES_BUCKET = os.environ.get('POLITICIAN_TRADES_BUCKET')
 LDA_DISCLOSURES_BUCKET = os.environ.get('LDA_DISCLOSURES_BUCKET')
 CONGRESS_BILLS_BUCKET = os.environ.get('CONGRESS_BILLS_DATA_S3_BUCKET_NAME')
+FEC_DATA_BUCKET = os.environ.get('FEC_DATA_S3_BUCKET_NAME')
 SESSIONS_TABLE = os.environ.get('SESSIONS_TABLE')
 S3_BASE_URL = os.environ.get('S3_BASE_URL', 'https://cosine-chat-files-production.s3.amazonaws.com')
 USER_PROFILES_TABLE_NAME = os.environ.get('USER_PROFILES_TABLE_NAME')
@@ -249,6 +250,7 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
         # Check bucket name first to avoid misclassification (LDA and SEC both use 'filings/' prefix)
         is_filesys = False
         is_congress_bill = False
+        is_fec_data = False
         if bucket_name == 'SEC_FILINGS':
             is_sec_filing = True
             is_lda_disclosure = False
@@ -269,6 +271,13 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             is_lda_disclosure = False
             is_politician_trade = False
             is_congress_bill = True
+            is_fec_data = False
+        elif bucket_name == 'FEC_DATA':
+            is_sec_filing = False
+            is_lda_disclosure = False
+            is_politician_trade = False
+            is_congress_bill = False
+            is_fec_data = True
         else:
             # Fallback to S3 key pattern when bucket is not specified
             # Check for filesys path first (user's file system storage)
@@ -280,8 +289,10 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             is_sec_filing = s3_key and s3_key.startswith('filings/') and not is_lda_disclosure
             # Congress bills use 'billtext/' prefix
             is_congress_bill = s3_key and s3_key.startswith('billtext/')
+            # FEC schedule files use {cycle}/committee/{committee_id}/schedule_[a|b|e].json.gz
+            is_fec_data = bool(s3_key and '/committee/' in s3_key and s3_key.endswith('.json.gz'))
         
-        is_public_filing = is_sec_filing or is_lda_disclosure or is_politician_trade or is_congress_bill
+        is_public_filing = is_sec_filing or is_lda_disclosure or is_politician_trade or is_congress_bill or is_fec_data
         
         logger.info(f"🔍 File type detection: bucket={bucket_name}, s3_key={s3_key}, is_sec_filing={is_sec_filing}, is_lda_disclosure={is_lda_disclosure}, is_politician_trade={is_politician_trade}, is_congress_bill={is_congress_bill}, is_public_filing={is_public_filing}, is_filesys={is_filesys}")
         
@@ -496,6 +507,18 @@ def handle_file_download(event: Dict[str, Any], body: Dict[str, Any], authentica
             # Always derive filename from the requested S3 key
             filename = s3_key.split('/')[-1]
             logger.info(f"📄 Congress bill text download request: {s3_key} from bucket {target_bucket} for user {user_id}")
+        elif is_fec_data:
+            # FEC schedule data download - validate user but skip session access check (public indexed files)
+            if not s3_key or not filename:
+                return {
+                    'statusCode': 400,
+                    'headers': build_cors_headers(origin),
+                    'body': json.dumps({'error': 'Missing required parameters: s3_key, filename'})
+                }
+
+            target_bucket = FEC_DATA_BUCKET or S3_BUCKET
+            filename = s3_key.split('/')[-1]
+            logger.info(f"📄 FEC schedule download request: {s3_key} from bucket {target_bucket} for user {user_id}")
         else:
             # Chat session file download - require session validation
             if not filename:

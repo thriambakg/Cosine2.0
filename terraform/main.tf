@@ -2911,6 +2911,7 @@ module "file_return_lambda" {
     POLITICIAN_TRADES_BUCKET           = "cosine-politician-trades-${var.environment}"
     LDA_DISCLOSURES_BUCKET             = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
     CONGRESS_BILLS_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_name
+    FEC_DATA_S3_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_name
     SESSIONS_TABLE                     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
     # WebSocket endpoint removed to avoid circular dependency with websocket_api module
     # The file_return Lambda can discover the endpoint at runtime if needed
@@ -2932,7 +2933,8 @@ module "file_return_lambda" {
     aws_iam_policy.sec_search_s3_policy.arn,
     aws_iam_policy.politician_trades_s3_policy.arn,
     aws_iam_policy.lda_disclosures_s3_policy.arn,
-    aws_iam_policy.congress_bills_s3_policy.arn
+    aws_iam_policy.congress_bills_s3_policy.arn,
+    aws_iam_policy.fec_search_s3_policy.arn
   ]
 
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -3780,15 +3782,21 @@ resource "aws_iam_policy" "fec_search_dynamodb_policy" {
 
 resource "aws_iam_policy" "fec_search_s3_policy" {
   name        = "${var.project_name}-fec-search-s3-policy-${var.environment}"
-  description = "Policy for FEC Search Lambda to read schedule gzip JSON from fec-data bucket"
+  description = "Policy for FEC/search + file_return Lambdas to read/list fec-data schedule files"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = ["${data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_arn}/*"]
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_arn}/*"
+        ]
       }
     ]
   })

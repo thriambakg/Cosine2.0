@@ -2503,7 +2503,7 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
 
     // FEC campaign finance entity
     if (itemType === 'fec_entity' || (itemData?.entity_id && itemData?.entity_type)) {
-      return <FECEntityDetailsContent itemData={itemData} title={title} />;
+      return <FECEntityDetailsContent itemData={itemData} title={title} userId={user_id} />;
     }
 
     // LDA Disclosure
