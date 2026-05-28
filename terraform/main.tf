@@ -948,6 +948,7 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*",
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}-alpha-vantage-api-${var.environment}*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-fec-api-${var.environment}*",
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}-encryption-secret-${var.environment}*"
         ]
       },
