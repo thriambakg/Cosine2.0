@@ -13,6 +13,7 @@ import {
   Chip,
 } from '@mui/material';
 import { Close as CloseIcon, Search as SearchIcon } from '@mui/icons-material';
+import ApiErrorAlert from '../common/ApiErrorAlert';
 import { fecSearchAPI, FECSearchHit, FECSearchFilters } from '../../services/api';
 
 const DEFAULT_CYCLE =
@@ -45,7 +46,7 @@ const FECSearchTile: React.FC<FECSearchTileProps> = ({
   const [cycle, setCycle] = useState(initialParams?.cycle || DEFAULT_CYCLE);
   const [results, setResults] = useState<FECSearchHit[]>(initialResults || []);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
 
   const runSearch = useCallback(async () => {
     if (!query.trim()) return;
@@ -58,7 +59,8 @@ const FECSearchTile: React.FC<FECSearchTileProps> = ({
       setResults(hits);
       onUpdate(id, { searchParams: filters, results: hits });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Search failed');
+      console.error('FEC tile search failed:', e);
+      setError(e);
     } finally {
       setLoading(false);
     }
@@ -119,10 +121,10 @@ const FECSearchTile: React.FC<FECSearchTileProps> = ({
           Go
         </Button>
       </Box>
-      {error && (
-        <Typography variant="caption" color="error" sx={{ px: 1.5 }}>
-          {error}
-        </Typography>
+      {error != null && (
+        <Box sx={{ px: 1, pb: 1 }}>
+          <ApiErrorAlert title="Search failed" error={error} onClose={() => setError(null)} />
+        </Box>
       )}
       <Box sx={{ flex: 1, overflow: 'auto', px: 1 }}>
         <Table size="small">

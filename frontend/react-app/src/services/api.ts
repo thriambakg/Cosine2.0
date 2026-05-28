@@ -4,6 +4,11 @@
 import { API_CONFIG, logApiConfig } from '../config/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import axios from 'axios';
+import {
+  getAuthorizationBearer,
+  hasValidSessionTokens,
+  isTokenExpired,
+} from './cognitoAuth';
 import { DashboardTab, DashboardGroup } from '../types/dashboardTypes';
 
 const API_BASE_URL = API_CONFIG.BASE_URL;
@@ -13,6 +18,84 @@ export const getApiBaseUrl = (): string => API_BASE_URL;
 
 // Track if we're already redirecting to prevent multiple redirects
 let isRedirectingToLogin = false;
+
+export type ApiRequestOptions = RequestInit & {
+  userId?: string;
+  /** Do not redirect / auth-expired on 401/403 — throw ApiRequestError for the caller. */
+  skipAuthRedirect?: boolean;
+  /** Do not redirect when Cognito token is expired — throw ApiRequestError instead. */
+  skipTokenExpiryRedirect?: boolean;
+};
+
+/** Structured API failure (used when skipAuthRedirect is set). */
+export class ApiRequestError extends Error {
+  readonly status?: number;
+  readonly endpoint: string;
+  readonly url: string;
+  readonly responseData?: unknown;
+  readonly hadAuthHeader: boolean;
+  readonly isAuthError: boolean;
+
+  constructor(
+    message: string,
+    details: {
+      status?: number;
+      endpoint: string;
+      url: string;
+      responseData?: unknown;
+      hadAuthHeader: boolean;
+      isAuthError?: boolean;
+    }
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = details.status;
+    this.endpoint = details.endpoint;
+    this.url = details.url;
+    this.responseData = details.responseData;
+    this.hadAuthHeader = details.hadAuthHeader;
+    this.isAuthError = details.isAuthError ?? (details.status === 401 || details.status === 403);
+  }
+}
+
+/** Human-readable error text for UI (FEC search debug panel). */
+export function formatApiErrorDetail(error: unknown): string {
+  if (error instanceof ApiRequestError) {
+    const parts = [
+      error.message,
+      error.status != null ? `HTTP status: ${error.status}` : null,
+      `Endpoint: ${error.endpoint}`,
+      `URL: ${error.url}`,
+      `Authorization header: ${error.hadAuthHeader ? 'present' : 'missing'}`,
+      error.isAuthError
+        ? 'This looks like an auth/API Gateway issue (not a forced logout). Check Cognito token and that /fec-search is deployed.'
+        : null,
+    ];
+    if (error.responseData != null) {
+      try {
+        parts.push(`Response: ${JSON.stringify(error.responseData, null, 2)}`);
+      } catch {
+        parts.push(`Response: ${String(error.responseData)}`);
+      }
+    }
+    return parts.filter(Boolean).join('\n');
+  }
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const data = error.response?.data;
+    return [
+      error.message,
+      status != null ? `HTTP status: ${status}` : 'No HTTP response (network/CORS?)',
+      data != null ? `Response: ${JSON.stringify(data, null, 2)}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
 
 // Debug logging on import
 console.log('🚀 API Service initialized with:', {
@@ -29,137 +112,81 @@ const getHeaders = (userId?: string) => ({
 // Generic API request function
 export const apiRequest = async <T>(
   endpoint: string,
-  options: RequestInit & { userId?: string } = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> => {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+  const skipAuthRedirect = options.skipAuthRedirect === true;
+  const skipTokenExpiryRedirect =
+    options.skipTokenExpiryRedirect === true || skipAuthRedirect;
+
   console.log(`🌐 Making API request to: ${url}`);
-  
+
+  let hadAuthHeader = false;
+
   try {
-    // Attempt to fetch Cognito session and attach Bearer token
+    // Attempt to fetch Cognito session and attach Bearer token (shared cognitoAuth helper)
     let authHeader: Record<string, string> = {};
     try {
       const session = await fetchAuthSession();
-      const idToken = session.tokens?.idToken;
-      const accessToken = session.tokens?.accessToken;
-      
-      // Log token info for debugging
-      console.log('🔍 Token debug info:', {
-        hasIdToken: !!idToken,
-        hasAccessToken: !!accessToken,
-        idTokenType: idToken ? typeof idToken : 'none',
-        accessTokenType: accessToken ? typeof accessToken : 'none',
-        apiUrl: API_BASE_URL
-      });
-      
-      // Check if tokens are expired
-      if (idToken || accessToken) {
-        // Get the token that exists (prefer idToken)
-        const token = idToken || accessToken;
-        
-        // Check if token has expiration (JWT tokens have exp claim)
-        try {
-          // Try to access token expiration
-          // JWT tokens have a payload with an 'exp' claim (expiration timestamp in seconds)
-          let tokenExpired = false;
-          
-          // Check if token has a payload property with exp
-          if (token && typeof token === 'object' && 'payload' in token) {
-            const payload = (token as any).payload;
-            if (payload && typeof payload.exp === 'number') {
-              const expirationTime = payload.exp;
-              const currentTime = Math.floor(Date.now() / 1000);
-              
-              // If token is expired or expiring within 5 seconds, treat as expired
-              if (expirationTime <= currentTime + 5) {
-                tokenExpired = true;
-              }
-            }
-          }
-          
-          if (tokenExpired && !isRedirectingToLogin) {
-            console.warn('🔒 Cognito token expired or expiring soon - redirecting to login');
-            
-            // Set flag to prevent multiple redirects
-            isRedirectingToLogin = true;
-            
-            // Dispatch auth expired event
-            if (typeof window !== 'undefined') {
-              const authExpiredEvent = new CustomEvent('auth-expired', {
+
+      if (isTokenExpired(session)) {
+        if (skipTokenExpiryRedirect) {
+          throw new ApiRequestError('Cognito session token is expired or expiring soon', {
+            status: 401,
+            endpoint,
+            url,
+            hadAuthHeader: false,
+            isAuthError: true,
+          });
+        }
+        if (!isRedirectingToLogin) {
+          console.warn('🔒 Cognito token expired or expiring soon - redirecting to login');
+          isRedirectingToLogin = true;
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('auth-expired', {
                 detail: {
                   status: 401,
                   endpoint,
-                  message: 'Your session has expired. Please log in again.'
-                }
-              });
-              window.dispatchEvent(authExpiredEvent);
-              
-              // Redirect to login after cleanup
-              setTimeout(() => {
-                try {
-                  localStorage.removeItem('user');
-                  sessionStorage.clear();
-                } catch (e) {
-                  console.warn('Failed to clear storage:', e);
-                }
-                window.location.href = '/';
-              }, 500);
-            }
-            
-            // Throw error to stop the request
-            throw new Error('Token expired');
+                  message: 'Your session has expired. Please log in again.',
+                },
+              })
+            );
+            setTimeout(() => {
+              try {
+                localStorage.removeItem('user');
+                sessionStorage.clear();
+              } catch (e) {
+                console.warn('Failed to clear storage:', e);
+              }
+              window.location.href = '/';
+            }, 500);
           }
-        } catch (tokenCheckError: any) {
-          if (tokenCheckError.message === 'Token expired') {
-            throw tokenCheckError;
-          }
-          // If we can't check expiration, continue with the token
-          console.warn('Could not verify token expiration:', tokenCheckError);
+          throw new Error('Token expired');
         }
-        
-        // Extract JWT token string from Amplify token object
-        // In Amplify v6, tokens are objects with a toString() method that returns the JWT string
-        let bearer = '';
-        if (token) {
-          // Try toString() first (Amplify v6 pattern)
-          if (typeof token.toString === 'function') {
-            bearer = token.toString();
-          } 
-          // Fallback: check if token has a direct string property
-          else if (typeof token === 'string') {
-            bearer = token;
-          }
-          // Fallback: check for common token string properties
-          else if (token && typeof token === 'object') {
-            bearer = (token as any).tokenString || (token as any).toString?.() || String(token);
-          }
-          
-          // Log token info for debugging (without exposing the full token)
-          if (bearer) {
-            console.log('🔒 Using token for Authorization header:', {
-              tokenLength: bearer.length,
-              tokenPrefix: bearer.substring(0, 20) + '...',
-              tokenType: idToken ? 'idToken' : 'accessToken'
-            });
-          } else {
-            console.warn('🔒 Could not extract token string from token object:', token);
-          }
-        }
-        
-        if (bearer) {
-          authHeader = { Authorization: `Bearer ${bearer}` };
-        }
-      } else {
-        console.warn('🔒 No Cognito tokens found; proceeding without Authorization header');
       }
-    } catch (authErr: any) {
-      // Check if this is a token expiration error
-      if (authErr.message === 'Token expired') {
-        // Already handled above, just re-throw
+
+      const bearer = await getAuthorizationBearer();
+      if (bearer) {
+        authHeader = { Authorization: `Bearer ${bearer}` };
+        hadAuthHeader = true;
+      } else if (!hasValidSessionTokens(session)) {
+        console.warn('🔒 No Cognito tokens found; proceeding without Authorization header');
+        if (skipAuthRedirect) {
+          console.warn(
+            '🔒 skipAuthRedirect: continuing without token — API Gateway may return 401'
+          );
+        }
+      }
+    } catch (authErr: unknown) {
+      if (authErr instanceof ApiRequestError) {
         throw authErr;
       }
-      
-      // For other auth errors, log and continue (might be unauthenticated request)
+      const authMessage =
+        authErr instanceof Error ? authErr.message : String(authErr);
+      if (authMessage === 'Token expired') {
+        throw authErr;
+      }
       console.warn('🔒 Failed to fetch Cognito session; proceeding unauthenticated:', authErr);
     }
 
@@ -233,44 +260,86 @@ export const apiRequest = async <T>(
         data: error.response?.data
       });
       
-      // Handle authentication errors (401, 403) - token expired or unauthorized
-      if ((status === 401 || status === 403) && !isRedirectingToLogin) {
-        console.warn('🔒 Authentication error detected (401/403) - session expired, redirecting to login');
-        
-        // Set flag to prevent multiple redirects
-        isRedirectingToLogin = true;
-        
-        // Dispatch event to notify auth context to clear session
-        if (typeof window !== 'undefined') {
-          const authExpiredEvent = new CustomEvent('auth-expired', {
-            detail: {
+      const responseData = error.response?.data;
+      const apiMessage =
+        (responseData as { message?: string })?.message ||
+        (responseData as { error?: string })?.error ||
+        error.message;
+
+      if (status === 401 || status === 403) {
+        if (skipAuthRedirect) {
+          console.error('🔒 API auth error (skipAuthRedirect — not logging out):', {
+            status,
+            endpoint,
+            hadAuthHeader,
+            responseData,
+          });
+          throw new ApiRequestError(
+            apiMessage || `Request failed with status ${status}`,
+            {
               status,
               endpoint,
-              message: 'Your session has expired. Please log in again.'
+              url,
+              responseData,
+              hadAuthHeader,
+              isAuthError: true,
             }
-          });
-          window.dispatchEvent(authExpiredEvent);
-          
-          // Redirect to login page after a short delay to allow cleanup
-          setTimeout(() => {
-            // Clear any cached auth data
-            try {
-              localStorage.removeItem('user');
-              sessionStorage.clear();
-            } catch (e) {
-              console.warn('Failed to clear storage:', e);
-            }
-            
-            // Redirect to login
-            window.location.href = '/';
-          }, 500);
+          );
+        }
+        if (!isRedirectingToLogin) {
+          console.warn(
+            '🔒 Authentication error detected (401/403) - session expired, redirecting to login'
+          );
+          isRedirectingToLogin = true;
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('auth-expired', {
+                detail: {
+                  status,
+                  endpoint,
+                  message: 'Your session has expired. Please log in again.',
+                },
+              })
+            );
+            setTimeout(() => {
+              try {
+                localStorage.removeItem('user');
+                sessionStorage.clear();
+              } catch (e) {
+                console.warn('Failed to clear storage:', e);
+              }
+              window.location.href = '/';
+            }, 500);
+          }
         }
       }
-      
-      // Log API configuration for debugging
+
+      if (skipAuthRedirect) {
+        throw new ApiRequestError(apiMessage || `Request failed with status ${status}`, {
+          status,
+          endpoint,
+          url,
+          responseData,
+          hadAuthHeader,
+          isAuthError: false,
+        });
+      }
+
       logApiConfig();
     }
-    
+
+    if (skipAuthRedirect && !(error instanceof ApiRequestError)) {
+      throw new ApiRequestError(
+        error instanceof Error ? error.message : 'Network request failed',
+        {
+          endpoint,
+          url,
+          hadAuthHeader,
+          isAuthError: false,
+        }
+      );
+    }
+
     throw error;
   }
 };
@@ -1906,12 +1975,18 @@ export interface FECSchedulesResponse {
   error?: string;
 }
 
+const fecApiOptions: ApiRequestOptions = {
+  skipAuthRedirect: true,
+  skipTokenExpiryRedirect: true,
+};
+
 export const fecSearchAPI = {
   search: async (params: {
     filters: FECSearchFilters;
     limit?: number;
   }): Promise<FECSearchResponse> => {
     return apiRequest<FECSearchResponse>('/fec-search', {
+      ...fecApiOptions,
       method: 'POST',
       body: JSON.stringify({ action: 'search', filters: params.filters, limit: params.limit }),
     });
@@ -1922,6 +1997,7 @@ export const fecSearchAPI = {
     cycle: number;
   }): Promise<FECProfileResponse> => {
     return apiRequest<FECProfileResponse>('/fec-search', {
+      ...fecApiOptions,
       method: 'POST',
       body: JSON.stringify({ action: 'profile', ...params }),
     });
@@ -1934,6 +2010,7 @@ export const fecSearchAPI = {
     per_page?: number;
   }): Promise<FECSchedulesResponse> => {
     return apiRequest<FECSchedulesResponse>('/fec-search', {
+      ...fecApiOptions,
       method: 'POST',
       body: JSON.stringify({ action: 'schedules', entity_type: 'committee', ...params }),
     });

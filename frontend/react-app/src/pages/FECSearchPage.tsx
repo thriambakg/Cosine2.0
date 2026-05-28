@@ -21,6 +21,7 @@ import {
   TableContainer,
 } from '@mui/material';
 import { Search as SearchIcon } from '@mui/icons-material';
+import ApiErrorAlert from '../components/common/ApiErrorAlert';
 import {
   fecSearchAPI,
   FECSearchHit,
@@ -42,7 +43,7 @@ const FECSearchPage: React.FC = () => {
   const [cycle, setCycle] = useState<number>(DEFAULT_CYCLE);
   const [results, setResults] = useState<FECSearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
@@ -58,13 +59,14 @@ const FECSearchPage: React.FC = () => {
       const filters: FECSearchFilters = { q: query.trim(), cycle };
       const resp = await fecSearchAPI.search({ filters, limit: 25 });
       if (!resp.success) {
-        setError(resp.error || 'Search failed');
+        setError(new Error(resp.error || 'Search failed'));
         setResults([]);
         return;
       }
       setResults(resp.results || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Search failed');
+      console.error('FEC search failed:', e);
+      setError(e);
       setResults([]);
     } finally {
       setIsSearching(false);
@@ -85,7 +87,11 @@ const FECSearchPage: React.FC = () => {
         cycle,
       });
       if (!resp.success || !resp.result) {
-        setError(resp.error || 'Profile not indexed yet — run Glue indexing for this entity');
+        setError(
+          new Error(
+            resp.error || 'Profile not indexed yet — run Glue indexing for this entity'
+          )
+        );
         setProfile(null);
         return;
       }
@@ -114,7 +120,8 @@ const FECSearchPage: React.FC = () => {
         }
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load profile');
+      console.error('FEC profile load failed:', e);
+      setError(e);
     } finally {
       setProfileLoading(false);
     }
@@ -164,10 +171,12 @@ const FECSearchPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
+      {error != null && (
+        <ApiErrorAlert
+          title="FEC API error (session kept — details below)"
+          error={error}
+          onClose={() => setError(null)}
+        />
       )}
 
       <TableContainer component={Card} sx={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid #374151' }}>
