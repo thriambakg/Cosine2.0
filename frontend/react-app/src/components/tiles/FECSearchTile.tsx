@@ -47,9 +47,20 @@ interface FECSearchTileProps {
   onUpdate: (id: string, data: unknown) => void;
   onSettingsChange: (id: string, settings: unknown) => void;
   searchParams?: FECSearchFilters;
-  results?: FECSearchHit[];
+  results?: unknown[];
   customTitle?: string;
   isPinned?: boolean;
+}
+
+function isFECSearchHit(value: unknown): value is FECSearchHit {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  const entityType = v.entity_type;
+  return (
+    (entityType === 'candidate' || entityType === 'committee') &&
+    typeof v.entity_id === 'string' &&
+    typeof v.name === 'string'
+  );
 }
 
 const FECSearchTile: React.FC<FECSearchTileProps> = ({
@@ -64,7 +75,9 @@ const FECSearchTile: React.FC<FECSearchTileProps> = ({
   const { openItemDetails } = useDialogManagerHelpers();
   const [query, setQuery] = useState(initialParams?.q || '');
   const [cycle, setCycle] = useState(initialParams?.cycle || DEFAULT_FEC_CYCLE);
-  const [results, setResults] = useState<FECSearchHit[]>(initialResults || []);
+  const [results, setResults] = useState<FECSearchHit[]>(
+    (initialResults || []).filter(isFECSearchHit)
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown | null>(null);
   const [selectedHits, setSelectedHits] = useState<Set<string>>(new Set());
