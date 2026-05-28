@@ -265,6 +265,23 @@ export const TILE_CONFIGS: Record<string, TileTypeConfig> = {
     supportsResize: true,
     supportsDrag: true,
   },
+  fec_campaign_finance: {
+    sizeConstraints: {
+      minWidth: 4,
+      maxWidth: 10,
+      minHeight: 4,
+      maxHeight: 10,
+      defaultWidth: 6,
+      defaultHeight: 6,
+    },
+    defaultDisplayOptions: {
+      showResultsTable: true,
+      maxResults: 25,
+      compactView: false,
+    },
+    supportsResize: true,
+    supportsDrag: true,
+  },
   folder: {
     sizeConstraints: {
       minWidth: 3,

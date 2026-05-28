@@ -57,8 +57,10 @@ import {
   addBillToContext,
   addRollCallToContext,
   addLDAFilingToContext,
+  addFECEntityToContext,
   addStockToContext,
 } from '../tiles/common/contextManager';
+import FECEntityDetailsContent from './FECEntityDetailsContent';
 
 /** Legislative stages for Status of Legislation tracker (per BILLSTATUS XML User Guide). */
 const LEGISLATIVE_STAGES = [
@@ -194,7 +196,8 @@ export type ItemType =
   | 'politician_trade' 
   | 'congress_bill' 
   | 'roll_call' 
-  | 'lda_disclosure' 
+  | 'lda_disclosure'
+  | 'fec_entity'
   | 'stock_result' 
   | 'tile';
 
@@ -1038,6 +1041,9 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
         case 'lda_disclosure':
           addLDAFilingToContext(itemData);
           break;
+        case 'fec_entity':
+          addFECEntityToContext(itemData);
+          break;
         case 'stock_result':
           addStockToContext(
             itemData.symbol || 'Unknown',
@@ -1103,6 +1109,12 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
             ? `LDA Filing - ${itemData.registrant_name}${itemData.client_name ? ` / ${itemData.client_name}` : ''}`
             : 'LDA Filing';
           itemTypeForFiles = 'lda_disclosure';
+          break;
+        case 'fec_entity':
+          title = itemData.name
+            ? `${itemData.name}${itemData.cycle ? ` (${itemData.cycle})` : ''}`
+            : 'FEC Entity';
+          itemTypeForFiles = 'fec_entity';
           break;
         case 'stock_result':
           title = `${itemData.symbol || 'Stock'} - ${itemData.name || 'Stock Data'}`;
@@ -2487,6 +2499,11 @@ const ItemDetailsDialog: React.FC<ItemDetailsDialogProps> = ({
           )}
         </Box>
       );
+    }
+
+    // FEC campaign finance entity
+    if (itemType === 'fec_entity' || (itemData?.entity_id && itemData?.entity_type)) {
+      return <FECEntityDetailsContent itemData={itemData} title={title} />;
     }
 
     // LDA Disclosure

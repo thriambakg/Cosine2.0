@@ -2227,7 +2227,7 @@ export interface FilesystemAddContextItemRequest {
   folder_path?: string;
   context_data: any; // Full JSON object
   title: string;
-  item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'roll_call' | 'politician_trade' | 'govt_contract' | 'news_article' | 'stock_result';
+  item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'roll_call' | 'politician_trade' | 'govt_contract' | 'fec_entity' | 'news_article' | 'stock_result';
 }
 
 export interface FilesystemAddBulkContextItemsRequest {
@@ -2236,7 +2236,7 @@ export interface FilesystemAddBulkContextItemsRequest {
   items: Array<{
     context_data: any; // Full JSON object
     title: string;
-    item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'roll_call' | 'politician_trade' | 'govt_contract' | 'news_article' | 'stock_result';
+    item_type?: 'context_item' | 'tile' | 'sec_filing' | 'lda_disclosure' | 'congress_bill' | 'roll_call' | 'politician_trade' | 'govt_contract' | 'fec_entity' | 'news_article' | 'stock_result';
   }>;
 }
 
