@@ -2292,8 +2292,8 @@ module "cloudfront" {
   acm_certificate_arn = local.certificate_arn
   aliases             = var.cloudfront_aliases
 
-  # Enable WAF for security
-  create_waf            = true
+  # WAF disabled to reduce cost; API remains protected by Cognito + API Gateway throttling
+  create_waf            = false
   waf_rate_limit        = var.waf_rate_limit
   waf_blocked_countries = var.waf_blocked_countries
 
