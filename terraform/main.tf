@@ -2292,8 +2292,9 @@ module "cloudfront" {
   acm_certificate_arn = local.certificate_arn
   aliases             = var.cloudfront_aliases
 
-  # WAF disabled to reduce cost; API remains protected by Cognito + API Gateway throttling
+  # Match RDI: no WAF, no access logs (each creates a KMS key + S3 bucket that bill at idle)
   create_waf            = false
+  enable_logging        = false
   waf_rate_limit        = var.waf_rate_limit
   waf_blocked_countries = var.waf_blocked_countries
 
