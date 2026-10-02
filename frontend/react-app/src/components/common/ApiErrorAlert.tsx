@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert, Box, Typography } from '@mui/material';
 import { formatApiErrorDetail } from '../../services/api';
 
+
 interface ApiErrorAlertProps {
   title?: string;
   error: unknown;
