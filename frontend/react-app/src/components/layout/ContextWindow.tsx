@@ -217,7 +217,7 @@ const ContextWindow: React.FC<ContextWindowProps> = ({
         
         // CRITICAL: For data-rich context items (LDA filings, SEC filings, contracts, bills, trades, etc.), preserve FULL data
         // These items contain structured data that the AI agent needs to analyze
-        const dataRichTypes = ['lda_filing', 'sec_filing', 'govt_contract_award', 'congress_bill', 'politician_trade', 'stock_data'];
+        const dataRichTypes = ['lda_filing', 'sec_filing', 'govt_contract_award', 'congress_bill', 'politician_trade', 'fec_entity', 'stock_data'];
         if (dataRichTypes.includes(item.type)) {
           console.log('🔍 ContextWindow: Preserving full data for data-rich item:', {
             id: item.id,

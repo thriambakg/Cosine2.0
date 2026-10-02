@@ -127,6 +127,13 @@ const defaultNavigationItems: NavigationItem[] = [
     category: 'government_data'
   },
   {
+    id: 'fec-search',
+    label: 'Campaign Finance',
+    path: '/fec-search',
+    icon: 'AccountBalanceIcon',
+    category: 'government_data'
+  },
+  {
     id: 'news-search',
     label: 'News Search',
     path: '/news-search',

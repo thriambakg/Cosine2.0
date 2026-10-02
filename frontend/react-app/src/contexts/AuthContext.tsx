@@ -13,9 +13,14 @@ import {
   updateUserAttributes,
   deleteUser,
   signInWithRedirect,
+  fetchAuthSession,
   AuthUser
 } from 'aws-amplify/auth';
 import { dashboardAPI } from '../services/api';
+import {
+  getAuthorizationBearer,
+  hasValidSessionTokens,
+} from '../services/cognitoAuth';
 
 export interface User {
   id: string;
@@ -96,57 +101,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initializeAuth();
   }, []);
 
-  // Listen for auth state changes (e.g., after email verification) and auto-login
+  // Poll for verified user after signup (only when no app user and valid Cognito tokens exist)
   useEffect(() => {
-    // Poll for auth state changes every 2 seconds when user is not authenticated
-    // This allows auto-login after email verification if the tab is still open
-    if (!user && typeof window !== 'undefined') {
-      console.log('🔄 AuthContext: Starting auth polling (checking every 2s for verified user)');
-      const checkAuthInterval = setInterval(async () => {
-        try {
-          const cognitoUser = await getCurrentUser();
-          if (cognitoUser) {
-            // Check if the user is verified before auto-logging in
-            const attributes = await fetchUserAttributes();
-            const isVerified = attributes.email_verified === 'true';
-            
-            console.log('🔄 AuthContext: Polling detected user:', {
-              userId: cognitoUser.userId,
-              email: attributes.email,
-              email_verified: attributes.email_verified,
-              isVerified
-            });
-            
-            if (isVerified) {
-              console.log('✅ AuthContext: User is verified! Auto-logging in...');
-              const userData = await convertCognitoUser(cognitoUser);
-              setUser(userData);
-              setAuthError(null);
-              console.log('✅ AuthContext: Auto-login complete, user:', userData.email);
-              clearInterval(checkAuthInterval);
-            } else {
-              console.log('⏳ AuthContext: User exists but email_verified=false, continuing to poll...');
-            }
-          } else {
-            // Only log every 10th poll to avoid spam
-            if (Math.random() < 0.1) {
-              console.log('🔄 AuthContext: Polling - no authenticated user yet');
-            }
-          }
-        } catch (error) {
-          // User still not authenticated or not verified, continue polling
-          // Only log every 10th poll to avoid spam
-          if (Math.random() < 0.1) {
-            console.log('🔄 AuthContext: Polling error:', error instanceof Error ? error.message : error);
-          }
-        }
-      }, 2000);
-      
-      return () => {
-        console.log('🔄 AuthContext: Stopping auth polling');
+    if (user || typeof window === 'undefined') return;
+
+    let staleSessionSignOutDone = false;
+    let pollCount = 0;
+    const maxPolls = 90; // ~3 minutes
+
+    const checkAuthInterval = setInterval(async () => {
+      pollCount += 1;
+      if (pollCount > maxPolls) {
         clearInterval(checkAuthInterval);
-      };
-    }
+        return;
+      }
+
+      try {
+        const session = await fetchAuthSession();
+        if (!hasValidSessionTokens(session)) {
+          return;
+        }
+
+        const bearer = await getAuthorizationBearer();
+        if (!bearer) {
+          return;
+        }
+
+        const cognitoUser = await getCurrentUser();
+        if (!cognitoUser) {
+          return;
+        }
+
+        let attributes: Awaited<ReturnType<typeof fetchUserAttributes>>;
+        try {
+          attributes = await fetchUserAttributes();
+        } catch {
+          // Stale partial session: getCurrentUser without valid attributes — clear once
+          if (!staleSessionSignOutDone) {
+            staleSessionSignOutDone = true;
+            try {
+              await signOut();
+            } catch {
+              /* ignore */
+            }
+          }
+          return;
+        }
+
+        if (attributes.email_verified !== 'true') {
+          return;
+        }
+
+        const userData = await convertCognitoUser(cognitoUser);
+        setUser(userData);
+        setAuthError(null);
+        clearInterval(checkAuthInterval);
+      } catch {
+        // Not authenticated yet — keep polling quietly
+      }
+    }, 2000);
+
+    return () => clearInterval(checkAuthInterval);
   }, [user]);
 
   // Listen for auth expiration events from API calls (401/403 errors)
@@ -392,11 +407,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // Don't set global loading for login attempts as it interferes with modal UX
       // setIsLoading(true);
-      
-      const result = await signIn({ 
-        username: email.toLowerCase().trim(), 
-        password 
-      });
+
+      const username = email.toLowerCase().trim();
+      let result;
+      try {
+        result = await signIn({ username, password });
+      } catch (signInError: unknown) {
+        const err = signInError as { name?: string; message?: string };
+        const alreadySignedIn =
+          err.name === 'UserAlreadyAuthenticatedException' ||
+          (err.message || '').toLowerCase().includes('already a signed in user');
+
+        if (alreadySignedIn) {
+          // Complete login from existing session instead of failing
+          const cognitoUser = await getCurrentUser();
+          if (cognitoUser) {
+            const userData = await convertCognitoUser(cognitoUser);
+            setUser(userData);
+            setAuthError(null);
+            return { success: true };
+          }
+          // Broken session — sign out and retry once
+          try {
+            await signOut();
+          } catch {
+            /* ignore */
+          }
+          result = await signIn({ username, password });
+        } else {
+          throw signInError;
+        }
+      }
       
       console.log('Sign-in result:', result);
       

@@ -26,6 +26,7 @@ import NewsSearchPage from './pages/NewsSearchPage';
 import GovtContractsSearchPage from './pages/GovtContractsSearchPage';
 import CongressBillsSearchPage from './pages/CongressBillsSearchPage';
 import LDASearchPage from './pages/LDASearchPage';
+import FECSearchPage from './pages/FECSearchPage';
 import StockScreenerSearchPage from './pages/StockScreenerSearchPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import SupportMePage from './pages/SupportMePage';
@@ -137,6 +138,11 @@ function AppContent() {
               <Route path="/lda-search" element={
                 <ProtectedRoute>
                   <LDASearchPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/fec-search" element={
+                <ProtectedRoute>
+                  <FECSearchPage />
                 </ProtectedRoute>
               } />
               <Route path="/stock-screener-search" element={

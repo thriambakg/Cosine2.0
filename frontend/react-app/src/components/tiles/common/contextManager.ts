@@ -27,7 +27,7 @@ export function getS3BucketNames(): {
 
 export interface ContextItem {
   id: string;
-  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'roll_call' | 'lda_filing' | 'custom' | 'filesystem';
+  type: 'tile' | 'article' | 'chart' | 'chat' | 'stock_data' | 'sec_filing' | 'politician_trade' | 'govt_contract_award' | 'congress_bill' | 'roll_call' | 'lda_filing' | 'fec_entity' | 'custom' | 'filesystem';
   title: string;
   subtitle?: string;
   data: any;
@@ -1377,6 +1377,63 @@ export const addMultipleLDAFilingsToContext = (
 };
 
 /**
+ * Add an FEC candidate/committee entity to the context window
+ */
+export const addFECEntityToContext = (entity: any): void => {
+  const entityId = entity.entity_id || `fec_${Date.now()}`;
+  const cycle = entity.cycle ? ` · ${entity.cycle}` : '';
+  const title = `${entity.name || 'FEC Entity'}${cycle}`;
+  const subtitleParts: string[] = [];
+  if (entity.entity_type) subtitleParts.push(entity.entity_type);
+  if (entity.party) subtitleParts.push(entity.party);
+  if (entity.state) subtitleParts.push(entity.state);
+  if (entity.subtitle) subtitleParts.push(entity.subtitle);
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Campaign Finance';
+
+  const contextItem: ContextItem = {
+    id: `fec_entity_${entityId}_${Date.now()}`,
+    type: 'fec_entity',
+    title,
+    subtitle,
+    data: entity,
+    timestamp: Date.now(),
+  };
+
+  window.dispatchEvent(
+    new CustomEvent('add-to-sidebar-context', { detail: contextItem })
+  );
+};
+
+/**
+ * Add multiple FEC entities to the context window
+ */
+export const addMultipleFECEntitiesToContext = (entities: any[]): void => {
+  const contextItems: ContextItem[] = entities.map((entity) => {
+    const entityId = entity.entity_id || `fec_${Date.now()}_${Math.random()}`;
+    const cycle = entity.cycle ? ` · ${entity.cycle}` : '';
+    const title = `${entity.name || 'FEC Entity'}${cycle}`;
+    const subtitleParts: string[] = [];
+    if (entity.entity_type) subtitleParts.push(entity.entity_type);
+    if (entity.party) subtitleParts.push(entity.party);
+    if (entity.state) subtitleParts.push(entity.state);
+    const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' • ') : 'Campaign Finance';
+
+    return {
+      id: `fec_entity_${entityId}_${Date.now()}_${Math.random()}`,
+      type: 'fec_entity' as const,
+      title,
+      subtitle,
+      data: entity,
+      timestamp: Date.now(),
+    };
+  });
+
+  window.dispatchEvent(
+    new CustomEvent('add-multiple-to-sidebar-context', { detail: contextItems })
+  );
+};
+
+/**
  * Extract tile data for context
  * This function prepares tile data for context INCLUDING backend data
  * Note: This only extracts frontend properties. For actual API data,
@@ -1407,7 +1464,7 @@ export const extractTileData = (tile: any): TileContextData => {
   }
 
   // Add search params and filter settings for politician trades, SEC, government contracts, congress bills, and LDA disclosures tiles
-  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills' || tile.type === 'congress_roll_calls' || tile.type === 'lda_disclosures') {
+  if (tile.type === 'politician_trades' || tile.type === 'sec_search' || tile.type === 'govt_contracts' || tile.type === 'congress_bills' || tile.type === 'congress_roll_calls' || tile.type === 'lda_disclosures' || tile.type === 'fec_campaign_finance') {
     return {
       ...baseData,
       searchParams: tile.searchParams, // Search parameters (politicians, securities, dates, etc.)

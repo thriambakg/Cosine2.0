@@ -31,6 +31,9 @@ export const SEARCH_PAGE_CONFIGS: Record<string, SearchPageBatchConfig> = {
   'lda_search': {
     batchSize: DEFAULT_SEARCH_PAGE_BATCH_SIZE,
   },
+  'fec_search': {
+    batchSize: 25,
+  },
   'congress_bills': {
     batchSize: DEFAULT_SEARCH_PAGE_BATCH_SIZE,
   },

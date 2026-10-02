@@ -105,11 +105,13 @@ locals {
 
   # Message retention: default 14 days (1209600 seconds)
   sqs_message_retention = var.sqs_message_retention_seconds != null ? var.sqs_message_retention_seconds : 1209600
+
+  create_dlq = var.enable_sqs && var.sqs_enable_dlq
 }
 
 # Dead Letter Queue (optional)
 resource "aws_sqs_queue" "dlq" {
-  count = var.sqs_enable_dlq ? 1 : 0
+  count = local.create_dlq ? 1 : 0
 
   name                       = var.sqs_fifo_queue ? "${replace(local.sqs_queue_name, ".fifo", "")}-dlq.fifo" : "${local.sqs_queue_name}-dlq"
   message_retention_seconds  = var.sqs_dlq_message_retention_seconds != null ? var.sqs_dlq_message_retention_seconds : local.sqs_message_retention
@@ -132,6 +134,8 @@ resource "aws_sqs_queue" "dlq" {
 
 # Main SQS Queue
 resource "aws_sqs_queue" "main" {
+  count = var.enable_sqs ? 1 : 0
+
   name                       = local.sqs_queue_name
   message_retention_seconds  = local.sqs_message_retention
   visibility_timeout_seconds = local.sqs_visibility_timeout
@@ -140,7 +144,7 @@ resource "aws_sqs_queue" "main" {
   receive_wait_time_seconds  = var.sqs_receive_wait_time_seconds != null ? var.sqs_receive_wait_time_seconds : 0
 
   # Dead Letter Queue configuration
-  redrive_policy = var.sqs_enable_dlq ? jsonencode({
+  redrive_policy = local.create_dlq ? jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq[0].arn
     maxReceiveCount     = var.sqs_max_receive_count != null ? var.sqs_max_receive_count : 3
   }) : null
@@ -162,9 +166,9 @@ resource "aws_sqs_queue" "main" {
 
 # SQS Queue Policy: only wrapper can send, only root Lambda can receive (least privilege)
 resource "aws_sqs_queue_policy" "main" {
-  count = var.enable_wrapper_lambda ? 1 : 0
+  count = var.enable_sqs && var.enable_wrapper_lambda ? 1 : 0
 
-  queue_url = aws_sqs_queue.main.id
+  queue_url = aws_sqs_queue.main[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -176,7 +180,7 @@ resource "aws_sqs_queue_policy" "main" {
           AWS = aws_iam_role.wrapper_execution_role[0].arn
         }
         Action   = ["sqs:SendMessage"]
-        Resource = aws_sqs_queue.main.arn
+        Resource = aws_sqs_queue.main[0].arn
       },
       {
         Sid    = "AllowRootReceive"
@@ -190,7 +194,7 @@ resource "aws_sqs_queue_policy" "main" {
           "sqs:GetQueueAttributes",
           "sqs:ChangeMessageVisibility"
         ]
-        Resource = aws_sqs_queue.main.arn
+        Resource = aws_sqs_queue.main[0].arn
       }
     ]
   })
@@ -198,6 +202,8 @@ resource "aws_sqs_queue_policy" "main" {
 
 # IAM Policy for Lambda to read from SQS
 resource "aws_iam_policy" "sqs_read_policy" {
+  count = var.enable_sqs ? 1 : 0
+
   name        = "${var.function_name}-sqs-read-policy"
   description = "Policy for ${var.function_name} Lambda to read from SQS queue"
 
@@ -214,11 +220,11 @@ resource "aws_iam_policy" "sqs_read_policy" {
             "sqs:ChangeMessageVisibility"
           ]
           Resource = [
-            aws_sqs_queue.main.arn
+            aws_sqs_queue.main[0].arn
           ]
         }
       ],
-      var.sqs_enable_dlq ? [
+      local.create_dlq ? [
         {
           Effect = "Allow"
           Action = [
@@ -250,15 +256,17 @@ resource "aws_iam_policy" "sqs_read_policy" {
 
 # Attach SQS read policy to Lambda execution role
 resource "aws_iam_role_policy_attachment" "sqs_read_policy" {
+  count = var.enable_sqs ? 1 : 0
+
   role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = aws_iam_policy.sqs_read_policy.arn
+  policy_arn = aws_iam_policy.sqs_read_policy[0].arn
 }
 
 # Event Source Mapping: SQS Queue -> Lambda Function
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
-  count = var.sqs_enable_event_source_mapping ? 1 : 0
+  count = var.enable_sqs && var.sqs_enable_event_source_mapping ? 1 : 0
 
-  event_source_arn                   = aws_sqs_queue.main.arn
+  event_source_arn                   = aws_sqs_queue.main[0].arn
   function_name                      = aws_lambda_function.function.function_name
   batch_size                         = var.sqs_batch_size != null ? var.sqs_batch_size : 1
   maximum_batching_window_in_seconds = var.sqs_max_batching_window_seconds != null ? var.sqs_max_batching_window_seconds : 0
@@ -356,7 +364,7 @@ resource "aws_iam_role_policy_attachment" "wrapper_basic_execution" {
 
 # IAM Policy for Wrapper Lambda to send messages to SQS only (no receive/list)
 resource "aws_iam_policy" "wrapper_sqs_send_policy" {
-  count = var.enable_wrapper_lambda ? 1 : 0
+  count = var.enable_sqs && var.enable_wrapper_lambda ? 1 : 0
 
   name        = "${local.wrapper_function_name}-sqs-send-policy"
   description = "Policy for ${local.wrapper_function_name} to send messages to SQS queue only"
@@ -368,7 +376,7 @@ resource "aws_iam_policy" "wrapper_sqs_send_policy" {
         {
           Effect   = "Allow"
           Action   = ["sqs:SendMessage"]
-          Resource = [aws_sqs_queue.main.arn]
+          Resource = [aws_sqs_queue.main[0].arn]
         }
       ],
       var.kms_key_id != null ? [
@@ -413,7 +421,7 @@ resource "aws_iam_policy" "wrapper_lambda_invoke_policy" {
 
 # Attach policies to wrapper execution role (SQS send + Lambda invoke only; no SNS - wrapper is invoked by SNS)
 resource "aws_iam_role_policy_attachment" "wrapper_sqs_send_policy" {
-  count = var.enable_wrapper_lambda ? 1 : 0
+  count = var.enable_sqs && var.enable_wrapper_lambda ? 1 : 0
 
   role       = aws_iam_role.wrapper_execution_role[0].name
   policy_arn = aws_iam_policy.wrapper_sqs_send_policy[0].arn
@@ -443,7 +451,7 @@ resource "aws_lambda_function" "wrapper" {
 
   environment {
     variables = {
-      SQS_QUEUE_URL        = aws_sqs_queue.main.url
+      SQS_QUEUE_URL        = var.enable_sqs ? aws_sqs_queue.main[0].url : ""
       SNS_TOPIC_ARN        = aws_sns_topic.completion[0].arn
       WORKER_FUNCTION_NAME = aws_lambda_function.function.function_name
       RESPONSE_TABLE_NAME  = var.response_table_name != null ? var.response_table_name : ""

@@ -46,75 +46,75 @@ output "deployment_package_path" {
 # ============================================================================
 
 output "sqs_queue_name" {
-  description = "Name of the SQS queue"
-  value       = aws_sqs_queue.main.name
+  description = "Name of the SQS queue (null if SQS not enabled)"
+  value       = var.enable_sqs ? aws_sqs_queue.main[0].name : null
 }
 
 output "sqs_queue_arn" {
-  description = "ARN of the SQS queue"
-  value       = aws_sqs_queue.main.arn
+  description = "ARN of the SQS queue (null if SQS not enabled)"
+  value       = var.enable_sqs ? aws_sqs_queue.main[0].arn : null
 }
 
 output "sqs_queue_url" {
-  description = "URL of the SQS queue"
-  value       = aws_sqs_queue.main.url
+  description = "URL of the SQS queue (null if SQS not enabled)"
+  value       = var.enable_sqs ? aws_sqs_queue.main[0].url : null
 }
 
 output "sqs_queue_id" {
-  description = "ID of the SQS queue"
-  value       = aws_sqs_queue.main.id
+  description = "ID of the SQS queue (null if SQS not enabled)"
+  value       = var.enable_sqs ? aws_sqs_queue.main[0].id : null
 }
 
 output "sqs_dlq_name" {
   description = "Name of the dead letter queue (null if DLQ not enabled)"
-  value       = var.sqs_enable_dlq ? aws_sqs_queue.dlq[0].name : null
+  value       = local.create_dlq ? aws_sqs_queue.dlq[0].name : null
 }
 
 output "sqs_dlq_arn" {
   description = "ARN of the dead letter queue (null if DLQ not enabled)"
-  value       = var.sqs_enable_dlq ? aws_sqs_queue.dlq[0].arn : null
+  value       = local.create_dlq ? aws_sqs_queue.dlq[0].arn : null
 }
 
 output "sqs_dlq_url" {
   description = "URL of the dead letter queue (null if DLQ not enabled)"
-  value       = var.sqs_enable_dlq ? aws_sqs_queue.dlq[0].url : null
+  value       = local.create_dlq ? aws_sqs_queue.dlq[0].url : null
 }
 
 output "sqs_dlq_id" {
   description = "ID of the dead letter queue (null if DLQ not enabled)"
-  value       = var.sqs_enable_dlq ? aws_sqs_queue.dlq[0].id : null
+  value       = local.create_dlq ? aws_sqs_queue.dlq[0].id : null
 }
 
 output "sqs_read_policy_arn" {
-  description = "ARN of the IAM policy for Lambda to read from SQS"
-  value       = aws_iam_policy.sqs_read_policy.arn
+  description = "ARN of the IAM policy for Lambda to read from SQS (null if SQS not enabled)"
+  value       = var.enable_sqs ? aws_iam_policy.sqs_read_policy[0].arn : null
 }
 
 output "sqs_event_source_mapping_id" {
   description = "ID of the event source mapping connecting SQS to Lambda (null if event source mapping not enabled)"
-  value       = var.sqs_enable_event_source_mapping ? aws_lambda_event_source_mapping.sqs_trigger[0].id : null
+  value       = length(aws_lambda_event_source_mapping.sqs_trigger) > 0 ? aws_lambda_event_source_mapping.sqs_trigger[0].id : null
 }
 
 output "sqs_event_source_mapping_uuid" {
   description = "UUID of the event source mapping connecting SQS to Lambda (null if event source mapping not enabled)"
-  value       = var.sqs_enable_event_source_mapping ? aws_lambda_event_source_mapping.sqs_trigger[0].uuid : null
+  value       = length(aws_lambda_event_source_mapping.sqs_trigger) > 0 ? aws_lambda_event_source_mapping.sqs_trigger[0].uuid : null
 }
 
 # Queue attributes for reference
 output "sqs_queue_attributes" {
-  description = "Map of SQS queue attributes"
-  value = {
-    name                        = aws_sqs_queue.main.name
-    arn                         = aws_sqs_queue.main.arn
-    url                         = aws_sqs_queue.main.url
-    message_retention_seconds   = aws_sqs_queue.main.message_retention_seconds
-    visibility_timeout_seconds  = aws_sqs_queue.main.visibility_timeout_seconds
-    delay_seconds               = aws_sqs_queue.main.delay_seconds
-    max_message_size            = aws_sqs_queue.main.max_message_size
-    receive_wait_time_seconds   = aws_sqs_queue.main.receive_wait_time_seconds
-    fifo_queue                  = aws_sqs_queue.main.fifo_queue
-    content_based_deduplication = aws_sqs_queue.main.content_based_deduplication
-  }
+  description = "Map of SQS queue attributes (null if SQS not enabled)"
+  value = var.enable_sqs ? {
+    name                        = aws_sqs_queue.main[0].name
+    arn                         = aws_sqs_queue.main[0].arn
+    url                         = aws_sqs_queue.main[0].url
+    message_retention_seconds   = aws_sqs_queue.main[0].message_retention_seconds
+    visibility_timeout_seconds  = aws_sqs_queue.main[0].visibility_timeout_seconds
+    delay_seconds               = aws_sqs_queue.main[0].delay_seconds
+    max_message_size            = aws_sqs_queue.main[0].max_message_size
+    receive_wait_time_seconds   = aws_sqs_queue.main[0].receive_wait_time_seconds
+    fifo_queue                  = aws_sqs_queue.main[0].fifo_queue
+    content_based_deduplication = aws_sqs_queue.main[0].content_based_deduplication
+  } : null
 }
 
 # ============================================================================

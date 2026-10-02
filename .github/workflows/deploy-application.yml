@@ -362,9 +362,27 @@ jobs:
           # If build was skipped, only plan the ECR repository (not Lambda function)
           if [ "$BUILD_SKIPPED" = "true" ]; then
             echo "⏭️ Build was skipped - planning only ECR repository and dependencies (excluding Lambda function)"
-            terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr
+            # Targeted plans must cover pending address moves (lambda-sqs queues gained count = enable_sqs)
+            SQS_TARGETS=$({ terraform state list | grep -E '^module\.[^.]+\.(aws_sqs_queue|aws_sqs_queue_policy|aws_lambda_event_source_mapping|aws_iam_policy|aws_iam_role_policy_attachment)\.(main|dlq|sqs_trigger|sqs_read_policy|wrapper_sqs_send_policy)(\[[0-9]+\])?$' || true; } | sed -E 's/\[[0-9]+\]$//' | sort -u | sed 's/^/-target=/' | tr '\n' ' ')
+            terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr $SQS_TARGETS
           else
             terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars"
+          fi
+
+      # Terraform updates the function configuration before its code, and AWS rejects
+      # configuration updates while the function's current image is missing from ECR.
+      - name: Point Chat Agent Lambda at New Image
+        if: needs.build-chat-agent-container.outputs.build-skipped != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop')
+        env:
+          FUNCTION_NAME: cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}
+          IMAGE_URI: ${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}
+        run: |
+          if [ -n "$IMAGE_URI" ] && aws lambda get-function --function-name "$FUNCTION_NAME" > /dev/null 2>&1; then
+            aws lambda update-function-code --function-name "$FUNCTION_NAME" --image-uri "$IMAGE_URI" > /dev/null
+            aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+            echo "✅ $FUNCTION_NAME now uses $IMAGE_URI"
+          else
+            echo "⏭️ Function or image not available - skipping"
           fi
           
       - name: Run Terraform Apply
@@ -380,7 +398,8 @@ jobs:
           if [ "$BUILD_SKIPPED" = "true" ]; then
             echo "⏭️ Build was skipped - applying only ECR repository and dependencies (excluding Lambda function)"
             echo "💡 Lambda function will be created on the next pipeline run after the image is built"
-            terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr -auto-approve
+            SQS_TARGETS=$({ terraform state list | grep -E '^module\.[^.]+\.(aws_sqs_queue|aws_sqs_queue_policy|aws_lambda_event_source_mapping|aws_iam_policy|aws_iam_role_policy_attachment)\.(main|dlq|sqs_trigger|sqs_read_policy|wrapper_sqs_send_policy)(\[[0-9]+\])?$' || true; } | sed -E 's/\[[0-9]+\]$//' | sort -u | sed 's/^/-target=/' | tr '\n' ' ')
+            terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr $SQS_TARGETS -auto-approve
           else
             terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -auto-approve
           fi
@@ -389,7 +408,7 @@ jobs:
     name: 'Update Lambda Container Image'
     runs-on: ubuntu-latest
     needs: [determine-environment, build-chat-agent-container, deploy-application]
-    if: ${{ !github.event.inputs.destroy && needs.deploy-application.result == 'success' }}
+    if: ${{ !github.event.inputs.destroy && needs.deploy-application.result == 'success' && needs.build-chat-agent-container.outputs.build-skipped != 'true' }}
     
     steps:
       - name: Checkout Repository

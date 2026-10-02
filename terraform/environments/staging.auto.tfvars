@@ -61,3 +61,7 @@ lambda_provisioned_concurrency_default = 0
 # 3. After terraform apply, update your domain's nameservers
 # 4. Your staging URL will be: https://staging.your-domain.com
 # 5. Your production URL will be: https://your-domain.com (or subdomain if set)
+
+# Cost hibernation: no SQS queues/pollers, no WAF (toggle back to true to restore)
+enable_sqs = false
+enable_waf = false

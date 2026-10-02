@@ -5,7 +5,7 @@ FROM public.ecr.aws/lambda/python:3.11
 
 # Install build dependencies for compiling C extensions
 RUN yum update -y && \
-    yum install -y gcc gcc-c++ make && \
+    yum install -y gcc gcc-c++ make zlib-devel libjpeg-turbo-devel && \
     yum clean all
 
 # Copy the chat agent code

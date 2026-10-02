@@ -140,7 +140,7 @@ variable "geo_restriction_locations" {
 variable "enable_logging" {
   description = "Whether to enable CloudFront logging"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "logging_bucket" {
@@ -170,7 +170,7 @@ variable "web_acl_arn" {
 variable "create_waf" {
   description = "Whether to create a WAF WebACL for the CloudFront distribution"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "waf_rate_limit" {

@@ -10,11 +10,11 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# PyPDF2 is the only dependency for extraction
+# pypdf is the only dependency for extraction
 try:
-    import PyPDF2  # noqa: F401
+    import pypdf  # noqa: F401
 except ImportError:
-    PyPDF2 = None
+    pypdf = None
 
 
 def extract_text(
@@ -37,13 +37,13 @@ def extract_text(
             - pages_read: list of 1-indexed page numbers actually read
             - error: str (if success is False)
     """
-    if PyPDF2 is None:
+    if pypdf is None:
         return {
             "success": False,
             "text": "",
             "total_pages": 0,
             "pages_read": [],
-            "error": "PyPDF2 not available",
+            "error": "pypdf not available",
         }
     content_len = len(pdf_content) if pdf_content else 0
     logger.info("[PDF_PARSER] extract_text: pdf_content length=%s bytes", content_len)
@@ -61,7 +61,7 @@ def extract_text(
             "PDFs truncated at 8KB will fail with 'EOF marker not found'."
         )
     try:
-        reader = PyPDF2.PdfReader(BytesIO(pdf_content))
+        reader = pypdf.PdfReader(BytesIO(pdf_content))
         total_pages = len(reader.pages)
         if total_pages == 0:
             return {
@@ -130,10 +130,10 @@ def extract_text(
 
 def get_pdf_page_count(pdf_content: bytes) -> int:
     """Return number of pages in PDF bytes. Returns 0 on error."""
-    if not PyPDF2 or not pdf_content:
+    if not pypdf or not pdf_content:
         return 0
     try:
-        reader = PyPDF2.PdfReader(BytesIO(pdf_content))
+        reader = pypdf.PdfReader(BytesIO(pdf_content))
         return len(reader.pages)
     except Exception:
         return 0

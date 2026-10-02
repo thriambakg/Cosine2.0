@@ -50,7 +50,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDualScreenMode } from '../../contexts/DualScreenModeContext';
 // COMMENTED OUT: Old WebSocket context (replaced by messaging service)
 // import { useWebSocket } from '../../contexts/WebSocketContext';
-import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext, addRollCallToContext, addMultipleRollCallsToContext } from '../tiles/common/contextManager';
+import { ContextItem, addMultipleBillsToContext, addBillToContext, addAwardToContext, addMultipleAwardsToContext, addLDAFilingToContext, addMultipleLDAFilingsToContext, addFECEntityToContext, addMultipleFECEntitiesToContext, addTradeToContext, addMultipleTradesToContext, addFilingToContext, addMultipleFilingsToContext, addStockToContext, addMultipleStocksToContext, addArticleToContext, addMultipleArticlesToContext, addRollCallToContext, addMultipleRollCallsToContext } from '../tiles/common/contextManager';
 import ContextItemRow from '../context/ContextItemRow';
 import { sessionManagementAPI, fileReturnAPI, getApiBaseUrl } from '../../services/api';
 void getApiBaseUrl; // used in sendMessageWithFilesToFileHandler for /files fetch
@@ -2618,6 +2618,12 @@ const GlobalChatSidebar: React.FC = () => {
             } else if (data.filings.length === 1) {
               addLDAFilingToContext(data.filings[0]);
             }
+          } else if (data.type === 'fec_entities' && data.entities && Array.isArray(data.entities)) {
+            if (data.entities.length > 1) {
+              addMultipleFECEntitiesToContext(data.entities);
+            } else if (data.entities.length === 1) {
+              addFECEntityToContext(data.entities[0]);
+            }
             } else if (data.type === 'politician_trades' && data.trades && Array.isArray(data.trades)) {
               // Use batch function for multiple trades, single function for one trade
               if (data.trades.length > 1) {
@@ -3970,6 +3976,12 @@ const GlobalChatSidebar: React.FC = () => {
                 addMultipleAwardsToContext(data.awards);
               } else if (data.awards.length === 1) {
                 addAwardToContext(data.awards[0]);
+              }
+            } else if (data.type === 'fec_entities' && data.entities && Array.isArray(data.entities)) {
+              if (data.entities.length > 1) {
+                addMultipleFECEntitiesToContext(data.entities);
+              } else if (data.entities.length === 1) {
+                addFECEntityToContext(data.entities[0]);
               }
             } else if (data.type === 'roll_calls' && data.rollCalls && Array.isArray(data.rollCalls)) {
               if (data.rollCalls.length > 1) {

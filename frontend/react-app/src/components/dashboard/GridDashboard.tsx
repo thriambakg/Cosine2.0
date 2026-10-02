@@ -15,6 +15,7 @@ import GovtContractsSearchTile from '../tiles/GovtContractsSearchTile';
 import CongressBillsSearchTile from '../tiles/CongressBillsSearchTile';
 import RollCallSearchTile from '../tiles/RollCallSearchTile';
 import LDASearchTile from '../tiles/LDASearchTile';
+import FECSearchTile from '../tiles/FECSearchTile';
 import FolderTile from '../tiles/FolderTile';
 import PlaceholderTile from '../tiles/PlaceholderTile';
 import { UnifiedTile, GridPosition, GridSize } from '../../types/dashboardTypes';
@@ -816,7 +817,7 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
         
         // For search tiles, ensure searchParams are always included (even if empty)
         // This ensures the tile can be restored with its search configuration AND exact results
-        if (['lda_disclosures', 'congress_bills', 'congress_roll_calls', 'news', 'sec_search', 'govt_contracts', 'politician_trades'].includes(tile.type)) {
+        if (['lda_disclosures', 'fec_campaign_finance', 'congress_bills', 'congress_roll_calls', 'news', 'sec_search', 'govt_contracts', 'politician_trades'].includes(tile.type)) {
           if (tile.searchParams !== undefined) {
             fullTileData.searchParams = tile.searchParams;
           }
@@ -1267,6 +1268,14 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
       // Ignore sessionStorage errors
     }
 
+    const fecSearchProps = {
+      ...commonProps,
+      searchParams: tile.searchParams,
+      results: (tile as { results?: unknown[] }).results,
+      customTitle: tile.customTitle,
+      isPinned: tile.isPinned,
+    };
+
     const ldaSearchProps = {
       ...commonProps,
       onSelectionChange: (id: string, isSelected: boolean) => handleTileSelection(id, isSelected),
@@ -1375,6 +1384,8 @@ const GridDashboard: React.FC<GridDashboardProps> = ({
           <RollCallSearchTile key={tile.id} {...rollCallProps} />
         ) : tile.type === 'lda_disclosures' ? (
           <LDASearchTile key={tile.id} {...ldaSearchProps} />
+        ) : tile.type === 'fec_campaign_finance' ? (
+          <FECSearchTile key={tile.id} {...fecSearchProps} />
         ) : tile.type === 'folder' ? (
           <FolderTile key={tile.id} {...folderProps} />
         ) : (

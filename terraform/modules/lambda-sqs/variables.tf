@@ -75,6 +75,12 @@ variable "sqs_fifo_queue" {
   default     = false
 }
 
+variable "enable_sqs" {
+  description = "Whether to create the SQS queue(s), queue IAM policies, and event source mapping. When false, the wrapper (if enabled) invokes the worker directly with no queue fallback."
+  type        = bool
+  default     = true
+}
+
 variable "sqs_enable_dlq" {
   description = "Whether to create a Dead Letter Queue"
   type        = bool

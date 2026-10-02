@@ -87,7 +87,13 @@ locals {
 # This avoids conflicts and ensures proper permissions
 locals {
   # Use main KMS key from base infrastructure if available, otherwise use null
-  kms_key_arn = try(data.terraform_remote_state.base_infra.outputs.kms_key_arn, null)
+  kms_key_arn          = try(data.terraform_remote_state.base_infra.outputs.kms_key_arn, null)
+  dynamodb_kms_key_arn = try(data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn, null)
+
+  # IAM statements must name a resource, so with base-infra KMS disabled they point at the (nonexistent) key alias and grant nothing.
+  kms_alias_arn_prefix        = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alias/${var.project_name}"
+  kms_main_key_policy_arn     = coalesce(local.kms_key_arn, "${local.kms_alias_arn_prefix}-main-${var.environment}")
+  kms_dynamodb_key_policy_arn = coalesce(local.dynamodb_kms_key_arn, "${local.kms_alias_arn_prefix}-dynamodb-${var.environment}")
 }
 
 # SSL Certificate for staging HTTPS (when no custom domain)
@@ -235,6 +241,9 @@ module "api_gateway" {
     }
     lda_autocomplete = {
       path_part = "lda-autocomplete"
+    }
+    fec_search = {
+      path_part = "fec-search"
     }
     billing_spending = {
       path_part = "billing-spending"
@@ -641,6 +650,16 @@ module "api_gateway" {
       request_parameters      = {}
       timeout_milliseconds    = 29000 # 29 seconds - max for API Gateway
     }
+    fec_search_post = {
+      resource_key            = "fec_search"
+      http_method             = "POST"
+      integration_type        = "AWS_PROXY"
+      integration_http_method = "POST"
+      lambda_arn              = module.fec_search_lambda.wrapper_function_arn != null ? module.fec_search_lambda.wrapper_function_arn : module.fec_search_lambda.function_arn
+      request_parameters      = {}
+      timeout_milliseconds    = 29000
+      authorization_type      = "COGNITO_USER_POOLS"
+    }
     # GET method for billing spending
     billing_spending_get = {
       resource_key            = "billing_spending"
@@ -885,6 +904,11 @@ module "api_gateway" {
       http_method   = "POST"
       resource_path = "lda-autocomplete"
     }
+    fec_search_post = {
+      function_arn  = module.fec_search_lambda.wrapper_function_arn != null ? module.fec_search_lambda.wrapper_function_arn : module.fec_search_lambda.function_arn
+      http_method   = "POST"
+      resource_path = "fec-search"
+    }
     billing_spending_get = {
       function_arn  = module.billing_spending_lambda.function_arn
       http_method   = "GET"
@@ -908,7 +932,7 @@ module "api_gateway" {
   tags                 = var.common_tags
 
   # Deployment trigger - increment this when you want to force a redeployment
-  deployment_trigger = "85" # Updated for CORS fixes (dynamic origin headers)
+  deployment_trigger = "86" # FEC /fec-search route + Cognito POST deployment
 }
 
 
@@ -930,6 +954,7 @@ resource "aws_iam_policy" "lambda_secrets_policy" {
         Resource = [
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}/*",
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}-alpha-vantage-api-${var.environment}*",
+          "arn:aws:secretsmanager:*:*:secret:${var.project_name}-fec-api-${var.environment}*",
           "arn:aws:secretsmanager:*:*:secret:${var.project_name}-encryption-secret-${var.environment}*"
         ]
       },
@@ -1317,8 +1342,8 @@ resource "aws_iam_policy" "lambda_kms_policy" {
           "kms:GenerateDataKey"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.dynamodb_module_kms_key_arn,
-          data.terraform_remote_state.base_infra.outputs.kms_key_arn
+          local.kms_dynamodb_key_policy_arn,
+          local.kms_main_key_policy_arn
         ]
       }
     ]
@@ -1427,6 +1452,8 @@ module "ses" {
 module "stock_volatility_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-stock-volatility-${var.environment}"
   description   = "Lambda function for stock volatility calculation using yfinance"
   handler       = "lambda_function.lambda_handler"
@@ -1467,6 +1494,8 @@ module "stock_volatility_lambda" {
 # Crypto Stats Lambda Function (with SQS and wrapper support)
 module "crypto_stats_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-crypto-stats-${var.environment}"
   description   = "Lambda function for cryptocurrency statistics using CoinGecko API"
@@ -1514,6 +1543,8 @@ module "crypto_stats_lambda" {
 # User Dashboard Lambda Function (with SQS and wrapper support)
 module "user_dashboard_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-user-dashboard-${var.environment}"
   description   = "Lambda function for user dashboard management"
@@ -1571,6 +1602,8 @@ module "user_dashboard_lambda" {
 module "stock_alerts_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-stock-alerts-${var.environment}"
   description   = "Lambda function for stock alert management (create, read, delete alerts)"
   handler       = "lambda_function.lambda_handler"
@@ -1618,6 +1651,8 @@ module "stock_alerts_lambda" {
 # Note: This is triggered by scheduled events, but wrapper enables async processing if needed
 module "stock_alert_trigger_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-stock-alert-trigger-${var.environment}"
   description   = "Lambda function to check and trigger stock alerts (scheduled execution)"
@@ -1668,7 +1703,7 @@ module "chat_agent_ecr" {
 
   project_name = var.project_name
   environment  = var.environment
-  kms_key_arn  = data.terraform_remote_state.base_infra.outputs.kms_key_arn
+  kms_key_arn  = local.kms_key_arn
   tags         = var.common_tags
 
   # Override the repository name for chat agent
@@ -2273,8 +2308,9 @@ module "cloudfront" {
   acm_certificate_arn = local.certificate_arn
   aliases             = var.cloudfront_aliases
 
-  # Enable WAF for security
-  create_waf            = true
+  # Match RDI: no WAF, no access logs (each creates a KMS key + S3 bucket that bill at idle)
+  create_waf            = var.enable_waf
+  enable_logging        = false
   waf_rate_limit        = var.waf_rate_limit
   waf_blocked_countries = var.waf_blocked_countries
 
@@ -2488,6 +2524,8 @@ resource "aws_route53_record" "www_investcosine_cloudfront_alias_ipv6" {
 module "portfolio_analysis_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-portfolio-analysis-${var.environment}"
   description   = "Lambda function for portfolio risk analysis and metrics calculation"
   handler       = "lambda_function.lambda_handler"
@@ -2538,6 +2576,8 @@ module "portfolio_analysis_lambda" {
 # Stock Screener Lambda Function (with SQS and wrapper support)
 module "stock_screener_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-stock-screener-${var.environment}"
   description   = "Lambda function for stock screening using yfinance and Alpha Vantage"
@@ -2591,6 +2631,8 @@ module "stock_screener_lambda" {
 module "stock_data_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-stock-data-${var.environment}"
   description   = "Lambda function for comprehensive stock data retrieval using yfinance"
   handler       = "lambda_function.lambda_handler"
@@ -2636,6 +2678,8 @@ module "stock_data_lambda" {
 module "stock_statistics_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-stock-statistics-${var.environment}"
   description   = "Lambda function for portfolio analysis and stock statistics using yfinance"
   handler       = "lambda_function.lambda_function"
@@ -2678,6 +2722,8 @@ module "stock_statistics_lambda" {
 # Volatility Fetch Lambda Function (with SQS and wrapper support)
 module "volatility_fetch_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-volatility-fetch-${var.environment}"
   description   = "Lambda function for stock volatility calculation using yfinance"
@@ -2722,6 +2768,8 @@ module "volatility_fetch_lambda" {
 # Robinhood Integration Lambda Function (with SQS and wrapper support)
 module "robinhood_integration_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-robinhood-integration-${var.environment}"
   description   = "Lambda function for Robinhood API integration and portfolio analysis"
@@ -2789,6 +2837,8 @@ resource "aws_iam_policy" "robinhood_portfolio_invoke_policy" {
 # Session Management Lambda Function (with SQS and wrapper support)
 module "session_management_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-session-management-${var.environment}"
   description   = "Lambda function for managing chat sessions and message persistence"
@@ -2892,6 +2942,7 @@ module "file_return_lambda" {
     POLITICIAN_TRADES_BUCKET           = "cosine-politician-trades-${var.environment}"
     LDA_DISCLOSURES_BUCKET             = data.terraform_remote_state.base_infra.outputs.lda_disclosures_s3_bucket_name
     CONGRESS_BILLS_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.congress_bills_data_s3_bucket_name
+    FEC_DATA_S3_BUCKET_NAME            = data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_name
     SESSIONS_TABLE                     = data.terraform_remote_state.base_infra.outputs.chat_sessions_table_name
     # WebSocket endpoint removed to avoid circular dependency with websocket_api module
     # The file_return Lambda can discover the endpoint at runtime if needed
@@ -2913,7 +2964,8 @@ module "file_return_lambda" {
     aws_iam_policy.sec_search_s3_policy.arn,
     aws_iam_policy.politician_trades_s3_policy.arn,
     aws_iam_policy.lda_disclosures_s3_policy.arn,
-    aws_iam_policy.congress_bills_s3_policy.arn
+    aws_iam_policy.congress_bills_s3_policy.arn,
+    aws_iam_policy.fec_search_s3_policy.arn
   ]
 
   reserved_concurrent_executions = var.lambda_reserved_concurrency_default
@@ -2954,7 +3006,7 @@ resource "aws_iam_policy" "billing_spending_policy" {
           "kms:GenerateDataKey"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.kms_key_arn
+          local.kms_main_key_policy_arn
         ]
       }
     ]
@@ -3004,7 +3056,7 @@ resource "aws_iam_policy" "billing_payment_policy" {
           "kms:GenerateDataKey"
         ]
         Resource = [
-          data.terraform_remote_state.base_infra.outputs.kms_key_arn
+          local.kms_main_key_policy_arn
         ]
       }
     ]
@@ -3084,6 +3136,8 @@ module "billing_payment_lambda" {
 # News Search Lambda Function (with SQS and wrapper support)
 module "news_search_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-news-search-${var.environment}"
   description   = "Lambda function for news search with complex query expressions"
@@ -3210,6 +3264,8 @@ resource "aws_iam_policy" "sec_search_query_cache_dynamodb_policy" {
 module "sec_search_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-sec-search-${var.environment}"
   description   = "Lambda function for SEC EDGAR search and autocomplete functionality"
   handler       = "lambda_function.lambda_handler"
@@ -3272,6 +3328,8 @@ module "sec_search_lambda" {
 module "politician_trades_search_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-politician-trades-search-${var.environment}"
   description   = "Lambda function for searching politician trades in DynamoDB"
   handler       = "lambda_function.lambda_handler"
@@ -3325,6 +3383,8 @@ module "politician_trades_search_lambda" {
 # USAspending Autocomplete Lambda Function (with SQS and wrapper support)
 module "usaspending_autocomplete_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-usaspending-autocomplete-${var.environment}"
   description   = "Lambda function for USAspending API autocomplete endpoints"
@@ -3428,6 +3488,8 @@ resource "aws_iam_policy" "usaspending_search_s3_policy" {
 module "usaspending_search_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-usaspending-search-${var.environment}"
   description   = "Lambda function for searching USAspending awards in DynamoDB"
   handler       = "lambda_function.lambda_handler"
@@ -3529,6 +3591,8 @@ resource "aws_iam_policy" "congress_bills_search_s3_policy" {
 module "congress_bills_search_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-congress-bills-search-${var.environment}"
   description   = "Lambda function for searching congress bills in DynamoDB"
   handler       = "lambda_function.lambda_handler"
@@ -3584,6 +3648,8 @@ module "congress_bills_search_lambda" {
 module "lda_search_lambda" {
   source = "./modules/lambda-sqs"
 
+  enable_sqs = var.enable_sqs
+
   function_name = "${var.project_name}-lda-search-${var.environment}"
   description   = "Lambda function for searching LDA filings in DynamoDB"
   handler       = "lambda_function.lambda_handler"
@@ -3636,6 +3702,8 @@ module "lda_search_lambda" {
 # LDA Autocomplete Lambda Function (with SQS and wrapper support)
 module "lda_autocomplete_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-lda-autocomplete-${var.environment}"
   description   = "Lambda function for LDA autocomplete from S3 CSV files"
@@ -3732,6 +3800,106 @@ resource "aws_iam_policy" "lda_autocomplete_s3_policy" {
   tags = var.common_tags
 }
 
+# ==============================================================================
+# FEC CAMPAIGN FINANCE SEARCH API
+# ==============================================================================
+
+resource "aws_iam_policy" "fec_search_dynamodb_policy" {
+  name        = "${var.project_name}-fec-search-dynamodb-policy-${var.environment}"
+  description = "Policy for FEC Search Lambda to read fec-profiles table"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.fec_profiles_table_arn
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_policy" "fec_search_s3_policy" {
+  name        = "${var.project_name}-fec-search-s3-policy-${var.environment}"
+  description = "Policy for FEC/search + file_return Lambdas to read/list fec-data schedule files"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_arn,
+          "${data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+module "fec_search_lambda" {
+  source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
+
+  function_name = "${var.project_name}-fec-search-${var.environment}"
+  description   = "FEC campaign finance search, profile, and schedule API"
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300
+  memory_size   = 512
+
+  source_dir = "../backend_app/src/fec_search/search"
+
+  environment_variables = {
+    ENVIRONMENT             = var.environment
+    LOG_LEVEL               = var.environment == "development" ? "DEBUG" : "INFO"
+    FEC_API_BASE_URL        = "https://api.open.fec.gov/v1"
+    FEC_SECRET_NAME         = data.terraform_remote_state.base_infra.outputs.fec_api_secret_name
+    FEC_PROFILES_TABLE_NAME = data.terraform_remote_state.base_infra.outputs.fec_profiles_table_name
+    FEC_DATA_S3_BUCKET_NAME = data.terraform_remote_state.base_infra.outputs.fec_data_s3_bucket_name
+    REQUEST_TIMEOUT         = "30"
+    SEARCH_PER_PAGE         = "25"
+  }
+
+  layers = [
+    data.terraform_remote_state.base_infra.outputs.core_layer_arn
+  ]
+
+  additional_policy_arns = [
+    aws_iam_policy.fec_search_dynamodb_policy.arn,
+    aws_iam_policy.fec_search_s3_policy.arn,
+    aws_iam_policy.lambda_secrets_policy.arn,
+    aws_iam_policy.lambda_kms_policy.arn
+  ]
+
+  enable_wrapper_lambda          = true
+  wrapper_timeout                = 300
+  sns_topic_name                 = "${var.project_name}-fec-search-completion-${var.environment}"
+  response_table_name            = null
+  completion_sns_env_var_name    = "FEC_SEARCH_COMPLETION_SNS_TOPIC_ARN"
+  wrapper_layers                 = [data.terraform_remote_state.base_infra.outputs.core_layer_arn]
+  sqs_enable_dlq                 = true
+  sqs_batch_size                 = 1
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_default
+
+  tags = var.common_tags
+}
+
 # IAM Policy for USAspending Enrichment Lambda to access DynamoDB awards table (read/write)
 resource "aws_iam_policy" "usaspending_enrichment_dynamodb_policy" {
   name        = "${var.project_name}-usaspending-enrichment-dynamodb-policy-${var.environment}"
@@ -3787,6 +3955,8 @@ resource "aws_iam_policy" "usaspending_enrichment_s3_policy" {
 # USAspending Enrichment Lambda Function (with SQS and wrapper support)
 module "usaspending_enrichment_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-usaspending-enrichment-${var.environment}"
   description   = "Lambda function for enriching USAspending awards with up-to-date data from API"
@@ -3847,6 +4017,8 @@ module "usaspending_enrichment_lambda" {
 # Note: This is primarily triggered by SNS, but wrapper enables async processing if needed
 module "sec_search_progress_subscriber_lambda" {
   source = "./modules/lambda-sqs"
+
+  enable_sqs = var.enable_sqs
 
   function_name = "${var.project_name}-sec-search-progress-subscriber-${var.environment}"
   description   = "Lambda function that subscribes to SNS progress events and updates DynamoDB"
