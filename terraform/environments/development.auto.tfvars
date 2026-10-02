@@ -24,3 +24,7 @@ common_tags = {
 # Lambda (hibernate / dev): explicit so provisioned config is not created
 lambda_reserved_concurrency_default    = null
 lambda_provisioned_concurrency_default = 0
+
+# Cost hibernation: no SQS queues/pollers, no WAF (toggle back to true to restore)
+enable_sqs = false
+enable_waf = false

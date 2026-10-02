@@ -11,7 +11,7 @@ resource "aws_ecr_repository" "frontend" {
   }
 
   encryption_configuration {
-    encryption_type = "KMS"
+    encryption_type = var.kms_key_arn != null ? "KMS" : "AES256"
     kms_key         = var.kms_key_arn
   }
 
@@ -19,10 +19,9 @@ resource "aws_ecr_repository" "frontend" {
     Name = "${var.project_name}-${var.repository_name}-ecr-${var.environment}"
   })
 
+  # No create_before_destroy: the repository name is fixed, so a replacement must destroy first.
   lifecycle {
     ignore_changes = [name]
-    # Force recreation when image_tag_mutability changes
-    create_before_destroy = true
   }
 }
 

@@ -62,3 +62,7 @@ lambda_reserved_concurrency_default    = null
 # 2. After terraform apply, update your domain's nameservers to Route53
 # 3. Production URL will be: https://fingov.ai
 # 4. Certificate will be automatically managed by AWS ACM
+
+# Cost hibernation: no SQS queues/pollers, no WAF (toggle back to true to restore)
+enable_sqs = false
+enable_waf = false

@@ -71,7 +71,19 @@ variable "certificate_arn" {
   default     = ""
 }
 
+variable "enable_sqs" {
+  description = "Create SQS queues and event source mappings for lambda-sqs functions. When false, queues are destroyed and wrappers invoke workers directly."
+  type        = bool
+  default     = true
+}
+
 # WAF Configuration
+variable "enable_waf" {
+  description = "Attach a WAF WebACL to the CloudFront distribution"
+  type        = bool
+  default     = false
+}
+
 variable "waf_rate_limit" {
   description = "Rate limit for WAF (requests per 5 minutes)"
   type        = number
