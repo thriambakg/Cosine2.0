@@ -368,6 +368,22 @@ jobs:
           else
             terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars"
           fi
+
+      # Terraform updates the function configuration before its code, and AWS rejects
+      # configuration updates while the function's current image is missing from ECR.
+      - name: Point Chat Agent Lambda at New Image
+        if: needs.build-chat-agent-container.outputs.build-skipped != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop')
+        env:
+          FUNCTION_NAME: cosine-chat-agent-${{ needs.determine-environment.outputs.environment }}
+          IMAGE_URI: ${{ needs.build-chat-agent-container.outputs.ecr-image-uri }}
+        run: |
+          if [ -n "$IMAGE_URI" ] && aws lambda get-function --function-name "$FUNCTION_NAME" > /dev/null 2>&1; then
+            aws lambda update-function-code --function-name "$FUNCTION_NAME" --image-uri "$IMAGE_URI" > /dev/null
+            aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+            echo "✅ $FUNCTION_NAME now uses $IMAGE_URI"
+          else
+            echo "⏭️ Function or image not available - skipping"
+          fi
           
       - name: Run Terraform Apply
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/develop'
