@@ -362,7 +362,9 @@ jobs:
           # If build was skipped, only plan the ECR repository (not Lambda function)
           if [ "$BUILD_SKIPPED" = "true" ]; then
             echo "⏭️ Build was skipped - planning only ECR repository and dependencies (excluding Lambda function)"
-            terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr
+            # Targeted plans must cover pending address moves (lambda-sqs queues gained count = enable_sqs)
+            SQS_TARGETS=$({ terraform state list | grep -E '^module\.[^.]+\.(aws_sqs_queue|aws_sqs_queue_policy|aws_lambda_event_source_mapping|aws_iam_policy|aws_iam_role_policy_attachment)\.(main|dlq|sqs_trigger|sqs_read_policy|wrapper_sqs_send_policy)(\[[0-9]+\])?$' || true; } | sed -E 's/\[[0-9]+\]$//' | sort -u | sed 's/^/-target=/' | tr '\n' ' ')
+            terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr $SQS_TARGETS
           else
             terraform plan -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars"
           fi
@@ -380,7 +382,8 @@ jobs:
           if [ "$BUILD_SKIPPED" = "true" ]; then
             echo "⏭️ Build was skipped - applying only ECR repository and dependencies (excluding Lambda function)"
             echo "💡 Lambda function will be created on the next pipeline run after the image is built"
-            terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr -auto-approve
+            SQS_TARGETS=$({ terraform state list | grep -E '^module\.[^.]+\.(aws_sqs_queue|aws_sqs_queue_policy|aws_lambda_event_source_mapping|aws_iam_policy|aws_iam_role_policy_attachment)\.(main|dlq|sqs_trigger|sqs_read_policy|wrapper_sqs_send_policy)(\[[0-9]+\])?$' || true; } | sed -E 's/\[[0-9]+\]$//' | sort -u | sed 's/^/-target=/' | tr '\n' ' ')
+            terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -target=module.chat_agent_ecr $SQS_TARGETS -auto-approve
           else
             terraform apply -var-file="environments/${ENVIRONMENT}.auto.tfvars" -var-file="additional_vars.tfvars" -auto-approve
           fi
