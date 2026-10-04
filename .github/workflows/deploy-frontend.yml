@@ -284,7 +284,8 @@ jobs:
       - name: npm audit (SCA – dependency vulnerabilities)
         run: |
           echo "🔍 Running npm audit on frontend dependencies..."
-          npm audit --audit-level=high
+          # Dev dependencies (Tailwind, ESLint) only run at build time and never ship to the browser
+          npm audit --omit=dev --audit-level=high
         working-directory: frontend/react-app
 
       - name: Install Semgrep

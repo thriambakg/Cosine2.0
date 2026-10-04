@@ -487,6 +487,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [determine-environment, deploy-application, update-lambda-container]
     if: always() && github.event_name == 'pull_request'
+    permissions:
+      issues: write
+      pull-requests: write
     steps:
       - name: Comment PR with Results
         uses: actions/github-script@v7
