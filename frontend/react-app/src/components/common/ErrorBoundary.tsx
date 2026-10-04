@@ -2,6 +2,7 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
 import { Box, Typography, Button, Alert } from '@mui/material';
 
+
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
